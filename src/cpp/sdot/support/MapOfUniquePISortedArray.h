@@ -45,7 +45,7 @@ public:
     void   display    ( Displayer &ds ) const { ds << values; }
 
 private:
-    using  Map      = VecForCapa<PIO>;
+    using  Map        = VecForCapa<PIO>;
 
     Map    values;    ///<
 };

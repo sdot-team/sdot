@@ -35,10 +35,10 @@ public:
     const T*            data        () const { return _data.data(); }
     T*                  data        () { return _data.data(); }
  
-    SimdTensor&         operator<<  ( const Point &p );
+    T_i SimdTensor&     operator<<  ( const Vec<T,i> &p );
 
     Point               pop_back_val() { return operator[]( --_size ); }
-    void                set_item    ( PI index, const Point &p );
+    T_i void            set_item    ( PI index, const Vec<T,i> &p );
     void                reserve     ( PI capa );
     void                resize      ( PI size );
     void                clear       ();
@@ -62,15 +62,15 @@ DTP UTP &UTP::operator=( const SimdTensor &that ) {
     return *this;
 }
 
-DTP UTP &UTP::operator<<( const Point &p ) {
+DTP T_i UTP &UTP::operator<<( const Vec<T,i> &p ) {
     const PI o = _size++;
     reserve( _size );
     set_item( o, p );
     return *this;
 }
 
-DTP void UTP::set_item( PI index, const Point &p ) {
-    for( PI d = 0; d < nb_dims; ++d )
+DTP T_i void UTP::set_item( PI index, const Vec<T,i> &p ) {
+    for( PI d = 0; d < i; ++d )
         operator()( index, d ) = p[ d ];
 }
 

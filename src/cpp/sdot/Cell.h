@@ -73,7 +73,7 @@ private:
     PI              _new_coid_ref_map      ( PI size );
     void            _unbounded_cut         ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     void            _bounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
-    void            _update_sps            ( const Pt &dir, TF off, auto td );
+    T_i void        _update_sps            ( const Vec<TF,i> &dir, TF off );
 
     T_i  auto       _with_ct_dim           ( auto &&func, CtInt<i> min_td, CtInt<i> max_td ) const;
     T_ij auto       _with_ct_dim           ( auto &&func, CtInt<i> min_td, CtInt<j> max_td ) const;

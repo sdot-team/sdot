@@ -131,9 +131,10 @@ DTP T_i Vec<TF,i+1> UTP::ray_dir( const Vec<LI,i> &edge_refs, LI base_vertex ) c
     return res;
 }
 
-DTP void UTP::_update_sps( const Pt &dir, TF off, auto td ) {
+DTP T_i void UTP::_update_sps( const Vec<TF,i> &dir, TF off ) {
     constexpr PI simd_size = _VertexCoords::simd_size;
     using SimdVec = _VertexCoords::SimdVec;
+    CtInt<i> td;
 
     if ( _sps.size() < nb_vertices_true_dim() )
         _sps.aligned_resize_woc( nb_vertices_true_dim(), CtInt<_VertexCoords::simd_size * sizeof( TF )>() );
@@ -142,13 +143,13 @@ DTP void UTP::_update_sps( const Pt &dir, TF off, auto td ) {
     for( PI num_vertex = 0; num_vertex < floor_of_nb_vertices; num_vertex += simd_size ) {
         TF *ptr = _vertex_coords.data() + _vertex_coords.offset( num_vertex );
         SimdVec s = SimdVec::load_aligned( ptr ) * dir[ 0 ] - off;
-        for( int d = 1; d < td; ++d )
+        for( int d = 1; d < i; ++d )
             s += SimdVec::load_aligned( ptr + d * simd_size ) * dir[ d ];
         s.store_aligned( _sps.data() + num_vertex );
     }
 
     for( PI num_vertex = floor_of_nb_vertices; num_vertex < nb_vertices_true_dim(); ++num_vertex )
-        _sps[ num_vertex ] = sp( _vertex_coords[ num_vertex ], dir, td ) - off;
+        _sps[ num_vertex ] = sp( _vertex_coords.nd_at( num_vertex, td ), dir ) - off;
 }
 
 DTP PI UTP::_new_coid_ref_map( PI size ) {
@@ -163,12 +164,14 @@ DTP void UTP::_for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td
     const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
     auto &edge_map = _ref_map[ CtInt<td-1>() ].map;
     edge_map.prepare_for( _cuts.size() );
+    P( _cuts.size() );
 
     // find edges with 2 vertices
     for( PI32 n0 = 0; n0 < nb_vertices_true_dim(); ++n0 ) {
         CtRange<0,td>::for_each_item( [&]( auto ind_cut ) {
             auto edge_cuts = _vertex_refs[ n0 ].slice( CtInt<0>(), td ).without_index( ind_cut );
             PI &edge_op_id = edge_map[ edge_cuts ];
+            P( td, edge_cuts );
 
             if ( edge_op_id >= op_id ) {
                 Vec<PI32,2> ns{ PI32( edge_op_id - op_id ), n0 };
@@ -245,35 +248,52 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     }
 
     //
+    LI old_nb_vertices = nb_vertices_true_dim();
+ 
+    //
     _with_ct_dim( [&]( auto td ) {
         Vec<TF,td> dir_td = dir;
         TF off_td = off;
         if ( td < nb_dims )
             TODO;
 
-        // attention : dir et off sont exprimés dans la _base
-        // il faudrait ou refaire dir et off
-        _update_sps( dir_td, off_td, td );
+        // get scalar product for each vertex
+        _update_sps( dir_td, off_td );
 
-        // for each edge
-        _for_each_ray_and_edge( [&]( const auto &ray_refs, PI32 base_vertex ) {
-            auto rd = ray_dir( ray_refs, base_vertex );
+        // add new vertices for each edge
+        _for_each_ray_and_edge( [&]( const auto &refs, PI32 base_vertex ) { // ray
+            auto vp = _vertex_coords.nd_at( base_vertex, td );
+            auto rd = ray_dir( refs, base_vertex );
             TF alpha = sp( rd, dir_td );
-            P( alpha );
-            TODO;
-            // P( ray_refs, base_vertex,  );
-        }, [&]( const auto &edge_refs, const Vec<PI32,2> &num_vertices ) {
-            P( edge_refs, num_vertices );
+            if ( alpha > 0 ) {
+                Vec<TF,td> pos = vp + ( off - sp( vp, dir_td ) ) / alpha * rd;
+                _vertex_coords << pos;
+                _vertex_refs << refs;
+            }
+        }, [&]( const auto &refs, const Vec<PI32,2> &num_vertices ) { // edge
+            auto v0 = _vertex_coords.nd_at( num_vertices[ 0 ], td );
+            auto v1 = _vertex_coords.nd_at( num_vertices[ 1 ], td );
+            auto s0 = sp( v0, dir_td );
+            auto s1 = sp( v1, dir_td );
+            bool e0 = s0 > off_td;
+            bool e1 = s1 > off_td;
+            if ( e0 != e1 ) {
+                Vec<TF,td> pos = v0 - s0 / ( s1 - s0 ) * ( v1 - v0 );
+                _vertex_coords << pos;
+                _vertex_refs << refs;
+            }
         }, td );
-        
-        TODO;
+
+        // add the new cut (we will check if useful later)
+        _Cut *new_cut = _cuts.push_back( std::move( cut_info ), dir, off );
+        if ( td < nb_dims ) {
+            for( PI d = 0; d < td; ++d )
+                new_cut->_dir_td[ d ] = dir_td[ d ];
+            new_cut->_off_td = off_td;
+        }
+
+        // remove unused vertices
     }, CtInt<1>(), CtInt<nb_dims>() );
-
-    // add the cut (we will check if useful later)
-    _cuts.push_back( std::move( cut_info ), dir, off );
-
-    // in this version, 
-    TODO;
 }
 
 DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
