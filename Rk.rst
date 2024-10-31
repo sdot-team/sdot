@@ -65,3 +65,11 @@ Quand on change de dimension, les nouveaux vertices, c'est l'intersection des ed
   Si les coordonnées sont exprimée dans la base, il faut juste ajouter un 0... sauf à la fin, il faut passer en coordonnées réelles
 
 
+dx * x + dy * y + dz * z - off
+
+dx * ( b_ax * a + b_bx * b ) + dy * ( b_ay * a + b_by * b ) + dz * ( b_az * a + b_bz * b ) - off
+
+( dx * b_ax + dy * b_ay + dz * b_az )...
+
+
+

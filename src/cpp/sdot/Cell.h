@@ -32,12 +32,14 @@ public:
     void            cut                    ( const Pt &dir, TF off, CutInfo &&cut_info = {} ); ///< 
 
     // output info
-    PI              nb_stored_cuts         () const; ///< may be different from nb_active_cuts if remove_inactive_cuts has not been called
-    PI              nb_active_cuts         () const; ///< if _may_have_unused_cuts == true, this function will have to read _vertex_cut_lists to compute the result. _may_have_unused_cuts can be canceled using remove_inactive_cuts
-    
+    PI              true_dimensionality    () const { return _true_dimensionality; }
+
     PI              nb_vertices_true_dim   () const; ///< 
     PI              nb_vertices            () const; ///< nb vertices for dim == nb_dim. For instance, 2 (non parallel) cuts in 3D leave an edge and no vertex, but the cell will have true_dimensionality == 2, and a vertex in the 2D projected cell (nb_vertices_true_dim = 1)
 
+    PI              nb_stored_cuts         () const; ///< may be different from nb_active_cuts if remove_inactive_cuts has not been called
+    PI              nb_active_cuts         () const; ///< if _may_have_unused_cuts == true, this function will have to read _vertex_cut_lists to compute the result. _may_have_unused_cuts can be canceled using remove_inactive_cuts
+    
     T_i Vec<TF,i>   vertex_coord           ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pt              vertex_coord           ( PI num_vertex ) const;
 
@@ -47,8 +49,9 @@ public:
     void            display                ( Displayer &ds ) const;
 
     //
+    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func, auto td );
+    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func );
     T_i Vec<TF,i+1> ray_dir                ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
-
 
     // utility
     auto            with_ct_dim            ( auto &&func ) const;
@@ -68,8 +71,8 @@ private:
     using           _Cuts                  = Vec<_Cut>;
 
     //
-    void            _for_each_ray_and_edge ( auto &&ray_func, auto &&edge_func, auto td );
     T_i void        _remove_inactive_cuts  ( CtInt<i> ); ///< 
+    void            _remove_ext_vertices   ( PI old_nb_vertices );
     PI              _new_coid_ref_map      ( PI size );
     void            _unbounded_cut         ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     void            _bounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
