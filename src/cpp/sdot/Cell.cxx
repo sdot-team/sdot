@@ -1,10 +1,13 @@
 #pragma once
 
 #include <tl/support/operators/for_each_selection.h>
+#include <tl/support/operators/determinant.h>
 #include <tl/support/operators/norm_2.h>
 #include <tl/support/operators/sp.h>
 
 #include <tl/support/containers/CtRange.h>
+
+#include <Eigen/Dense>
 
 #include "Cell.h"
 
@@ -110,6 +113,24 @@ DTP PI UTP::nb_vertices() const {
     return _true_dimensionality == nb_dims ? _vertex_coords.size() : 0;
 }
 
+DTP T_i Vec<TF,i+1> UTP::ray_dir( const Vec<LI,i> &edge_refs, LI base_vertex ) const {
+    Vec<Vec<TF,i>,i> M;
+    Vec<TF,i+1> res;
+    CtInt<i+1> td;
+    for( LI d = 0; d <= i; ++d ) {
+        for( LI c = 0; c < i; ++c )
+            for( LI r = 0; r < i; ++r )
+                M[ r ][ c ] = _cuts[ edge_refs[ c ] ].dir_td( td, r + ( r >= d ) );
+        res[ d ] = d & 1 ? - determinant( M ) : determinant( M );
+    }
+
+    Vec<TF,i+1> tst = _vertex_coords.nd_at( base_vertex, td ) + res;
+    for( const _Cut &cut : _cuts )
+        if ( sp( cut.dir_td( td ), tst ) > cut.off_td( td ) )
+            return - res;
+    return res;
+}
+
 DTP void UTP::_update_sps( const Pt &dir, TF off, auto td ) {
     constexpr PI simd_size = _VertexCoords::simd_size;
     using SimdVec = _VertexCoords::SimdVec;
@@ -142,8 +163,6 @@ DTP void UTP::_for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td
     const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
     auto &edge_map = _ref_map[ CtInt<td-1>() ].map;
     edge_map.prepare_for( _cuts.size() );
-
-    P( td, _vertex_refs );
 
     // find edges with 2 vertices
     for( PI32 n0 = 0; n0 < nb_vertices_true_dim(); ++n0 ) {
@@ -227,16 +246,23 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
 
     //
     _with_ct_dim( [&]( auto td ) {
-        // attention : dir et off sont exprimés dans la _base
-        // il faudrait ou refaire dir et off
+        Vec<TF,td> dir_td = dir;
+        TF off_td = off;
         if ( td < nb_dims )
             TODO;
-        _update_sps( dir, off, td );
+
+        // attention : dir et off sont exprimés dans la _base
+        // il faudrait ou refaire dir et off
+        _update_sps( dir_td, off_td, td );
 
         // for each edge
-        _for_each_ray_and_edge( []( const auto &ray_refs, PI32 base_vertex ) {
-            P( ray_refs, base_vertex );
-        }, []( const auto &edge_refs, const Vec<PI32,2> &num_vertices ) {
+        _for_each_ray_and_edge( [&]( const auto &ray_refs, PI32 base_vertex ) {
+            auto rd = ray_dir( ray_refs, base_vertex );
+            TF alpha = sp( rd, dir_td );
+            P( alpha );
+            TODO;
+            // P( ray_refs, base_vertex,  );
+        }, [&]( const auto &edge_refs, const Vec<PI32,2> &num_vertices ) {
             P( edge_refs, num_vertices );
         }, td );
         
@@ -261,7 +287,7 @@ DTP void UTP::display( Displayer &ds ) const {
     if ( _true_dimensionality < nb_dims )
         ds.append_attribute( "base", _base_vecs.slice( 0, _true_dimensionality ) );
     ds.append_attribute( "vertex_coords", map_vec( _vertex_coords, [&]( const auto &v ) -> Vec<TF> { return v.slice( 0, _true_dimensionality ); } ) );
-    ds.append_attribute( "vertex_refs", map_vec( _vertex_refs, [&]( const auto &v ) -> Vec<TR> { return v.slice( 0, _true_dimensionality ); } ) );
+    ds.append_attribute( "vertex_refs", map_vec( _vertex_refs, [&]( const auto &v ) -> Vec<LI> { return v.slice( 0, _true_dimensionality ); } ) );
 
     ds.end_object();
 }

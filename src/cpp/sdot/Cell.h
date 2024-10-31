@@ -20,9 +20,9 @@ namespace sdot {
 template<class Arch,class TF,int nb_dims,class CutInfo=Void,class CellInfo=Void>
 class Cell {
 public:
-    using           TR                     = PI32; ///< ref item (num cut) for refs in vertices
+    using           LI                     = PI32; ///< local index, e.g. for num cut, num vertex, ...
     using           Pt                     = Vec<TF,nb_dims>;
-    using           Pr                     = Vec<TR,nb_dims>;
+    using           Pr                     = Vec<LI,nb_dims>;
 
     /**/            Cell                   ( CellInfo &&info = {} );
 
@@ -41,10 +41,14 @@ public:
     T_i Vec<TF,i>   vertex_coord           ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pt              vertex_coord           ( PI num_vertex ) const;
 
-    T_i Vec<TR,i>   vertex_refs            ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
+    T_i Vec<LI,i>   vertex_refs            ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pr              vertex_refs            ( PI num_vertex ) const;
 
     void            display                ( Displayer &ds ) const;
+
+    //
+    T_i Vec<TF,i+1> ray_dir                ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
+
 
     // utility
     auto            with_ct_dim            ( auto &&func ) const;
@@ -54,12 +58,12 @@ public:
     CellInfo        info;                  ///< used defined aditional info
 
 private:
-    T_i struct      _RefMapForDim          { MapOfUniquePISortedArray<i,TR,PI> map; };
+    T_i struct      _RefMapForDim          { MapOfUniquePISortedArray<i,LI,PI> map; };
     using           _RefMap                = RangeOfClasses<_RefMapForDim,0,nb_dims>;
     using           _Cut                   = Cut<TF,nb_dims,CutInfo>;
            
     using           _VertexCoords          = SimdTensor<TF,nb_dims>;
-    using           _VertexRefs            = Vec<Vec<TR,nb_dims>>;
+    using           _VertexRefs            = Vec<Vec<LI,nb_dims>>;
     using           _BaseVecs              = Vec<Pt,nb_dims>;
     using           _Cuts                  = Vec<_Cut>;
 
