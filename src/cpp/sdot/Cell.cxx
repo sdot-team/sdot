@@ -181,7 +181,7 @@ DTP T_i void UTP::_update_sps( const Vec<TF,i> &dir, TF off ) {
         _sps[ num_vertex ] = sp( _vertex_coords.nd_at( num_vertex, td ), dir ) - off;
 }
 
-DTP PI UTP::_new_coid_ref_map( PI size ) {
+DTP PI UTP::_new_coid_ref_map( PI size ) const {
     // reservation for the test
     ++_coid_ref_map;
 
@@ -189,7 +189,10 @@ DTP PI UTP::_new_coid_ref_map( PI size ) {
     return std::exchange( _coid_ref_map, _coid_ref_map + size );
 }
 
-DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td ) {
+DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td ) const {
+    if ( td != _true_dimensionality )
+        return;
+
     const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
     auto &edge_map = _ref_map[ CtInt<td-1>() ].map;
     edge_map.prepare_for( _cuts.size() );
@@ -225,10 +228,32 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td 
     }
 }
 
-DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func ) {
-    if ( _true_dimensionality == nb_dims )
-        for_each_ray_and_edge( FORWARD( ray_func ), FORWARD( edge_func ), CtInt<nb_dims>() );
+DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func ) const {
+    for_each_ray_and_edge( FORWARD( ray_func ), FORWARD( edge_func ), CtInt<nb_dims>() );
 }
+
+DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {
+    if ( td != _true_dimensionality )
+        return;
+    for( PI n = 0; n < nb_vertices_true_dim(); ++n )
+        func( _vertex_coords.nd_at( n, td ) );
+}
+
+DTP void UTP::for_each_vertex_coord( auto &&func ) const {
+    return for_each_vertex_coord( FORWARD( func ), CtInt<nb_dims>() );
+}
+
+DTP void UTP::for_each_vertex_ref( auto &&func, auto td ) const {
+    if ( td != _true_dimensionality )
+        return;
+    for( PI n = 0; n < nb_vertices_true_dim(); ++n )
+        func( _vertex_refs[ n ].slice( CtInt<0>(), td ) );
+}
+
+DTP void UTP::for_each_vertex_ref( auto &&func ) const {
+    return for_each_vertex_ref( FORWARD( func ), CtInt<nb_dims>() );
+}
+
 
 DTP void UTP::_remove_ext_vertices( PI old_nb_vertices ) {
     if ( old_nb_vertices == 0 )

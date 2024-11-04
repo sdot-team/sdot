@@ -1,0 +1,22 @@
+[build-system]
+requires = ["flit_core >=3.2,<4","pytest"]
+build-backend = "flit_core.buildapi"
+
+[project]
+description = "Tools to construct/handle PowerDiagram, notably for semi-discrete optimal transport"
+authors = [ { name = "Hugo Leclerc", email = "hugo.leclerc@universite-paris-saclay.fr" }, ]
+keywords = ["optimal transport","power diagram","Laguerre diagram"]
+dependencies = [ "munch", "pybind11", "archspec", "scons" ]
+version = "2024.10.25.0"
+readme = "README.md"
+name = "sdot"
+
+# Documentation = "https://readthedocs.org"
+# Repository = "https://github.com/me/spam.git"
+
+# [tool.hatch.build.targets.wheel]
+# artifacts = [
+#   "*.so",
+#   "*.dll",
+#   "*.dylib",
+# ]

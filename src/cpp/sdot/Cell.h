@@ -49,9 +49,15 @@ public:
     void            display                ( Displayer &ds ) const;
 
     //
-    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func, auto td );
-    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func );
+    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func, auto td ) const;
+    void            for_each_ray_and_edge  ( auto &&ray_func, auto &&edge_func ) const;
     T_i Vec<TF,i+1> ray_dir                ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
+
+    void            for_each_vertex_coord  ( auto &&func, auto td ) const; ///< dimensionality specified by the user
+    void            for_each_vertex_coord  ( auto &&func ) const; ///< assumed dimensionality == nb_dims
+
+    void            for_each_vertex_ref    ( auto &&func, auto td ) const; ///< dimensionality specified by the user
+    void            for_each_vertex_ref    ( auto &&func ) const; ///< assumed dimensionality == nb_dims
 
     // utility
     auto            with_ct_dim            ( auto &&func ) const;
@@ -73,7 +79,7 @@ private:
     //
     T_i void        _remove_inactive_cuts  ( CtInt<i> ); ///< 
     void            _remove_ext_vertices   ( PI old_nb_vertices );
-    PI              _new_coid_ref_map      ( PI size );
+    PI              _new_coid_ref_map      ( PI size ) const;
     void            _unbounded_cut         ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     void            _bounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     T_i void        _update_sps            ( const Vec<TF,i> &dir, TF off );

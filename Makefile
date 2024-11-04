@@ -7,8 +7,7 @@ pip_upload:
 	# ${PYTHON} -m twine upload --repository pypi --verbose dist/*
 
 python_link_install:
-	# ${PYTHON} -m pip install --break-system-packages -e .
-	cd src/python; flit install -s 
+	cd src/python; flit install -s
 
 
 .PHONY: all \
