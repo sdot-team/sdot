@@ -70,6 +70,13 @@ class Cell:
     def empty( self ):
         return self._cell.empty
     
+    @property
+    def base( self ):
+        """ internal base, used for vertex_coords if true_dimensionnality < nb_dims.
+            It true_dimensionality == nb_dims, it return an identity matrix
+        """
+        return self._cell.base
+    
     def cut( self, dir, val, index = 0 ):
         return self._cell.cut( np.ascontiguousarray( dir ), val, int( index ) )
 

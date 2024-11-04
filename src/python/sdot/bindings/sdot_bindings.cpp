@@ -254,9 +254,9 @@ Vec<Pt> VecPt_from_Array( const Array &array ) {
 }
 
 template<class T,int s>
-static Array Array_from_VecPt( const Vec<Vec<T,s>> &v ) {
+static auto Array_from_VecPt( const Vec<Vec<T,s>> &v ) {
     Vec<PI,2> shape{ v.size(), PI( s ) };
-    Array res( shape );
+    pybind11::array_t<T, pybind11::array::c_style> res( shape );
     for( PI i = 0; i < v.size(); ++i )
         for( PI d = 0; d < s; ++d )
             res.mutable_at( i, d ) = v[ i ][ d ];
@@ -278,17 +278,18 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     pybind11::class_<Cell_>( m, PD_STR( Cell ) )
         // base methods
         .def( pybind11::init<>() )
-        .def( "__repr__", []( const Cell_ &cell ) { return to_string( cell ); } )
 
         // modifications
         .def( "cut", []( Cell_ &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .index = ind } ); } )
         
-        // // properties
-        // .def_property_readonly( "true_dimensionality", &Cell::true_dimensionality )
-        // .def_property_readonly( "nb_vertices", &Cell::nb_vertices )
-        // .def_property_readonly( "nb_cuts", &Cell::nb_cuts )
-        // .def_property_readonly( "bounded", &Cell::bounded )
-        // .def_property_readonly( "empty", &Cell::empty )
+        // properties
+        .def( "true_dimensionality", &Cell_::true_dimensionality )
+        .def( "nb_active_cuts", &Cell_::nb_active_cuts )
+        .def( "nb_stored_cuts", &Cell_::nb_stored_cuts )
+        .def( "nb_vertices", []( Cell_ &cell, bool current_dim ) { return current_dim ? cell.nb_vertices_true_dim() : cell.nb_vertices(); } )
+        .def( "bounded", &Cell_::bounded )
+        .def( "empty", &Cell_::empty )
+        .def( "base", []( Cell_ &cell ) { return Array_from_VecPt( cell.base() ); } )
 
         .def( "vertex_coords", []( const Cell_ &cell, bool allow_lower_dim ) {
             if ( allow_lower_dim ) {
@@ -327,7 +328,8 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         } )
 
         // // output
-        // .def( "display_vtk", []( const Cell &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
+        .def( "display_vtk", []( const Cell_ &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
+        .def( "__repr__", []( const Cell_ &cell ) { return to_string( cell ); } )
         ;
 
     // pybind11::class_<DiracVec>( m, PD_STR( DiracVec ) )

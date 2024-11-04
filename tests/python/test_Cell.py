@@ -1,4 +1,5 @@
 from sdot import Cell
+import pytest
 import numpy
 
 def cut_and_check( c, dir, off ):
@@ -66,14 +67,33 @@ def test_Cell_emptyness_unbounded():
 
 # test_Cell_emptyness_bounded()
 # test_Cell_emptyness_unbounded()
-c = Cell( ndim = 3 )
-print( c )
-c.cut( [ 1, 0, 0 ], 1 )
-print( c )
-print( c.vertex_coords( 0 ) )
-print( c.vertex_coords( 1 ) )
-print( c.vertex_refs( 0 ) )
-print( c.vertex_refs( 1 ) )
+
+def test_base_3D():
+    c = Cell( ndim = 3 )
+
+    # make 2D cuts
+    dirs = [
+        [ -0.5, -0.7, 0 ],
+        [ -0.5, +0.8, 0 ],
+        [ +1.0, +0.0, 0 ],
+    ]
+    for dir in dirs:
+        c.cut( dir, 1 )
+
+    for dir, coords in zip( dirs, c.vertex_coords( True ) ):
+        sp = c.base().T @ coords
+        assert pytest.approx( numpy.dot( sp, dir ) ) == 1
+
+    # add 3D
+    c.cut( [ 0, 0, -1 ], 1 )
+    print( c.vertex_coords() )
+    print( c.bounded() )
+
+    c.cut( [ 0, 0, +1 ], 1 )
+    print( c.vertex_coords() )
+    print( c.bounded() )
+
+test_base_3D()
 
 # cut( [ +1, 0, 0 ] )
 # cut( [ 0, +1, 0 ] )

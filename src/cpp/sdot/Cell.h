@@ -3,12 +3,13 @@
 #include <tl/support/containers/Void.h>
 #include <tl/support/containers/Opt.h>
 
+#include "sdot/support/VtkOutput.h"
 #include "support/MapOfUniquePISortedArray.h"
 #include "support/RangeOfClasses.h"
 // #include "support/BigRational.h"
 #include "support/SimdTensor.h"
+#include "support/VtkOutput.h"
 // #include "PrevCutInfo.h"
-// #include "VtkOutput.h"
 #include "Cut.h"
 
 namespace sdot {
@@ -33,6 +34,9 @@ public:
 
     // output info
     PI              true_dimensionality    () const { return _true_dimensionality; }
+    bool            bounded                () const { return _bounded; }
+    bool            empty                  () const { return _empty; }
+    Vec<Pt>         base                   () const;
 
     PI              nb_vertices_true_dim   () const; ///< 
     PI              nb_vertices            () const; ///< nb vertices for dim == nb_dim. For instance, 2 (non parallel) cuts in 3D leave an edge and no vertex, but the cell will have true_dimensionality == 2, and a vertex in the 2D projected cell (nb_vertices_true_dim = 1)
@@ -46,6 +50,8 @@ public:
     T_i Vec<LI,i>   vertex_refs            ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pr              vertex_refs            ( PI num_vertex ) const;
 
+
+    void            display_vtk            ( VtkOutput &vo ) const;
     void            display                ( Displayer &ds ) const;
 
     //

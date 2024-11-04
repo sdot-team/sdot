@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <tl/support/operators/for_each_selection.h>
 #include <tl/support/operators/determinant.h>
 #include <tl/support/operators/norm_2.h>
@@ -106,6 +107,15 @@ DTP PI UTP::nb_active_cuts() const {
     return nb_stored_cuts();
 }
 
+DTP Vec<Vec<TF,nb_dims>> UTP::base() const {
+    if ( _true_dimensionality < nb_dims )
+        return _base_vecs.slice( 0, _true_dimensionality );
+    Vec<Pt> res;
+    for( PI d = 0; d < nb_dims; ++d )
+         res << Pt( FromFunctionOnIndex(), [&]( int i ) { return d == i; } );
+    return res;
+}
+
 DTP PI UTP::nb_vertices_true_dim() const {
     return _vertex_coords.size();
 }
@@ -126,9 +136,12 @@ DTP T_i Vec<TF,i+1> UTP::ray_dir( const Vec<LI,i> &edge_refs, LI base_vertex ) c
     }
 
     Vec<TF,i+1> tst = _vertex_coords.nd_at( base_vertex, td ) + res;
-    for( const _Cut &cut : _cuts )
-        if ( sp( cut.dir_td( td ), tst ) > cut.off )
+    for( PI num_cut = 0; num_cut < _cuts.size(); ++num_cut ) {
+        if ( edge_refs.contains( num_cut ) )
+            continue;
+        if ( sp( _cuts[ num_cut ].dir_td( td ), tst ) > _cuts[ num_cut ].off )
             return - res;
+    }
     return res;
 }
 
@@ -337,7 +350,8 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
         }
 
         // if non null, we have a new dimension
-        if ( TF n2 = norm_2_p2( new_base_vec ) ) {
+        TF n2 = norm_2_p2( new_base_vec );
+        if ( n2 > 10 * nb_dims * pow( std::numeric_limits<TF>::epsilon(), 2 ) ) {
             // normalize
             new_base_vec /= std::sqrt( n2 );
 
@@ -421,10 +435,16 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
 
         // add the new cut
         _cuts.push_back( dir_td, std::move( cut_info ), dir, off );
+
+        // check if bounded
     }, CtInt<1>(), CtInt<nb_dims>() );
 }
 
 DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
+    TODO;
+}
+
+DTP void UTP::display_vtk( VtkOutput &vo ) const {
     TODO;
 }
 
