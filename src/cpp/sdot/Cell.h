@@ -86,6 +86,7 @@ private:
     T_i void        _remove_inactive_cuts  ( CtInt<i> ); ///< 
     void            _remove_ext_vertices   ( PI old_nb_vertices );
     PI              _new_coid_ref_map      ( PI size ) const;
+    void            _update_bounded        (); ///<
     void            _unbounded_cut         ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     void            _bounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     T_i void        _update_sps            ( const Vec<TF,i> &dir, TF off );

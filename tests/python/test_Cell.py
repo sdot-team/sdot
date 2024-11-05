@@ -93,6 +93,10 @@ def test_base_3D():
     print( c.vertex_coords() )
     print( c.bounded() )
 
+    c.cut( [ 0, 0, +1 ], 0.5 )
+    print( c.vertex_coords() )
+    print( c.bounded() )
+
 test_base_3D()
 
 # cut( [ +1, 0, 0 ] )

@@ -335,6 +335,41 @@ DTP void UTP::_remove_ext_vertices( PI old_nb_vertices ) {
     }
 }
 
+DTP void UTP::_update_bounded() {
+    const PI op_id = _new_coid_ref_map( 1 );
+    auto &edge_map = _ref_map[ CtInt<nb_dims-1>() ].map;
+    edge_map.prepare_for( _cuts.size() );
+
+    // mark edges with 2 vertices
+    const PI nv = nb_vertices_true_dim();
+    for( PI32 n0 = 0; n0 < nv; ++n0 ) {
+        CtRange<0,nb_dims>::for_each_item( [&]( auto ind_cut ) {
+            auto edge_cuts = _vertex_refs[ n0 ].without_index( ind_cut );
+            PI &edge_op_id = edge_map[ edge_cuts ];
+
+            // second (and last) time: mark the edge
+            if ( edge_op_id >= op_id )
+                edge_op_id = op_id - 1;
+            else
+                edge_op_id = op_id;
+        } );
+    }
+
+    // find rays
+    for( PI32 n0 = 0; n0 < nv; ++n0 ) {
+        CtRange<0,nb_dims>::for_each_item( [&]( auto ind_cut ) {
+            auto edge_cuts = _vertex_refs[ n0 ].without_index( ind_cut );
+            PI &edge_op_id = edge_map[ edge_cuts ];
+
+            if ( edge_op_id == op_id )
+                return;
+        } );
+    }
+
+    //
+    _bounded = true;
+}
+
 DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     LI old_nb_vertices = nb_vertices_true_dim();
     LI ind_of_new_cut = _cuts.size();
@@ -437,10 +472,37 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
         _cuts.push_back( dir_td, std::move( cut_info ), dir, off );
 
         // check if bounded
+        if ( td == nb_dims )
+            _update_bounded();
     }, CtInt<1>(), CtInt<nb_dims>() );
 }
 
 DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
+    // here, we assume that _true_dimensionality == nb_dims and _bounded == true
+    const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
+    auto &edge_map = _ref_map[ CtInt<nb_dims-1>() ].map;
+    edge_map.prepare_for( _cuts.size() );
+
+    // find edges with 2 vertices
+    const PI nv = nb_vertices_true_dim();
+    for( PI32 n0 = 0; n0 < nv; ++n0 ) {
+        CtRange<0,nb_dims>::for_each_item( [&]( auto ind_cut ) {
+            auto edge_cuts = _vertex_refs[ n0 ].without_index( ind_cut );
+            PI &edge_op_id = edge_map[ edge_cuts ];
+
+            if ( edge_op_id >= op_id ) {
+                Vec<PI32,2> ns{ PI32( edge_op_id - op_id ), n0 };
+                //edge_func( edge_cuts, ns );
+                TODO;
+
+                // mark the edge (to say that it's not a ray)
+                edge_op_id = op_id - 1;
+            } else {
+                edge_op_id = op_id + n0;
+            }
+        } );
+    }
+
     TODO;
 }
 
