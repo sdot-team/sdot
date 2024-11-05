@@ -1,103 +1,59 @@
+from munch import Munch
 from sdot import Cell
 import pytest
 import numpy
 
-def cut_and_check( c, dir, off ):
-    print( "---------------------", dir, off, "---------------------" )
-    c.cut_boundary( dir, off )
+def check_cut_seq( ndim, cuts ):
+    cell = Cell( ndim = ndim )
+    for num_cut, cut in enumerate( map( Munch, cuts ) ):
+        # do the cut
+        cell.cut( cut.dir, cut.off )
 
-    print( "vertex_coords", c.vertex_coords( allow_lower_dim = True ) )
-    print( "vertex_refs", c.vertex_refs( allow_lower_dim = True ) )
-    print( "true_dimensionality", c.true_dimensionality )
-    print( "nb_vertices", c.nb_vertices )
-    print( "nb_cuts", c.nb_cuts )
-    print( "bounded", c.bounded )
-    print( "empty", c.empty )
+        # check scalar products
+        for coords, refs in zip( cell.vertex_coords, cell.vertex_refs ):
+            for num_cut in refs:
+                assert pytest.approx( numpy.dot( cell.base.T @ coords, cuts[ num_cut ][ 'dir' ] ) - cuts[ num_cut ][ 'off' ], abs = 1e-10 ) == 0
+
+        # check expected data
+        if 'true_dimensionality' in cut:
+            assert cut.true_dimensionality == cell.true_dimensionality
+        if 'bounded' in cut:
+            assert cut.bounded == cell.bounded
+        if 'empty' in cut:
+            assert cut.empty == cell.empty
+
+        if 'coords' in cut:
+            assert pytest.approx( numpy.sort( cell.vertex_coords @ cell.base.T, axis = 0 ), abs = 1e-6 ) == numpy.sort( cut.coords, axis = 0 )
 
 
-def test_Cell_emptyness_bounded():
-    c = Cell( ndim = 2 )
-    assert c.nb_vertices == 0
-    assert c.bounded == False
-    assert c.empty == False
+def test_3D():
+    # wedge
+    check_cut_seq( 3, [
+        { 'dir': [ -0.5, -0.7, +0.0 ], 'off': +1.0, 'true_dimensionality': 1,  },
+        { 'dir': [ -0.5, +0.8, +0.0 ], 'off': +1.0, 'true_dimensionality': 2,  },
+        { 'dir': [ +1.0, +0.0, +0.0 ], 'off': +1.0, 'true_dimensionality': 2,  },
+        { 'dir': [ +0.0, +0.0, +1.0 ], 'off': +1.0, 'true_dimensionality': 3, 'bounded': 0 },
+        { 'dir': [ +0.0, +0.0, -1.0 ], 'off': +1.0, 'true_dimensionality': 3, 'bounded': 1, 'empty': 0, 'coords': [[-2,0,1],[1,1.875,1],[1,-2.14285714,1],[-2,0,-1],[1,1.875,-1],[1,-2.14285714,-1]] },
+        { 'dir': [ +0.0, +0.0, +1.0 ], 'off': -2.0, 'empty': 1, 'coords': numpy.zeros( [ 0, 3 ] ) },
+        { 'dir': [ +0.0, +0.0, +1.0 ], 'off': -1.0, 'empty': 1, 'coords': numpy.zeros( [ 0, 3 ] ) },
+    ] )
 
-    c.cut_boundary( [ +1, 0 ], 1 )
-    assert c.nb_vertices == 0
-    assert c.bounded == False
-    assert c.empty == False
+    # fail before true_dimensionality == nb_dims
+    check_cut_seq( 3, [
+        { 'dir': [ +1.0, +0.0, +0.0 ], 'off': +1.0, 'empty': 0 },
+        { 'dir': [ -1.0, +0.0, +0.0 ], 'off': -2.0, 'empty': 1 },
+        { 'dir': [ +0.0, +1.0, +0.0 ], 'off': -1.0, 'empty': 1 },
+    ] )
 
-    c.cut_boundary( [ 0, +1 ], 1 )
-    assert c.nb_vertices == 1
-    assert c.bounded == False
-    assert c.empty == False
-
-    c.cut_boundary( [ -1, 0 ], 1 )
-    assert c.nb_vertices == 2
-    assert c.bounded == False
-    assert c.empty == False
-
-    c.cut_boundary( [ 0, -1 ], 1 )
-    assert c.nb_vertices == 4
-    assert c.bounded == True
-    assert c.empty == False
-
-    c.cut_boundary( [ 1, 0 ], 0.5 )
-    assert c.nb_vertices == 4
-    assert c.bounded == True
-    assert c.empty == False
-
-    c.cut_boundary( [ 1, 0 ], -2 )
-    assert c.nb_vertices == 0
-    assert c.bounded == True
-    assert c.empty == True
-
-    c.cut_boundary( [ 1, 0 ], -3 )
-    assert c.nb_vertices == 0
-    assert c.bounded == True
-    assert c.empty == True
-
-def test_Cell_emptyness_unbounded():
-    c = Cell( ndim = 3 )
-    assert c.nb_vertices == 0
-    assert c.bounded == False
-    assert c.empty == False
-
-    cut_and_check( c, [ 1.0, 1.0, 0 ], 1.0 )
-    cut_and_check( c, [ 1.0, 1.0, 0 ], 1.5 )
-
-# test_Cell_emptyness_bounded()
-# test_Cell_emptyness_unbounded()
-
-def test_base_3D():
-    c = Cell( ndim = 3 )
-
-    # make 2D cuts
-    dirs = [
-        [ -0.5, -0.7, 0 ],
-        [ -0.5, +0.8, 0 ],
-        [ +1.0, +0.0, 0 ],
-    ]
-    for dir in dirs:
-        c.cut( dir, 1 )
-
-    for dir, coords in zip( dirs, c.vertex_coords( True ) ):
-        sp = c.base().T @ coords
-        assert pytest.approx( numpy.dot( sp, dir ) ) == 1
-
-    # add 3D
-    c.cut( [ 0, 0, -1 ], 1 )
-    print( c.vertex_coords() )
-    print( c.bounded() )
-
-    c.cut( [ 0, 0, +1 ], 1 )
-    print( c.vertex_coords() )
-    print( c.bounded() )
-
-    c.cut( [ 0, 0, +1 ], 0.5 )
-    print( c.vertex_coords() )
-    print( c.bounded() )
-
-test_base_3D()
+    # simple cube
+    check_cut_seq( 3, [
+        { 'dir': [ +1.0, +0.0, +0.0 ], 'off': +1.0, },
+        { 'dir': [ +0.0, +1.0, +0.0 ], 'off': +1.0, },
+        { 'dir': [ +0.0, +0.0, +1.0 ], 'off': +1.0, },
+        { 'dir': [ -1.0, +0.0, +0.0 ], 'off': +1.0, },
+        { 'dir': [ +0.0, -1.0, +0.0 ], 'off': +1.0, 'bounded': 0, },
+        { 'dir': [ +0.0, +0.0, -1.0 ], 'off': +1.0, 'bounded': 1, 'empty': 0, 'coords': [[-1,-1,-1],[1,-1,-1],[-1,1,-1],[1,1,-1],[-1,-1,1],[1,-1,1],[-1,1,1],[1,1,1],] },
+    ] )
 
 # cut( [ +1, 0, 0 ] )
 # cut( [ 0, +1, 0 ] )

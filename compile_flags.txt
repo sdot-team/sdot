@@ -1,0 +1,13 @@
+-I/home/leclerc/.vfs_build/ext/Catch2/install/include
+-I/usr/lib/python3/dist-packages/numpy/core/include
+-I/usr/include/python3.12
+-Iext/matplotlib-cpp
+-Iext/tl20/src/cpp
+-Iext/Catch2/src
+-Iext/asimd/src
+-Iext/eigen
+-Iext/amgcl
+-Isrc/cpp
+-march=native
+-std=c++20
+-xc++

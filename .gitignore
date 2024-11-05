@@ -7,7 +7,6 @@ ext/
 commentaires.rst
 *.vtk
 err
-compile_flags.txt
 callgrind.*
 *.bin
 perf.data*

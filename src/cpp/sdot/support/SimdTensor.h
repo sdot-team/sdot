@@ -21,6 +21,7 @@ public:
     SimdTensor&         operator=   ( const SimdTensor &that );
  
     PI                  capacity    () const { return _data.size() / nb_dims; }
+    bool                empty       () const { return _size == 0; }
     PI                  size        () const { return _size; }
  
     PI                  offset      ( PI n, PI d = 0 ) const { return ( n / simd_size ) * simd_size * nb_dims + ( n % simd_size ) + simd_size * d; }

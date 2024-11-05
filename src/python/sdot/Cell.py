@@ -26,56 +26,59 @@ class Cell:
     def __repr__( self ):
         return self._cell.__repr__()
 
-    def vertex_coords( self, allow_lower_dim = False ):
-        """ get list of coordinates for each vertex (stored in a numpy array) 
-        
-            if allow_lower_dim == True, it will return the data for the cell with dim == true_dimensionality (projected on self.base())
-        """
-        return self._cell.vertex_coords( allow_lower_dim )
+    @property
+    def vertex_coords( self ):
+        """ get list of coordinates for each vertex (stored in a numpy array) in the current base """
+        return self._cell.vertex_coords( True )
 
-    def vertex_refs( self, allow_lower_dim = False ):
-        """ get list of cut indices for each vertex (stored in a numpy array) 
-        
-            if allow_lower_dim == True, it will return the data for the cell with dim == true_dimensionality (projected on self.base())
-        """
-        return self._cell.vertex_refs( allow_lower_dim )
+    @property
+    def vertex_refs( self ):
+        """ get list of cut indices for each vertex (stored in a numpy array) in the current base """
+        return self._cell.vertex_refs( True )
 
     @property
     def true_dimensionality( self ):
-        """ at the beginning, all the cell starts with true_dimensionality == 0. A first cut will lead to true_dimensionality == 1. 
+        """ Size of the base.
+        
+            at the beginning, all the cell starts with true_dimensionality == 0. A first cut will lead to true_dimensionality == 1. 
             If not in the same direction, true_dimensionality will be incremented, ...
             If true_dimensionality < ndims, coordinates are expressed in self.base
         """
-        return self._cell.true_dimensionality
+        return self._cell.true_dimensionality()
 
     @property
     def nb_active_cuts( self ):
         """ beware: if remove_inactive_cuts() has not been called, this procedure will have first to compute the active cuts (may take some time) """
-        return self._cell.nb_active_cuts
+        return self._cell.nb_active_cuts()
 
     @property
     def nb_stored_cuts( self ):
         """ may be different from nb_active_cuts if remove_inactive_cuts() has not been called """
-        return self._cell.nb_active_cuts
+        return self._cell.nb_stored_cuts()
+
+    @property
+    def nb_vertices_td( self ):
+        """ nb vertices in current dimensionality """
+        return self._cell.nb_vertices( True )
 
     @property
     def nb_vertices( self ):
-        return self._cell.nb_vertices
+        return self._cell.nb_vertices( False )
 
     @property
     def bounded( self ):
-        return self._cell.bounded
+        return self._cell.bounded()
 
     @property
     def empty( self ):
-        return self._cell.empty
+        return self._cell.empty()
     
     @property
     def base( self ):
         """ internal base, used for vertex_coords if true_dimensionnality < nb_dims.
             It true_dimensionality == nb_dims, it return an identity matrix
         """
-        return self._cell.base
+        return self._cell.base()
     
     def cut( self, dir, val, index = 0 ):
         return self._cell.cut( np.ascontiguousarray( dir ), val, int( index ) )

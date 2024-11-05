@@ -94,7 +94,7 @@ def module_for( **kwargs ):
         sys.path.insert( 0, str( build_dir ) )
 
     # call scons
-    ret_code = subprocess.call( [ "scons", f"--sconstruct={ Path( __file__ ).parent / 'SConstruct' }", '-s',
+    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / 'SConstruct' }", '-s',
         f"module_name={ module_name }", 
         f"suffix={ suffix }"
     ] + ilist, cwd = str( build_dir ) )

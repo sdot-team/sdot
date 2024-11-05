@@ -31,8 +31,9 @@ CPPPATH = [
     os.path.join( bad, 'src', 'cpp' ),
 
     os.path.join( bad, 'ext', 'tl20', 'src', 'cpp' ),
+    os.path.join( bad, 'ext', 'Catch2', 'src' ),
     os.path.join( bad, 'ext', 'asimd', 'src' ),
-    os.path.join( bad, 'ext', 'eigen-3.4.0' ),
+    os.path.join( bad, 'ext', 'eigen' ),
 
     sysconfig.get_paths()[ 'include' ], # Python.h
     pybind11.get_include(), # pybind11.h
@@ -56,12 +57,13 @@ CXXFLAGS = [
 
     '-fdiagnostics-color=always',
     
-    # '-march=skylake',
-    '-march=native',
+    '-march=' + args[ 'arch' ].replace( '_', '-' ),
     '-ffast-math',
     '-O3',
 
     '-g3',
+
+    '-std=c++20',
 ]
 
 # LIBS
