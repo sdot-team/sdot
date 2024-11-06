@@ -15,7 +15,7 @@ namespace sdot {
 template<class T,class B=PI8> struct MpiContent;
 
 //
-template<class T,class B> requires std::is_trivially_copyable_v<T>
+template<class T,class B> requires TriviallyCopyable<T>
 struct MpiContent<T,B> {
 public:
     static constexpr bool dynamic_mpi_size = false;
@@ -30,7 +30,7 @@ public:
 };
 
 //
-template<class T,class B> requires std::is_trivially_copyable_v<T>
+template<class T,class B> requires TriviallyCopyable<T>
 struct MpiContent<Vec<T>,B> {
 public:
     static constexpr bool dynamic_mpi_size = true;

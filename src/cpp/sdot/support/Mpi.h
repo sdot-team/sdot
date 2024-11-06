@@ -46,7 +46,7 @@ T_T T Mpi::reduction_to( PI tgt_rank, const T &value, const std::function<void( 
     return gather_to( tgt_rank, value, [&]( CstSpan<T> values ) {
         T res = values[ 0 ];
         for( PI r = 1; r < values.size(); ++r )
-            f( res, values[ r ] );
+            func( res, values[ r ] );
         return res;
     }, data_info );
 }
@@ -85,11 +85,15 @@ T_T T Mpi::sum_to( PI tgt_rank, const T &value, MpiDataInfo data_info ) {
 
 
 T_T T Mpi::reduction( const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info ) {
-    return scatter_from( 0, reduction_to( 0, value, func ), data_info);
+    auto res = reduction_to( 0, value, func );
+    scatter_from( 0, res, data_info);
+    return res;
 }
 
 T_T auto Mpi::gather( const T &value, auto &&func, MpiDataInfo data_info ) {
-    return scatter_from( 0, gather_to( 0, value, FORWARD( func ), data_info ) );
+    auto res = gather_to( 0, value, FORWARD( func ), data_info );
+    scatter_from( 0, res );
+    return res;
 }
 
 T_T T Mpi::sum( const T &value, MpiDataInfo data_info ) {
@@ -97,6 +101,9 @@ T_T T Mpi::sum( const T &value, MpiDataInfo data_info ) {
 }
 
 T_T void Mpi::scatter_from( PI src_rank, T &value, MpiDataInfo data_info ) {
+    if ( this->size() == 1 )
+        return;
+    
     TODO;
 }
 
