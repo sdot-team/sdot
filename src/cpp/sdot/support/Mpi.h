@@ -64,7 +64,7 @@ T_T auto Mpi::gather_to( PI tgt_rank, const T &value, auto &&func, MpiDataInfo d
         // serialize `value`
         return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( value, [&]( CstSpan<B> value ) {
             // get all the content in tgt_rank
-            Vec<B> room( FromSize(), value.size() * size() );
+            Vec<B> room( FromSize(), value.size() * this->size() );
             _gather( tgt_rank, room, value );
 
             if ( rank() != tgt_rank )
