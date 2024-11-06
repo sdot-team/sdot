@@ -14,22 +14,24 @@ namespace sdot {
 */
 class Mpi {
 public:
+    struct                DataInfo               { bool assume_homogeneous_mpi_data_size = false; };
+
     bool                  main                   () const { return rank() == 0; }
     virtual int           rank                   () const = 0;
     virtual int           size                   () const = 0;
 
     // variants that compute and "send" the result only to a given machine (tgt_rank)
-    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func );
-    T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
-    T_T T                 sum_to                 ( PI tgt_rank, const T &value );
+    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, DataInfo data_info = {} );
+    T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func, DataInfo data_info = {} ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
+    T_T T                 sum_to                 ( PI tgt_rank, const T &value, DataInfo data_info = {} );
 
     // variants that scatter the results to all machines
-    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func );
-    T_T auto              gather                 ( const T &value, auto &&func ); ///< return func( [ value_for_each_process ] )
+    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func, DataInfo data_info = {} );
+    T_T auto              gather                 ( const T &value, auto &&func, DataInfo data_info = {} ); ///< return func( [ value_for_each_process ] )
     T_T T                 sum                    ( const T &value );
 
     // send
-    T_T auto              scatter_from           ( PI src_rank, const T &value ); ///< 
+    T_T void              scatter_from           ( PI src_rank, T &value, DataInfo data_info = {} ); ///< `value` is copied from rank `src_rank`
 
 protected:
     using                 B                      = PI8;

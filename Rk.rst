@@ -75,3 +75,4 @@ dx * ( b_ax * a + b_bx * b ) + dy * ( b_ay * a + b_by * b ) + dz * ( b_az * a + 
 Rq: on pourrait systématiquement travailler en nb_dims, en imposant les 
 
 
+Pb: on aimerait bien ne pas avoir à envoyer les infos de taille dynamique lorsqu'on connait la taille à priori.
