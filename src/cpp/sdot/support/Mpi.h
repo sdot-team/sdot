@@ -2,6 +2,8 @@
 
 // #include "MyPrint.h"
 #include <tl/support/containers/Vec.h>
+#include <tl/support/TODO.h>
+#include "MpiDataInfo.h"
 #include "MpiContent.h"
 #include <functional>
 
@@ -14,82 +16,91 @@ namespace sdot {
 */
 class Mpi {
 public:
-    struct                DataInfo               { bool assume_homogeneous_mpi_data_size = false; };
 
     bool                  main                   () const { return rank() == 0; }
     virtual int           rank                   () const = 0;
     virtual int           size                   () const = 0;
 
     // variants that compute and "send" the result only to a given machine (tgt_rank)
-    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, DataInfo data_info = {} );
-    T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func, DataInfo data_info = {} ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
-    T_T T                 sum_to                 ( PI tgt_rank, const T &value, DataInfo data_info = {} );
+    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info = {} );
+    T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func, MpiDataInfo data_info = {} ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
+    T_T T                 sum_to                 ( PI tgt_rank, const T &value, MpiDataInfo data_info = {} );
 
     // variants that scatter the results to all machines
-    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func, DataInfo data_info = {} );
-    T_T auto              gather                 ( const T &value, auto &&func, DataInfo data_info = {} ); ///< return func( [ value_for_each_process ] )
-    T_T T                 sum                    ( const T &value );
+    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info = {} );
+    T_T auto              gather                 ( const T &value, auto &&func, MpiDataInfo data_info = {} ); ///< return func( [ value_for_each_process ] )
+    T_T T                 sum                    ( const T &value, MpiDataInfo data_info = {} );
 
     // send
-    T_T void              scatter_from           ( PI src_rank, T &value, DataInfo data_info = {} ); ///< `value` is copied from rank `src_rank`
+    T_T void              scatter_from           ( PI src_rank, T &value, MpiDataInfo data_info = {} ); ///< `value` is copied from rank `src_rank`
 
 protected:
     using                 B                      = PI8;
 
-    virtual void          _scatter               ( Span<B> value, PI src_rank ) = 0; ///< 
-    virtual void          _gather                ( Span<B> output, CstSpan<B> input, PI tgt_rank ) = 0; ///< 
+    virtual void          _scatter               ( PI src_rank , Span<B> value) = 0; ///< 
+    virtual void          _gather                ( PI tgt_rank, Span<B> output, CstSpan<B> input ) = 0; ///< 
 };
 
 extern Mpi *mpi;
 
 // ------------------------------- IMPL -------------------------------
-T_T T Mpi::reduction_to( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func ) {
+T_T T Mpi::reduction_to( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info ) {
     return gather_to( tgt_rank, value, [&]( CstSpan<T> values ) {
         T res = values[ 0 ];
         for( PI r = 1; r < values.size(); ++r )
             f( res, values[ r ] );
         return res;
-    } );
+    }, data_info );
 }
 
-T_T auto Mpi::gather_to( PI tgt_rank, const T &value, auto &&func ) {
-    if ( rank() == 1 )
+T_T auto Mpi::gather_to( PI tgt_rank, const T &value, auto &&func, MpiDataInfo data_info ) {
+    using TR = DECAYED_TYPE_OF( func( CstSpan<T>( &value, 1 ) ) );
+    if ( size() == 1 )
         return func( CstSpan<T>( &value, 1 ) );
 
-    return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( CstSpan<T>( &value, 1 ), [&]( CstSpan<B> value ) {
-        Vec<B> room( FromSize(), value.size() * rank() );
-        _gather( room, value );
+    // homogeneous size
+    using MC = MpiContent<DECAYED_TYPE_OF( value )>;
+    if ( has_ct_value( MC::size( value ) ) || data_info.assume_homogeneous_mpi_data_size ) {
+        // serialize `value`
+        return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( value, [&]( CstSpan<B> value ) {
+            // get all the content in tgt_rank
+            Vec<B> room( FromSize(), value.size() * size() );
+            _gather( tgt_rank, room, value );
 
-        using R = DECAYED_TYPE_OF( func( CstSpan<T>( &value, 1 ) ) );
-        R res;
-        if ( main() ) {
-            MpiContent<DECAYED_TYPE_OF( value )>::as_cpp( room, [&]( CstSpan<T> room ) {
+            if ( rank() != tgt_rank )
+                return TR{};
+
+            TR res;
+            MpiContent<DECAYED_TYPE_OF( value )>::as_cpp( room, [&]( T room ) {
                 res = func( room );
             } );
-        }
 
-        return ;
-    } );
+            return res;
+        } );
+    }
+
+    // heterogeneous size => we have first to gather the sizes
+    TODO;
 }
 
-T_T T Mpi::sum_to( PI tgt_rank, const T &value ) {
-    return reduction_to( tgt_rank, value, []( T &a, const T &b ) { a += b; } );
+T_T T Mpi::sum_to( PI tgt_rank, const T &value, MpiDataInfo data_info ) {
+    return reduction_to( tgt_rank, value, []( T &a, const T &b ) { a += b; }, data_info );
 }
 
 
-T_T T Mpi::reduction( const T &value, const std::function<void( T &a, const T &b )> &func ) {
-    return scatter_from( 0, reduction_to( 0, value, func ) );
+T_T T Mpi::reduction( const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info ) {
+    return scatter_from( 0, reduction_to( 0, value, func ), data_info);
 }
 
-T_T auto Mpi::gather( const T &value, auto &&func ) {
-    return scatter_from( 0, gather_to( 0, value, FORWARD( func ) ) );
+T_T auto Mpi::gather( const T &value, auto &&func, MpiDataInfo data_info ) {
+    return scatter_from( 0, gather_to( 0, value, FORWARD( func ), data_info ) );
 }
 
-T_T T Mpi::sum( const T &value ) {
-    return scatter_from( 0, sum_to( 0, value ) );
+T_T T Mpi::sum( const T &value, MpiDataInfo data_info ) {
+    return scatter_from( 0, sum_to( 0, value, data_info ) );
 }
 
-T_T auto Mpi::scatter_from( PI src_rank, const T &value ) {
+T_T void Mpi::scatter_from( PI src_rank, T &value, MpiDataInfo data_info ) {
     TODO;
 }
 
