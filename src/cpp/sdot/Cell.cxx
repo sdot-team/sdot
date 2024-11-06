@@ -1,6 +1,5 @@
 #pragma once
 
-#include <limits>
 #include <tl/support/operators/for_each_selection.h>
 #include <tl/support/operators/determinant.h>
 #include <tl/support/operators/norm_2.h>
@@ -9,6 +8,7 @@
 #include <tl/support/containers/CtRange.h>
 
 #include <Eigen/Dense>
+#include <limits>
 
 #include "Cell.h"
 

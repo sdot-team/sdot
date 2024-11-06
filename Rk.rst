@@ -72,4 +72,6 @@ dx * ( b_ax * a + b_bx * b ) + dy * ( b_ay * a + b_by * b ) + dz * ( b_az * a + 
 ( dx * b_ax + dy * b_ay + dz * b_az )...
 
 
+Rq: on pourrait systématiquement travailler en nb_dims, en imposant les 
+
 

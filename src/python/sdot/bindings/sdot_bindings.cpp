@@ -3,6 +3,8 @@
 // #include <sdot/WeightsWithBounds.h>
 // #include <sdot/PavingWithDiracs.h>
 // #include <sdot/RegularGrid.h>
+#include <sdot/vec_readers/KnownVecReader.h>
+#include <sdot/pavings/RegularGrid.h>
 #include <sdot/support/VtkOutput.h>
 #include <sdot/Cell.h>
 
@@ -332,14 +334,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "__repr__", []( const Cell_ &cell ) { return to_string( cell ); } )
         ;
 
-    // pybind11::class_<DiracVec>( m, PD_STR( DiracVec ) )
-    //     .def( "__repr__", []( const DiracVec &a ) { return to_string( a ); } )
-    //     ;
-
-    // pybind11::class_<DiracVecFromLocallyKnownValues,DiracVec>( m, PD_STR( DiracVecFromLocallyKnownValues ) )
-    //     .def( pybind11::init( [&]( const Array &pts ) -> DiracVecFromLocallyKnownValues { return VecPt_from_Array( pts ); } ) )
-    //     // .def( "__repr__", []( const DiracVecFromLocallyKnownValues &a ) { return to_string( a ); } )
-    //     ;
+    pybind11::class_<KnownVecReader<Pt>>( m, PD_STR( KnownVecOfPointsReader ) )
+        .def( pybind11::init( [&]( const Array &pts ) -> KnownVecReader<Pt> { return VecPt_from_Array( pts ); } ) )
+        .def( "__repr__", []( const KnownVecReader<Pt> &a ) { return to_string( a ); } )
+        ;
 
     // // weights ======================================================================================
     // pybind11::class_<WeightsWithBounds>( m, PD_STR( WeightsWithBounds ) )
@@ -351,7 +349,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     // .def( "__repr__", []( const HomogeneousWeights &a ) { return to_string( a ); } )
     //     ;
 
-    // // paving ========================================================================================
+    // paving ========================================================================================
     // pybind11::class_<PavingWithDiracs>( m, PD_STR( PavingWithDiracs ) )
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     .def( "for_each_cell", []( PavingWithDiracs &paving, const Cell &base_cell, const WeightsWithBounds &wwb, const std::function<void( const Cell &cell )> &f ) { 
@@ -363,10 +361,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     } )
     //     ;
 
-    // pybind11::class_<RegularGrid,PavingWithDiracs>( m, PD_STR( RegularGrid ) )
-    //     .def( pybind11::init( []( const DiracVec &pts ) -> RegularGrid { return { pts, {} }; } ) )
-    //     .def( "__repr__", []( const RegularGrid &a ) { return to_string( a ); } )
-    //     ;
+    pybind11::class_<RegularGrid<TF,nb_dims>>( m, PD_STR( RegularGrid ) )
+        .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TF,nb_dims> { return { pts, {} }; } ) )
+        .def( "__repr__", []( const RegularGrid<TF,nb_dims> &a ) { return to_string( a ); } )
+        ;
 
     // // utility functions ============================================================================
     // m.def( "display_vtk", []( VtkOutput &vo, const Cell &base_cell, PavingWithDiracs &diracs, const WeightsWithBounds &weights ) {

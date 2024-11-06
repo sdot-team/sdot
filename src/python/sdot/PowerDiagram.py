@@ -9,13 +9,14 @@ class PowerDiagram:
         * positions are stored in a Paving class (RegularPaving, VoronoiPaving, ...)  
         * weights are stored in a HierarchicalRepr class (, ...)
 
-        Boundaries are represented as a 2D tensor where each row contains [ dir..., val ].
-        A point is exterior if scalar_product( dir, point ) > val.
+        Boundaries are represented as a 2D tensor where each row contains [ dir..., val ] where
+            a point is exterior if scalar_product( dir, point ) > val.
 
         `dtype` is the name of the scalar type used by the bindings. One can use numpy types as input (e.g. numpy.float64).
         The static method normalized_dtype( dtype ) allows to get the internal name (e.g. for comparison).
+
         By default, the scalar type is deduced from the inputs (positions, weights, ...), 
-        but is can be forced by specifying dtype in the ctor, or by setting it using self.dtype = ...
+        but is can be forced by specifying `dtype` in the ctor, or by setting it using `self.dtype = ...` (dtype is a property)
     """
     def __init__( self, positions = None, weights = None, boundaries = None, dtype = None, ndim = None ):
         # 
@@ -118,7 +119,7 @@ class PowerDiagram:
         if not self._update_bindings():
             return
         
-        # make base_cell from boundaries
+        # make `base_cell` from boundaries
         base_cell = self._binding_module.Cell()
         if self._boundaries is not None:
             ndim = self._binding_module.ndim()
@@ -139,8 +140,11 @@ class PowerDiagram:
 
         # check format of _positions
         if type( self._positions ) == np.ndarray:
-            dv = self._binding_module.DiracVecFromLocallyKnownValues( self._positions )
+            dv = self._binding_module.KnownVecOfPointsReader( self._positions )
             self._positions = self._binding_module.RegularGrid( dv )
+        
+            print( self._positions )
+            raise RuntimeError("todo")
         else:
             raise "TODO"
 

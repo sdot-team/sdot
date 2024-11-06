@@ -1,9 +1,11 @@
 #pragma once
 
 // #include "MyPrint.h"
-#include <tl/support/common_types.h>
+#include <tl/support/containers/Vec.h>
+#include "MpiContent.h"
 #include <functional>
-// #include <vector>
+
+namespace sdot {
 
 /**
   Allows to use mpi semantic even if mpi is not loaded.
@@ -12,70 +14,82 @@
 */
 class Mpi {
 public:
-    bool                  master                 () const { return rank() == 0; }
+    bool                  main                   () const { return rank() == 0; }
     virtual int           rank                   () const = 0;
     virtual int           size                   () const = 0;
 
-    virtual void          send                   ( const SI8  *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const PI8  *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const SI32 *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const PI32 *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const SI64 *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const PI64 *data, PI count, int destination, int tag = 0 ) = 0;
-    virtual void          send                   ( const FP64 *data, PI count, int destination, int tag = 0 ) = 0;
+    // variants that compute and "send" the result only to a given machine (tgt_rank)
+    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func );
+    T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
+    T_T T                 sum_to                 ( PI tgt_rank, const T &value );
 
-    virtual void          recv                   ( SI8  *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( PI8  *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( SI32 *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( PI32 *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( SI64 *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( PI64 *data, PI count, int source, int tag = 0 ) = 0;
-    virtual void          recv                   ( FP64 *data, PI count, int source, int tag = 0 ) = 0;
+    // variants that scatter the results to all machines
+    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func );
+    T_T auto              gather                 ( const T &value, auto &&func ); ///< return func( [ value_for_each_process ] )
+    T_T T                 sum                    ( const T &value );
 
-    virtual void          gather                 ( SI32 *dst, const SI32 *src, PI count, int root = 0 ) = 0;
-    virtual void          gather                 ( SI64 *dst, const SI64 *src, PI count, int root = 0 ) = 0;
-    virtual void          gather                 ( PI32 *dst, const PI32 *src, PI count, int root = 0 ) = 0;
-    virtual void          gather                 ( PI64 *dst, const PI64 *src, PI count, int root = 0 ) = 0;
-    virtual void          gather                 ( FP64 *dst, const FP64 *src, PI count, int root = 0 ) = 0;
+    // send
+    T_T auto              scatter_from           ( PI src_rank, const T &value ); ///< 
 
-    virtual void          all_gather             ( std::vector<std::vector<char>> &dst, const char *src, PI count ) = 0;
-    virtual void          all_gather             ( std::vector<std::vector<int >> &dst, const int  *src, PI count ) = 0;
+protected:
+    using                 B                      = PI8;
 
-    virtual void          bcast                  ( SI8  *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( PI8  *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( SI32 *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( SI64 *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( PI32 *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( PI64 *vec, PI count, int root = 0 ) = 0;
-    virtual void          bcast                  ( FP64 *vec, PI count, int root = 0 ) = 0;
-
-    virtual void          barrier                () = 0;
-
-    virtual void          selective_send_and_recv( std::vector<std::vector<char>> &ext, const std::vector<std::vector<int>> &needs, std::vector<char> &to_send ) = 0;
-
-    virtual void          cross_sends            ( std::vector<std::vector<std::uint8_t >> &dst, const std::vector<std::vector<std::uint8_t >> &src ) = 0;
-    virtual void          cross_sends            ( std::vector<std::vector<PI32>> &dst, const std::vector<std::vector<PI32>> &src ) = 0;
-    virtual void          cross_sends            ( std::vector<std::vector<PI64>> &dst, const std::vector<std::vector<PI64>> &src ) = 0;
-
-    virtual PI            probe_size             ( int source, int tag = 0 ) = 0;
-                     
-    virtual SI32          reduction              ( SI32 value, const std::function<SI32(SI32,SI32)> &f ) = 0;
-    virtual SI64          reduction              ( SI64 value, const std::function<SI64(SI64,SI64)> &f ) = 0;
-    virtual PI32          reduction              ( PI32 value, const std::function<PI32(PI32,PI32)> &f ) = 0;
-    virtual PI64          reduction              ( PI64 value, const std::function<PI64(PI64,PI64)> &f ) = 0;
-    virtual FP64          reduction              ( FP64 value, const std::function<FP64(FP64,FP64)> &f ) = 0;
-         
-    virtual SI32          sum                    ( SI32 value );
-    virtual SI64          sum                    ( SI64 value );
-    virtual PI32          sum                    ( PI32 value );
-    virtual PI64          sum                    ( PI64 value );
-    virtual FP64          sum                    ( FP64 value );
-         
-    // virtual void       partition  ( std::vector<int> &partition, const std::vector<PI> &node_offsets, const std::vector<PI> &edge_indices, const std::vector<PI> &edge_values, const std::vector<int> &edge_costs, const std::vector<FP64> &xyz, int dim, bool full_redistribution ) = 0;
-    // virtual void       partition  ( std::vector<int> &partition, const std::vector<PI> &node_offsets, const std::vector<FP64> &xyz, int dim ) = 0;
+    virtual void          _scatter               ( Span<B> value, PI src_rank ) = 0; ///< 
+    virtual void          _gather                ( Span<B> output, CstSpan<B> input, PI tgt_rank ) = 0; ///< 
 };
 
 extern Mpi *mpi;
+
+// ------------------------------- IMPL -------------------------------
+T_T T Mpi::reduction_to( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func ) {
+    return gather_to( tgt_rank, value, [&]( CstSpan<T> values ) {
+        T res = values[ 0 ];
+        for( PI r = 1; r < values.size(); ++r )
+            f( res, values[ r ] );
+        return res;
+    } );
+}
+
+T_T auto Mpi::gather_to( PI tgt_rank, const T &value, auto &&func ) {
+    if ( rank() == 1 )
+        return func( CstSpan<T>( &value, 1 ) );
+
+    return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( CstSpan<T>( &value, 1 ), [&]( CstSpan<B> value ) {
+        Vec<B> room( FromSize(), value.size() * rank() );
+        _gather( room, value );
+
+        using R = DECAYED_TYPE_OF( func( CstSpan<T>( &value, 1 ) ) );
+        R res;
+        if ( main() ) {
+            MpiContent<DECAYED_TYPE_OF( value )>::as_cpp( room, [&]( CstSpan<T> room ) {
+                res = func( room );
+            } );
+        }
+
+        return ;
+    } );
+}
+
+T_T T Mpi::sum_to( PI tgt_rank, const T &value ) {
+    return reduction_to( tgt_rank, value, []( T &a, const T &b ) { a += b; } );
+}
+
+
+T_T T Mpi::reduction( const T &value, const std::function<void( T &a, const T &b )> &func ) {
+    return scatter_from( 0, reduction_to( 0, value, func ) );
+}
+
+T_T auto Mpi::gather( const T &value, auto &&func ) {
+    return scatter_from( 0, gather_to( 0, value, FORWARD( func ) ) );
+}
+
+T_T T Mpi::sum( const T &value ) {
+    return scatter_from( 0, sum_to( 0, value ) );
+}
+
+T_T auto Mpi::scatter_from( PI src_rank, const T &value ) {
+    TODO;
+}
 
 // template<class OS,class... Args> void ___my_mpi_print( OS &os, const char *str, const Args &...args ) {
 //     // get local msg
@@ -116,3 +130,5 @@ extern Mpi *mpi;
 // #define PNMPI( ... ) ___my_mpi_print( std::cout, #__VA_ARGS__ " ->\n" , __VA_ARGS__ )
 // #define PMPI( ... ) ___my_mpi_print( std::cout, #__VA_ARGS__ " -> " , __VA_ARGS__ )
 // #define PMPI_0( ... ) ___my_mpi_print_0( std::cout, #__VA_ARGS__ " -> " , __VA_ARGS__ )
+
+} // namespace sdot
