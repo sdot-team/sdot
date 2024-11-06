@@ -26,27 +26,33 @@ DTP PI UTP::RegularGrid::index( const Pt &pos ) const {
 DTP UTP::RegularGrid( const auto &points, const Vec<Trans> &transformations ) : transformations( transformations ) {
     nb_base_points = points.global_size();
 
-    // min_pos, max_pos
+    // local min_pos, max_pos
     bool seen = false;
     points.get_local_content( [&]( const auto &content ) {
         if ( content.size() == 0 )
             return;
         if ( ! seen ) {
-            min_pos = *content.begin();
-            max_pos = min_pos;
+            limits[ 0 ] = *content.begin();
+            limits[ 1 ] = limits[ 0 ];
             seen = true;
         }
         for( const auto &p : content ) {
-            min_pos = min( min_pos, p );
-            max_pos = max( max_pos, p );
+            limits[ 0 ] = min( limits[ 0 ], p );
+            limits[ 1 ] = max( limits[ 1 ], p );
         }
     } );
-    
-    mpi->reduction(  );
+
+    // global min_pos ans max_pos
+    limits = mpi->reduction( limits, []( auto &a, const auto &b ) {
+        a[ 0 ] = min( a[ 0 ], b[ 0 ] );
+        a[ 1 ] = max( a[ 1 ], b[ 1 ] );
+    } );
+
+    P( limits );
 }
 
 DTP void UTP::display( Displayer &ds ) const {
-    DS_OJBECT( min_pos, max_pos );
+    DS_OJBECT( limits );
 }
 
 #undef DTP

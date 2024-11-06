@@ -29,9 +29,7 @@ private:
     PI          index            ( const Pt &pos ) const;
 
     PI          nb_base_points;  ///<     
-    Pt          min_pos;         ///<
-    Pt          max_pos;         ///<
-    Nd          nb_divs;         ///<
+    Vec<Pt,2>   limits;         ///<
     Pt          steps;           ///<
 
     Vec<Trans>  transformations; ///<

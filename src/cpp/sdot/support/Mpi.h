@@ -16,8 +16,6 @@ namespace sdot {
 */
 class Mpi {
 public:
-
-    bool                  main                   () const { return rank() == 0; }
     virtual int           rank                   () const = 0;
     virtual int           size                   () const = 0;
 
@@ -37,8 +35,8 @@ public:
 protected:
     using                 B                      = PI8;
 
-    virtual void          _scatter               ( PI src_rank , Span<B> value) = 0; ///< 
-    virtual void          _gather                ( PI tgt_rank, Span<B> output, CstSpan<B> input ) = 0; ///< 
+    virtual void          _scatter               ( PI src_rank, Span<B> value ) = 0; ///< send value from src_rank to other machines
+    virtual void          _gather                ( PI tgt_rank, Span<B> outputs, CstSpan<B> input ) = 0; ///< in tgt_rank, get concatenation of each input in outputs
 };
 
 extern Mpi *mpi;
@@ -60,27 +58,25 @@ T_T auto Mpi::gather_to( PI tgt_rank, const T &value, auto &&func, MpiDataInfo d
 
     // homogeneous size
     using MC = MpiContent<DECAYED_TYPE_OF( value )>;
-    if ( has_ct_value( MC::size( value ) ) || data_info.assume_homogeneous_mpi_data_size ) {
+    if constexpr ( MC::dynamic_mpi_size ) {
         // serialize `value`
-        return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( value, [&]( CstSpan<B> value ) {
+        return MpiContent<DECAYED_TYPE_OF( value )>::as_mpi( { &value, 1 }, [&]( CstSpan<B> value ) {
             // get all the content in tgt_rank
             Vec<B> room( FromSize(), value.size() * this->size() );
             _gather( tgt_rank, room, value );
 
+            // call func only in tgt_rank
             if ( rank() != tgt_rank )
                 return TR{};
 
-            TR res;
-            MpiContent<DECAYED_TYPE_OF( value )>::as_cpp( room, [&]( T room ) {
-                res = func( room );
-            } );
-
-            return res;
+            // call func with a CstSpan of T for each rank
+            return MpiContent<DECAYED_TYPE_OF( value )>::as_cpp( room, func );
         } );
+    } else {
+        // heterogeneous size => we have first to gather the sizes
+        // data_info.assume_homogeneous_mpi_data_size
+        TODO;
     }
-
-    // heterogeneous size => we have first to gather the sizes
-    TODO;
 }
 
 T_T T Mpi::sum_to( PI tgt_rank, const T &value, MpiDataInfo data_info ) {
