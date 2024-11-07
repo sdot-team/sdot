@@ -20,12 +20,12 @@ public:
     virtual int           size                   () const = 0;
 
     // variants that compute and "send" the result only to a given machine (tgt_rank)
-    T_T T                 reduction_to           ( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info = {} );
+    T_T T                 reduction_to           ( PI tgt_rank, const T &value, auto &&func, MpiDataInfo data_info = {} ); // ex func( a, b ): a += b
     T_T auto              gather_to              ( PI tgt_rank, const T &value, auto &&func, MpiDataInfo data_info = {} ); ///< return func( [ value_for_each_process ] ), called only on rank == tgt_rank
     T_T T                 sum_to                 ( PI tgt_rank, const T &value, MpiDataInfo data_info = {} );
 
     // variants that scatter the results to all machines
-    T_T T                 reduction              ( const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info = {} );
+    T_T T                 reduction              ( const T &value, auto &&func, MpiDataInfo data_info = {} );
     T_T auto              gather                 ( const T &value, auto &&func, MpiDataInfo data_info = {} ); ///< return func( [ value_for_each_process ] )
     T_T T                 sum                    ( const T &value, MpiDataInfo data_info = {} );
 
@@ -42,7 +42,7 @@ protected:
 extern Mpi *mpi;
 
 // ------------------------------- IMPL -------------------------------
-T_T T Mpi::reduction_to( PI tgt_rank, const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info ) {
+T_T T Mpi::reduction_to( PI tgt_rank, const T &value, auto &&func, MpiDataInfo data_info ) {
     return gather_to( tgt_rank, value, [&]( CstSpan<T> values ) {
         T res = values[ 0 ];
         for( PI r = 1; r < values.size(); ++r )
@@ -84,7 +84,7 @@ T_T T Mpi::sum_to( PI tgt_rank, const T &value, MpiDataInfo data_info ) {
 }
 
 
-T_T T Mpi::reduction( const T &value, const std::function<void( T &a, const T &b )> &func, MpiDataInfo data_info ) {
+T_T T Mpi::reduction( const T &value, auto &&func, MpiDataInfo data_info ) {
     auto res = reduction_to( 0, value, func );
     scatter_from( 0, res, data_info);
     return res;
@@ -97,13 +97,15 @@ T_T auto Mpi::gather( const T &value, auto &&func, MpiDataInfo data_info ) {
 }
 
 T_T T Mpi::sum( const T &value, MpiDataInfo data_info ) {
-    return scatter_from( 0, sum_to( 0, value, data_info ) );
+    auto res = sum_to( 0, value );
+    scatter_from( 0, res, data_info);
+    return res;
 }
 
 T_T void Mpi::scatter_from( PI src_rank, T &value, MpiDataInfo data_info ) {
     if ( this->size() == 1 )
         return;
-    
+
     TODO;
 }
 

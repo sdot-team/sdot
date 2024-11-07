@@ -38,6 +38,38 @@ class PowerDiagram:
         self.weights = weights
 
 
+    def add_cube_boundaries( self, ndim = None, base = None, min_offset = None, max_offset = None ):
+        """ add an (hyper-)cube to the boundaries
+
+            if ndim is not specified, one tries to guess it from the defined attributes
+
+            min_offset and max_offset are related to base. They can be single scalars or vector, with one value for each base item. 
+        """
+        if base is not None:
+            ndim = len( base )
+        if ndim is None:
+            ndim = self.ndim
+            if ndim is None:
+                raise RuntimeError( "Found no way to guess ndim" )
+        if base is None:
+            base = np.identity( ndim )
+        if min_offset is None:
+            min_offset = 0
+        if max_offset is None:
+            max_offset = 1
+        if isinstance( min_offset, ( int, float ) ):
+            min_offset = np.full( [ ndim ], min_offset )
+        if isinstance( max_offset, ( int, float ) ):
+            max_offset = np.full( [ ndim ], max_offset )
+
+        l = []
+        if self._boundaries is not None:
+            l = list( self._boundaries )
+        for n in range( ndim ):
+            l.append( [ -( d == n ) for d in range( ndim ) ] + [ - min_offset[ n ] ] )
+            l.append( [ +( d == n ) for d in range( ndim ) ] + [ + max_offset[ n ] ] )
+        self._boundaries = np.array( l )
+
     @property
     def boundaries( self ):
         return self._boundaries
@@ -103,7 +135,7 @@ class PowerDiagram:
         
         # else, use the dtypes from the inputs
         if self._boundaries is not None and len( self._boundaries ):
-            return self._boundaries.shape[ 1 ]
+            return self._boundaries.shape[ 1 ] - 1
         if self._positions is not None and len( self._positions ):
             return self._positions.shape[ 1 ]
 
@@ -142,50 +174,23 @@ class PowerDiagram:
         if type( self._positions ) == np.ndarray:
             dv = self._binding_module.KnownVecOfPointsReader( self._positions )
             self._positions = self._binding_module.RegularGrid( dv )
-        
-            print( self._positions )
-            raise RuntimeError("todo")
         else:
             raise "TODO"
 
         # check format of _weights
         if self._weights is None:
-            self._weights = self._binding_module.HomogeneousWeights( 1 )
+            self._weights = self._binding_module.LocalWeightBounds_ConstantValue( 1 )
         else:
             raise "TODO"
 
         # check format of _boundaries
         if self._boundaries is None:
             self._boundaries = np.empty( [ 0, ndim ], dtype = numpy_dtype_for( dtype ) )
-        else:
-            raise "TODO"
+        elif not isinstance( self._boundaries, np.ndarray ):
+            raise RuntimeError( "boundaries must be expressed as a ndarray" )
 
         return True
 
-
-# # pre-loaded functions
-# make_weighted_point_set_aabb = vfs.function( 'make_weighted_point_set_aabb', [ f'inc_file:sdot/WeightedPointSet_AABB.h' ] )
-# rt_int = vfs.function( 'Vfs::RtInt', [ 'inc_file:vfs/vfs_system/RtInt.h' ] )
-
-# #
-# class PowerDiagram:
-#     def __init__( self, points_, weights_, b_dirs = None, b_offs = None ) -> None:
-#         points = np.asarray( points_ )
-#         weights = np.asarray( weights_ )
-#         assert( points.ndim == 2 )
-#         assert( weights.ndim == 1 )
-#         assert( points.shape[ 0 ] == weights.shape[ 0 ] )
-
-#         # points and weight are actually stored in a "weighted_point_set" structure
-#         self.wps = make_weighted_point_set_aabb( points, weights, rt_int( points.shape[ 1 ] ) )
-#         self.nb_dims = points.shape[ 1 ]
-
-#         self.b_dirs = np.asarray( b_dirs )
-#         self.b_offs = np.asarray( b_offs )
-#         assert( self.b_dirs.ndim == 2 )
-#         assert( self.b_offs.ndim == 1 )
-#         assert( self.b_dirs.shape[ 1 ] == self.nb_dims )
-#         assert( self.b_offs.shape[ 0 ] == self.b_dirs.shape[ 0 ] )
 
 #     def write_vtk( self, filename, fit_boundaries = 0.1 ):
 #         display_vtk_laguerre_cells = vfs.function( 'display_vtk_laguerre_cells', [ f'inc_file:sdot/display_vtk_laguerre_cells.h' ] )

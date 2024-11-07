@@ -39,6 +39,23 @@ DTP UTP::Cell( CellInfo &&info ) : info( std::move( info ) ) {
     _vertex_refs.resize( 1 );
 }
 
+DTP UTP::Cell( const Cell &that ) : Cell( CellInfo( that.info ) ) {
+    get_geometrical_data_from( that );
+}
+
+DTP void UTP::get_geometrical_data_from( const Cell &cell ) {
+    _true_dimensionality = cell._true_dimensionality;
+
+    _vertex_coords = cell._vertex_coords;
+    _vertex_refs = cell._vertex_refs;
+    _cuts = cell._cuts;
+    _sps = cell._sps;
+ 
+    _may_have_unused_cuts = cell._may_have_unused_cuts;
+    _bounded = cell._bounded;
+    _empty = cell._empty;
+}
+
 DTP T_i auto UTP::_with_ct_dim( auto &&func, CtInt<i> min_td, CtInt<i> max_td ) const {
     return func( max_td );
 }

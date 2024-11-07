@@ -3,13 +3,15 @@
 // #include <sdot/WeightsWithBounds.h>
 // #include <sdot/PavingWithDiracs.h>
 // #include <sdot/RegularGrid.h>
+#include "sdot/local_weight_bounds/LocalWeightBounds.h"
+#include <sdot/local_weight_bounds/LocalWeightBounds_ConstantValue.h>
 #include <sdot/vec_readers/KnownVecReader.h>
 #include <sdot/pavings/RegularGrid.h>
 #include <sdot/support/VtkOutput.h>
 #include <sdot/Cell.h>
 
 #include <tl/support/string/to_string.h>
-
+ 
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -54,8 +56,17 @@ using Array = pybind11::array_t<TF, pybind11::array::c_style>;
 using Pt = Vec<TF, nb_dims>;
 using namespace sdot;
 
-struct CutInfo {
-    PI index;
+struct PD_NAME( CutInfo ) {
+    CutType type;
+    Pt      p1;
+    TF      w1;
+    PI      i1;
+};
+
+struct PD_NAME( CellInfo ) {
+    Pt p0;
+    TF w0;
+    PI i0;
 };
 
 // #define PolyCon_Py CC_DT( PolyCon_py )
@@ -270,30 +281,31 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     .def( pybind11::init( &create_Pt_from_Array ) )
     //     .def( "__repr__", []( const Pt &pt ) { return to_string( pt ); } )
     //     ;
-    using Cell_ = Cell<Arch,TF,nb_dims,CutInfo>;
+    using TCell = Cell<Arch,TF,nb_dims,PD_NAME( CutInfo ),PD_NAME( CellInfo )>;
  
     pybind11::class_<VtkOutput>( m, PD_STR( VtkOutput ) )
         .def( pybind11::init<>() )
         .def( "save", []( VtkOutput &vo, Str fn ) { return vo.save( fn ); } )
         ;
  
-    pybind11::class_<Cell_>( m, PD_STR( Cell ) )
+    pybind11::class_<TCell>( m, PD_STR( Cell ) )
         // base methods
         .def( pybind11::init<>() )
 
         // modifications
-        .def( "cut", []( Cell_ &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .index = ind } ); } )
+        .def( "cut_boundary", []( TCell &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Boundary, .i1 = ind } ); } )
+        .def( "cut", []( TCell &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Undefined, .i1 = ind } ); } )
         
         // properties
-        .def( "true_dimensionality", &Cell_::true_dimensionality )
-        .def( "nb_active_cuts", &Cell_::nb_active_cuts )
-        .def( "nb_stored_cuts", &Cell_::nb_stored_cuts )
-        .def( "nb_vertices", []( Cell_ &cell, bool current_dim ) { return current_dim ? cell.nb_vertices_true_dim() : cell.nb_vertices(); } )
-        .def( "bounded", &Cell_::bounded )
-        .def( "empty", &Cell_::empty )
-        .def( "base", []( Cell_ &cell ) { return Array_from_VecPt( cell.base() ); } )
+        .def( "true_dimensionality", &TCell::true_dimensionality )
+        .def( "nb_active_cuts", &TCell::nb_active_cuts )
+        .def( "nb_stored_cuts", &TCell::nb_stored_cuts )
+        .def( "nb_vertices", []( TCell &cell, bool current_dim ) { return current_dim ? cell.nb_vertices_true_dim() : cell.nb_vertices(); } )
+        .def( "bounded", &TCell::bounded )
+        .def( "empty", &TCell::empty )
+        .def( "base", []( TCell &cell ) { return Array_from_VecPt( cell.base() ); } )
 
-        .def( "vertex_coords", []( const Cell_ &cell, bool allow_lower_dim ) {
+        .def( "vertex_coords", []( const TCell &cell, bool allow_lower_dim ) {
             if ( allow_lower_dim ) {
                 return cell.with_ct_dim( [&]( auto td ) {
                     Vec<Vec<TF,td>> coords;
@@ -311,7 +323,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             return Array_from_VecPt( coords );
         } )
 
-        .def( "vertex_refs", []( const Cell_ &cell, bool allow_lower_dim ) {
+        .def( "vertex_refs", []( const TCell &cell, bool allow_lower_dim ) {
             if ( allow_lower_dim ) {
                 return cell.with_ct_dim( [&]( auto td ) {
                     Vec<Vec<PI,td>> refs;
@@ -322,7 +334,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 } );
             }
 
-           Vec<Vec<PI,nb_dims>> refs;
+            Vec<Vec<PI,nb_dims>> refs;
             cell.for_each_vertex_ref( [&]( const auto &pt ) {
                 refs << pt;
             } );
@@ -330,8 +342,8 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         } )
 
         // // output
-        .def( "display_vtk", []( const Cell_ &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
-        .def( "__repr__", []( const Cell_ &cell ) { return to_string( cell ); } )
+        .def( "display_vtk", []( const TCell &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
+        .def( "__repr__", []( const TCell &cell ) { return to_string( cell ); } )
         ;
 
     pybind11::class_<KnownVecReader<Pt>>( m, PD_STR( KnownVecOfPointsReader ) )
@@ -340,30 +352,30 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         ;
 
     // // weights ======================================================================================
-    // pybind11::class_<WeightsWithBounds>( m, PD_STR( WeightsWithBounds ) )
-    //     .def( "__repr__", []( const WeightsWithBounds &a ) { return to_string( a ); } )
-    //     ;
+    pybind11::class_<LocalWeightBounds<TCell>>( m, PD_STR( LocalWeightBounds ) )
+        .def( "__repr__", []( const LocalWeightBounds<TCell> &a ) { return to_string( a ); } )
+        ;
 
-    // pybind11::class_<HomogeneousWeights,WeightsWithBounds>( m, PD_STR( HomogeneousWeights ) )
-    //     .def( pybind11::init<TF>() )
-    //     // .def( "__repr__", []( const HomogeneousWeights &a ) { return to_string( a ); } )
-    //     ;
+    pybind11::class_<LocalWeightBounds_ConstantValue<TCell>,LocalWeightBounds<TCell>>( m, PD_STR( LocalWeightBounds_ConstantValue ) )
+        .def( pybind11::init<TF>() )
+        // .def( "__repr__", []( const HomogeneousWeights &a ) { return to_string( a ); } )
+        ;
 
     // paving ========================================================================================
     // pybind11::class_<PavingWithDiracs>( m, PD_STR( PavingWithDiracs ) )
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
-    //     .def( "for_each_cell", []( PavingWithDiracs &paving, const Cell &base_cell, const WeightsWithBounds &wwb, const std::function<void( const Cell &cell )> &f ) { 
-    //         pybind11::gil_scoped_release gsr;
-    //         paving.for_each_cell( base_cell, wwb, [&]( Cell &cell, int ) {
-    //             pybind11::gil_scoped_acquire gsa;
-    //             f( cell );
-    //         } );
-    //     } )
     //     ;
 
-    pybind11::class_<RegularGrid<TF,nb_dims>>( m, PD_STR( RegularGrid ) )
-        .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TF,nb_dims> { return { pts, {} }; } ) )
-        .def( "__repr__", []( const RegularGrid<TF,nb_dims> &a ) { return to_string( a ); } )
+    pybind11::class_<RegularGrid<TCell>>( m, PD_STR( RegularGrid ) )
+        .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TCell> { return { pts, {} }; } ) )
+        .def( "__repr__", []( const RegularGrid<TCell> &a ) { return to_string( a ); } )
+        .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const LocalWeightBounds<TCell> &wwb, const std::function<void( const TCell &cell )> &f ) { 
+            pybind11::gil_scoped_release gsr;
+            paving.for_each_cell( base_cell, wwb, [&]( TCell &cell, int ) {
+                pybind11::gil_scoped_acquire gsa;
+                f( cell );
+            } );
+        } )
         ;
 
     // // utility functions ============================================================================
@@ -376,7 +388,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     } );
     // } );
     
-    // m.def( "ndim", []() {
-    //     return sdot::nb_dims;
-    // } );
+    m.def( "ndim", []() {
+        return nb_dims;
+    } );
 }

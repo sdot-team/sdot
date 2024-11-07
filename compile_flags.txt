@@ -1,6 +1,7 @@
 -I/home/leclerc/.vfs_build/ext/Catch2/install/include
 -I/usr/lib/python3/dist-packages/numpy/core/include
 -I/usr/include/python3.12
+-Iext/pybind11/include
 -Iext/matplotlib-cpp
 -Iext/tl20/src/cpp
 -Iext/Catch2/src
