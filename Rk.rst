@@ -76,3 +76,7 @@ Rq: on pourrait systématiquement travailler en nb_dims, en imposant les
 
 
 Pb: on aimerait bien ne pas avoir à envoyer les infos de taille dynamique lorsqu'on connait la taille à priori.
+
+Rq: pour python, on pourrait utiliser les outils habituels de production de fichiers .vtk 
+
+Prop: faces dans 

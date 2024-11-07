@@ -302,7 +302,15 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "nb_stored_cuts", &TCell::nb_stored_cuts )
         .def( "nb_vertices", []( TCell &cell, bool current_dim ) { return current_dim ? cell.nb_vertices_true_dim() : cell.nb_vertices(); } )
         .def( "bounded", &TCell::bounded )
+        .def( "closed_faces", []( const TCell &cell ) {
+            std::vector<std::vector<PI>> faces;
+            cell.for_each_closed_face( [&]( auto &&refs, auto &&vertices ) {
+                faces.push_back( { vertices.begin(), vertices.end() } );
+            } );
+            return faces;
+        } )
         .def( "empty", &TCell::empty )
+        .def( "ndim", []( const TCell &cell ) { return nb_dims; } )
         .def( "base", []( TCell &cell ) { return Array_from_VecPt( cell.base() ); } )
 
         .def( "vertex_coords", []( const TCell &cell, bool allow_lower_dim ) {
@@ -369,12 +377,12 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     pybind11::class_<RegularGrid<TCell>>( m, PD_STR( RegularGrid ) )
         .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TCell> { return { pts, {} }; } ) )
         .def( "__repr__", []( const RegularGrid<TCell> &a ) { return to_string( a ); } )
-        .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const LocalWeightBounds<TCell> &wwb, const std::function<void( const TCell &cell )> &f ) { 
+        .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const LocalWeightBounds<TCell> &wwb, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
             pybind11::gil_scoped_release gsr;
             paving.for_each_cell( base_cell, wwb, [&]( TCell &cell, int ) {
                 pybind11::gil_scoped_acquire gsa;
                 f( cell );
-            } );
+            }, max_nb_threads );
         } )
         ;
 

@@ -76,7 +76,7 @@ DTP UTP::RegularGrid( const auto &point_reader, const Vec<Trans> &transformation
     nb_base_points = mpi->sum( nb_base_points );
 
     // divs
-    TF step = pow( nb_glob_points / ( nb_diracs_per_box * product( limits[ 1 ] - limits[ 0 ] ) ), double( 1 ) / nb_dims );
+    TF step = pow( nb_diracs_per_box / ( nb_glob_points * product( limits[ 1 ] - limits[ 0 ] ) ), double( 1 ) / nb_dims );
     for( PI d = 0; d < nb_dims; ++d ) {
         nb_divs[ d ] = max( TF( 1 ), ceil( ( limits[ 1 ][ d ] - limits[ 0 ][ d ] ) / step ) );
         steps[ d ] = TF( limits[ 1 ][ d ] - limits[ 0 ][ d ] ) / nb_divs[ d ];
@@ -125,10 +125,10 @@ DTP UTP::RegularGrid( const auto &point_reader, const Vec<Trans> &transformation
 }
 
 DTP void UTP::display( Displayer &ds ) const {
-    DS_OJBECT( limits );
+    DS_OJBECT( limits, nb_divs );
 }
 
-DTP PI UTP::max_nb_threads() const {
+DTP PI UTP::recommended_nb_threads() const {
     return std::thread::hardware_concurrency();
 }
 
@@ -164,7 +164,7 @@ DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const Loc
     }
 }
 
-DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCell> &weights_bounds, auto &&f ) {
+DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCell> &weights_bounds, auto &&f, int max_nb_threads ) {
     // for each box...
     int error = 0;
     spawn( [&]( int num_thread, int nb_threads ) {
@@ -192,7 +192,7 @@ DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCel
         } catch ( CellTraversalError e ) {
             error = e.error;
         }
-    }, max_nb_threads() );
+    }, max_nb_threads ? max_nb_threads : recommended_nb_threads() );
     return error;
 }
 

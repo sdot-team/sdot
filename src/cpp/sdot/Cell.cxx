@@ -5,6 +5,7 @@
 #include <tl/support/operators/norm_2.h>
 #include <tl/support/operators/sp.h>
 
+#include <tl/support/containers/SmallVec.h>
 #include <tl/support/containers/CtRange.h>
 
 #include <Eigen/Dense>
@@ -25,7 +26,8 @@ DTP UTP::Cell( CellInfo &&info ) : info( std::move( info ) ) {
     _vertex_coords.reserve( 128 );
     _vertex_refs.reserve( 128 );
     _cuts.reserve( 128 );
-    _sps.reserve( 128 );
+ 
+    _sps.aligned_reserve( 128, CtInt<_VertexCoords::simd_size * sizeof( TF )>() );
  
     _may_have_unused_cuts = false;
     _bounded = false;
@@ -284,6 +286,54 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td 
 
 DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func ) const {
     for_each_ray_and_edge( FORWARD( ray_func ), FORWARD( edge_func ), CtInt<nb_dims>() );
+}
+
+DTP void UTP::for_each_closed_face( auto &&func ) const {
+    // sibling for each vertex (index in `vertices`), for each face
+    struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
+    std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
+    for_each_ray_and_edge( []( auto&&, auto&& ) {}, [&]( const Vec<PI32,nb_dims-1> &edge_cuts, Span<PI32,2> vs ) {
+        // for each connected face
+        for( PI i = 0; i < nb_dims - 1; ++i ) {
+            Vec<PI32,nb_dims-2> face_cuts = edge_cuts.without_index( i );
+            auto &fi = face_map[ face_cuts ];
+
+            // store connected vertices
+            fi.siblings.resize( nb_vertices() );
+            fi.siblings[ vs[ 0 ] ] << vs[ 1 ];
+            fi.siblings[ vs[ 1 ] ] << vs[ 0 ];
+            fi.start = vs[ 0 ];
+        }
+    } );
+
+    // for each face
+    Vec<PI32> vs;
+    for( const auto &p: face_map ) {
+        const Vec<PI32,nb_dims-2> &face_cuts = p.first;
+        const FaceInfo &fi = p.second;
+
+        // get the loop
+        vs.clear();
+        for( PI n = fi.start, j = 0; ; ++j ) {
+            vs << n;
+
+            const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+            n = fi.siblings[ n ][ s ];
+
+            if ( n == fi.start )
+                break;
+
+            // TODO: optimize
+            if ( vs.contains( n ) ) {
+                vs.clear();
+                break;
+            }
+        }
+
+        // call f
+        if ( vs.size() )
+            func( face_cuts, vs );
+    }
 }
 
 DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {

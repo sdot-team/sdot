@@ -1,4 +1,5 @@
 from .bindings.loader import numpy_dtype_for, normalized_dtype, type_promote, module_for
+from .Cell import Cell
 import numpy as np
 
 class PowerDiagram:
@@ -87,10 +88,9 @@ class PowerDiagram:
 
     @positions.setter
     def positions( self, values ):
-        if values == None:
+        if values is None:
             return
         self._positions = np.ascontiguousarray( values )
-
 
     @property
     def weights( self ):
@@ -147,7 +147,9 @@ class PowerDiagram:
             return
         self._ndim = int( value )
 
-    def for_each_cell( self, function ):
+    def for_each_cell( self, function, max_nb_threads = None ):
+        """
+        """
         if not self._update_bindings():
             return
         
@@ -159,7 +161,14 @@ class PowerDiagram:
                 base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
         # call module function
-        self._positions.for_each_cell( base_cell, self._weights, function )
+        cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
+        self._positions.for_each_cell( base_cell, self._weights, cwc, max_nb_threads or 0 )
+
+    def plot_in_pyplot( self, fig ):
+        """  
+            plot cells content in pyplot figure `fig`        
+        """
+        self.for_each_cell( lambda cell: cell.plot_in_pyplot( fig ), max_nb_threads = 1 )
 
     def _update_bindings( self ):
         # get the right module
@@ -174,7 +183,9 @@ class PowerDiagram:
         if type( self._positions ) == np.ndarray:
             dv = self._binding_module.KnownVecOfPointsReader( self._positions )
             self._positions = self._binding_module.RegularGrid( dv )
+            print( self._positions )
         else:
+            print( type( self._positions ) )
             raise "TODO"
 
         # check format of _weights

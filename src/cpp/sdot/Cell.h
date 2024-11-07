@@ -55,9 +55,11 @@ public:
     void            display_vtk              ( VtkOutput &vo ) const;
     void            display                  ( Displayer &ds ) const;
   
-    //  
-    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const;
-    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const;
+    //
+    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_closed_face     ( auto &&func ) const; ///< func( num_cuts, vertex_indices )
+   
     T_i Vec<TF,i+1> ray_dir                  ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
   
     void            for_each_vertex_coord    ( auto &&func, auto td ) const; ///< dimensionality specified by the user
@@ -65,7 +67,7 @@ public:
   
     void            for_each_vertex_ref      ( auto &&func, auto td ) const; ///< dimensionality specified by the user
     void            for_each_vertex_ref      ( auto &&func ) const; ///< assumed dimensionality == nb_dims
-  
+
     // utility  
     auto            with_ct_dim              ( auto &&func ) const;
     auto            with_ct_dim              ( auto &&func );
