@@ -133,9 +133,9 @@ DTP PI UTP::recommended_nb_threads() const {
 }
 
 DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const LocalWeightBounds<TCell> &weights ) {
-    // indices of points to be sorted
+    // indices of points to be tested (includes virtual points)
     buf.clear();
-    for( PI n1 = offsets[ b0 + 0 ]; n1 < offsets[ b0 + 1 ]; ++n1 )
+    for( PI n1 = offsets[ 2 * b0 + 0 ]; n1 < offsets[ 2 * b0 + 2 ]; ++n1 )
         if ( n1 != n0 )
             buf << n1;
 
@@ -175,17 +175,27 @@ DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCel
             TCell local_cell;
             Vec<PI> buf( FromReservationSize(), 128 );
             for( PI b0 = beg_b0; b0 < end_b0; ++b0 ) {
-                for( PI n0 = offsets[ b0 + 0 ]; n0 < offsets[ b0 + 1 ]; ++n0 ) {
+                // "primary" points (not the virtual ones)
+                for( PI n0 = offsets[ 2 * b0 + 0 ]; n0 < offsets[ 2 * b0 + 1 ]; ++n0 ) {
                     if ( error )
                         return;
                     const PI i0 = inds[ n0 ];
 
+                    // copy of base cell
                     local_cell.get_geometrical_data_from( base_cell );
                     local_cell.info.w0 = weights_bounds[ i0 ];
                     local_cell.info.p0 = points[ n0 ];
                     local_cell.info.i0 = i0;
 
+                    // cuts with points from b0
                     make_cuts_from( b0, n0, local_cell, buf, weights_bounds );
+
+                    //
+                    for( PI b1 = 0; b1 < end_index(); ++b1 ) {
+                        make_cuts_from( b1, n0, local_cell, buf, weights_bounds );
+                    }
+
+                    // callback
                     f( local_cell, num_thread );
                 }
             }

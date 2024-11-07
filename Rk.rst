@@ -79,4 +79,24 @@ Pb: on aimerait bien ne pas avoir à envoyer les infos de taille dynamique lorsq
 
 Rq: pour python, on pourrait utiliser les outils habituels de production de fichiers .vtk 
 
-Prop: faces dans 
+L'idée de base, c'est de tester s'il est possible de trouver un dirac coupant dans les zones non explorées.
+  On pourrait trouver différentes façons de délimiter l'espace.
+  L'idée, c'est que s'il y a une possibilité de coupe dans cette partie de l'espace, on prend la cellule non vide la plus proche.
+  Quand on teste si une zone peut contenir un dirac coupant, on est emmenés à rapetisser la zone.
+  On pourra donc chercher les boites dans le résultat de cette découpe.
+  A fortiori, quand on va explorer des sous-zones pour la description des poids, on va créer des subdivisions de la cellule qui décrit les zones à explorer 
+
+Rq: on pourrait faire un "front" des cellules voisines, en mettant au début toutes les boites dont on est certains qu'elles ne peuvent plus rien couper.
+  (ça utiliserait une approximation du poids par boite)
+  À un moment donné, on n'aura plus que des boites non coupantes.
+  Il faudra ensuite tester ce qui reste
+
+Prop: on fait la représentation des poids de façon hiérarchique dans le grille.
+  Pour chaque cellule en construction, on fait un tableau qui dit si les celules ont été parcourues complétement.
+  Quand on 
+
+
+
+
+
+
