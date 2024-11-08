@@ -2,9 +2,9 @@
 // #include <sdot/HomogeneousWeights.h>
 // #include <sdot/WeightsWithBounds.h>
 // #include <sdot/PavingWithDiracs.h>
-// #include <sdot/RegularGrid.h>
+// #include <sdot/VoronoiAccelerationStructure.h>
 
-#include <sdot/pavings/RegularGrid.h>
+#include <sdot/acceleration_structures/VoronoiAccelerationStructure.h>
 #include <sdot/poom/PoomVec.h>
 
 #include <sdot/support/VtkOutput.h>
@@ -53,7 +53,7 @@ static constexpr int nb_dims = SDOT_CONFIG_nb_dims;
 using TF = SDOT_CONFIG_scalar_type;
 using Arch = sdot::SDOT_CONFIG_arch;
 
-using Array = pybind11::array_t<TF, pybind11::array::c_style>;
+using Array_TF = pybind11::array_t<TF, pybind11::array::c_style>;
 using Pt = Vec<TF, nb_dims>;
 using namespace sdot;
 
@@ -247,7 +247,7 @@ struct PD_NAME( CellInfo ) {
 //     PolyCon<POLYCON_SCALAR,POLYCON_DIM> pc;
 // };
 
-Pt Pt_from_Array( const Array &array ) {
+Pt Pt_from_Array( const Array_TF &array ) {
     Pt res;
     if ( array.size() < nb_dims )
         throw pybind11::value_error( "array is not large enough" );
@@ -256,7 +256,7 @@ Pt Pt_from_Array( const Array &array ) {
     return res;
 }
 
-Vec<Pt> VecPt_from_Array( const Array &array ) {
+Vec<Pt> VecPt_from_Array( const Array_TF &array ) {
     Vec<Pt> res;
     if ( array.shape( 1 ) < nb_dims )
         throw pybind11::value_error( "array is not large enough" );
@@ -294,8 +294,8 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( pybind11::init<>() )
 
         // modifications
-        .def( "cut_boundary", []( TCell &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Boundary, .i1 = ind } ); } )
-        .def( "cut", []( TCell &cell, const Array &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Undefined, .i1 = ind } ); } )
+        .def( "cut_boundary", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Boundary, .i1 = ind } ); } )
+        .def( "cut", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Undefined, .i1 = ind } ); } )
         
         // properties
         .def( "true_dimensionality", &TCell::true_dimensionality )
@@ -355,29 +355,24 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "__repr__", []( const TCell &cell ) { return to_string( cell ); } )
         ;
 
-    pybind11::class_<PoomVec<Pt>>( m, PD_STR( PoomVecPt ) )
-        .def( pybind11::init( [&]( const Array &pts ) -> PoomVec<Pt> { return { VecPt_from_Array( pts ) }; } ) )
-        .def( "__repr__", []( const PoomVec<Pt> &a ) { return to_string( a ); } )
-        ;
-
     // paving ========================================================================================
     // pybind11::class_<PavingWithDiracs>( m, PD_STR( PavingWithDiracs ) )
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     ;
 
-    // pybind11::class_<RegularGrid<TCell>>( m, PD_STR( RegularGrid ) )
-    //     .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TCell> { return { pts, {} }; } ) )
-    //     .def( "__repr__", []( const RegularGrid<TCell> &a ) { return to_string( a ); } )
-    //     .def_property_readonly( "dtype", []( const RegularGrid<TCell> &a ) { return type_name<TF>(); } )
-    //     .def_property_readonly( "ndim", []( const RegularGrid<TCell> &a ) { return nb_dims; } )
-    //     .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
-    //         pybind11::gil_scoped_release gsr;
-    //         paving.for_each_cell( base_cell, [&]( TCell &cell, int ) {
-    //             pybind11::gil_scoped_acquire gsa;
-    //             f( cell );
-    //         }, max_nb_threads );
-    //     } )
-    //     ;
+    pybind11::class_<VoronoiAccelerationStructure<TCell>>( m, PD_STR( VoronoiAccelerationStructure ) )
+        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> VoronoiAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
+        .def( "__repr__"     , []( const VoronoiAccelerationStructure<TCell> &a ) { return to_string( a ); } )
+        .def( "for_each_cell", []( VoronoiAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
+            pybind11::gil_scoped_release gsr;
+            vas.for_each_cell( base_cell, [&]( TCell &cell, int ) {
+                pybind11::gil_scoped_acquire gsa;
+                f( cell );
+            }, max_nb_threads );
+        } )
+        .def_property_readonly( "dtype", []( const VoronoiAccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
+        .def_property_readonly( "ndim" , []( const VoronoiAccelerationStructure<TCell> &a ) { return nb_dims; } )
+        ;
 
     // // utility functions ============================================================================
     // m.def( "display_vtk", []( VtkOutput &vo, const Cell &base_cell, PavingWithDiracs &diracs, const WeightsWithBounds &weights ) {

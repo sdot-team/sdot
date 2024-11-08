@@ -27,12 +27,17 @@ class PoomVec:
                         shape = array.shape
                     if dtype is None:
                         dtype = array.dtype
-                    dtype = normalized_dtype( dtype )
+                    scalar_type = normalized_dtype( dtype )
 
-                    self._module = poom_vec_module_for( scalar_type = dtype, item_type = dtype )
+                    item_type = scalar_type
+                    if len( shape ) > 1:
+                        for s in shape[ 1: ]:
+                            item_type = f'Vec<{ item_type },{ s }>'
+
+                    self._module = poom_vec_module_for( scalar_type = scalar_type, item_type = item_type )
                     self._vec = self._module.make_PoomVec_from_ndarray( array )
                     return
-        except TypeError:
+        except TypeError as e:
             pass
 
         # specification of attriutes
@@ -53,8 +58,18 @@ class PoomVec:
     def __repr__( self ):
         return self._vec.__repr__()
 
-    # @property
-    # def vertex_coords( self ):
-    #     """ get list of coordinates for each vertex (stored in a numpy array) in the current base """
-    #     return self._vec.vertex_coords( True )
+    @property
+    def as_ndarray( self ):
+        """  """
+        return self._vec.as_ndarray()
+
+    @property
+    def dtype( self ):
+        """  """
+        return self._vec.dtype()
+
+    @property
+    def shape( self ):
+        """  """
+        return self._vec.shape()
 

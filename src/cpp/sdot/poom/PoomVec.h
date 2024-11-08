@@ -21,15 +21,14 @@ class PoomVec {
 public:
     using       T                    = T_;
     using       Inst                 = PoomVecInst<T>;
-    using       CstSpanViewFunc      = void( CstSpanView<T> );
 
     /* */       PoomVec              ( CstSpan<T> data );
 
-    void        get_values_by_chuncks( CstSpanViewFunc func, PI beg, PI end ); ///< 
-    void        get_values_by_chuncks( CstSpanViewFunc func ); ///< get chuncks for all the data
+    void        get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ); ///< 
+    void        get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func ); ///< get chuncks for all the data
      
-    //PI        global_size          () const;
-     
+    PI          size                 () const;
+    
     void        display              ( Displayer &ds ) const { ds << inst; }
 
 private:

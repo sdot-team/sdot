@@ -1,3 +1,4 @@
+from urllib.parse import unquote_plus
 import sysconfig
 import pybind11
 import os
@@ -16,7 +17,12 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
     VariantDir( 'build', bad )
 
     # common args
-    args = dict( ARGLIST )
+    args = {}
+    for k, v in ARGLIST:
+        if k in [ 'module_name', 'suffix' ]:
+            args[ k ] = v
+        else:
+            args[ k ] = unquote_plus( v )
 
     module_name = args[ 'module_name' ]
     suffix = args[ 'suffix' ]
@@ -63,7 +69,7 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
        CXXFLAGS.append( '-march=' + args[ 'arch' ].replace( '_', '-' ) )
 
     for name in used_arg_names:
-        CXXFLAGS.append( f'-DSDOT_CONFIG_{ name }={ args[ name ] }' )
+        CXXFLAGS.append( f'"-DSDOT_CONFIG_{ name }={ args[ name ] }"' )
 
     # LIBS
     LIBS = [

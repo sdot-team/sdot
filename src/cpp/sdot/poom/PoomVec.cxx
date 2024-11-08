@@ -12,13 +12,17 @@ DTP UTP::PoomVec( CstSpan<T> data ) {
     inst = new PoomVecInst_KV( data );
 }
 
-DTP void UTP::get_values_by_chuncks( CstSpanViewFunc func, PI beg, PI end ) {
+DTP void UTP::get_values_by_chuncks( const std::function<void( CstSpanView<T> )> & func, PI beg, PI end ) {
     inst->get_values_by_chuncks( inst, func, beg, end );
 
 }
 
-DTP void UTP::get_values_by_chuncks( CstSpanViewFunc func ) {
+DTP void UTP::get_values_by_chuncks( const std::function<void( CstSpanView<T> )> & func ) {
     inst->get_values_by_chuncks( inst, func );
+}
+
+DTP PI UTP::size() const {
+    return inst->size();
 }
 
 #undef DTP

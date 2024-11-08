@@ -15,12 +15,12 @@ namespace sdot {
 template<class T>
 class PoomVecInst {
 public:
-    using        CstSpanViewFunc      = void( CstSpanView<T> );
-
     virtual     ~PoomVecInst          () {}
 
-    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, CstSpanViewFunc func, PI beg, PI end ) = 0;
-    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, CstSpanViewFunc func ) = 0;
+    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ) = 0;
+    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func ) = 0;
+
+    virtual PI   size                 () const = 0;
     
     virtual void display              ( Displayer &ds ) const = 0; 
 

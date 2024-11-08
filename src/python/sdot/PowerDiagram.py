@@ -1,4 +1,4 @@
-from .bindings.loader import normalized_dtype, type_promote, sdot_module_for
+from .bindings.loader import normalized_dtype, type_promote, sdot_module_for, numpy_dtype_for
 from .PoomVec import PoomVec
 from .Cell import Cell
 import numpy as np
@@ -108,25 +108,29 @@ class PowerDiagram:
 
     @property
     def positions( self ):
+        if self.automatic_conversion_to_ndarrays and self._positions is not None:
+            return self._positions.as_ndarray
         return self._positions
 
     @positions.setter
     def positions( self, values ):
         if values is None:
             return
-        self._positions = PoomVec( values )
         self._acceleration_structure = None
+        self._positions = PoomVec( values )
 
     @property
     def weights( self ):
+        if self.automatic_conversion_to_ndarrays and self._weights is not None:
+            return self._weights.as_ndarray
         return self._weights
 
     @weights.setter
     def weights( self, values ):
         if values == None:
             return
-        self._weights = PoomVec( values )
         self._acceleration_structure = None # TODO: update weight without redoing everything
+        self._weights = PoomVec( values )
 
     @property
     def dtype( self ):
@@ -160,7 +164,7 @@ class PowerDiagram:
         # else, use the ndim from the inputs
         if self._boundaries is not None and len( self._boundaries ):
             return self._boundaries.shape[ 1 ] - 1
-        if self._positions is not None and len( self._positions ):
+        if self._positions is not None:
             return self._positions.shape[ 1 ]
 
         return None
@@ -187,9 +191,9 @@ class PowerDiagram:
             for n, bnd in enumerate( self._boundaries ):
                 base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
-        # call module function
+        # call the compiled function
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
-        self._positions.for_each_cell( base_cell, cwc, max_nb_threads or 0 )
+        self._acceleration_structure.for_each_cell( base_cell, cwc, max_nb_threads or 0 )
 
     def plot_in_pyplot( self, fig ):
         """  
@@ -212,15 +216,23 @@ class PowerDiagram:
         self._binding_module = sdot_module_for( scalar_type = dtype, nb_dims = ndim )
 
         # early return if already done
-        if self._acceleration_structure is not None and self._acceleration_structure.dtype == dtype and self._acceleration_structure.ndim == ndim:
+        if self._acceleration_structure is not None and \
+           self._acceleration_structure.dtype == dtype and \
+           self._acceleration_structure.ndim == ndim:
             return
 
-        # say that all the data are in memory
-        positions = self._binding_module.KnownVecOfPointsReader( self.positions )
-        weights = self._binding_module.KnownVecOfScalarsReader( self.weights )
+        # set weights if not defined
+        if self._weights is None:
+            self._weights = PoomVec( np.ones( self._positions.shape[ 0 ], dtype = numpy_dtype_for( dtype ) ) )
+
+        # get dtype consistency. TODO: use PoomVecInst_Cast<...>
+        if self._positions.dtype != dtype:
+            self._positions = PoomVec( self._positions.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
+        if self._weights.dtype != dtype:
+            self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
 
         # make self._acceleration_structure
-        self._acceleration_structure = self._binding_module.KnownVecOfPointsReader( positions, weights )
+        self._acceleration_structure = self._binding_module.VoronoiAccelerationStructure( self._positions._vec, self._weights._vec )
 
         return True
 

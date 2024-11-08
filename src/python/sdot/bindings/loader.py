@@ -1,3 +1,4 @@
+from urllib.parse import quote_plus
 from pathlib import Path
 from munch import Munch
 import archspec.cpu
@@ -7,8 +8,12 @@ import numpy
 import sys
 import os
 
+auto_rebuild = False
 loader_cache = {}
 
+def set_auto_rebuild( value ):
+    global auto_rebuild
+    auto_rebuild = value
 
 def normalized_dtype( dtype, raise_exception_if_not_found = True ):
     if dtype in [ "FP64", "double", numpy.float64, numpy.int32, numpy.int64 ]:
@@ -71,11 +76,11 @@ def get_build_dir( suffix ):
     raise RuntimeError( "TODO: make a loc or tmp build dir" )
 
 def load_module( name, plist ):
-    ilist = [ f"{ k }={ v }" for k, v in plist ]
-    vlist = [ v for k, v in plist ]
+    ilist = [ f"{ k }={ quote_plus( str( v ) ) }" for k, v in plist ]
+    vlist = [ quote_plus( str( v ) ) for k, v in plist ]
 
     # names
-    suffix = "_".join( vlist )
+    suffix = "_".join( vlist ).replace( "%", '_' )
     module_name = f'{ name }_bindings_for_{ suffix }'
 
     # in the cache
@@ -87,22 +92,27 @@ def load_module( name, plist ):
     if build_dir not in sys.path:
         sys.path.insert( 0, str( build_dir ) )
 
-    # call scons
-    print( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
-        f"module_name={ module_name }", 
-        f"suffix={ suffix }"
-    ] + ilist )
-    
-    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
-        f"module_name={ module_name }", 
-        f"suffix={ suffix }"
-    ] + ilist, cwd = str( build_dir ) )
-    
-    if ret_code:
-        raise RuntimeError( f"Failed to compile the C++ { name } binding" )
+    # if allowed, try to load directly the library
+    module = None
+    if not auto_rebuild:
+        try:
+            module = __import__( module_name )
+        except ModuleNotFoundError:
+            pass
 
-    # import
-    module = __import__( module_name )
+    # else, build and load it
+    if module is None:
+        # call scons
+        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
+            f"module_name={ module_name }", 
+            f"suffix={ suffix }"
+        ] + ilist, cwd = str( build_dir ), shell = False )
+        
+        if ret_code:
+            raise RuntimeError( f"Failed to compile the C++ { name } binding" )
+
+        # import
+        module = __import__( module_name )
 
     # change names
     res = Munch()

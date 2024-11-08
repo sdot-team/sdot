@@ -3,10 +3,8 @@
 #include <tl/support/operators/product.h>
 #include <tl/support/operators/norm_2.h>
 
+#include "VoronoiAccelerationStructure.h"
 #include "CellTraversalError.h"
-#include "RegularGrid.h"
-
-#include "../local_weight_bounds/LocalWeightBounds.h"
 
 #include "../support/spawn.h"
 #include "../support/Mpi.h"
@@ -19,24 +17,24 @@
 namespace sdot {
 
 #define DTP template<class TCell>
-#define UTP RegularGrid<TCell>
+#define UTP VoronoiAccelerationStructure<TCell>
 
-DTP PI UTP::RegularGrid::end_index() const {
+DTP PI UTP::VoronoiAccelerationStructure::end_index() const {
     return product( nb_divs );
 }
 
-DTP PI UTP::RegularGrid::index( const Pt &pos, int dim ) const {
+DTP PI UTP::VoronoiAccelerationStructure::index( const Pt &pos, int dim ) const {
     return min( nb_divs[ dim ] - 1, PI( ( pos[ dim ] - limits[ 0 ][ dim ] ) / steps[ dim ] ) );
 }
 
-DTP PI UTP::RegularGrid::index( const Pt &pos ) const {
+DTP PI UTP::VoronoiAccelerationStructure::index( const Pt &pos ) const {
     PI res = index( pos, 0 );
     for( PI d = 1, m = 1; d < nb_dims; ++d )
         res += ( m *= nb_divs[ d - 1 ] ) * index( pos, d );
     return res;
 }
 
-DTP UTP::RegularGrid( const auto &point_reader, const Vec<Trans> &transformations, TF nb_diracs_per_box ) : transformations( transformations ) {
+DTP UTP::VoronoiAccelerationStructure( const auto &point_reader, const Vec<Trans> &transformations, TF nb_diracs_per_box ) : transformations( transformations ) {
     using std::pow;
 
     // local min_pos, max_pos + nb_base_points
