@@ -1,10 +1,7 @@
-from .construct import construct
-
-# we're going to reference the source through a build dir
-VariantDir( 'build', construct.bad )
+from sdot.bindings.construct import construct
 
 # register the library
-construct( Environment, dict( ARGLIST ), "poom_vec", [ 'scalar_type', 'shape' ], [
+construct( Environment, VariantDir, ARGLIST, "poom_vec", [ 'scalar_type', 'item_type' ], [
     'build/src/python/sdot/bindings/poom_vec_bindings.cpp',
 ] )
 

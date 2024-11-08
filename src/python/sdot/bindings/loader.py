@@ -88,7 +88,12 @@ def load_module( name, plist ):
         sys.path.insert( 0, str( build_dir ) )
 
     # call scons
-    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.poom_vec' + name ) }", '-s',
+    print( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
+        f"module_name={ module_name }", 
+        f"suffix={ suffix }"
+    ] + ilist )
+    
+    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
         f"module_name={ module_name }", 
         f"suffix={ suffix }"
     ] + ilist, cwd = str( build_dir ) )

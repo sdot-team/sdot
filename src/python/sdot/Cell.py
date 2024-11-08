@@ -1,4 +1,4 @@
-from .bindings.loader import module_for
+from .bindings.loader import sdot_module_for
 import numpy as np
 
 class Cell:
@@ -21,7 +21,7 @@ class Cell:
         if dtype is None:
             dtype = "FP64"
 
-        self._binding_module = module_for( scalar_type = dtype, nb_dims = ndim )
+        self._binding_module = sdot_module_for( scalar_type = dtype, nb_dims = ndim )
         self._cell = self._binding_module.Cell()
 
     def __repr__( self ):

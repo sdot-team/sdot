@@ -17,10 +17,14 @@ class PoomVecInst {
 public:
     using        CstSpanViewFunc      = void( CstSpanView<T> );
 
+    virtual     ~PoomVecInst          () {}
+
     virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, CstSpanViewFunc func, PI beg, PI end ) = 0;
     virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, CstSpanViewFunc func ) = 0;
     
     virtual void display              ( Displayer &ds ) const = 0; 
+
+    PI           ref_count            = 0;
 };
 
 } // namespace sdot

@@ -1,4 +1,4 @@
-from .bindings.loader import normalized_dtype, type_promote, module_for
+from .bindings.loader import normalized_dtype, type_promote, sdot_module_for
 from .PoomVec import PoomVec
 from .Cell import Cell
 import numpy as np
@@ -209,7 +209,7 @@ class PowerDiagram:
             return False
 
         # get the compiled library
-        self._binding_module = module_for( scalar_type = dtype, nb_dims = ndim )
+        self._binding_module = sdot_module_for( scalar_type = dtype, nb_dims = ndim )
 
         # early return if already done
         if self._acceleration_structure is not None and self._acceleration_structure.dtype == dtype and self._acceleration_structure.ndim == ndim:

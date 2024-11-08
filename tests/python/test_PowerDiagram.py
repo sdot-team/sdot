@@ -17,6 +17,5 @@ import pytest
 #     # pd.display_vtk( vo )
     
 # test_PowerDiagram()
-
-p = PoomVec( [ 1, 2, 3 ] )
+p = PoomVec( [ 1, 2, 4 ] )
 print( p )
