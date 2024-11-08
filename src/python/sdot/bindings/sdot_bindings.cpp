@@ -3,13 +3,15 @@
 // #include <sdot/WeightsWithBounds.h>
 // #include <sdot/PavingWithDiracs.h>
 // #include <sdot/RegularGrid.h>
-#include "sdot/local_weight_bounds/LocalWeightBounds.h"
-#include <sdot/local_weight_bounds/LocalWeightBounds_ConstantValue.h>
-#include <sdot/vec_readers/KnownVecReader.h>
+
 #include <sdot/pavings/RegularGrid.h>
+#include <sdot/poom/PoomVec.h>
+
 #include <sdot/support/VtkOutput.h>
+
 #include <sdot/Cell.h>
 
+#include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
  
 #include <pybind11/functional.h>
@@ -17,7 +19,6 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-// #include "pybind11/gil.h"
  
 #ifndef SDOT_CONFIG_scalar_type
 #define SDOT_CONFIG_scalar_type FP64
@@ -354,19 +355,9 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "__repr__", []( const TCell &cell ) { return to_string( cell ); } )
         ;
 
-    pybind11::class_<KnownVecReader<Pt>>( m, PD_STR( KnownVecOfPointsReader ) )
-        .def( pybind11::init( [&]( const Array &pts ) -> KnownVecReader<Pt> { return VecPt_from_Array( pts ); } ) )
-        .def( "__repr__", []( const KnownVecReader<Pt> &a ) { return to_string( a ); } )
-        ;
-
-    // // weights ======================================================================================
-    pybind11::class_<LocalWeightBounds<TCell>>( m, PD_STR( LocalWeightBounds ) )
-        .def( "__repr__", []( const LocalWeightBounds<TCell> &a ) { return to_string( a ); } )
-        ;
-
-    pybind11::class_<LocalWeightBounds_ConstantValue<TCell>,LocalWeightBounds<TCell>>( m, PD_STR( LocalWeightBounds_ConstantValue ) )
-        .def( pybind11::init<TF>() )
-        // .def( "__repr__", []( const HomogeneousWeights &a ) { return to_string( a ); } )
+    pybind11::class_<PoomVec<Pt>>( m, PD_STR( PoomVecPt ) )
+        .def( pybind11::init( [&]( const Array &pts ) -> PoomVec<Pt> { return { VecPt_from_Array( pts ) }; } ) )
+        .def( "__repr__", []( const PoomVec<Pt> &a ) { return to_string( a ); } )
         ;
 
     // paving ========================================================================================
@@ -374,17 +365,19 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     ;
 
-    pybind11::class_<RegularGrid<TCell>>( m, PD_STR( RegularGrid ) )
-        .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TCell> { return { pts, {} }; } ) )
-        .def( "__repr__", []( const RegularGrid<TCell> &a ) { return to_string( a ); } )
-        .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const LocalWeightBounds<TCell> &wwb, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
-            pybind11::gil_scoped_release gsr;
-            paving.for_each_cell( base_cell, wwb, [&]( TCell &cell, int ) {
-                pybind11::gil_scoped_acquire gsa;
-                f( cell );
-            }, max_nb_threads );
-        } )
-        ;
+    // pybind11::class_<RegularGrid<TCell>>( m, PD_STR( RegularGrid ) )
+    //     .def( pybind11::init( []( const KnownVecReader<Pt> &pts ) -> RegularGrid<TCell> { return { pts, {} }; } ) )
+    //     .def( "__repr__", []( const RegularGrid<TCell> &a ) { return to_string( a ); } )
+    //     .def_property_readonly( "dtype", []( const RegularGrid<TCell> &a ) { return type_name<TF>(); } )
+    //     .def_property_readonly( "ndim", []( const RegularGrid<TCell> &a ) { return nb_dims; } )
+    //     .def( "for_each_cell", []( RegularGrid<TCell> &paving, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
+    //         pybind11::gil_scoped_release gsr;
+    //         paving.for_each_cell( base_cell, [&]( TCell &cell, int ) {
+    //             pybind11::gil_scoped_acquire gsa;
+    //             f( cell );
+    //         }, max_nb_threads );
+    //     } )
+    //     ;
 
     // // utility functions ============================================================================
     // m.def( "display_vtk", []( VtkOutput &vo, const Cell &base_cell, PavingWithDiracs &diracs, const WeightsWithBounds &weights ) {

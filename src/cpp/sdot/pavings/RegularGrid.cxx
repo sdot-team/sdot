@@ -132,7 +132,7 @@ DTP PI UTP::recommended_nb_threads() const {
     return std::thread::hardware_concurrency();
 }
 
-DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const LocalWeightBounds<TCell> &weights ) {
+DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf ) {
     // indices of points to be tested (includes virtual points)
     buf.clear();
     for( PI n1 = offsets[ 2 * b0 + 0 ]; n1 < offsets[ 2 * b0 + 2 ]; ++n1 )
@@ -150,7 +150,7 @@ DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const Loc
     for( PI n1 : buf ) {
         const Pt p1 = points[ n1 ];
         const PI i1 = inds[ n1 ];
-        const TF w1 = weights[ i1 ];
+        const TF w1 = 1;
 
         const Pt dir = p1 - p0;
 
@@ -164,7 +164,7 @@ DTP void UTP::make_cuts_from( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const Loc
     }
 }
 
-DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCell> &weights_bounds, auto &&f, int max_nb_threads ) {
+DTP int UTP::for_each_cell( const TCell &base_cell, auto &&f, int max_nb_threads ) {
     // for each box...
     int error = 0;
     spawn( [&]( int num_thread, int nb_threads ) {
@@ -183,17 +183,13 @@ DTP int UTP::for_each_cell( const TCell &base_cell, const LocalWeightBounds<TCel
 
                     // copy of base cell
                     local_cell.get_geometrical_data_from( base_cell );
-                    local_cell.info.w0 = weights_bounds[ i0 ];
+                    local_cell.info.w0 = 1;
                     local_cell.info.p0 = points[ n0 ];
                     local_cell.info.i0 = i0;
 
                     // cuts with points from b0
-                    make_cuts_from( b0, n0, local_cell, buf, weights_bounds );
-
-                    //
-                    for( PI b1 = 0; b1 < end_index(); ++b1 ) {
-                        make_cuts_from( b1, n0, local_cell, buf, weights_bounds );
-                    }
+                    for( PI b1 = 0; b1 < end_index(); ++b1 )
+                        make_cuts_from( b1, n0, local_cell, buf );
 
                     // callback
                     f( local_cell, num_thread );

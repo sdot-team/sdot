@@ -1,9 +1,7 @@
 #pragma once
 
-#include "../local_weight_bounds/LocalWeightBounds.h"
-#include "AffineTransformation.h"
-
 #include <tl/support/containers/Opt.h>
+#include "AffineTransformation.h"
 
 namespace sdot {
 
@@ -24,11 +22,11 @@ public:
     /**/                 RegularGrid           ( const auto &points, const Vec<Trans> &transformations, TF nb_diracs_per_box = 30 );
               
     PI                   recommended_nb_threads() const;
-    int                  for_each_cell         ( const TCell &base_cell, const LocalWeightBounds<TCell> &weights_bounds, auto &&f, int max_nb_threads = 0 ); ///< return the first non null value of `f( cell, num_thread )`, or 0. If max_nb_threads = 0, we take recommended_nb_threads() threads
+    int                  for_each_cell         ( const TCell &base_cell, auto &&f, int max_nb_threads = 0 ); ///< return the first non null value of `f( cell, num_thread )`, or 0. If max_nb_threads = 0, we take recommended_nb_threads() threads
     void                 display               ( Displayer &ds ) const;
                   
 private:   
-    void                 make_cuts_from        ( PI b0, PI n0, TCell &cell, Vec<PI> &buf, const LocalWeightBounds<TCell> &weights );
+    void                 make_cuts_from        ( PI b0, PI n0, TCell &cell, Vec<PI> &buf );
     PI                   end_index             () const;
     PI                   index                 ( const Pt &pos, int dim ) const;
     PI                   index                 ( const Pt &pos ) const;

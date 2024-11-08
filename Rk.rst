@@ -91,11 +91,19 @@ Rq: on pourrait faire un "front" des cellules voisines, en mettant au début tou
   À un moment donné, on n'aura plus que des boites non coupantes.
   Il faudra ensuite tester ce qui reste
 
-Prop: on fait la représentation des poids de façon hiérarchique dans le grille.
-  Pour chaque cellule en construction, on fait un tableau qui dit si les celules ont été parcourues complétement.
-  Quand on 
+Question: faut-il représenter les cellules visitées par un tableau binaire ou par des entiers ?
+  160e6 => 6e5 octets par thread en binaires
+           5e6 octets par thread si on prend un octet pour amortir l'annulation de toutes les valeurs
 
+Prop: on démarre d'un pavage. On pourra prendre des simplex pour que le frontière fonctionnent mieux. À ce moment là, autant faire un découpage en voronoi directement, avec un cas particulier pour un faible nombre de diracs (par exemple, pas de structure d'accélération).
+      du coup, on a besoin d'avoir un stockage des cellules et des voisines
+         → on a besoin des points et des voisins. Prop: pour le C++, on fait d'abord des tableaux de tableaux
+  * on fait un parcourt des voisins. À chaque fois qu'on en visite un, on le marque. Si une boite à permis de couper, on va chercher les voisins.
 
+PomVec → ça serait bien que ça soit géré en C++ pour que ça soit disponible partout.
+  De plus, il faudrait qu'on puisse le faire évoluer par exemple lorsqu'on passe dans la structure d'accélération
+  Ça pourrait être une solution pour travailler sur les rationels...
+  On pourra faire une référence vers la structure d'accélération
 
 
 

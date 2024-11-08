@@ -70,19 +70,13 @@ def get_build_dir( suffix ):
     # else, make something in the home 
     raise RuntimeError( "TODO: make a loc or tmp build dir" )
 
-def module_for( **kwargs ):
-    # sorted list of parameters with arch
-    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
-    plist.sort()
-    plist.append( ( 'os', platform.system() ) )
-    plist.append( ( 'arch', str( archspec.cpu.host() ) ) )
-
+def load_module( name, plist ):
     ilist = [ f"{ k }={ v }" for k, v in plist ]
     vlist = [ v for k, v in plist ]
 
     # names
     suffix = "_".join( vlist )
-    module_name = f'sdot_bindings_for_{ suffix }'
+    module_name = f'{ name }_bindings_for_{ suffix }'
 
     # in the cache
     if module_name in loader_cache:
@@ -94,13 +88,13 @@ def module_for( **kwargs ):
         sys.path.insert( 0, str( build_dir ) )
 
     # call scons
-    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / 'SConstruct' }", '-s',
+    ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.poom_vec' + name ) }", '-s',
         f"module_name={ module_name }", 
         f"suffix={ suffix }"
     ] + ilist, cwd = str( build_dir ) )
     
     if ret_code:
-        raise RuntimeError( "Failed to compile the C++ PowerDiagram binding" )
+        raise RuntimeError( f"Failed to compile the C++ { name } binding" )
 
     # import
     module = __import__( module_name )
@@ -117,3 +111,21 @@ def module_for( **kwargs ):
 
     return res
 
+def sdot_module_for( **kwargs ):
+    # sorted list of parameters with arch
+    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
+    plist.sort()
+    plist.append( ( 'os', platform.system() ) )
+    plist.append( ( 'arch', str( archspec.cpu.host() ) ) )
+
+    #
+    return load_module( "sdot", plist )
+
+def poom_vec_module_for( **kwargs ):
+    # sorted list of parameters with arch
+    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
+    plist.sort()
+    plist.append( ( 'os', platform.system() ) )
+
+    # use Sconstruct.poom_vec
+    return load_module( "poom_vec", plist )

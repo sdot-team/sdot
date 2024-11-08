@@ -1,4 +1,5 @@
-from .bindings.loader import numpy_dtype_for, normalized_dtype, type_promote, module_for
+from .bindings.loader import normalized_dtype, type_promote, module_for
+from .PoomVec import PoomVec
 from .Cell import Cell
 import numpy as np
 
@@ -6,54 +7,66 @@ class PowerDiagram:
     """
         Stores all the data needed to compute a power diagram.
 
-        Internally,
-        * positions are stored in a Paving class (RegularPaving, VoronoiPaving, ...)  
-        * weights are stored in a HierarchicalRepr class (, ...)
+        Boundaries can be represented as
+            * an array [ [ dir_{num_axis}, ..., val ]_{num_boundary}, ... ] where a point is exterior if scalar_product( dir, point ) > val.
+            * a tuple of arrays, one for the directions (each row has a direction), and one for the values (a 1D array)
 
-        Boundaries are represented as a 2D tensor where each row contains [ dir..., val ] where
-            a point is exterior if scalar_product( dir, point ) > val.
+        `dtype` is the name of the scalar type used by the bindings. One can use numpy types as input (e.g. numpy.float64) or string representation (e.g. "FP32").
 
-        `dtype` is the name of the scalar type used by the bindings. One can use numpy types as input (e.g. numpy.float64).
-        The static method normalized_dtype( dtype ) allows to get the internal name (e.g. for comparison).
+        By default, the scalar type and the dimension used by the bindings are deduced from the inputs (positions, weights, boundaries, ...), 
+        but is can be forced by specifying `dtype` and `ndim` in the ctor, or by setting them using `self.dtype = ...` (dtype is a property) or `self.ndim = ...`
 
-        By default, the scalar type is deduced from the inputs (positions, weights, ...), 
-        but is can be forced by specifying `dtype` in the ctor, or by setting it using `self.dtype = ...` (dtype is a property)
+        Internally, positions and weights are stored in PoomVecs (Potientially Out of Memory vectors). They can be defined for instance using numpy arrays.
+
+        If `automatic_conversion_to_ndarrays` is set to True, output arrays are automically converted to numpy `ndarray`.
+        For instance, `self.positions` will return a `ndarray` instead of a `PoomVec`
+
     """
-    def __init__( self, positions = None, weights = None, boundaries = None, dtype = None, ndim = None ):
-        # 
+    def __init__( self, positions = None, weights = None, boundaries = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
+        # base init
+        self._acceleration_structure = None # paving + hierarchical repr of positions and weights
         self._binding_module = None
-        self._boundaries = None
-        self._positions = None
-        self._weights = None
-        self._dtype = None
-        self._inst = None
-        self._ndim = None
+        self._boundaries = None # expected to be a ndarray
+        self._positions = None # expected to be a ndarray
+        self._weights = None # expected to be a ndarray
+        self._dtype = None # can be used to force the data type
+        self._ndim = None # can be used to force the dimension
 
-        # 
+        # prefs
+        self.automatic_conversion_to_ndarrays = automatic_conversion_to_ndarrays
+
+        # ctor arguments phase 1
         self.dtype = dtype # used to force the type
         self.ndim = ndim # used to force the number of dimensions
 
-        #
+        # ctor arguments phase 2
         self.boundaries = boundaries
         self.positions = positions
         self.weights = weights
 
 
     def add_cube_boundaries( self, ndim = None, base = None, min_offset = None, max_offset = None ):
-        """ add an (hyper-)cube to the boundaries
+        """ delimit the power diagram by an (hyper-)cube (a square in 2D, and so on)
 
             if ndim is not specified, one tries to guess it from the defined attributes
 
-            min_offset and max_offset are related to base. They can be single scalars or vector, with one value for each base item. 
+            min_offset and max_offset are related to base. They can be single scalars or vector, with one value for each base item.
+
+            If base is not specified, one takes the identity matrix
         """
+
+        # check argument values
         if base is not None:
             ndim = len( base )
+
         if ndim is None:
             ndim = self.ndim
             if ndim is None:
                 raise RuntimeError( "Found no way to guess ndim" )
+            
         if base is None:
             base = np.identity( ndim )
+
         if min_offset is None:
             min_offset = 0
         if max_offset is None:
@@ -63,13 +76,14 @@ class PowerDiagram:
         if isinstance( max_offset, ( int, float ) ):
             max_offset = np.full( [ ndim ], max_offset )
 
+        # update the boundaries
         l = []
         if self._boundaries is not None:
             l = list( self._boundaries )
         for n in range( ndim ):
             l.append( [ -( d == n ) for d in range( ndim ) ] + [ - min_offset[ n ] ] )
             l.append( [ +( d == n ) for d in range( ndim ) ] + [ + max_offset[ n ] ] )
-        self._boundaries = np.array( l )
+        self.boundaries = l
 
     @property
     def boundaries( self ):
@@ -79,8 +93,18 @@ class PowerDiagram:
     def boundaries( self, values ):
         if values == None:
             return
-        self._boundaries = np.ascontiguousarray( values )
+        
+        if type( values ) is tuple:
+            dirs = np.asarray( values[ 0 ] )
+            vals = np.asarray( values[ 1 ] )
 
+            assert dirs.ndim == 2
+            assert vals.ndim == 1
+            assert dirs.shape[ 0 ] == vals.shape[ 0 ]
+
+            self._boundaries = np.ascontiguousarray( np.concatenate( ( dirs, vals.reshape( [ -1, 1 ] ) ), axis = 1 ) )
+        else:
+            self._boundaries = np.ascontiguousarray( values )
 
     @property
     def positions( self ):
@@ -90,7 +114,8 @@ class PowerDiagram:
     def positions( self, values ):
         if values is None:
             return
-        self._positions = np.ascontiguousarray( values )
+        self._positions = PoomVec( values )
+        self._acceleration_structure = None
 
     @property
     def weights( self ):
@@ -100,8 +125,8 @@ class PowerDiagram:
     def weights( self, values ):
         if values == None:
             return
-        self._weights = np.ascontiguousarray( values )
-
+        self._weights = PoomVec( values )
+        self._acceleration_structure = None # TODO: update weight without redoing everything
 
     @property
     def dtype( self ):
@@ -124,8 +149,7 @@ class PowerDiagram:
     def dtype( self, value ):
         if value == None:
             return
-        self._dtype = PowerDiagram.normalized_dtype( value )
-
+        self._dtype = normalized_dtype( value )
 
     @property
     def ndim( self ):
@@ -133,7 +157,7 @@ class PowerDiagram:
         if self._ndim:
             return self._ndim
         
-        # else, use the dtypes from the inputs
+        # else, use the ndim from the inputs
         if self._boundaries is not None and len( self._boundaries ):
             return self._boundaries.shape[ 1 ] - 1
         if self._positions is not None and len( self._positions ):
@@ -149,8 +173,11 @@ class PowerDiagram:
 
     def for_each_cell( self, function, max_nb_threads = None ):
         """
+            Call `function( cell: Cell )` for each cell in the power diagram.
+
+            If max_nb_threads == 1, `function` will be called from the main thread (which can be useful for instance for matplotlib, etc...)
         """
-        if not self._update_bindings():
+        if not self._update_acceleration_structure():
             return
         
         # make `base_cell` from boundaries
@@ -162,7 +189,7 @@ class PowerDiagram:
 
         # call module function
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
-        self._positions.for_each_cell( base_cell, self._weights, cwc, max_nb_threads or 0 )
+        self._positions.for_each_cell( base_cell, cwc, max_nb_threads or 0 )
 
     def plot_in_pyplot( self, fig ):
         """  
@@ -170,35 +197,30 @@ class PowerDiagram:
         """
         self.for_each_cell( lambda cell: cell.plot_in_pyplot( fig ), max_nb_threads = 1 )
 
-    def _update_bindings( self ):
-        # get the right module
+    def _update_acceleration_structure( self ):
+        """ compute self._acceleration_structure if not already done
+
+
+        """
+        # get the module info
         dtype = self.dtype
         ndim = self.ndim
         if dtype is None or ndim is None:
             return False
 
+        # get the compiled library
         self._binding_module = module_for( scalar_type = dtype, nb_dims = ndim )
 
-        # check format of _positions
-        if type( self._positions ) == np.ndarray:
-            dv = self._binding_module.KnownVecOfPointsReader( self._positions )
-            self._positions = self._binding_module.RegularGrid( dv )
-            print( self._positions )
-        else:
-            print( type( self._positions ) )
-            raise "TODO"
+        # early return if already done
+        if self._acceleration_structure is not None and self._acceleration_structure.dtype == dtype and self._acceleration_structure.ndim == ndim:
+            return
 
-        # check format of _weights
-        if self._weights is None:
-            self._weights = self._binding_module.LocalWeightBounds_ConstantValue( 1 )
-        else:
-            raise "TODO"
+        # say that all the data are in memory
+        positions = self._binding_module.KnownVecOfPointsReader( self.positions )
+        weights = self._binding_module.KnownVecOfScalarsReader( self.weights )
 
-        # check format of _boundaries
-        if self._boundaries is None:
-            self._boundaries = np.empty( [ 0, ndim ], dtype = numpy_dtype_for( dtype ) )
-        elif not isinstance( self._boundaries, np.ndarray ):
-            raise RuntimeError( "boundaries must be expressed as a ndarray" )
+        # make self._acceleration_structure
+        self._acceleration_structure = self._binding_module.KnownVecOfPointsReader( positions, weights )
 
         return True
 
