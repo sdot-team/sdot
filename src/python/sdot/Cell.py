@@ -89,11 +89,33 @@ class Cell:
     def ndim( self ):
         return self._cell.ndim()
     
+    @property
+    def cuts( self ):
+        return self._cell.cuts()
+    
     def cut( self, dir, val, index = 0 ):
         return self._cell.cut( np.ascontiguousarray( dir ), val, int( index ) )
 
     def display_vtk( self, vtk_output ):
         return self._cell.display_vtk( vtk_output )
+
+    def for_each_face( self, on_closed = None, on_2_rays = None, on_1_ray = None, on_free = None ):
+        """
+            Call args:
+                on_closed( cut_refs, vertex_indices ), 
+                on_2_rays( cut_refs, ray_1_refs, vertex_indices, ray_2_refs ) with vertex of ray 1 at the beginning, vertex of ray 2 at the end, 
+                on_1_ray ( cut_refs, ray_refs ), 
+                on_free  ( cut_refs ), 
+        """
+        if on_closed is None:
+            on_closed = lambda cut_refs, vertex_indices: 0
+        if on_2_rays is None:
+            on_2_rays = lambda cut_refs, ray_1_refs, vertex_indices, ray_2_refs: 0
+        if on_1_ray is None:
+            on_1_ray = lambda cut_refs, ray_refs: 0
+        if on_free is None:
+            on_free = lambda cut_refs: 0
+        return self._cell.for_each_face( on_closed, on_2_rays, on_1_ray, on_free )
 
     def plot_in_pyplot( self, fig ):
         """  

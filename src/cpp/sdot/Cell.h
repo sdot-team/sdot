@@ -58,7 +58,8 @@ public:
     //
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
-    void            for_each_closed_face     ( auto &&func ) const; ///< func( num_cuts, vertex_indices )
+    void            for_each_closed_face     ( auto &&on_closed ) const;
+    void            for_each_face            ( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const; ///< on_closed( cut_refs, vertex_indices ), on_2_rays( cut_refs, ray_1_refs, vertex_indices, ray_2_refs ) with vertex of ray 1 at the beginning, vertex of ray 2 at the end, on_1_rays( cut_refs, ray_refs ), on_free( cut_refs ), 
    
     T_i Vec<TF,i+1> ray_dir                  ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
   
@@ -67,6 +68,8 @@ public:
   
     void            for_each_vertex_ref      ( auto &&func, auto td ) const; ///< dimensionality specified by the user
     void            for_each_vertex_ref      ( auto &&func ) const; ///< assumed dimensionality == nb_dims
+
+    void            for_each_cut             ( auto &&func, auto td ) const; ///< func( cut_info, dir, off )
 
     // utility  
     auto            with_ct_dim              ( auto &&func ) const;

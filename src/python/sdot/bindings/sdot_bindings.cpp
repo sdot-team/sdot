@@ -20,6 +20,7 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <tuple>
  
 #ifndef SDOT_CONFIG_scalar_type
 #define SDOT_CONFIG_scalar_type FP64
@@ -278,6 +279,15 @@ static auto Array_from_VecPt( const Vec<Vec<T,s>> &v ) {
     return res;
 }
 
+template<class T>
+static auto Array_from_Vec( const Vec<T> &v ) {
+    Vec<PI,1> shape{ v.size() };
+    pybind11::array_t<T, pybind11::array::c_style> res( shape );
+    for( PI i = 0; i < v.size(); ++i )
+        res.mutable_at( i ) = v[ i ];
+    return res;
+}
+
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     // pybind11::class_<Pt>( m, PD_STR( Pt ) )
     //     .def( pybind11::init( &create_Pt_from_Array ) )
@@ -315,6 +325,21 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "ndim", []( const TCell &cell ) { return nb_dims; } )
         .def( "base", []( TCell &cell ) { return Array_from_VecPt( cell.base() ); } )
 
+        .def( "cuts", []( TCell &cell ) {
+            return cell.with_ct_dim( [&]( auto td ) {
+                Vec<Pt> directions;
+                Vec<TF> offsets;
+                Vec<PI> inds;
+
+                cell.for_each_cut( [&]( auto &&cut_info, auto &&dir, auto &&off ) {
+                    directions << dir;
+                    offsets << off;
+                    inds << cut_info.i1;
+                }, td );
+                return std::make_tuple( Array_from_VecPt( directions ), Array_from_Vec( offsets ), Array_from_Vec( inds ) );
+            } );
+        } )
+
         .def( "vertex_coords", []( const TCell &cell, bool allow_lower_dim ) {
             if ( allow_lower_dim ) {
                 return cell.with_ct_dim( [&]( auto td ) {
@@ -349,6 +374,23 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 refs << pt;
             } );
             return Array_from_VecPt( refs );
+        } )
+
+        .def( "for_each_face", []( const TCell &cell,
+                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices )> &on_closed,
+                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &ray_1_refs, const std::vector<TCell::LI> &vertices, const std::vector<TCell::LI> &ray_2_refs )> &on_2_rays,
+                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &ray_refs )> &on_1_ray,
+                    const std::function<void( const std::vector<PI> &cut_refs )> &on_free 
+                ) {
+            cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices ) {
+                on_closed( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
+            }, [&]( const auto &cut_refs, const auto &ray_1_refs, const auto &vertices, const auto &ray_2_refs ) {
+                on_2_rays( { cut_refs.begin(), cut_refs.end() }, { ray_1_refs.begin(), ray_1_refs.end() }, { vertices.begin(), vertices.end() }, { ray_2_refs.begin(), ray_2_refs.end() } );
+            }, [&]( const auto &cut_refs, const auto &ray_refs ) {
+                on_1_ray( { cut_refs.begin(), cut_refs.end() }, { ray_refs.begin(), ray_refs.end() } );
+            }, [&]( const auto &cut_refs ) {
+                on_free( { cut_refs.begin(), cut_refs.end() } );
+            } );
         } )
 
         // // output

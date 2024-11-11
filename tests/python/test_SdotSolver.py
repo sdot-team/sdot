@@ -1,27 +1,24 @@
-from sdot import PowerDiagram
+from sdot import PowerDiagram, SdotSolver, set_auto_rebuild
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
+set_auto_rebuild( True )
 
-def test_PowerDiagram():
+def test_SdotSolver():
     # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
     pd = PowerDiagram( positions = np.random.random( [ 40, 2 ] ) )
-    # pd.add_cube_boundaries()
+    pd.add_cube_boundaries()
 
-    # def on_cell( cell: Cell ):
-    #     print( cell )
-    #     cell.for_each_face( None, None, None, print )
+    # pd.for_each_cell( print )
 
-    # pd.for_each_cell( on_cell )
-
-    # pd.plot_in_pyplot( plt )
-    # plt.show()
+    pd.plot_in_pyplot( plt )
+    plt.show()
     
 
     # pd.display_vtk( vo )
 
-test_PowerDiagram()
+test_SdotSolver()
 
 # p = PoomVec( [1, 2] )
 # print( p.dtype )

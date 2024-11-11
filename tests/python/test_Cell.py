@@ -55,6 +55,20 @@ def test_3D():
         { 'dir': [ +0.0, +0.0, -1.0 ], 'off': +1.0, 'bounded': 1, 'empty': 0, 'coords': [[-1,-1,-1],[1,-1,-1],[-1,1,-1],[1,1,-1],[-1,-1,1],[1,-1,1],[-1,1,1],[1,1,1],] },
     ] )
 
+def faces():
+    cell = Cell( ndim = 2 )
+    cell.cut( [ +1, 0, 0 ], +1 );
+    cell.cut( [ -1, 0, 0 ], +1 );
+
+    on_closed = lambda cut_refs, vertex_indices: print( "closed", cut_refs, vertex_indices )
+    on_2_rays = lambda cut_refs, ray_1_refs, vertex_indices, ray_2_refs: print( "on_2_rays", cut_refs, ray_1_refs, vertex_indices, ray_2_refs )
+    on_1_ray = lambda cut_refs, ray_refs: print( "on_1_ray", cut_refs, ray_refs )
+    on_free = lambda cut_refs: print( "on_free", cut_refs )
+
+    cell.for_each_face( on_closed, on_2_rays, on_1_ray, on_free )
+
+faces()
+
 # print( cell )
 
 # vo = module.VtkOutput()

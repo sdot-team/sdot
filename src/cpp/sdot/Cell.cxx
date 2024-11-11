@@ -288,52 +288,113 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func ) const {
     for_each_ray_and_edge( FORWARD( ray_func ), FORWARD( edge_func ), CtInt<nb_dims>() );
 }
 
+DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const {
+    // nb_dims <= 1 => impossible to make faces
+    if ( nb_dims <= 1 )
+        return;
+
+    // nb_dims == 2 => we have exactly 1 face
+    if ( nb_dims == 2 ) {
+        // no cut
+        if ( _true_dimensionality == 0 ) {
+                on_free( Vec<LI,0>() );
+            return;
+        }
+
+        // cut(s) in 1 direction
+        if ( _true_dimensionality == 1 ) {
+            for( const auto &refs : _vertex_refs )
+                on_1_ray( Vec<LI,0>(), refs.template slice<0,1>() );
+            return;
+        }
+ 
+        //
+
+        //
+        // struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
+        // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
+
+
+        // for_each_ray_and_edge( []( const Vec<LI,td-1> &ray_refs, LI vertex ) {
+
+        // }, [&]( const Vec<LI,td-1> &edge_refs, Span<LI,2> vertices ) {
+
+        // } );
+        return;
+    }    
+
+    // with_ct_dim( [&]( auto td ) {
+    //     // no cut
+    //     if ( td == 0 ) {
+    //         return;
+    //     }
+
+    //     // single cut
+    //     if ( td == 1 ) {
+    //         for( const auto &refs : _vertex_refs )
+    //             on_free( refs.slice( CtInt<0>(), CtInt<nb_dims-2>() ) );
+    //         return;
+    //     }
+
+    //     //
+    //     // struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
+    //     // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
+
+
+    //     // for_each_ray_and_edge( []( const Vec<LI,td-1> &ray_refs, LI vertex ) {
+
+    //     // }, [&]( const Vec<LI,td-1> &edge_refs, Span<LI,2> vertices ) {
+
+    //     // } );
+    // } );
+
+    // // sibling for each vertex (index in `vertices`), for each face
+    // for_each_ray_and_edge( []( auto&&, auto&& ) {}, [&]( const Vec<PI32,nb_dims-1> &edge_cuts, Span<PI32,2> vs ) {
+    //     // for each connected face
+    //     for( PI i = 0; i < nb_dims - 1; ++i ) {
+    //         Vec<PI32,nb_dims-2> face_cuts = edge_cuts.without_index( i );
+    //         auto &fi = face_map[ face_cuts ];
+
+    //         // store connected vertices
+    //         fi.siblings.resize( nb_vertices() );
+    //         fi.siblings[ vs[ 0 ] ] << vs[ 1 ];
+    //         fi.siblings[ vs[ 1 ] ] << vs[ 0 ];
+    //         fi.start = vs[ 0 ];
+    //     }
+    // } );
+
+    // // for each face
+    // Vec<PI32> vs;
+    // for( const auto &p: face_map ) {
+    //     const Vec<PI32,nb_dims-2> &face_cuts = p.first;
+    //     const FaceInfo &fi = p.second;
+
+    //     // get the loop
+    //     vs.clear();
+    //     for( PI n = fi.start, j = 0; ; ++j ) {
+    //         vs << n;
+
+    //         const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+    //         n = fi.siblings[ n ][ s ];
+
+    //         if ( n == fi.start )
+    //             break;
+
+    //         // TODO: optimize
+    //         if ( vs.contains( n ) ) {
+    //             vs.clear();
+    //             break;
+    //         }
+    //     }
+
+    //     // call f
+    //     if ( vs.size() )
+    //         func( face_cuts, vs );
+    // }
+}
+
 DTP void UTP::for_each_closed_face( auto &&func ) const {
-    // sibling for each vertex (index in `vertices`), for each face
-    struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
-    std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
-    for_each_ray_and_edge( []( auto&&, auto&& ) {}, [&]( const Vec<PI32,nb_dims-1> &edge_cuts, Span<PI32,2> vs ) {
-        // for each connected face
-        for( PI i = 0; i < nb_dims - 1; ++i ) {
-            Vec<PI32,nb_dims-2> face_cuts = edge_cuts.without_index( i );
-            auto &fi = face_map[ face_cuts ];
-
-            // store connected vertices
-            fi.siblings.resize( nb_vertices() );
-            fi.siblings[ vs[ 0 ] ] << vs[ 1 ];
-            fi.siblings[ vs[ 1 ] ] << vs[ 0 ];
-            fi.start = vs[ 0 ];
-        }
-    } );
-
-    // for each face
-    Vec<PI32> vs;
-    for( const auto &p: face_map ) {
-        const Vec<PI32,nb_dims-2> &face_cuts = p.first;
-        const FaceInfo &fi = p.second;
-
-        // get the loop
-        vs.clear();
-        for( PI n = fi.start, j = 0; ; ++j ) {
-            vs << n;
-
-            const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
-            n = fi.siblings[ n ][ s ];
-
-            if ( n == fi.start )
-                break;
-
-            // TODO: optimize
-            if ( vs.contains( n ) ) {
-                vs.clear();
-                break;
-            }
-        }
-
-        // call f
-        if ( vs.size() )
-            func( face_cuts, vs );
-    }
+    for_each_face( func, []( auto &&, auto &&, auto &&, auto && ) {}, []( auto &&, auto && ) {}, []( auto && ) {} );
 }
 
 DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {
@@ -358,6 +419,10 @@ DTP void UTP::for_each_vertex_ref( auto &&func ) const {
     return for_each_vertex_ref( FORWARD( func ), CtInt<nb_dims>() );
 }
 
+DTP void UTP::for_each_cut( auto &&func, auto td ) const {
+    for( PI i = 0; i < _cuts.size(); ++i )
+        func( _cuts[ i ].info, _cuts[ i ].dir.template slice<0,td>(), _cuts[ i ].off );
+}
 
 DTP void UTP::_remove_ext_vertices( PI old_nb_vertices ) {
     if ( old_nb_vertices == 0 )
