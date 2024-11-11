@@ -17,8 +17,8 @@ class PoomVecInst {
 public:
     virtual     ~PoomVecInst          () {}
 
-    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ) = 0;
-    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func ) = 0;
+    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ) const = 0;
+    virtual void get_values_by_chuncks( RcPtr<PoomVecInst> &ptr, const std::function<void( CstSpanView<T> )> &func ) const = 0;
 
     virtual PI   size                 () const = 0;
     

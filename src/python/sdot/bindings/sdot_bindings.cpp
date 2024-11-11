@@ -4,7 +4,8 @@
 // #include <sdot/PavingWithDiracs.h>
 // #include <sdot/VoronoiAccelerationStructure.h>
 
-#include <sdot/acceleration_structures/VoronoiAccelerationStructure.h>
+// #include <sdot/acceleration_structures/VoronoiAccelerationStructure.h>
+#include <sdot/acceleration_structures/LowCountAccelerationStructure.h>
 #include <sdot/poom/PoomVec.h>
 
 #include <sdot/support/VtkOutput.h>
@@ -360,18 +361,18 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     ;
 
-    pybind11::class_<VoronoiAccelerationStructure<TCell>>( m, PD_STR( VoronoiAccelerationStructure ) )
-        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> VoronoiAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
-        .def( "__repr__"     , []( const VoronoiAccelerationStructure<TCell> &a ) { return to_string( a ); } )
-        .def( "for_each_cell", []( VoronoiAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
+    pybind11::class_<LowCountAccelerationStructure<TCell>>( m, PD_STR( LowCountAccelerationStructure ) )
+        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> LowCountAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
+        .def( "__repr__"     , []( const LowCountAccelerationStructure<TCell> &a ) { return to_string( a ); } )
+        .def( "for_each_cell", []( LowCountAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
             pybind11::gil_scoped_release gsr;
             vas.for_each_cell( base_cell, [&]( TCell &cell, int ) {
                 pybind11::gil_scoped_acquire gsa;
                 f( cell );
             }, max_nb_threads );
         } )
-        .def_property_readonly( "dtype", []( const VoronoiAccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
-        .def_property_readonly( "ndim" , []( const VoronoiAccelerationStructure<TCell> &a ) { return nb_dims; } )
+        .def_property_readonly( "dtype", []( const LowCountAccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
+        .def_property_readonly( "ndim" , []( const LowCountAccelerationStructure<TCell> &a ) { return nb_dims; } )
         ;
 
     // // utility functions ============================================================================

@@ -105,6 +105,7 @@ PomVec → ça serait bien que ça soit géré en C++ pour que ça soit disponib
   Ça pourrait être une solution pour travailler sur les rationels...
   On pourra faire une référence vers la structure d'accélération
 
-
+Quand il y a 
+* très peu de diracs, 
 
 

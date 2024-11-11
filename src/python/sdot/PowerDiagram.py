@@ -232,7 +232,7 @@ class PowerDiagram:
             self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
 
         # make self._acceleration_structure
-        self._acceleration_structure = self._binding_module.VoronoiAccelerationStructure( self._positions._vec, self._weights._vec )
+        self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec )
 
         return True
 

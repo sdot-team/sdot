@@ -19,20 +19,20 @@ template<class T> class PoomVecInst;
 template<class T_>
 class PoomVec {
 public:
-    using       T                    = T_;
-    using       Inst                 = PoomVecInst<T>;
-
-    /* */       PoomVec              ( CstSpan<T> data );
-
-    void        get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ); ///< 
-    void        get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func ); ///< get chuncks for all the data
-     
-    PI          size                 () const;
-    
-    void        display              ( Displayer &ds ) const { ds << inst; }
+    using               T                    = T_;
+    using               Inst                 = PoomVecInst<T>;
+        
+    /* */               PoomVec              ( CstSpan<T> data );
+        
+    void                get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func, PI beg, PI end ) const; ///< 
+    void                get_values_by_chuncks( const std::function<void( CstSpanView<T> )> &func ) const; ///< get chuncks for all the data
+             
+    PI                  size                 () const;
+            
+    void                display              ( Displayer &ds ) const { ds << inst; }
 
 private:
-    RcPtr<Inst> inst;
+    mutable RcPtr<Inst> inst;
 };
 
 } // namespace sdot
