@@ -51,15 +51,17 @@ public:
     T_i Vec<LI,i>   vertex_refs              ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pr              vertex_refs              ( PI num_vertex ) const;
 
-
     void            display_vtk              ( VtkOutput &vo ) const;
     void            display                  ( Displayer &ds ) const;
   
     //
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_edge            ( auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_edge            ( auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+
     void            for_each_closed_face     ( auto &&on_closed ) const;
-    void            for_each_face            ( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const; ///< on_closed( cut_refs, vertex_indices ), on_2_rays( cut_refs, ray_1_refs, vertex_indices, ray_2_refs ) with vertex of ray 1 at the beginning, vertex of ray 2 at the end, on_1_rays( cut_refs, ray_refs ), on_free( cut_refs ), 
+    void            for_each_face            ( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const; ///< on_closed( cut_refs, vertex_indices ), on_2_rays( cut_refs, vertex_indices ) with ray vertices at the extermities of vertex_indices, on_1_rays( cut_refs, ray_refs ), on_free( cut_refs ), 
    
     T_i Vec<TF,i+1> ray_dir                  ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
   

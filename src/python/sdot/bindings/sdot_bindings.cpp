@@ -279,8 +279,8 @@ static auto Array_from_VecPt( const Vec<Vec<T,s>> &v ) {
     return res;
 }
 
-template<class T>
-static auto Array_from_Vec( const Vec<T> &v ) {
+template<class T,int sts>
+static auto Array_from_Vec( const Vec<T,sts> &v ) {
     Vec<PI,1> shape{ v.size() };
     pybind11::array_t<T, pybind11::array::c_style> res( shape );
     for( PI i = 0; i < v.size(); ++i )
@@ -313,6 +313,13 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "nb_active_cuts", &TCell::nb_active_cuts )
         .def( "nb_stored_cuts", &TCell::nb_stored_cuts )
         .def( "nb_vertices", []( TCell &cell, bool current_dim ) { return current_dim ? cell.nb_vertices_true_dim() : cell.nb_vertices(); } )
+        .def( "ray_dir", []( TCell &cell, const std::vector<PI> &refs, PI starting_vertex ) { 
+            return cell.with_ct_dim( [&]( auto td ) {
+                if ( refs.size() != td - 1 )
+                    throw pybind11::value_error( "wrong refs size" );
+                return Array_from_Vec( cell.ray_dir( Vec<TCell::LI,td-1>( refs ), starting_vertex ) );
+            } );
+        } )
         .def( "bounded", &TCell::bounded )
         .def( "closed_faces", []( const TCell &cell ) {
             std::vector<std::vector<PI>> faces;
@@ -378,14 +385,14 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         .def( "for_each_face", []( const TCell &cell,
                     const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices )> &on_closed,
-                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &ray_1_refs, const std::vector<TCell::LI> &vertices, const std::vector<TCell::LI> &ray_2_refs )> &on_2_rays,
+                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices )> &on_2_rays,
                     const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &ray_refs )> &on_1_ray,
                     const std::function<void( const std::vector<PI> &cut_refs )> &on_free 
                 ) {
             cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices ) {
                 on_closed( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
-            }, [&]( const auto &cut_refs, const auto &ray_1_refs, const auto &vertices, const auto &ray_2_refs ) {
-                on_2_rays( { cut_refs.begin(), cut_refs.end() }, { ray_1_refs.begin(), ray_1_refs.end() }, { vertices.begin(), vertices.end() }, { ray_2_refs.begin(), ray_2_refs.end() } );
+            }, [&]( const auto &cut_refs, const auto &vertices ) {
+                on_2_rays( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
             }, [&]( const auto &cut_refs, const auto &ray_refs ) {
                 on_1_ray( { cut_refs.begin(), cut_refs.end() }, { ray_refs.begin(), ray_refs.end() } );
             }, [&]( const auto &cut_refs ) {

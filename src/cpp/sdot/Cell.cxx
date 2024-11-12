@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <tl/support/operators/for_each_selection.h>
 #include <tl/support/operators/determinant.h>
 #include <tl/support/operators/norm_2.h>
@@ -27,7 +29,7 @@ DTP UTP::Cell( CellInfo &&info ) : info( std::move( info ) ) {
     _vertex_refs.reserve( 128 );
     _cuts.reserve( 128 );
  
-    _sps.aligned_reserve( 128, CtInt<_VertexCoords::simd_size * sizeof( TF )>() );
+    _sps.aligned_resize( 128, CtInt<_VertexCoords::simd_size * sizeof( TF )>() );
  
     _may_have_unused_cuts = false;
     _bounded = false;
@@ -246,6 +248,9 @@ DTP PI UTP::_new_coid_ref_map( PI size ) const {
 }
 
 DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td ) const {
+    if ( _empty )
+        return;
+    
     if ( td != _true_dimensionality )
         return;
 
@@ -253,7 +258,7 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td 
     auto &edge_map = _ref_map[ CtInt<td-1>() ].map;
     edge_map.prepare_for( _cuts.size() );
 
-    // find edges with 2 vertices
+    // find the edges with 2 vertices
     const PI nv = nb_vertices_true_dim();
     for( PI32 n0 = 0; n0 < nv; ++n0 ) {
         CtRange<0,td>::for_each_item( [&]( auto ind_cut ) {
@@ -272,7 +277,7 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func, auto td 
         } );
     }
 
-    // find rays
+    // find the rays
     for( PI32 n0 = 0; n0 < nv; ++n0 ) {
         CtRange<0,td>::for_each_item( [&]( auto ind_cut ) {
             auto edge_cuts = _vertex_refs[ n0 ].slice( CtInt<0>(), td ).without_index( ind_cut );
@@ -288,7 +293,39 @@ DTP void UTP::for_each_ray_and_edge( auto &&ray_func, auto &&edge_func ) const {
     for_each_ray_and_edge( FORWARD( ray_func ), FORWARD( edge_func ), CtInt<nb_dims>() );
 }
 
+DTP void UTP::for_each_edge( auto &&edge_func, auto td ) const {
+    if ( td != _true_dimensionality )
+        return;
+
+    const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
+    auto &edge_map = _ref_map[ CtInt<td-1>() ].map;
+    edge_map.prepare_for( _cuts.size() );
+
+    // find edges with 2 vertices
+    for( LI n0 = 0, nv = nb_vertices_true_dim(); n0 < nv; ++n0 ) {
+        CtRange<0,td>::for_each_item( [&]( auto ind_cut ) {
+            auto edge_cuts = _vertex_refs[ n0 ].slice( CtInt<0>(), td ).without_index( ind_cut );
+            PI &edge_op_id = edge_map[ edge_cuts ];
+
+            if ( edge_op_id >= op_id ) {
+                Vec<LI,2> ns{ LI( edge_op_id - op_id ), n0 };
+                edge_func( edge_cuts, ns );
+            } else {
+                edge_op_id = op_id + n0;
+            }
+        } );
+    }
+}
+
+DTP void UTP::for_each_edge( auto &&edge_func ) const {
+    for_each_edge( edge_func, CtInt<nb_dims>() );
+}
+
+
 DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const {
+    if ( _empty )
+        return;
+
     // nb_dims <= 1 => impossible to make faces
     if ( nb_dims <= 1 )
         return;
@@ -297,7 +334,7 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
     if ( nb_dims == 2 ) {
         // no cut
         if ( _true_dimensionality == 0 ) {
-                on_free( Vec<LI,0>() );
+            on_free( Vec<LI,0>() );
             return;
         }
 
@@ -307,22 +344,127 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
                 on_1_ray( Vec<LI,0>(), refs.template slice<0,1>() );
             return;
         }
+
+        // else, get the siblings vertices
+        Vec<SmallVec<PI,2>> siblings( FromSize(), nb_vertices_true_dim() );
+        PI start = -1; ///< a first vertex in the thread
+        for_each_edge( [&]( auto &&edge_refs, auto &&vertices ) {
+            // store connected vertices
+            // siblings.resize( _vertex_coords.size() );
+            siblings[ vertices[ 0 ] ] << vertices[ 1 ];
+            siblings[ vertices[ 1 ] ] << vertices[ 0 ];
+            start = vertices[ 0 ];
+        }, CtInt<nb_dims>() );
+
+        // no edge
+        if ( start == PI( -1 ) )
+            return;
+
+        // get the thread
+        Vec<PI32> vs;
+        for( PI n = start; ; ) {
+            vs << n;
+
+            if ( vs.size() > 20 ) {
+                P( vs );
+                TODO;
+            }
  
-        //
+            // if we're on a ray
+            if ( siblings[ n ].size() == 1 ) {
+                // if the proposed sibling has already been seen, it means that we encountered the first ray and we have to go to the other side
+                if ( vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ] ) {
+                    std::reverse( vs.begin(), vs.end() );
+                    break;
+                }
 
-        //
-        // struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
-        // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
+                // else, we can go toward this vertex
+                n = siblings[ n ][ 0 ];
+            } else {
+                // do not go back
+                const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
+                n = siblings[ n ][ s ];
 
+                // if we're again in the first vertex, we're on a closed loop
+                if ( n == start ) {
+                    on_closed( Vec<LI,0>(), vs );
+                    return;
+                }
+            }
+        }
 
-        // for_each_ray_and_edge( []( const Vec<LI,td-1> &ray_refs, LI vertex ) {
+        // => find the other side with the other ray (not a loop)
+        for( PI n = start; ; ) {
+            // found the second ray ?
+            if ( siblings[ n ].size() == 1 ) {
+                on_2_rays( Vec<LI,0>(), vs );
+                return;
+            }
 
-        // }, [&]( const Vec<LI,td-1> &edge_refs, Span<LI,2> vertices ) {
+            // else, go "forward"
+            const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
+            n = siblings[ n ][ s ];
+            vs << n;
 
-        // } );
-        return;
+            if ( vs.size() > 20 ) {
+                P( vs );
+                TODO;
+            }
+        }
     }    
 
+    TODO;
+
+    // struct FaceInfo { 
+    //     Vec<SmallVec<PI,2>> siblings; ///< touching vertices (for each vertex)
+    //     PI start; ///< a first vertex
+    // };
+    // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map; ///< face refs => touching vertex lists
+
+    // for_each_ray_and_edge( []( const Vec<LI,nb_dims-1> &ray_refs, LI vertex ) {
+    //     // nothing to do for rays
+    // }, [&]( const Vec<LI,nb_dims-1> &edge_refs, Span<LI,2> vertices ) {
+    //     // for each connected face
+    //     for( PI i = 0; i < nb_dims - 1; ++i ) {
+    //         Vec<PI32,nb_dims-2> face_cuts = edge_refs.without_index( i );
+    //         auto &fi = face_map[ face_cuts ];
+
+    //         // store connected vertices
+    //         fi.siblings.resize( _vertex_coords.size() );
+    //         fi.siblings[ vertices[ 0 ] ] << vertices[ 1 ];
+    //         fi.siblings[ vertices[ 1 ] ] << vertices[ 0 ];
+    //         fi.start = vertices[ 0 ];
+    //     }
+    // }, nb_dims );
+
+    // // for each face
+    // Vec<PI32> vs;
+    // for( const auto &p: face_map ) {
+    //     const Vec<PI32,nb_dims-2> &face_cuts = p.first;
+    //     const FaceInfo &fi = p.second;
+
+    //     // get the loop
+    //     vs.clear();
+    //     for( PI n = fi.start, j = 0; ; ++j ) {
+    //         vs << n;
+
+    //         const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+    //         n = fi.siblings[ n ][ s ];
+
+    //         if ( n == fi.start )
+    //             break;
+
+    //         // TODO: optimize
+    //         if ( vs.contains( n ) ) {
+    //             vs.clear();
+    //             break;
+    //         }
+    //     }
+
+    //     // call f
+    //     if ( vs.size() )
+    //         func( face_cuts, vs );
+    // }
     // with_ct_dim( [&]( auto td ) {
     //     // no cut
     //     if ( td == 0 ) {
@@ -362,39 +504,10 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
     //         fi.start = vs[ 0 ];
     //     }
     // } );
-
-    // // for each face
-    // Vec<PI32> vs;
-    // for( const auto &p: face_map ) {
-    //     const Vec<PI32,nb_dims-2> &face_cuts = p.first;
-    //     const FaceInfo &fi = p.second;
-
-    //     // get the loop
-    //     vs.clear();
-    //     for( PI n = fi.start, j = 0; ; ++j ) {
-    //         vs << n;
-
-    //         const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
-    //         n = fi.siblings[ n ][ s ];
-
-    //         if ( n == fi.start )
-    //             break;
-
-    //         // TODO: optimize
-    //         if ( vs.contains( n ) ) {
-    //             vs.clear();
-    //             break;
-    //         }
-    //     }
-
-    //     // call f
-    //     if ( vs.size() )
-    //         func( face_cuts, vs );
-    // }
 }
 
 DTP void UTP::for_each_closed_face( auto &&func ) const {
-    for_each_face( func, []( auto &&, auto &&, auto &&, auto && ) {}, []( auto &&, auto && ) {}, []( auto && ) {} );
+    for_each_face( func, []( auto &&, auto && ) {}, []( auto &&, auto && ) {}, []( auto && ) {} );
 }
 
 DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {
@@ -654,7 +767,7 @@ DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     // store the new cut if we have at least one ext vertex
     PI new_cut = _cuts.push_back_ind( std::move( cut_info ), dir, off );
 
-    // prepare the edge_map (edge => index of first seen vertex in the edge)
+    // prepare the edge_map (edge refs => index of first seen vertex in the edge)
     const PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
     auto &edge_map = _ref_map[ CtInt<nb_dims-1>() ].map;
     edge_map.prepare_for( _cuts.size() );
@@ -717,6 +830,7 @@ DTP void UTP::display( Displayer &ds ) const {
         ds.append_attribute( "base", _base_vecs.slice( 0, _true_dimensionality ) );
     ds.append_attribute( "vertex_coords", map_vec( _vertex_coords, [&]( const auto &v ) -> Vec<TF> { return v.slice( 0, _true_dimensionality ); } ) );
     ds.append_attribute( "vertex_refs", map_vec( _vertex_refs, [&]( const auto &v ) -> Vec<LI> { return v.slice( 0, _true_dimensionality ); } ) );
+    ds.append_attribute( "cuts", _cuts );
 
     ds.end_object();
 }
