@@ -383,20 +383,12 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             return Array_from_VecPt( refs );
         } )
 
-        .def( "for_each_face", []( const TCell &cell,
-                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices )> &on_closed,
-                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices )> &on_2_rays,
-                    const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &ray_refs )> &on_1_ray,
-                    const std::function<void( const std::vector<PI> &cut_refs )> &on_free 
-                ) {
-            cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices ) {
-                on_closed( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
-            }, [&]( const auto &cut_refs, const auto &vertices ) {
-                on_2_rays( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
-            }, [&]( const auto &cut_refs, const auto &ray_refs ) {
-                on_1_ray( { cut_refs.begin(), cut_refs.end() }, { ray_refs.begin(), ray_refs.end() } );
-            }, [&]( const auto &cut_refs ) {
-                on_free( { cut_refs.begin(), cut_refs.end() } );
+        .def( "for_each_face", []( const TCell &cell, const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices, const std::vector<std::vector<TCell::LI>> &ray_refs )> &func ) {
+            cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices, const auto &ray_refs ) {
+                std::vector<std::vector<TCell::LI>> a_ray_refs;
+                for( const auto &r : ray_refs )
+                    a_ray_refs.push_back( { r.begin(), r.end() } );
+                func( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() }, a_ray_refs );
             } );
         } )
 

@@ -105,7 +105,7 @@ PomVec → ça serait bien que ça soit géré en C++ pour que ça soit disponib
   Ça pourrait être une solution pour travailler sur les rationels...
   On pourra faire une référence vers la structure d'accélération
 
-Quand il y a 
-* très peu de diracs, 
+On pourrait calculer les refs des rayon a posteriori, mais l'idée de for_each_face, c'est quand même de macher le boulot.
+  on_face( face_refs,  )
 
 

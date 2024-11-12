@@ -322,7 +322,7 @@ DTP void UTP::for_each_edge( auto &&edge_func ) const {
 }
 
 
-DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const {
+DTP void UTP::for_each_face( auto &&func ) const {
     if ( _empty )
         return;
 
@@ -334,21 +334,25 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
     if ( nb_dims == 2 ) {
         // no cut
         if ( _true_dimensionality == 0 ) {
-            on_free( Vec<LI,0>() );
+            func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{}, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
             return;
         }
 
         // cut(s) in 1 direction
         if ( _true_dimensionality == 1 ) {
-            for( const auto &refs : _vertex_refs )
-                on_1_ray( Vec<LI,0>(), refs.template slice<0,1>() );
+            for( PI i = 0; i < _vertex_refs.size(); ++i )
+                func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{ i }, /*ray refs*/ Vec<Vec<LI,1>,1>{ Vec<LI,1>{ _vertex_refs[ i ][ 0 ] } } );
             return;
         }
 
         // else, get the siblings vertices
         Vec<SmallVec<PI,2>> siblings( FromSize(), nb_vertices_true_dim() );
+        Vec<Vec<LI,nb_dims-1>> rays;
         PI start = -1; ///< a first vertex in the thread
-        for_each_edge( [&]( auto &&edge_refs, auto &&vertices ) {
+        for_each_ray_and_edge( [&]( auto &&ray_refs, auto starting_vertex ) {
+            start = starting_vertex;
+            rays << ray_refs;
+        }, [&]( auto &&edge_refs, auto &&vertices ) {
             // store connected vertices
             // siblings.resize( _vertex_coords.size() );
             siblings[ vertices[ 0 ] ] << vertices[ 1 ];
@@ -356,9 +360,15 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
             start = vertices[ 0 ];
         }, CtInt<nb_dims>() );
 
-        // no edge
+        // no edge, no ray
         if ( start == PI( -1 ) )
             return;
+
+        // only 1 vertex (2 rays)
+        if ( siblings[ start ].size() == 0 ) {
+            func( Vec<LI,0>{}, /*vertices*/Vec<LI,1>{ start }, /*ray refs*/ rays );
+            return;
+        }
 
         // get the thread
         Vec<PI32> vs;
@@ -387,7 +397,8 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
 
                 // if we're again in the first vertex, we're on a closed loop
                 if ( n == start ) {
-                    on_closed( Vec<LI,0>(), vs );
+                    func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
+                    assert( rays.empty() );
                     return;
                 }
             }
@@ -397,7 +408,26 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
         for( PI n = start; ; ) {
             // found the second ray ?
             if ( siblings[ n ].size() == 1 ) {
-                on_2_rays( Vec<LI,0>(), vs );
+                // check te ordering
+                if ( vs.size() > 1 ) {
+                    LI nb_common_values = 0;
+                    for( LI nv = 0, nr = 0; ; ) {
+                        if ( _vertex_refs[ vs[ 0 ] ][ nv ] == rays[ 0 ][ nr ] ) {
+                            ++nb_common_values;
+                            if ( ++nv >= nb_dims || ++nr >= nb_dims - 1 )
+                                break;
+                        } else if ( _vertex_refs[ vs[ 0 ] ][ nv ] < rays[ 0 ][ nr ] ) {
+                            if ( ++nv >= nb_dims )
+                                break;
+                        } else {
+                            if ( ++nr >= nb_dims - 1 )
+                                break;
+                        }
+                    }
+                    if ( nb_common_values != nb_dims - 1 )
+                        std::swap( rays[ 0 ], rays[ 1 ] );
+                }
+                func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ rays );
                 return;
             }
 
@@ -507,7 +537,10 @@ DTP void UTP::for_each_face( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray
 }
 
 DTP void UTP::for_each_closed_face( auto &&func ) const {
-    for_each_face( func, []( auto &&, auto && ) {}, []( auto &&, auto && ) {}, []( auto && ) {} );
+    for_each_face( [&]( const auto &face_refs, const auto &vertices, const auto &ray_refs ) {
+        if ( vertices.size() && ray_refs.size() == 0 )
+            func( face_refs, vertices );
+    } );
 }
 
 DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {
@@ -709,27 +742,29 @@ DTP void UTP::_unbounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
         // add new vertices for each edge
         bool add_the_new_cut = false;
         for_each_ray_and_edge( [&]( const auto &refs, PI32 base_vertex ) { // ray
-            auto v0 = _vertex_coords.nd_at( base_vertex, td );
-            auto v1 = ray_dir( refs, base_vertex );
-            auto s0 = sp( v0, dir_td );
-            auto s1 = sp( v1, dir_td );
-            bool e0 = s0 > off;
-            bool e1 = s1 > 0;
-            if ( e0 != e1 ) {
-                _vertex_coords << v0 + ( off - s0 ) / s1 * v1;
+            auto vr = ray_dir( refs, base_vertex );
+            auto s0 = _sps[ base_vertex ];
+            auto sr = sp( vr, dir_td );
+            bool e0 = s0 > 0;
+            bool er = sr > 0;
+            if ( sr && e0 != er ) {
+                auto v0 = _vertex_coords.nd_at( base_vertex, td );
+    
                 _vertex_refs << refs.with_pushed_value( ind_of_new_cut );
+                _vertex_coords << v0 - s0 / sr * vr;
                 add_the_new_cut = true;
             }
-        }, [&]( const auto &refs, const Vec<PI32,2> &num_vertices ) { // edge
-            auto v0 = _vertex_coords.nd_at( num_vertices[ 0 ], td );
-            auto v1 = _vertex_coords.nd_at( num_vertices[ 1 ], td );
-            auto s0 = sp( v0, dir_td );
-            auto s1 = sp( v1, dir_td );
-            bool e0 = s0 > off;
-            bool e1 = s1 > off;
+        }, [&]( const auto &refs, const Vec<LI,2> &num_vertices ) { // edge
+            auto s0 = _sps[ num_vertices[ 0 ] ];
+            auto s1 = _sps[ num_vertices[ 1 ] ];
+            bool e0 = s0 > 0;
+            bool e1 = s1 > 0;
             if ( e0 != e1 ) {
-                _vertex_coords << v0 - s0 / ( s1 - s0 ) * ( v1 - v0 );
+                auto v0 = _vertex_coords.nd_at( num_vertices[ 0 ], td );
+                auto v1 = _vertex_coords.nd_at( num_vertices[ 1 ], td );
+
                 _vertex_refs << refs.with_pushed_value( ind_of_new_cut );
+                _vertex_coords << v0 - s0 / ( s1 - s0 ) * ( v1 - v0 );
                 add_the_new_cut = true;
             }
         }, td );

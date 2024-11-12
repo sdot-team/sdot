@@ -60,8 +60,8 @@ public:
     void            for_each_edge            ( auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
     void            for_each_edge            ( auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
 
-    void            for_each_closed_face     ( auto &&on_closed ) const;
-    void            for_each_face            ( auto &&on_closed, auto &&on_2_rays, auto &&on_1_ray, auto &&on_free ) const; ///< on_closed( cut_refs, vertex_indices ), on_2_rays( cut_refs, vertex_indices ) with ray vertices at the extermities of vertex_indices, on_1_rays( cut_refs, ray_refs ), on_free( cut_refs ), 
+    void            for_each_closed_face     ( auto &&func ) const; ///< func( cut_refs, vertex_indices )
+    void            for_each_face            ( auto &&func ) const; ///< func( cut_refs, vertex_indices, ray_refs_list )
    
     T_i Vec<TF,i+1> ray_dir                  ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
   

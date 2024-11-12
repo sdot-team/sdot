@@ -96,48 +96,25 @@ def test_faces():
 
 c = Cell( ndim = 2 )
 
-c.cut( [ 0.0032212639998749903, -0.11510865119116831 ], -0.020422031329160022 )
-c.cut( [ -0.18679755260909214, -0.00886601053817937 ], -0.10675875690110406 )
-c.cut( [ 0.044522870461866426, -0.19306613091051228 ], -0.00019536387275698175 )
+# c.cut( [ -1, 0 ], 0 )
+# c.cut( [ 0, -1 ], 0 )
+# c.cut( [ 1, 1 ], 1 )
+# c.cut( [ 1, 0 ], 0.2 )
 
 
-plt.plot( c.vertex_coords[ :, 0 ], c.vertex_coords[ :, 1 ], "x" )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-c.plot_in_pyplot( plt )
-
-
-
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-
+# c.cut( [ 0.0032212639998749903, -0.11510865119116831 ], -0.020422031329160022 )
+# c.cut( [ -0.18679755260909214, -0.00886601053817937 ], -0.10675875690110406 )
+# c.cut( [ 0.044522870461866426, -0.19306613091051228 ], -0.00019536387275698175 )
 # c.cut( [ -0.08291155504751879, 0.18530991092253823 ], 0.013394261948515177 )
-
-# plt.plot( c.vertex_coords[ :, 0 ], c.vertex_coords[ :, 1 ], "+" )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-# c.plot_in_pyplot( plt )
-
 # c.cut( [ -0.13126000371532676, 0.16137033745074147 ], -0.02321846265965842 )
-
-# plt.plot( c.vertex_coords[ :, 0 ] + .05, c.vertex_coords[ :, 1 ], "o" )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-# c.plot_in_pyplot( plt )
-
 # c.cut( [ 0.16788490438253667, -0.15619032674672084 ], 0.09637571025369839 )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-
 # c.cut( [ 0.18483658203340547, -0.15719319464581905 ], 0.11033972564677288 )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-
-# plt.plot( c.vertex_coords[ :, 0 ] + 0.1, c.vertex_coords[ :, 1 ], "*" )
-# c.plot_in_pyplot( plt )
-
 # c.cut( [ -0.05034494939375456, 0.29159158045711475 ], 0.08475712496836402 )
-# print( c.vertex_refs, c.bounded, c.true_dimensionality )
-
-# plt.plot( c.vertex_coords[ :, 0 ] + 0.2, c.vertex_coords[ :, 1 ], "+" )
-
-plt.show()
 # c.cut( [ 0.13861671261726616, 0.27560331721312237 ], 0.20792562567902012)
 # c.cut( [ -0.2936004248916124, 0.18374035125955934 ], -0.0852321307463734)
 # c.cut( [ -0.33767997454121457, 0.1104191684028405 ], -0.1294632756214804)
 # c.cut( [ -0.3569681279432535, -0.13456388358553806 ], -0.1944559164364274 )
-# print( c.vertex_refs )
+
+# c.plot_in_pyplot( plt )
+
+# plt.show()
