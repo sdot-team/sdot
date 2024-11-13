@@ -874,6 +874,57 @@ DTP void UTP::cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     return _bounded ? _bounded_cut( dir, off, std::move( cut_info ) ) : _unbounded_cut( dir, off, std::move( cut_info ) ) ;
 }
 
+DTP void UTP::_add_measure_rec( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id ) const {
+    using std::abs;
+
+    if constexpr ( constexpr PI c = num_cuts.ct_size ) {
+        CtRange<0,c>::for_each_item( [&]( auto n ) {
+            // next item ref
+            auto next_num_cuts = num_cuts.without_index( n );
+
+            // vertex choice for this item
+            auto &iv = _ref_map[ CtInt<c-1>() ].map[ next_num_cuts ];
+            if ( iv < op_id ) {
+                iv = op_id + prev_vertex;
+                return;
+            }
+
+            //
+            const PI32 next_vertex = iv - op_id;
+            if ( next_vertex == prev_vertex )
+                return;
+
+            // fill the corresponding column
+            for( int d = 0; d < nb_dims; ++d )
+                M[ d ][ c - 1 ] = _vertex_coords[ next_vertex ][ d ] - _vertex_coords[ prev_vertex ][ d ];
+
+            // recursion
+            _add_measure_rec( res, M, next_num_cuts, next_vertex, op_id );
+        } );
+    } else {
+        res += abs( determinant( M ) );
+    }
+}
+
+DTP TF UTP::measure( const ConstantValue<TF> &cv ) const {
+    if ( ! _bounded )
+        return std::numeric_limits<TF>::infinity();
+
+    _ref_map.for_each_item( [&]( auto &obj ) { obj.map.prepare_for( _cuts.size() ); } );
+    PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
+
+    TF res = 0;
+    Vec<Vec<TF,nb_dims>,nb_dims> M;
+    for( PI n = 0; n < nb_vertices(); ++n )
+        _add_measure_rec( res, M, _vertex_refs[ n ], n, op_id );
+
+    TF coe = 1;
+    for( int d = 2; d <= nb_dims; ++d )
+        coe *= d;
+
+    return cv.value * res / coe;
+}
+
 #undef DTP
 #undef UTP
 

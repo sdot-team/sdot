@@ -33,6 +33,8 @@ class SdotSolver:
     def solve( self ):
         generic_dist, dirac_dist, dirac_is_tgt = self._check_inputs()
 
+        
+
         # print( self.power_diagram.measures() )
 
     def plot_in_pyplot( self, plt ):

@@ -6,6 +6,9 @@
 
 // #include <sdot/acceleration_structures/VoronoiAccelerationStructure.h>
 #include <sdot/acceleration_structures/LowCountAccelerationStructure.h>
+
+#include <sdot/distributions/ConstantValue.h>
+
 #include <sdot/poom/PoomVec.h>
 
 #include <sdot/support/VtkOutput.h>
@@ -402,21 +405,39 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     ;
 
-    pybind11::class_<LowCountAccelerationStructure<TCell>>( m, PD_STR( LowCountAccelerationStructure ) )
-        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> LowCountAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
-        .def( "__repr__"     , []( const LowCountAccelerationStructure<TCell> &a ) { return to_string( a ); } )
-        .def( "for_each_cell", []( LowCountAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
+    pybind11::class_<AccelerationStructure<TCell>>( m, PD_STR( AccelerationStructure ) )
+        .def( "for_each_cell", []( AccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
             pybind11::gil_scoped_release gsr;
             vas.for_each_cell( base_cell, [&]( TCell &cell, int ) {
                 pybind11::gil_scoped_acquire gsa;
                 f( cell );
             }, max_nb_threads );
         } )
-        .def_property_readonly( "dtype", []( const LowCountAccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
-        .def_property_readonly( "ndim" , []( const LowCountAccelerationStructure<TCell> &a ) { return nb_dims; } )
+        .def_property_readonly( "dtype", []( const AccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
+        .def_property_readonly( "ndim" , []( const AccelerationStructure<TCell> &a ) { return nb_dims; } )
         ;
 
-    // // utility functions ============================================================================
+    pybind11::class_<LowCountAccelerationStructure<TCell>,AccelerationStructure<TCell>>( m, PD_STR( LowCountAccelerationStructure ) )
+        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> LowCountAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
+        .def( "__repr__"     , []( const LowCountAccelerationStructure<TCell> &a ) { return to_string( a ); } )
+        // .def( "for_each_cell", []( LowCountAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
+        //     pybind11::gil_scoped_release gsr;
+        //     vas.for_each_cell( base_cell, [&]( TCell &cell, int ) {
+        //         pybind11::gil_scoped_acquire gsa;
+        //         f( cell );
+        //     }, max_nb_threads );
+        // } )
+        // .def_property_readonly( "dtype", []( const LowCountAccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
+        // .def_property_readonly( "ndim" , []( const LowCountAccelerationStructure<TCell> &a ) { return nb_dims; } )
+        ;
+
+    // utility functions ============================================================================
+    pybind11::class_<ConstantValue<TF>>( m, PD_STR( ConstantValue ) )
+        .def( pybind11::init ( []( TF value ) -> ConstantValue<TF> { return { value }; } ) )
+        .def( "__repr__"     , []( const ConstantValue<TF> &cv ) { return to_string( cv.value ); } )
+        ;
+
+    // utility functions ============================================================================
     // m.def( "display_vtk", []( VtkOutput &vo, const Cell &base_cell, PavingWithDiracs &diracs, const WeightsWithBounds &weights ) {
     //     std::mutex m;
     //     diracs.for_each_cell( base_cell, weights, [&]( Cell &cell, int ) { 
@@ -425,6 +446,14 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //         m.unlock();
     //     } );
     // } );
+    
+    m.def( "measures", []( AccelerationStructure<TCell> &as, const TCell &base_cell, ConstantValue<TF> cv ) {
+        pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
+        as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
+            res.mutable_at( cell.info.i0 ) = cell.measure( cv );
+        } );
+        return res;
+    } );
     
     m.def( "ndim", []() {
         return nb_dims;

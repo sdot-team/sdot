@@ -3,13 +3,13 @@
 #include <tl/support/containers/Void.h>
 #include <tl/support/containers/Opt.h>
 
-#include "sdot/support/VtkOutput.h"
 #include "support/MapOfUniquePISortedArray.h"
 #include "support/RangeOfClasses.h"
-// #include "support/BigRational.h"
 #include "support/SimdTensor.h"
 #include "support/VtkOutput.h"
-// #include "PrevCutInfo.h"
+
+#include "distributions/ConstantValue.h"
+
 #include "Cut.h"
 
 namespace sdot {
@@ -73,6 +73,9 @@ public:
 
     void            for_each_cut             ( auto &&func, auto td ) const; ///< func( cut_info, dir, off )
 
+    // computations
+    TF              measure                  ( const ConstantValue<TF> &cv ) const;
+
     // utility  
     auto            with_ct_dim              ( auto &&func ) const;
     auto            with_ct_dim              ( auto &&func );
@@ -94,6 +97,7 @@ private:
     T_i void        _remove_inactive_cuts    ( CtInt<i> ); ///< 
     void            _remove_ext_vertices     ( PI old_nb_vertices );
     PI              _new_coid_ref_map        ( PI size ) const;
+    void            _add_measure_rec         ( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id ) const;
     void            _update_bounded          (); ///<
     T_i bool        _has_ext_vertex          ( const Vec<TF,i> &dir, TF off );
     void            _unbounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 

@@ -119,6 +119,10 @@ DTP int UTP::for_each_cell( const TCell &base_cell, const std::function<void( TC
     return error;
 }
 
+DTP PI UTP::nb_cells() const {
+    return position_and_weights.size();
+}
+
 #undef DTP
 #undef UTP
 

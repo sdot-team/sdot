@@ -1,4 +1,5 @@
 from .bindings.loader import normalized_dtype, type_promote, sdot_module_for, numpy_dtype_for
+from .distributions.normalized_distribution import normalized_distribution
 from .PoomVec import PoomVec
 from .Cell import Cell
 import numpy as np
@@ -22,13 +23,14 @@ class PowerDiagram:
         For instance, `self.positions` will return a `ndarray` instead of a `PoomVec`
 
     """
-    def __init__( self, positions = None, weights = None, boundaries = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
+    def __init__( self, positions = None, weights = None, boundaries = None, density = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
         self._binding_module = None
         self._boundaries = None # expected to be a ndarray
-        self._positions = None # expected to be a ndarray
-        self._weights = None # expected to be a ndarray
+        self._positions = None # PoomVec
+        self._weights = None # PoomVec
+        self._density = None # instance of Density
         self._dtype = None # can be used to force the data type
         self._ndim = None # can be used to force the dimension
 
@@ -43,7 +45,7 @@ class PowerDiagram:
         self.boundaries = boundaries
         self.positions = positions
         self.weights = weights
-
+        self.density = density
 
     def add_cube_boundaries( self, ndim = None, base = None, min_offset = None, max_offset = None ):
         """ delimit the power diagram by an (hyper-)cube (a square in 2D, and so on)
@@ -133,6 +135,14 @@ class PowerDiagram:
         self._weights = PoomVec( values )
 
     @property
+    def density( self ):
+        return self._density
+
+    @density.setter
+    def density( self, values ):
+        self._density = normalized_distribution( values )
+
+    @property
     def dtype( self ):
         # if specified by the user
         if self._dtype:
@@ -181,19 +191,19 @@ class PowerDiagram:
 
             If max_nb_threads == 1, `function` will be called from the main thread (which can be useful for instance for matplotlib, etc...)
         """
-        if not self._update_acceleration_structure():
-            return
-        
-        # make `base_cell` from boundaries
-        base_cell = self._binding_module.Cell()
-        if self._boundaries is not None:
-            ndim = self._binding_module.ndim()
-            for n, bnd in enumerate( self._boundaries ):
-                base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
-        # call the compiled function
+        if not self._update_internal_attributes():
+            return
+
+        # call the compiled function and wrap the cell
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
-        self._acceleration_structure.for_each_cell( base_cell, cwc, max_nb_threads or 0 )
+        self._acceleration_structure.for_each_cell( self._base_cell, cwc, max_nb_threads or 0 )
+
+    def measures( self ):
+        """ volumes/area/length/... for each cell """
+        if not self._update_internal_attributes():
+            return np.empty( [ 0, self.ndim or 0 ] )
+        return self._binding_module.measures( self._acceleration_structure, self._base_cell, self._density.binding( self._binding_module ) )
 
     def plot_in_pyplot( self, fig ):
         """  
@@ -201,41 +211,41 @@ class PowerDiagram:
         """
         self.for_each_cell( lambda cell: cell.plot_in_pyplot( fig ), max_nb_threads = 1 )
 
-    def _update_acceleration_structure( self ):
-        """ compute self._acceleration_structure if not already done
-
-
+    def _update_internal_attributes( self ):
+        """ 
+            compute self._binding_module, self._acceleration_structure and self._base_cell if not already done
         """
-        # get the module info
+
+        # binding module
         dtype = self.dtype
         ndim = self.ndim
         if dtype is None or ndim is None:
             return False
-
-        # get the compiled library
         self._binding_module = sdot_module_for( scalar_type = dtype, nb_dims = ndim )
 
-        # early return if already done
-        if self._acceleration_structure is not None and \
-           self._acceleration_structure.dtype == dtype and \
-           self._acceleration_structure.ndim == ndim:
-            return
+        # acceleration structure
+        if self._acceleration_structure is None or self._acceleration_structure.dtype != dtype or self._acceleration_structure.ndim != ndim:
+            # set weights if not defined
+            if self._weights is None:
+                self._weights = PoomVec( np.ones( self._positions.shape[ 0 ], dtype = numpy_dtype_for( dtype ) ) )
 
-        # set weights if not defined
-        if self._weights is None:
-            self._weights = PoomVec( np.ones( self._positions.shape[ 0 ], dtype = numpy_dtype_for( dtype ) ) )
+            # get dtype consistency. TODO: use PoomVecInst_Cast<...>
+            if self._positions.dtype != dtype:
+                self._positions = PoomVec( self._positions.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
+            if self._weights.dtype != dtype:
+                self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
 
-        # get dtype consistency. TODO: use PoomVecInst_Cast<...>
-        if self._positions.dtype != dtype:
-            self._positions = PoomVec( self._positions.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
-        if self._weights.dtype != dtype:
-            self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
+            # make self._acceleration_structure
+            self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec )
 
-        # make self._acceleration_structure
-        self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec )
+        # base cell
+        self._base_cell = self._binding_module.Cell()
+        if self._boundaries is not None:
+            ndim = self._binding_module.ndim()
+            for n, bnd in enumerate( self._boundaries ):
+                self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
         return True
-
 
 #     def write_vtk( self, filename, fit_boundaries = 0.1 ):
 #         display_vtk_laguerre_cells = vfs.function( 'display_vtk_laguerre_cells', [ f'inc_file:sdot/display_vtk_laguerre_cells.h' ] )

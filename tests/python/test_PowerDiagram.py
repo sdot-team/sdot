@@ -8,12 +8,7 @@ def test_PowerDiagram():
     # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
     pd = PowerDiagram( positions = np.random.random( [ 40, 2 ] ) )
     # pd.add_cube_boundaries()
-
-    # def on_cell( cell: Cell ):
-    #     print( cell )
-    #     cell.for_each_face( None, None, None, print )
-
-    # pd.for_each_cell( on_cell )
+    print( pd.measures() )
 
     # pd.plot_in_pyplot( plt )
     # plt.show()
