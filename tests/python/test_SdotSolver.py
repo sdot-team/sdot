@@ -9,11 +9,12 @@ def test_SdotSolver():
         target_distribution = IndicatorFunction( UnitSquare() ),
     )
 
-    tp = sd.solve()  
+    # tp = sd.solve()  
+    sd.solve()  
 
     # tp.plot_in_vtk_output( vo )
-    # tp.plot_in_pyplot( plt )
-    # plt.show()
+    sd.plot_in_pyplot( plt )
+    plt.show()
 
 np.random.seed( 2 )
 
