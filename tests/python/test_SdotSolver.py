@@ -1,20 +1,19 @@
-from sdot import PowerDiagram, SdotSolver, set_auto_rebuild
+from sdot import SdotSolver, SumOfDiracs, IndicatorFunction, UnitSquare
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-set_auto_rebuild( True )
-
 def test_SdotSolver():
-    # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
-    pd = PowerDiagram( positions = np.random.random( [ 40, 2 ] ) )
-    pd.add_cube_boundaries()
+    sd = SdotSolver(
+        source_distribution = SumOfDiracs( np.random.random( [ 40, 2 ] ) ),
+        target_distribution = IndicatorFunction( UnitSquare() ),
+    )
 
-    pd.plot_in_pyplot( plt )
-    plt.show()
-    
+    tp = sd.solve()  
 
-    # pd.display_vtk( vo )
+    # tp.plot_in_vtk_output( vo )
+    # tp.plot_in_pyplot( plt )
+    # plt.show()
 
 np.random.seed( 2 )
 

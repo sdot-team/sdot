@@ -109,3 +109,4 @@ On pourrait calculer les refs des rayon a posteriori, mais l'idée de for_each_f
   on_face( face_refs,  )
 
 
+Pour représenter les densités, ça sera difficile de tout mettre dans une seule classe.
