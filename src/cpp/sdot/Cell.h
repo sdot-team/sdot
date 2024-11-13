@@ -74,6 +74,7 @@ public:
     void            for_each_cut             ( auto &&func, auto td ) const; ///< func( cut_info, dir, off )
 
     // computations
+    TF              for_each_cut_with_measure( const std::function<void( const Cut<TF,nb_dims,CutInfo> &cut, TF measure )> &f ) const;
     TF              measure                  ( const ConstantValue<TF> &cv ) const;
 
     // utility  
@@ -97,6 +98,7 @@ private:
     T_i void        _remove_inactive_cuts    ( CtInt<i> ); ///< 
     void            _remove_ext_vertices     ( PI old_nb_vertices );
     PI              _new_coid_ref_map        ( PI size ) const;
+    void            _add_measure_rec         ( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id, Vec<TF> &measure_for_each_cut ) const;
     void            _add_measure_rec         ( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id ) const;
     void            _update_bounded          (); ///<
     T_i bool        _has_ext_vertex          ( const Vec<TF,i> &dir, TF off );

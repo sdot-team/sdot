@@ -25,5 +25,13 @@ class UnitSquare( SpaceSubset ):
             res.append( [ - ( i == d ) for i in range( ndim ) ] + [ 0 ] )
         return res
     
+    def indicator_binding( self, base_cell, binding_module ):
+        # we can use a constant value, with modified boundaries
+        ndim = binding_module.ndim()
+        for d in range( ndim ):
+            base_cell.cut( [ + ( i == d ) for i in range( ndim ) ], 1 )
+            base_cell.cut( [ - ( i == d ) for i in range( ndim ) ], 0 )
+            
+        return binding_module.ConstantValue( 1 )
 
 

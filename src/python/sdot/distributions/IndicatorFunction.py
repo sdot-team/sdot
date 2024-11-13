@@ -17,3 +17,5 @@ class IndicatorFunction( Distribution ):
     def convex_boundaries( self, ndim = None ):
         return self.space_subset.convex_boundaries( ndim )
     
+    def binding( self, base_cell, binding_module ):
+        return self.space_subset.indicator_binding( base_cell, binding_module )

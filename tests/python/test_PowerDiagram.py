@@ -1,4 +1,4 @@
-from sdot import PowerDiagram
+from sdot import PowerDiagram, UnitSquare, IndicatorFunction
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -7,13 +7,14 @@ import pytest
 def test_PowerDiagram():
     # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
     pd = PowerDiagram( positions = np.random.random( [ 40, 2 ] ) )
+    pd.underlying_measure = IndicatorFunction( UnitSquare() )
     # pd.add_cube_boundaries()
+    # print( pd.dmeasures_dweights() )
     print( pd.measures() )
 
-    # pd.plot_in_pyplot( plt )
-    # plt.show()
+    pd.plot_in_pyplot( plt )
+    plt.show()
     
-
     # pd.display_vtk( vo )
 
 test_PowerDiagram()

@@ -93,6 +93,9 @@ class Cell:
     def cuts( self ):
         return self._cell.cuts()
     
+    def cut_boundary( self, dir, val, index = 0 ):
+        return self._cell.cut_boundary( np.ascontiguousarray( dir ), val, int( index ) )
+
     def cut( self, dir, val, index = 0 ):
         return self._cell.cut( np.ascontiguousarray( dir ), val, int( index ) )
 

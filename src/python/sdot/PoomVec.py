@@ -73,3 +73,20 @@ class PoomVec:
         """  """
         return self._vec.shape()
 
+    @property
+    def size( self ):
+        """  """
+        return self.shape[ 0 ]
+
+    def __iadd__( self, other ):
+        self._vec.self_add( PoomVec( other )._vec )
+        return self
+
+    def __isub__( self, other ):
+        self._vec.self_sub( PoomVec( other )._vec )
+        return self
+
+    def __idiv__( self, other ):
+        self._vec.self_div( other )
+        return self
+

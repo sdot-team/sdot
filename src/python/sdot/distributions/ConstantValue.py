@@ -8,5 +8,5 @@ class ConstantValue( Distribution ):
     def __init__( self, value = 1 ):
         self.value = value
 
-    def binding( self, binding_module ):
+    def binding( self, base_cell, binding_module ):
         return binding_module.ConstantValue( self.value )

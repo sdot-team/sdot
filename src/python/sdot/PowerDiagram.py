@@ -6,11 +6,13 @@ import numpy as np
 
 class PowerDiagram:
     """
-        Stores all the data needed to compute a power diagram.
+        Stores all the data needed to compute a power diagram (i.e. seed positions and weights) + optional boundaries and underlying measure.
 
         Boundaries can be represented as
             * an array [ [ dir_{num_axis}, ..., val ]_{num_boundary}, ... ] where a point is exterior if scalar_product( dir, point ) > val.
             * a tuple of arrays, one for the directions (each row has a direction), and one for the values (a 1D array)
+
+        Underlying measure is internally stored as an instance of `Distribution`. It is used to compute measures (volumes/areas/...) and can give boundaries (for instance, IndicatorFunction(UnitSquare()) will naturally add boundaries).
 
         `dtype` is the name of the scalar type used by the bindings. One can use numpy types as input (e.g. numpy.float64) or string representation (e.g. "FP32").
 
@@ -23,14 +25,15 @@ class PowerDiagram:
         For instance, `self.positions` will return a `ndarray` instead of a `PoomVec`
 
     """
-    def __init__( self, positions = None, weights = None, boundaries = None, density = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
+    def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
+        self._density_binding = None
         self._binding_module = None
         self._boundaries = None # expected to be a ndarray
         self._positions = None # PoomVec
         self._weights = None # PoomVec
-        self._density = None # instance of Density
+        self._density = None # instance of Distribution
         self._dtype = None # can be used to force the data type
         self._ndim = None # can be used to force the dimension
 
@@ -42,10 +45,10 @@ class PowerDiagram:
         self.ndim = ndim # used to force the number of dimensions
 
         # ctor arguments phase 2
+        self.underlying_measure = underlying_measure
         self.boundaries = boundaries
         self.positions = positions
         self.weights = weights
-        self.density = density
 
     def add_cube_boundaries( self, ndim = None, base = None, min_offset = None, max_offset = None ):
         """ delimit the power diagram by an (hyper-)cube (a square in 2D, and so on)
@@ -129,17 +132,20 @@ class PowerDiagram:
 
     @weights.setter
     def weights( self, values ):
-        if values == None:
+        if values is None:
             return
-        self._acceleration_structure = None # TODO: update weight without redoing everything
         self._weights = PoomVec( values )
+        self._weight_have_been_modified()
+
+    def _weight_have_been_modified( self ):
+        self._acceleration_structure = None # TODO: update weight without redoing everything
 
     @property
-    def density( self ):
+    def underlying_measure( self ):
         return self._density
 
-    @density.setter
-    def density( self, values ):
+    @underlying_measure.setter
+    def underlying_measure( self, values ):
         self._density = normalized_distribution( values )
 
     @property
@@ -197,13 +203,19 @@ class PowerDiagram:
 
         # call the compiled function and wrap the cell
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
-        self._acceleration_structure.for_each_cell( self._base_cell, cwc, max_nb_threads or 0 )
+        self._acceleration_structure.for_each_cell( self._base_cell._cell, cwc, max_nb_threads or 0 )
 
     def measures( self ):
         """ volumes/area/length/... for each cell """
         if not self._update_internal_attributes():
             return np.empty( [ 0, self.ndim or 0 ] )
-        return self._binding_module.measures( self._acceleration_structure, self._base_cell, self._density.binding( self._binding_module ) )
+        return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, self._density_binding )
+
+    def dmeasures_dweights( self ):
+        """ return ( m_rows, m_cols, m_vals, v_vals, error ) with m = matrix, v = vector """
+        if not self._update_internal_attributes():
+            raise ValueError( "TODO" )
+        return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
 
     def plot_in_pyplot( self, fig ):
         """  
@@ -239,11 +251,14 @@ class PowerDiagram:
             self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec )
 
         # base cell
-        self._base_cell = self._binding_module.Cell()
+        self._base_cell = Cell( _cell = self._binding_module.Cell(), _binding_module = self._binding_module )
         if self._boundaries is not None:
             ndim = self._binding_module.ndim()
             for n, bnd in enumerate( self._boundaries ):
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
+        
+        # density binding (possible modification of base cell)
+        self._density_binding = self._density.binding( self._base_cell, self._binding_module )
 
         return True
 

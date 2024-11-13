@@ -11,7 +11,6 @@ def pdir( dir, n = 1 ):
 # directories
 cwd = os.getcwd()
 bad = pdir( cwd, 2 )
-print( bad )
 
 # we're going to reference the source through a build dir
 VariantDir( 'build', bad )

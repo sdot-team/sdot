@@ -874,6 +874,55 @@ DTP void UTP::cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     return _bounded ? _bounded_cut( dir, off, std::move( cut_info ) ) : _unbounded_cut( dir, off, std::move( cut_info ) ) ;
 }
 
+DTP void UTP::_add_measure_rec( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id, Vec<TF> &measure_for_each_cut ) const {
+    using std::sqrt;
+    using std::abs;
+    using std::pow;
+
+    if constexpr ( constexpr PI c = num_cuts.ct_size ) {
+        //
+        if ( c == 1 ) {
+            Vec<Vec<TF,nb_dims-1>,nb_dims> woc( FromInitFunctionOnIndex(), [&]( Vec<TF,nb_dims-1> *v, PI i ) {
+                new ( v ) Vec<TF,nb_dims-1>( M[ i ].without_index( CtInt<0>() ) );
+            } );
+
+            TF loc = 0;
+            CtRange<0,nb_dims>::for_each_item( [&]( auto r ) {
+                auto N = woc.without_index( r );
+                loc += pow( determinant( N ), 2 );
+            } );
+            measure_for_each_cut[ num_cuts[ 0 ] ] += sqrt( loc );
+        }
+
+        //
+        CtRange<0,c>::for_each_item( [&]( auto n ) {
+            // next item ref
+            auto next_num_cuts = num_cuts.without_index( n );
+
+            // vertex choice for this item
+            auto &iv = _ref_map[ CtInt<c-1>() ].map[ next_num_cuts ];
+            if ( iv < op_id ) {
+                iv = op_id + prev_vertex;
+                return;
+            }
+
+            //
+            const PI32 next_vertex = iv - op_id;
+            if ( next_vertex == prev_vertex )
+                return;
+
+            // fill the corresponding column
+            for( int d = 0; d < nb_dims; ++d )
+                M[ d ][ c - 1 ] = _vertex_coords[ next_vertex ][ d ] - _vertex_coords[ prev_vertex ][ d ];
+
+            // recursion
+            _add_measure_rec( res, M, next_num_cuts, next_vertex, op_id, measure_for_each_cut );
+        } );
+    } else {
+        res += abs( determinant( M ) );
+    }
+}
+
 DTP void UTP::_add_measure_rec( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id ) const {
     using std::abs;
 
@@ -904,6 +953,32 @@ DTP void UTP::_add_measure_rec( auto &res, auto &M, const auto &num_cuts, PI32 p
     } else {
         res += abs( determinant( M ) );
     }
+}
+
+DTP TF UTP::for_each_cut_with_measure( const std::function<void( const _Cut &cut, TF measure )> &f ) const {
+    _ref_map.for_each_item( [&]( auto &obj ) { obj.map.prepare_for( _cuts.size() ); } );
+    PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
+
+    Vec<TF> measure_for_each_cut( FromSizeAndItemValue(), _cuts.size(), 0 );
+
+    TF res = 0;
+    Vec<Vec<TF,nb_dims>,nb_dims> M;
+    for( PI n = 0; n < nb_vertices(); ++n )
+        _add_measure_rec( res, M, _vertex_refs[ n ], n, op_id, measure_for_each_cut );
+
+    // cuts
+    TF coe = 1;
+    for( int d = 2; d + 1 <= nb_dims; ++d )
+        coe *= d;
+
+    for( PI num_cut = 0; num_cut < _cuts.size(); ++num_cut )
+        if ( TF m = measure_for_each_cut[ num_cut ] )
+            f( _cuts[ num_cut ], m / coe );
+
+    // cell
+    if ( ! _bounded )
+        return std::numeric_limits<TF>::infinity();
+    return res / ( coe * nb_dims );
 }
 
 DTP TF UTP::measure( const ConstantValue<TF> &cv ) const {

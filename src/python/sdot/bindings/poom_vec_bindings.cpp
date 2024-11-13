@@ -99,9 +99,14 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     pybind11::class_<PoomVec<ItemType>>( m, PD_STR( VtkOutput ) )
         // .def( pybind11::init<>() )
         .def( "__repr__", []( const PoomVec<ItemType> &vec ) { return to_string( vec ); } )
+        
         .def( "as_ndarray", []( PoomVec<ItemType> &vec ) { return poom_vec_to_ndarray( vec ); } )
         .def( "dtype", []( PoomVec<ItemType> &vec ) { return poom_vec_dtype( vec ); } )
         .def( "shape", []( PoomVec<ItemType> &vec ) { return poom_vec_shape( vec ); } )
+
+        .def( "self_add", []( PoomVec<ItemType> &self, PoomVec<ItemType> &that ) { self += that; } )
+        .def( "self_sub", []( PoomVec<ItemType> &self, PoomVec<ItemType> &that ) { self -= that; } )
+        .def( "self_div", []( PoomVec<ItemType> &self, ItemType that ) { self.operator/=( that ); } )
         ;
 
     m.def( "make_PoomVec_from_ndarray", []( const Array_TF &inp ) -> PoomVec<ItemType> {

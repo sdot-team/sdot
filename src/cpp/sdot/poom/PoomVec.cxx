@@ -25,6 +25,21 @@ DTP PI UTP::size() const {
     return inst->size();
 }
 
+DTP void UTP::operator+=( const PoomVec<T> &that ) {
+    // TODO: get_refs_...
+    inst->operator+=( that );
+}
+
+DTP void UTP::operator-=( const PoomVec<T> &that ) {
+    // TODO: get_refs_...
+    inst->operator-=( that );
+}
+
+DTP void UTP::operator/=( const T &that ) {
+    // TODO: get_refs_...
+    inst->operator/=( that );
+}
+
 #undef DTP
 #undef UTP
 
