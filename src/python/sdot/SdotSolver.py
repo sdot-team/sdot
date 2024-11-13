@@ -15,8 +15,8 @@ class SdotSolver:
     """
     def __init__( self, source_measure, target_measure = None, norm = 2 ):
         # internal attributes
-        self._source_density = None
-        self._target_density = None
+        self._source_measure = None
+        self._target_measure = None
 
         # the PowerDiagram used for the computations stores the acceleration structure with the positions and the weights
         self.power_diagram = PowerDiagram()
@@ -32,18 +32,21 @@ class SdotSolver:
         # error history
         self.max_mass_error_ratio_history = []
         self.norm_2_mass_error_history = []
+        self.nb_relaxation_divs_history = []
         self.max_mass_error_history = []
+        self.max_dw_history = []
+
         self.raise_if_error = True
         self.log_items = []
         self.status = 'none'
 
         # properties and attributes from ctor arguments
-        self.source_density = source_measure
-        self.target_density = target_measure
+        self.source_measure = source_measure
+        self.target_measure = target_measure
         self.norm = norm
 
     def solve( self ):
-        return self.newton_solve( )
+        return self.newton_solve()
 
     def newton_solve( self, relaxation_coefficient = 1.0 ):
         # first system
@@ -52,7 +55,7 @@ class SdotSolver:
             return self._set_status( 'void cells before the first iteration' )
 
         # check convergence
-        if self._convergence_test( v_vals, n2_err ):
+        if self._convergence_test( v_vals, n2_err, None ):
             return self._set_status( 'ok' )
 
         # newton iteration
@@ -66,10 +69,12 @@ class SdotSolver:
             self.power_diagram._weight_have_been_modified() # TODO: keep the same acceleration structure
 
             # loop if void cell
-            for _ in range( self.max_lg2_relaxation ):
+            for nb_relax_divs in range( self.max_lg2_relaxation ):
                 # solve again the linear system
                 m_rows, m_cols, m_vals, v_vals, n2_err, error_code = self.newton_system()
+
                 if error_code == 0:
+                    self.nb_relaxation_divs_history.append( nb_relax_divs )
                     break
 
                 # smaller weights update
@@ -80,7 +85,7 @@ class SdotSolver:
                 return self._set_status( 'max_lg2_relaxation reached' )
 
             # check convergence
-            if self._convergence_test( v_vals, n2_err ):
+            if self._convergence_test( v_vals, n2_err, mw ):
                 break
         else:
             return self._set_status( 'max_nb_newton_iterations reached' )
@@ -88,17 +93,26 @@ class SdotSolver:
         return self._set_status( 'ok' )
                 
 
-    def _convergence_test( self, v_vals, n2_err ):
+    def _convergence_test( self, v_vals, n2_err, dw ):
         self.max_mass_error_ratio_history.append( np.max( v_vals ) * self.nb_unknowns )
         self.norm_2_mass_error_history.append( np.linalg.norm( v_vals ) )
         self.max_mass_error_history.append( np.max( v_vals ) )
+        if dw is not None:
+            self.max_dw_history.append( np.max( np.abs( dw ) ) )
 
+        if 'nb_relaxation_divs' in self.log_items and len( self.nb_relaxation_divs_history ):
+            print( 'nb_relaxation_divs:', self.nb_relaxation_divs_history[ -1 ], end=' ' )
         if 'max_mass_error_ratio' in self.log_items:
-            print( 'max_mass_error_ratio:', self.max_mass_error_ratio_history[ -1 ] )
+            print( 'max_mass_error_ratio:', self.max_mass_error_ratio_history[ -1 ], end=' ' )
         if 'norm_2_mass_error' in self.log_items:
-            print( 'norm_2_mass_error:', self.norm_2_mass_error_history[ -1 ] )
+            print( 'norm_2_mass_error:', self.norm_2_mass_error_history[ -1 ], end=' ' )
         if 'max_mass_error' in self.log_items:
-            print( 'max_mass_error:', self.max_mass_error_history[ -1 ] )
+            print( 'max_mass_error:', self.max_mass_error_history[ -1 ], end=' ' )
+        if 'max_dw' in self.log_items and len( self.max_dw_history ):
+            print( 'max_dw:', self.max_dw_history[ -1 ], end=' ' )
+
+        if len( self.log_items ):
+            print()
 
         ok = True
         tested = False
@@ -140,10 +154,11 @@ class SdotSolver:
         m_rows, m_cols, m_vals, v_vals, n2_err, error_code = self.power_diagram.dmeasures_dweights()
 
         # force a delta weight to be equal to 0 (the first one...)
-        if error_code == 0:
+        if m_vals.size:
             for i in range( v_vals.size ):
                 if m_rows[ i ] == m_cols[ i ]:
                     m_vals[ i ] *= 2
+                    break
 
         return m_rows, m_cols, m_vals, v_vals, n2_err, error_code
     
@@ -164,30 +179,30 @@ class SdotSolver:
         return self.power_diagram._weights.size
 
     @property
-    def target_density( self ):
-        return self._target_density
+    def target_measure( self ):
+        return self._target_measure
 
-    @target_density.setter
-    def target_density( self, distribution ):
-        self._target_density = self._normalize_and_use_density( distribution )
+    @target_measure.setter
+    def target_measure( self, measure ):
+        self._target_measure = self._normalize_and_use_measure( measure )
 
     @property
-    def source_density( self ):
-        return self._source_density
+    def source_measure( self ):
+        return self._source_measure
 
-    @source_density.setter
-    def source_density( self, distribution ):
-        self._source_density = self._normalize_and_use_density( distribution )
+    @source_measure.setter
+    def source_measure( self, measure ):
+        self._source_measure = self._normalize_and_use_measure( measure )
 
     @property
     def ndim( self ):
-        for dist in [ self._source_density, self._target_density ]:
+        for dist in [ self._source_measure, self._target_measure ]:
             p = dist.ndim
             if p is not None:
                 return p
         return None
 
-    def _normalize_and_use_density( self, distribution ):
+    def _normalize_and_use_measure( self, distribution ):
         if distribution is None:
             return distribution
 
@@ -212,12 +227,12 @@ class SdotSolver:
     def _check_inputs( self ):
         """ return ( generic_dist, dirac_dist, dirac_is_target ) """
 
-        if self._target_density is None:
-            self.target_density = UnitSquare()
+        if self._target_measure is None:
+            self.target_measure = UnitSquare()
 
         # check distribution compatibility
-        sd = isinstance( self._source_density, SumOfDiracs )
-        td = isinstance( self._target_density, SumOfDiracs )
+        sd = isinstance( self._source_measure, SumOfDiracs )
+        td = isinstance( self._target_measure, SumOfDiracs )
         if sd + td == 0:
             raise RuntimeError( "SdotSolver expects at least one distribution to be a SumOfDiracs" )
         if sd + td == 2:
@@ -225,9 +240,9 @@ class SdotSolver:
 
         # distributions in the expected ordering
         if td:
-            generic_dist, dirac_dist, dirac_is_tgt = self._source_density, self._target_density, True
+            generic_dist, dirac_dist, dirac_is_tgt = self._source_measure, self._target_measure, True
         else:
-            generic_dist, dirac_dist, dirac_is_tgt = self._target_density, self._source_density, False
+            generic_dist, dirac_dist, dirac_is_tgt = self._target_measure, self._source_measure, False
 
         # output
         return generic_dist, dirac_dist, dirac_is_tgt

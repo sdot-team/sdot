@@ -239,7 +239,7 @@ class PowerDiagram:
         if self._acceleration_structure is None or self._acceleration_structure.dtype != dtype or self._acceleration_structure.ndim != ndim:
             # set weights if not defined
             if self._weights is None:
-                self._weights = PoomVec( np.ones( self._positions.shape[ 0 ], dtype = numpy_dtype_for( dtype ) ) )
+                self._weights = PoomVec( np.zeros( self._positions.shape[ 0 ], dtype = numpy_dtype_for( dtype ) ) )
 
             # get dtype consistency. TODO: use PoomVecInst_Cast<...>
             if self._positions.dtype != dtype:
