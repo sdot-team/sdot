@@ -6,9 +6,12 @@ Power diagram (or Laguerre diagram) can be considerer as a generalization of Vor
 In python the wrapper class is named `PowerDiagram`. It handles 
 * virtual seeds, for periodicity handling,
 * any number of dimension (>= 1),
+* a wide variety of scalar types,
 * large vectors (notably for out-of-core or MPI computations).
 
-It is optionaly equiped with an underlying measure (Lebesgue bye default), for methods like `cell_integrals`.
+It is optionaly equiped with an underlying measure (Lebesgue by default), for methods like `cell_integrals`, `cell.boundary_integrals`...
+
+Internally, it is optimized for multicore and SIMD/SIMT instruction sets.
 
 Construction and visualization
 ==============================

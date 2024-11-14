@@ -22,7 +22,7 @@ For python, `pip install sdot` will install the package, with precompiled librar
 Tutorials
 ---------
 
-* (A first tutorial for optimal transport operations in python)[doc/optimal_transport_py.md].
-* (A tutorial for power/voronoi diagram and cells in python)[doc/power_diagram_py.md].
-* (A tutorial for polyhedral convex function in python)[doc/polyhedral_convex_py.md].
+* [A first tutorial for optimal transport operations in python](doc/optimal_transport_py.md).
+* [A tutorial for power/voronoi diagram and cells in python](doc/power_diagram_py.md).
+* [A tutorial for polyhedral convex function in python](doc/polyhedral_convex_py.md).
 
