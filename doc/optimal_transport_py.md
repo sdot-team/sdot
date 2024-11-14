@@ -1,7 +1,7 @@
 Optimal transport
 =================
 
-Sdot specializes in semi-discrete optimal transport, meaning that one of the two measures must be a sum of diracs.
+Sdot specializes in semi-discrete optimal transport, meaning that exactly one of the two measures must be a sum of diracs.
 
 The only transport cost currently managed is based on the Euclidean norm (research is underway for tools based on other norms... but this is still a long way from production).
 

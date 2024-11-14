@@ -27,6 +27,9 @@ class Cell:
     def __repr__( self ):
         return self._cell.__repr__()
 
+    def integral( self, func = '1', underling_measure_override = None ):
+        # ...
+
     @property
     def true_dimensionality( self ):
         """ Size of the base.

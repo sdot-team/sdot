@@ -15,6 +15,8 @@ Internally, it is optimized for multicore and SIMD/SIMT instruction sets.
 Construction and visualization
 -----------------------------
 
+## Basic example
+
 ```python
 from sdot import PowerDiagram
 
@@ -26,14 +28,15 @@ pd.plot( plt )
 plt.show()
 ```
 
-gives something like:
+It gives something like:
 
 ![Unbounded 2D PowerDiagram](pd_0.png)
 
-By default, power diagrams are unbounded, but it is possible to add bounds using some affine functions.
+## Boundaries
+
+Bounds are opional. They are defined using affine functions as in:
 
 ```python
-import matplotlib.pyplot as plt
 from sdot import PowerDiagram
 import numpy as np
 
@@ -45,16 +48,17 @@ pd = PowerDiagram( np.random.random( [ 40, 2 ] ) - 0.5 )
 # A point x is exterior when `dot( direction, x ) - offset > 0` 
 pd.boundaries = [ [ np.cos( a ), np.sin( a ), 1 ] for a in np.linspace( 0, 2 * np.pi, 5, endpoint=False ) ]
 
-pd.plot( plt )
-plt.show()
+# if output context is not specified, `plot()` tries to find the best one and calls the corresponding `show` method
+pd.plot()
 ```
 
-gives something like:
+This example should give something like:
 
 ![Bounded 2D PowerDiagram](pd_1.png)
 
+## Periodicity
 
-In the next example, we add periodicity:
+In this example, we add periodicity along the `y` axis:
 
 ```python
 from sdot import PowerDiagram, VtkOutput
@@ -62,9 +66,10 @@ import numpy as np
 
 pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
 
-# periodicity on the y-axis: we virtually repeat the seed with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
-# The "transformations" are affine and defined by a tuple ( M, V ). A seed at position `x` becomes a virtual seed at position `M @ x + V`
-pd.virtual_seed_transformations = [
+# We virtually repeat the seed with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
+# The "transformations" are internaly stored as transormation matrices (4x4 in 3D for instance)
+# But can be constructed using tuple ( M, V ) tu describe the transformation `M @ x + V` for a point `x`
+pd.periodicity_seed_transformations = [
     ( np.eye( 2 ), [ 0, +1 ] ),
     ( np.eye( 2 ), [ 0, -1 ] ),
 ]
@@ -81,18 +86,21 @@ TODO: image
 Cells
 -----
 
-Cells can be scanned using the method `for_each_cell`. It calls the function given as argument with a `Cell` instance, which expected methods like `integral`, `boundaries`, ...
+### Sweeping
 
-Most of theses methods have vectorized counterparts in the `PowerDiagram` class. For instance for `cell.integral(...)` there is a method `power_diagram.cell_integrals(...)`.
+Cells can be scanned using the method `for_each_cell`. It calls the function given as argument with the corresponding `Cell` instances.
 
-One important remark: by default, to avoid unnecessary memory consumption, cells are computed on the fly. If the user plans to call methods that lead to the same cells being scanned several times (the diagram not being modified between the calls), with a low memory pressure, it is possible to request caching with `power_diagram.use_cache = True`.
+`Cell` contains methods like `integral`, `boundaries`, etc... but most of theses methods have vectorized counterparts in the `PowerDiagram` class (prefixed with `cell_` and suffixed with a `s`). For instance for `cell.integral(...)` (with cell obtained for instance with `pd.for_each_cell`) there is a method `power_diagram.cell_integrals(...)` that returns a list with the results of `cell.integral(...)`.
 
-One another important comment: cell may be suported on space with lower dimensionnality. In this case, methods like `vertex_coords` or `vertex_refs` (list of cuts indices for each vertex) will return lists of arrays with size < dim.
+One important comment: by default, to avoid unnecessary memory consumption, cells are computed on the fly. If the user plans to call methods that lead to the same cells being scanned several times (the diagram not being modified between the calls), and there's no particular memory pressure, it is possible to request caching with `power_diagram.use_cache = True` or set `use_cache = True` in argument of the methods.
+
+### Lower dimensionality
+
+Cells may be suported on space with lower dimensionnality. If it is the case, methods like `vertex_coords` or `vertex_refs` (list of cuts indices for each vertex) will return lists of arrays with size < dim (`.shape[ 1 ]` will be inferior to `ndim`).
 
 It is illustrated in the following example 
 
 ```python
-import matplotlib.pyplot as plt
 from sdot import Cell
 
 cell = Cell( ndim = 3 )
@@ -119,6 +127,23 @@ print( cell.nb_vertices_td ) # => 3 (the 3 vertices of the triangle)
 print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.]]
 
 # visualization will show the 2D content with thiner lines
-cell.plot( plt )
-plt.show()
+cell.plot()
 ```
+
+Siblings, connectivity
+----------------------
+
+`PowerDiagram.summary` is designed to provide arrays to summarize the coordinates and the connectivity. They have optional parameters to provide what we consider as optionnal information like neighboring, masses, ...
+
+For instance 
+
+```python
+from sdot import PowerDiagram
+
+pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
+
+print( pd.vertices(  ) )
+
+```
+
+
