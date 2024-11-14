@@ -15,7 +15,6 @@ perf.data*
 *.o
 *.xyz
 *.bin
-*.png
 *.gif
 
 # Byte-compiled / optimized / DLL files
