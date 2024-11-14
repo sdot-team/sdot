@@ -3,6 +3,8 @@ Power diagram
 
 Power diagram (or Laguerre diagram) can be considered as a generalization of Voronoi diagrams where each seeds has "weights", enabling displacement of the cells.
 
+The convention is that $x$ is in cell $i$ if $|| x - \delta_i ||^2 - w_i < || x - \delta_j ||^2 - w_j$ \forall j`.
+
 In python the wrapper class is named `PowerDiagram`. 
 * It handles virtual seeds, for periodicity handling.
 * It works with any number of dimension (>= 1).
