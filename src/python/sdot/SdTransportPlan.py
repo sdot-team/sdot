@@ -4,11 +4,13 @@ from .distributions.SumOfDiracs import SumOfDiracs
 
 from .space_subsets.UnitSquare import UnitSquare
 
+from .D2GTransportMap import D2GTransportMap
+from .G2DTransportMap import G2DTransportMap
 from .PowerDiagram import PowerDiagram
 
 import numpy as np
 
-class SdotSolver:
+class SdTransportPlan:
     """
         Class to find a transport plan between a sum of dirac and a density.
 
@@ -45,7 +47,13 @@ class SdotSolver:
         self.target_measure = target_measure
         self.norm = norm
 
-    def solve( self ):
+    def forward_map( self ):
+        return D2GTransportMap()
+
+    def backward_map( self ):
+        return D2GTransportMap()
+
+    def adjust_weights( self ):
         return self.newton_solve()
 
     def newton_solve( self, relaxation_coefficient = 1.0 ):
@@ -169,7 +177,13 @@ class SdotSolver:
         M = coo_matrix( ( m_vals, ( m_rows, m_cols ) ), shape = ( v_vals.size, v_vals.size ) ).tocsr()
         return spsolve( M, v_vals )
 
-    def plot_in_pyplot( self, plt ):
+    def plot( self, plt = None ):
+        if plt is None:
+            import matplotlib.pyplot as plt
+            self.plot( plt )
+            plt.show()
+            return
+
         generic_dist, dirac_dist, dirac_is_tgt = self._check_inputs()
         self.power_diagram.plot_in_pyplot( plt )
 

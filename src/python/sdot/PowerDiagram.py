@@ -217,11 +217,15 @@ class PowerDiagram:
             raise ValueError( "TODO" )
         return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
 
-    def plot_in_pyplot( self, fig ):
+    def plot( self, fig, **kwargs ):
         """  
-            plot cells content in pyplot figure `fig`        
+            plot cells content in
+            * pyplot figure (`pyplot` or in a `pyplot.fig` for instance)
+            * or in a VtkOutput
+
+            For optional arguments, see the `Cell.plot` method
         """
-        self.for_each_cell( lambda cell: cell.plot_in_pyplot( fig ), max_nb_threads = 1 )
+        self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
 
     def _update_internal_attributes( self ):
         """ 

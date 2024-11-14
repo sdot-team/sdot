@@ -28,16 +28,6 @@ class Cell:
         return self._cell.__repr__()
 
     @property
-    def vertex_coords( self ):
-        """ get list of coordinates for each vertex (stored in a numpy array) in the current base """
-        return self._cell.vertex_coords( True )
-
-    @property
-    def vertex_refs( self ):
-        """ get list of cut indices for each vertex (stored in a numpy array) in the current base """
-        return self._cell.vertex_refs( True )
-
-    @property
     def true_dimensionality( self ):
         """ Size of the base.
         
@@ -46,6 +36,26 @@ class Cell:
             If true_dimensionality < ndims, coordinates are expressed in self.base
         """
         return self._cell.true_dimensionality()
+
+    @property
+    def vertex_coords_td( self ):
+        """ get list of coordinates for each vertex (stored in a numpy array) in the current base """
+        return self._cell.vertex_coords( True )
+
+    @property
+    def vertex_coords( self ):
+        """ get list of coordinates for each vertex (stored in a numpy array) """
+        return self._cell.vertex_coords( False )
+
+    @property
+    def vertex_refs_td( self ):
+        """ get list of cut indices for each vertex (stored in a numpy array) in the current base """
+        return self._cell.vertex_refs( True )
+
+    @property
+    def vertex_refs( self ):
+        """ get list of cut indices for each vertex (stored in a numpy array) in the current base """
+        return self._cell.vertex_refs( False )
 
     @property
     def nb_active_cuts( self ):
@@ -59,7 +69,7 @@ class Cell:
 
     @property
     def nb_vertices_td( self ):
-        """ nb vertices in current dimensionality """
+        """ nb vertices in current "true" dimensionality """
         return self._cell.nb_vertices( True )
 
     @property
@@ -80,7 +90,7 @@ class Cell:
     
     @property
     def base( self ):
-        """ internal base, used for vertex_coords if true_dimensionnality < nb_dims.
+        """ internal base, used to get coordinates and directions if true_dimensionnality < nb_dims.
             It true_dimensionality == nb_dims, it return an identity matrix
         """
         return self._cell.base()
@@ -112,27 +122,27 @@ class Cell:
     def ray_dir( self, ray_refs, base_vertex ):
         return self._cell.ray_dir( ray_refs, base_vertex )
 
-    def plot_in_pyplot( self, fig, ray_size = 0.5, color = 'black' ):
+    def plot( self, fig, color = 'black', linestyle = '-', ray_length = 0.5, ray_color = None, ray_linestyle = '--' ):
         """  
-        
+            ray_size is used for infinite edges.
         """
-        if self.ndim == 2:
-            coords = self.vertex_coords @ self.base.T
+        if self.true_dimensionality == 2:
+            coords = self.vertex_coords_td @ self.base
 
-            def disp_ray( ray_refs, vertex_index, rev, color ):
+            def disp_ray( ray_refs, vertex_index, rev ):
                 dir = self.ray_dir( ray_refs, vertex_index ) @ self.base.T
                 b_c = coords[ vertex_index ]
-                d_c = b_c + ray_size * dir / np.linalg.norm( dir )
+                d_c = b_c + ray_length * dir / np.linalg.norm( dir )
                 x = [ b_c[ 0 ], d_c[ 0 ] ]
                 y = [ b_c[ 1 ], d_c[ 1 ] ]
                 if rev:
                     x.reverse()
                     y.reverse()
-                fig.plot( x, y, '--', color = color )
+                fig.plot( x, y, ray_linestyle or linestyle, color = ray_color or color )
 
             def on_face( cut_refs, vertex_indices, ray_refs ):
                 if len( ray_refs ) >= 1:
-                    disp_ray( ray_refs[ 0 ], vertex_indices[ 0 ], 1, color )
+                    disp_ray( ray_refs[ 0 ], vertex_indices[ 0 ], 1 )
 
                 if len( vertex_indices ) >= 2:
                     x = [ coords[ n, 0 ] for n in vertex_indices ]
@@ -140,10 +150,10 @@ class Cell:
                     if len( ray_refs ) == 0: # closed
                         x.append( x[ 0 ] )
                         y.append( y[ 0 ] )
-                    fig.plot( x, y, color = color )
+                    fig.plot( x, y, linestyle, color = color )
 
                 if len( ray_refs ) >= 2:
-                    disp_ray( ray_refs[ 1 ], vertex_indices[ -1 ], 0, color )
+                    disp_ray( ray_refs[ 1 ], vertex_indices[ -1 ], 0 )
 
             self.for_each_face( on_face )
             fig.axis('equal')

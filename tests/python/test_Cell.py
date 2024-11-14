@@ -12,7 +12,7 @@ def check_cut_seq( ndim, cuts ):
             cell.cut( cut.dir, cut.off )
 
         # check scalar products
-        for coords, refs in zip( cell.vertex_coords, cell.vertex_refs ):
+        for coords, refs in zip( cell.vertex_coords_td, cell.vertex_refs_td ):
             for num_cut in refs:
                 assert pytest.approx( numpy.dot( cell.base.T @ coords, cuts[ num_cut ][ 'dir' ] ) - cuts[ num_cut ][ 'off' ], abs = 1e-10 ) == 0
 
@@ -24,7 +24,7 @@ def check_cut_seq( ndim, cuts ):
         if 'empty' in cut:
             assert cut.empty == cell.empty
         if 'coords' in cut:
-            assert pytest.approx( numpy.sort( cell.vertex_coords @ cell.base.T, axis = 0 ), abs = 1e-6 ) == numpy.sort( cut.coords, axis = 0 )
+            assert pytest.approx( numpy.sort( cell.vertex_coords_td @ cell.base, axis = 0 ), abs = 1e-6 ) == numpy.sort( cut.coords, axis = 0 )
         if 'faces' in cut:
             faces = []
 

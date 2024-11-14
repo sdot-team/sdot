@@ -6,8 +6,9 @@ from .space_subsets.UnitSquare import UnitSquare
 
 from .bindings.loader import set_auto_rebuild
 
+from .SdTransportPlan import SdTransportPlan
+from .SdTransportPlan import SdTransportPlan
 from .PowerDiagram import PowerDiagram
-from .SdotSolver import SdotSolver
 from .ot_plan import ot_plan
 
 from .PoomVec import PoomVec
