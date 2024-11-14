@@ -1,13 +1,12 @@
 Power diagram
 =============
 
-Power diagram (or Laguerre diagram) can be considerer as a generalization of Voronoi diagrams where each seeds has weights, allowing notably displacement of the cells.
+Power diagram (or Laguerre diagram) can be considered as a generalization of Voronoi diagrams where each seeds has "weights", enabling displacement of the cells.
 
-In python the wrapper class is named `PowerDiagram`. It handles 
-* virtual seeds, for periodicity handling,
-* any number of dimension (>= 1),
-* a wide variety of scalar types,
-* large vectors (notably for out-of-core or MPI computations).
+In python the wrapper class is named `PowerDiagram`. 
+* It handles virtual seeds, for periodicity handling.
+* It works with any number of dimension (>= 1).
+* It can work with large vectors (notably for out-of-core or MPI computations).
 
 It is optionaly equiped with an underlying measure (Lebesgue by default), for methods like `cell_integrals`, `cell.boundary_integrals`...
 
