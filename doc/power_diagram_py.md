@@ -28,7 +28,7 @@ plt.show()
 
 gives something like:
 
-![Unbounded 2D PowerDiagram](doc/pd_0.png)
+![Unbounded 2D PowerDiagram](pd_0.png)
 
 By default, power diagrams are unbounded, but it is possible to add bounds using some affine functions.
 
