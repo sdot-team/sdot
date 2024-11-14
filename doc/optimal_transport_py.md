@@ -24,9 +24,9 @@ tp = optimal_transport_plan(
     source_measure = SumOfDiracs( np.random.random( [ 40, 2 ] )  ),
     target_measure = IndicatorFunction( UnitSquare() ),
     # stopping criterion
-    goal_for_inf_norm_of_mass_ratio_error = 1e-4, # actually the default value
-    # what to display during execution
-    log_of_inf_norm_of_mass_ratio_error = True
+    goal_for_infinite_norm_of_mass_ratio_error = 1e-4, # actually the default value
+    # what to display during execution (verbosity_level is a way to force display)
+    display_of_infinite_norm_of_mass_ratio_error = True
 )
 
 # tp is of type SdTransportPlan.
@@ -34,7 +34,7 @@ tp.plot( plt )
 plt.show()
 
 # In this case, `tp.forward_map` (of type `D2GTransportMap`) will typically provide methods that give informations for each dirac
-print( tp.forward_map.kantorovitch_potentials ) # vector that corresponds to the weights of the powerdiagram
+print( tp.forward_map.kantorovitch_potentials ) # a vector that corresponds to the weights of the powerdiagram
 print( tp.forward_map.brenier_potentials ) # discrete Brenier potentials for each dirac (convex if `tp` is optimal)
 print( tp.forward_map.barycenters ) # barycenters of the cells for each dirac
 
@@ -46,52 +46,57 @@ print( tp.backward_map.dirac_index( x ) ) # index of the dirac for cell at `x`
 print( tp.backward_map.barycenter( x ) ) # position of the dirac for cell at `x`
 
 # Besides, `tp` gives directly access to the power diagram where the generic (not discrete) measure is stored as the `underlying_measure`
-print( tp.power_diagram.integrals() ) # => should give 1/40 for each cell
+print( tp.power_diagram.integrals() ) # => should give a vector with 1/40 for each cell
 print( tp.power_diagram.weights ) # => Kantorovitch potentials for each cell
 print( tp.power_diagram.brenier ) # => Brenier potentials for each cell
 print( tp.power_diagram.barycenters ) # => first moment for each cell
 print( tp.power_diagram.inertia_matrices ) # => second moment for each cell
 ```
 
-It gives something like (arrows goes from the dirac positions to the barycenter of the cells)
+This code will give something like (arrows goes from the dirac positions to the barycenter of the cells)
+
+By convention the duality is under the form \psi(y)-\phi_i \leq |y-X_i|^2. otherwise x\in Lag_i if |y-X_i|^2-\phi_i\leq |y-X_j|^2-\phi_j for all j 
 
 ![Unbounded 2D PowerDiagram](pd_2000.png)
 
-By the way, due to automatic conversion and default values (aside from the log stuff), the same example could have been written in a more concise way:
+Default values and conversions
+------------------------------
+
+The same example could have been written in a more concise way:
 
 ```python
 from sdot import optimal_transport_plan
 import numpy as np
 
+# First specified measure is the source one.
+# Coordinates like input (convertible to a `numpy.ndarray` with `shape.size == 2`) are transformed to a `SumOfDirac`.
+# By default, the first unspecified measure is the UnitBox
 tp = optimal_transport_plan( np.random.random( [ 40, 2 ] ) )
-tp.plot() # if not specified, `plot` proposes a display context and calls the corresponding `show` method.
+
+# if not specified, `plot` tries to find a display context, and calls the corresponding `show` method.
+tp.plot()
 ```
 
-As a matter of facts, the first measure in the arguments (if not named) is the source one. 
+Besides, `SpaceSubset` instances (like `UnitBox()`) are automatically transformed to an `IndicatorFunction` if a `Distribution` is expected.
 
-Besides, if measures are not already of type `Distribution`,
-  * coordinates like input (convertible to a `numpy.ndarray` with `shape.size == 2`) are transformed to a `SumOfDirac`
-  * `SpaceSubset` instances (like `UnitSquare` which inherits from it) are transformed to `IndicatorFunction`
-
-The standard distributions offered by the `sdot` package are in `sdot.distributions`. `SpaceSubset` objects are defined in `sdot.space_subsets`.
+Here are more information on distributions(distributions.md) and space subsets(space_subsets.md) readily available in `sdot`.
 
 Partial transport
 -----------------
 
-...
+TBC
 
 Moreau-Yosida regularization
 ----------------------------
 
-...
-
+TBC
 
 Direct use of SdTransportPlan
 -----------------------------
 
-Functions like `optimal_transport_plan`, `optimal_partial_transport_plan` and `optimal_moreau_yosida_transport_plan` are actually very thin wrapper around the `SdTransportPlan` class. They simply call the constructor and the method `adjust_potentials`.
+Functions like `optimal_transport_plan`, `optimal_partial_transport_plan` and `optimal_moreau_yosida_transport_plan` are actually very thin wrapper around the `SdTransportPlan` class. They simply call the constructor and the method `adjust_potentials` before returning the created instance.
 
-If you plan to call the aforementionned methods several times on similar datasets, it can be very profitable to use `SdTransportPlan` directly. It provides the same level of usability, while allowing a wide number of optimizations in terms of execution speed and memory usage.
+If you plan to work on several successive transport plans that share similar datasets, it can be very profitable to directly use instances of `SdTransportPlan`. It provides the same level of usability, while allowing a wide number of optimizations in terms of execution speed and memory usage (for instance, it may avoid to recompute the acceleration structures, ...).
 
 Here is a simple example
 
@@ -99,20 +104,20 @@ Here is a simple example
 from sdot import SdTransportPlan
 import numpy as np
 
-# define a transport plan to go from some diracs to an UnitSquare
+# define a transport plan to go from some diracs to an UnitSquare (arguments of `optimal_transport_plan` are presents in the same way than in `SdTransportPlan`)
 # this transport plan is not yet optimal
 tp = SdTransportPlan( np.random.random( [ 40, 2 ] ) )
 
-# one can define or redefined arguments that can be set using ctor. For instance:
-tp.log_of_inf_norm_of_mass_ratio_error = True
+# one can define or redefine ctor arguments. For instance:
+tp.display_of_infinite_norm_of_mass_ratio_error = True
 
-# solve (uses a Newton by default)
+# solve (uses a Newton solver by default)
 tp.adjust_potentials()
 
-# of course one has access to the previously seen methods
+# of course one has access to the previously seen methods (the functions like `optimal_transport_plan` return a `SdTransportPlan`)
 tp.plot()
 
-# now, it's possible to change only some parts of the inputs without having to redefine everythinf
+# now, it's possible to change only some parts of the inputs without having to redefine (and recompute) everything
 tp.dirac_positions = tp.cell_barycenters
 
 # Make the Transport Plan Optimal Again
