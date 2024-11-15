@@ -2,7 +2,7 @@
 from .SpaceSubset import SpaceSubset
 import numpy as np
 
-class UnitSquare( SpaceSubset ):
+class UnitBox( SpaceSubset ):
     """ 
     """
 

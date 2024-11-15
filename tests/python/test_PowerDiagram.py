@@ -1,9 +1,8 @@
-from sdot import PowerDiagram, UnitSquare, IndicatorFunction
-# import matplotlib.pyplot as plt
+from sdot import PowerDiagram
 import numpy as np
 # import pytest
 
-pd = PowerDiagram( positions = np.random.random( [ 30, 2 ] ) )
+pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 pd.periodicity_transformations = [[1,0],[0,1]]
 pd.plot()
 

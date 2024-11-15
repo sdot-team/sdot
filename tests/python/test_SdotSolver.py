@@ -1,4 +1,4 @@
-from sdot import SdotSolver, SumOfDiracs, IndicatorFunction, UnitSquare, Cell
+from sdot import SdotSolver, SumOfDiracs, IndicatorFunction, UnitBox, Cell
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest

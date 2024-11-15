@@ -2,7 +2,7 @@ from .distributions.IndicatorFunction import IndicatorFunction
 from .distributions.Distribution import Distribution
 from .distributions.SumOfDiracs import SumOfDiracs
 
-from .space_subsets.UnitSquare import UnitSquare
+from .space_subsets.UnitBox import UnitBox
 
 from .bindings.loader import set_auto_rebuild
 

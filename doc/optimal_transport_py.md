@@ -15,14 +15,14 @@ A basic example
 This is a very explicit example, where all the inputs are in their final expected type:
 
 ```python
-from sdot import optimal_transport_plan, SumOfDiracs, IndicatorFunction, UnitSquare
+from sdot import optimal_transport_plan, SumOfDiracs, IndicatorFunction, UnitBox
 import matplotlib.pyplot as plt
 import numpy as np
 
-# find an optimal plan to go from diracs to an UnitSquare
+# find an optimal plan to go from diracs to an UnitBox
 tp = optimal_transport_plan(
     source_measure = SumOfDiracs( np.random.random( [ 40, 2 ] )  ),
-    target_measure = IndicatorFunction( UnitSquare() ),
+    target_measure = IndicatorFunction( UnitBox() ),
     # stopping criterion
     goal_for_infinite_norm_of_mass_ratio_error = 1e-4, # actually the default value
     # what to display during execution (verbosity_level is a way to force display)
@@ -104,7 +104,7 @@ Here is a simple example
 from sdot import SdTransportPlan
 import numpy as np
 
-# define a transport plan to go from some diracs to an UnitSquare (arguments of `optimal_transport_plan` are presents in the same way than in `SdTransportPlan`)
+# define a transport plan to go from some diracs to an UnitBox (arguments of `optimal_transport_plan` are presents in the same way than in `SdTransportPlan`)
 # this transport plan is not yet optimal
 tp = SdTransportPlan( np.random.random( [ 40, 2 ] ) )
 
@@ -133,7 +133,7 @@ Common generic densities
 ### IndicatorFunction
 
 `IndicatorFunction` take a `SpaceSubset` instance as argument. Currently there are 3 concrete classes that inherits from `SpaceSubset`:
-* the ubiquitous `UnitSquare` (that actually can be translated, scaled and rotated),
+* the ubiquitous `UnitBox` (that actually can be translated, scaled and rotated),
 * `PolyhedralConvexSubspace` which contains a list of affine functions. A point `x` is in the subspace if all the function values at `x` are negative,
 * `PolyhedralContouredSubspace` which contains a mesh, not necessarily convex.
 

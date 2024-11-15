@@ -2,7 +2,7 @@ from .distributions.normalized_distribution import normalized_distribution
 from .distributions.Distribution import Distribution
 from .distributions.SumOfDiracs import SumOfDiracs
 
-from .space_subsets.UnitSquare import UnitSquare
+from .space_subsets.UnitBox import UnitBox
 
 from .D2GTransportMap import D2GTransportMap
 from .G2DTransportMap import G2DTransportMap
@@ -242,7 +242,7 @@ class SdTransportPlan:
         """ return ( generic_dist, dirac_dist, dirac_is_target ) """
 
         if self._target_measure is None:
-            self.target_measure = UnitSquare()
+            self.target_measure = UnitBox()
 
         # check distribution compatibility
         sd = isinstance( self._source_measure, SumOfDiracs )

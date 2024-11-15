@@ -17,7 +17,7 @@ class PowerDiagram:
             * an array [ [ dir_{num_axis}, ..., val ]_{num_boundary}, ... ] where a point is exterior if scalar_product( dir, point ) > val.
             * a tuple of arrays, one for the directions (each row has a direction), and one for the values (a 1D array)
 
-        Underlying measure is internally stored as an instance of `Distribution`. It is used to compute measures (volumes/areas/...) and can give boundaries (for instance, IndicatorFunction(UnitSquare()) will naturally add boundaries).
+        Underlying measure is internally stored as an instance of `Distribution`. It is used to compute measures (volumes/areas/...) and can give boundaries (for instance, IndicatorFunction(UnitBox()) will naturally add boundaries).
 
         `dtype` is the name of the scalar type used by the bindings. One can use numpy types as input (e.g. numpy.float64) or string representation (e.g. "FP32").
 
