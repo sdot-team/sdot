@@ -61,30 +61,47 @@ This example should give something like:
 
 ## Periodicity
 
+Periodicity is handled in sdot by "virtual seed (affine) transformation". Everytime a user add a transformation `T` (internally represented as matrices), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
+
 In this example, we add periodicity along the `y` axis:
 
 ```python
 from sdot import PowerDiagram, VtkOutput
 import numpy as np
 
-pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
+pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 
 # We virtually repeat the seeds with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
+#   Specifying `[ 0, +1 ]` is enought because internally, it will also add the inverse transformation.
 # The "transformations" are internaly stored as transormation matrices (4x4 in 3D for instance)
 #   but can be constructed using tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
-pd.periodicity_seed_transformations = [
-    ( np.eye( 2 ), [ 0, +1 ] ),
-    ( np.eye( 2 ), [ 0, -1 ] ),
+pd.periodicity_transformations = [
+    ( np.eye( 2 ), [ 0, 1 ] )
 ]
 
-# VtkOutput is a convenience class to produce .vtk file that can be visualized for instance in paraview
-vo = VtkOutput()
-pd.plot( plt )
-vo.save( "pd.vtk" )
+pd.plot()
+```
+
+![Bounded 2D PowerDiagram](pd_periodicity.png)
+
+### VtkOutput
+
+For large number of cells or complex 3D visualization, it is possible to generate files that can be read by softwares likes paraview...
+
+Currently, only `.vtk` files are supported, but more are planed.
+
+```python
+from sdot import PowerDiagram, VtkOutput
+import numpy as np
+
+pd = PowerDiagram( np.random.random( [ 40, 3 ] ) )
+
+# plot understands the string as a filename and checks the extension to call the right plot function 
+#  (there is a pd.plot_vtk() function)
+pd.plot( "out.vtk" )
 ```
 
 TODO: image
-
 
 Cells
 -----
@@ -132,6 +149,8 @@ print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.
 # visualization will show the 2D content with thiner lines
 cell.plot()
 ```
+
+![2D cell in 3D space](pd_cell_2D3D.png)
 
 Siblings, connectivity
 ----------------------

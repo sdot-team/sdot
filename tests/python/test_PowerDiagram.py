@@ -6,16 +6,29 @@ import pytest
 
 def test_PowerDiagram():
     # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
-    pd = PowerDiagram( positions = np.random.random( [ 40, 2 ] ) )
-    pd.underlying_measure = IndicatorFunction( UnitSquare() )
-    # pd.add_cube_boundaries()
-    # print( pd.dmeasures_dweights() )
-    print( pd.measures() )
+    best_ptp = 100000000
+    best_p = None
+    for i in range( 3000 ):
+        p = np.random.random( [ 30, 2 ] )
+        pd = PowerDiagram( positions = p )
 
-    pd.plot_in_pyplot( plt )
-    plt.show()
-    
-    # pd.display_vtk( vo )
+        pd.periodicity_transformations = [
+            ( np.eye( 2 ), [ 0, 1 ] )
+        ]
+
+        ptp = np.ptp( pd.summary().vertex_coords[ :, 0 ] )
+        if best_ptp > ptp:
+            best_ptp = ptp
+            best_p = p
+
+    print( best_ptp )
+    pd = PowerDiagram( positions = best_p )
+
+    pd.periodicity_transformations = [
+        ( np.eye( 2 ), [ 0, 1 ] )
+    ]
+
+    pd.plot()
 
 test_PowerDiagram()
 

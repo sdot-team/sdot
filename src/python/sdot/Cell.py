@@ -1,4 +1,5 @@
 from .bindings.loader import sdot_module_for
+from types import ModuleType
 import numpy as np
 
 class Cell:
@@ -148,17 +149,21 @@ class Cell:
     def ray_dir( self, ray_refs, base_vertex ):
         return self._cell.ray_dir( ray_refs, base_vertex )
 
-    def plot_pyplot( self, fig, color = 'black', linestyle = '-', ray_length = 0.5, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':' ):
+    def plot_pyplot( self, fig, color = 'black', linestyle = '-', linewidth = 2, low_dim_linewidth_coeff = 0.25, ray_length = 0.2, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':' ):
         """
             ray_length is the length used to display infinite edges.
         """
 
-        # hard to understand in axis are not equal
-        fig.axis( 'equal' )
+        # check fig properties
+        if isinstance( fig, ModuleType ):
+            fig.axis( 'equal' )
+
+        if self.ndim == 3:
+            fig = fig.figure()
+            fig = fig.add_subplot( projection = '3d' )
 
         #
         coords = self.vertex_coords_td @ self.base
-        refs = self.vertex_refs_td
 
         # find a complementary base
         cbase = list( np.eye( self.ndim ) )
@@ -166,26 +171,47 @@ class Cell:
             for c in self.base:
                 cbase[ r ] -= np.dot( cbase[ r ], c ) * c
         cbase.sort( key = np.linalg.norm )
-        cbase = cbase[ - self.true_dimensionality : ]
+        cbase = cbase[ self.true_dimensionality : ]
 
         # helper to plot
         def pl( array, gtype ):
             array = np.array( array )
+            xyz = [ array[ :, d ] for d in range( min( self.ndim, 3 ) ) ]
+            kwa = { 'linewidth': linewidth }
+            if self.true_dimensionality < self.ndim and gtype != 'free':
+                kwa[ 'linewidth' ] *= low_dim_linewidth_coeff
+
             if gtype == 'free':
-                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = free_linestyle, color = free_color or color )
+                return fig.plot( *xyz, **kwa, linestyle = free_linestyle, color = free_color or color )
             if gtype == 'ray':
-                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = ray_linestyle, color = ray_color or color )
+                return fig.plot( *xyz, **kwa, linestyle = ray_linestyle, color = ray_color or color )
             if gtype == 'edge':
-                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = linestyle, color = color )
+                return fig.plot( *xyz, **kwa, linestyle = linestyle, color = color )
 
         # for each vertex, plot free items, get the edges and the rays
-        for n in range( coords.shape[ 0 ] ):
+        for c in coords:
             for cvec in cbase:
-                pl( [ coords[ n ] - ray_length * cvec, coords[ n ] + ray_length * cvec ], 'free' )
+                pl( [ c - ray_length * cvec, c + ray_length * cvec ], 'free' )
 
         # plot edge
         def edge_func( refs, vertices ):
-            print( refs, vertices )
+            if len( refs ) == 0:
+                return
+
+            # ray
+            if len( vertices ) == 1:
+                rd = self.ray_dir( refs, vertices[ 0 ] ) @ self.base
+                bc = coords[ vertices[ 0 ] ]
+                pl( [ bc, bc + ray_length * rd ], 'ray' )
+                return
+            
+            # edge
+            if len( vertices ) == 2:
+                pl( [ coords[ vertices[ 0 ] ], coords[ vertices[ 1 ] ] ], 'edge' )
+                return
+
+            raise RuntimeError( "not an expected size for vertices" )
+
         self.for_each_edge_td( edge_func )
 
     def plot( self, fig = None, **kwargs ):

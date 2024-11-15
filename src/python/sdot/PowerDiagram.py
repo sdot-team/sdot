@@ -1,8 +1,12 @@
-from .bindings.loader import normalized_dtype, type_promote, sdot_module_for, numpy_dtype_for
+from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, sdot_module_for
 from .distributions.normalized_distribution import normalized_distribution
 from .PoomVec import PoomVec
 from .Cell import Cell
+
+from munch import Munch
 import numpy as np
+
+
 
 class PowerDiagram:
     """
@@ -27,13 +31,14 @@ class PowerDiagram:
     """
     def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
+        self._periodicity_transformations = [] # 
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
         self._density_binding = None
         self._binding_module = None
         self._boundaries = None # expected to be a ndarray
         self._positions = None # PoomVec
         self._weights = None # PoomVec
-        self._density = None # instance of Distribution
+        self._underlying_measure = None # instance of Distribution
         self._dtype = None # can be used to force the data type
         self._ndim = None # can be used to force the dimension
 
@@ -91,6 +96,39 @@ class PowerDiagram:
         self.boundaries = l
 
     @property
+    def periodicity_transformations( self ):
+        return self._periodicity_transformations[ ::2 ]
+    
+    @periodicity_transformations.setter
+    def periodicity_transformations( self, values ):
+        self._periodicity_transformations = []
+        self._acceleration_structure = None
+
+        for value in values:
+            if isinstance( value, tuple ):
+                assert( len( value ) == 2 )
+                M = np.array( value[ 0 ] )
+                V = np.array( value[ 1 ] )
+                
+                assert( M.shape[ 0 ] == M.shape[ 1 ] )
+                assert( M.shape[ 0 ] == V.shape[ 0 ] )
+                s = M.shape[ 0 ]
+
+                value = np.zeros( [ s + 1, s + 1 ] )
+                value[ :s, :s ] = M
+                value[ :s, s ] = V
+                value[ s, s ] = 1
+            else:
+                value = np.array( value )
+                assert( value.shape[ 0 ] == value.shape[ 1 ] )
+                if self.ndim is not None:
+                    assert( value.shape[ 0 ] == self.ndim + 1 )
+
+            self._periodicity_transformations.append( value )
+            self._periodicity_transformations.append( np.linalg.inv( value ) )
+
+
+    @property
     def boundaries( self ):
         return self._boundaries
 
@@ -142,11 +180,11 @@ class PowerDiagram:
 
     @property
     def underlying_measure( self ):
-        return self._density
+        return self._underlying_measure
 
     @underlying_measure.setter
     def underlying_measure( self, values ):
-        self._density = normalized_distribution( values )
+        self._underlying_measure = normalized_distribution( values )
 
     @property
     def dtype( self ):
@@ -156,12 +194,9 @@ class PowerDiagram:
         
         # else, use the dtypes from the inputs
         dtypes = []
-        if self._boundaries is not None:
-            dtypes.append( normalized_dtype( self._boundaries.dtype ) )
-        if self._positions is not None:
-            dtypes.append( normalized_dtype( self._positions.dtype ) )
-        if self._weights is not None:
-            dtypes.append( normalized_dtype( self._weights.dtype ) )
+        for v in [ self._boundaries, self._positions, self._weights ]:
+            if v is not None:
+                dtypes.append( normalized_dtype( v.dtype ) )
 
         return type_promote( dtypes )
 
@@ -217,7 +252,34 @@ class PowerDiagram:
             raise ValueError( "TODO" )
         return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
 
-    def plot( self, fig, **kwargs ):
+    def summary( self ):
+        res = Munch()
+
+        # for each cell
+        vertex_coords = []
+        def cf( cell ):
+            for c in cell.vertex_coords:
+                vertex_coords.append( c )
+        
+        self.for_each_cell( cf )
+        
+        vertex_coords = np.array( vertex_coords )
+
+        res[ 'vertex_coords' ] = vertex_coords
+
+        return res
+
+    def plot_vtk( self, vtk_output ):
+        if isinstance( vtk_output, str ):
+            vo = VtkOutput()
+            self.plot_vtk( vtk_output )
+            vo.save( vtk_output )
+            return 
+        
+        assert isinstance( vtk_output, VtkOutput )
+        return self._binding_module.plot_vtk( vtk_output, self._acceleration_structure, self._base_cell._cell )
+
+    def plot( self, fig = None, **kwargs ):
         """  
             plot cells content in
             * pyplot figure (`pyplot` or in a `pyplot.fig` for instance)
@@ -225,6 +287,17 @@ class PowerDiagram:
 
             For optional arguments, see the `Cell.plot` method
         """
+        if fig is None:
+            import matplotlib.pyplot as plt
+            self.plot( plt )
+            plt.show()
+            return
+
+        if isinstance( fig, str ):
+            if str.endswith( ".vtk" ):
+                return self.plot_vtk( fig, **kwargs )
+            raise ValueError( "Unhandled file type" )
+
         self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
 
     def _update_internal_attributes( self ):
@@ -252,7 +325,7 @@ class PowerDiagram:
                 self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
 
             # make self._acceleration_structure
-            self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec )
+            self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec, self._periodicity_transformations )
 
         # base cell
         self._base_cell = Cell( _cell = self._binding_module.Cell(), _binding_module = self._binding_module )
@@ -262,7 +335,7 @@ class PowerDiagram:
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
         
         # density binding (possible modification of base cell)
-        self._density_binding = self._density.binding( self._base_cell, self._binding_module )
+        self._density_binding = self._underlying_measure.binding( self._base_cell, self._binding_module )
 
         return True
 

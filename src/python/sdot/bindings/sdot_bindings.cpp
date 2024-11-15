@@ -419,6 +419,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     //     .def( "__repr__", []( const PavingWithDiracs &a ) { return to_string( a ); } )
     //     ;
 
+    // AccelerationStructure ----------------------------------------------------------------------------------------------------------------------
     pybind11::class_<AccelerationStructure<TCell>>( m, PD_STR( AccelerationStructure ) )
         .def( "for_each_cell", []( AccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
             pybind11::gil_scoped_release gsr;
@@ -427,12 +428,28 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 f( cell );
             }, max_nb_threads );
         } )
+
         .def_property_readonly( "dtype", []( const AccelerationStructure<TCell> &a ) { return type_name<TF>(); } )
         .def_property_readonly( "ndim" , []( const AccelerationStructure<TCell> &a ) { return nb_dims; } )
         ;
 
+    //LowCountAccelerationStructure ----------------------------------------------------------------------------------------------------------------
     pybind11::class_<LowCountAccelerationStructure<TCell>,AccelerationStructure<TCell>>( m, PD_STR( LowCountAccelerationStructure ) )
-        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights ) -> LowCountAccelerationStructure<TCell> { return { positions, weights, /*transfo*/{} }; } ) )
+        .def( pybind11::init ( []( const PoomVec<Pt> &positions, const PoomVec<TF> &weights, const std::vector<Array_TF> &periodiciy_trans ) -> LowCountAccelerationStructure<TCell> {
+            using Trans = LowCountAccelerationStructure<TCell>::Trans;
+            Vec<Trans> transformations;
+            for( const Array_TF &tra : periodiciy_trans ) {
+                Trans trans;
+                for( PI r = 0; r < nb_dims; ++r )
+                    for( PI c = 0; c < nb_dims; ++c )
+                        trans.linear_transformation[ r ][ c ] = tra.at( r, c );
+                for( PI d = 0; d < nb_dims; ++d )
+                    trans.translation[ d ] = tra.at( d, nb_dims );
+                transformations << trans;
+            }
+            return { positions, weights, transformations };
+        } ) )
+
         .def( "__repr__"     , []( const LowCountAccelerationStructure<TCell> &a ) { return to_string( a ); } )
         // .def( "for_each_cell", []( LowCountAccelerationStructure<TCell> &vas, const TCell &base_cell, const std::function<void( const TCell &cell )> &f, int max_nb_threads ) { 
         //     pybind11::gil_scoped_release gsr;
