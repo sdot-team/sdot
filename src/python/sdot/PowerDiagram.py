@@ -1,5 +1,6 @@
-from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, sdot_module_for
+from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, module_for
 from .distributions.normalized_distribution import normalized_distribution
+from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec
 from .Cell import Cell
 
@@ -114,15 +115,24 @@ class PowerDiagram:
                 assert( M.shape[ 0 ] == V.shape[ 0 ] )
                 s = M.shape[ 0 ]
 
-                value = np.zeros( [ s + 1, s + 1 ] )
+                value = np.eye( s + 1 )
                 value[ :s, :s ] = M
                 value[ :s, s ] = V
-                value[ s, s ] = 1
             else:
                 value = np.array( value )
-                assert( value.shape[ 0 ] == value.shape[ 1 ] )
-                if self.ndim is not None:
-                    assert( value.shape[ 0 ] == self.ndim + 1 )
+
+                if len( value.shape ) == 2:
+                    assert( value.shape[ 0 ] == value.shape[ 1 ] )
+                    if self.ndim is not None:
+                        assert( value.shape[ 0 ] == self.ndim + 1 )
+                elif len( value.shape ) == 1:
+                    V = value
+                    s = V.size
+
+                    value = np.eye( s + 1 )
+                    value[ :s, s ] = V
+                else:
+                    raise ValueError( "invalid transformation" )
 
             self._periodicity_transformations.append( value )
             self._periodicity_transformations.append( np.linalg.inv( value ) )
@@ -310,7 +320,7 @@ class PowerDiagram:
         ndim = self.ndim
         if dtype is None or ndim is None:
             return False
-        self._binding_module = sdot_module_for( scalar_type = dtype, nb_dims = ndim )
+        self._binding_module = module_for( 'sdot', use_arch = True, scalar_type = dtype, nb_dims = ndim )
 
         # acceleration structure
         if self._acceleration_structure is None or self._acceleration_structure.dtype != dtype or self._acceleration_structure.ndim != ndim:

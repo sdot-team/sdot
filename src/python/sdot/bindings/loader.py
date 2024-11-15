@@ -75,9 +75,19 @@ def get_build_dir( suffix ):
     # else, make something in the home 
     raise RuntimeError( "TODO: make a loc or tmp build dir" )
 
-def load_module( name, plist ):
+def module_for( name, use_arch = False, **kwargs ):
+    # sorted list of parameters
+    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
+    plist.sort()
+
+    # append 'os'
+    plist.append( ( 'os', platform.system() ) )
+    # if use_arch:
+    #     plist.append( ( 'arch', archspec.cpu.generic_microarchitecture() ) )
+
+    # other presentation for the parameters
     ilist = [ f"{ k }={ quote_plus( str( v ) ) }" for k, v in plist ]
-    vlist = [ quote_plus( str( v ) ) for k, v in plist ]
+    vlist = [ quote_plus( str( v ) ) for _, v in plist ]
 
     # names
     suffix = "_".join( vlist ).replace( "%", '_' )
@@ -103,7 +113,7 @@ def load_module( name, plist ):
     # else, build and load it
     if module is None:
         # call scons
-        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( 'SConstruct.' + name ) }", '-s',
+        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( name + '.SConstruct' ) }", '-s',
             f"module_name={ module_name }", 
             f"suffix={ suffix }"
         ] + ilist, cwd = str( build_dir ), shell = False )
@@ -125,22 +135,3 @@ def load_module( name, plist ):
     loader_cache[ module_name ] = res
 
     return res
-
-def sdot_module_for( **kwargs ):
-    # sorted list of parameters with arch
-    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
-    plist.sort()
-    plist.append( ( 'os', platform.system() ) )
-    plist.append( ( 'arch', str( archspec.cpu.host() ) ) )
-
-    #
-    return load_module( "sdot", plist )
-
-def poom_vec_module_for( **kwargs ):
-    # sorted list of parameters with arch
-    plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
-    plist.sort()
-    plist.append( ( 'os', platform.system() ) )
-
-    # use Sconstruct.poom_vec
-    return load_module( "poom_vec", plist )

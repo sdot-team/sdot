@@ -61,7 +61,7 @@ This example should give something like:
 
 ## Periodicity
 
-Periodicity is handled in sdot by "virtual seed (affine) transformation". Everytime a user add a transformation `T` (internally represented as matrices), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
+Periodicity is handled in sdot by virtual seed affine transformations. Everytime a user add a transformation `T` (internally represented as a matrix), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
 
 In this example, we add periodicity along the `y` axis:
 
@@ -72,9 +72,10 @@ import numpy as np
 pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 
 # We virtually repeat the seeds with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
-#   Specifying `[ 0, +1 ]` is enought because internally, it will also add the inverse transformation.
-# The "transformations" are internaly stored as transormation matrices (4x4 in 3D for instance)
+#   Specifying `[ 0, +1 ]` is enough because internally, it will also add the inverse transformation.
+# The transformations are internaly stored as transformation matrices (4x4 in 3D for instance)
 #   but can be constructed using tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
+#   or by a single vector for a simple translation
 pd.periodicity_transformations = [
     ( np.eye( 2 ), [ 0, 1 ] )
 ]

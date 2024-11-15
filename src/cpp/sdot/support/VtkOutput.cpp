@@ -1,6 +1,8 @@
 #include "VtkOutput.h"
 #include <fstream>
 
+namespace sdot {
+
 VtkOutput::VtkOutput() {
 }
 
@@ -128,4 +130,4 @@ void VtkOutput::add_item( const Pt *pts_data, PI pts_size, PI vtk_type, const st
         field.second.resize( cell_types.size(), TF( 0 ) );
 }
 
-
+}

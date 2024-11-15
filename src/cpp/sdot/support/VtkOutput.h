@@ -3,6 +3,8 @@
 #include <tl/support/containers/Vec.h>
 #include <map>
 
+namespace sdot {
+
 /***/
 class VtkOutput {
 public:
@@ -55,3 +57,4 @@ public:
     Vec<Pt>         points;
 };
 
+}
