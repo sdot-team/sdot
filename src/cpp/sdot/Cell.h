@@ -51,14 +51,15 @@ public:
     T_i Vec<LI,i>   vertex_refs              ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pr              vertex_refs              ( PI num_vertex ) const;
 
+    void            display_vtk              ( VtkOutput &vo, auto &&pt_to_vtk ) const;
     void            display_vtk              ( VtkOutput &vo ) const;
     void            display                  ( Displayer &ds ) const;
   
     //
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex ), edge_func( cut_refs, num_vertices )
     void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex ), edge_func( cut_refs, num_vertices )
-    void            for_each_edge            ( auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
-    void            for_each_edge            ( auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_edge            ( auto &&edge_func, auto td ) const; ///< edge_func( cut_refs, vertices )
+    void            for_each_edge            ( auto &&edge_func ) const; ///< edge_func( cut_refs, vertices )
 
     // void         for_each_closed_face     ( auto &&func ) const; ///< func( cut_refs, vertex_indices )
     // void         for_each_face            ( auto &&func ) const; ///< func( cut_refs, vertex_indices, ray_refs_list )

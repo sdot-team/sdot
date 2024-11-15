@@ -14,6 +14,7 @@
 #include <limits>
 
 #include "Cell.h"
+#include "sdot/support/VtkOutput.h"
 
 #include <tl/support/P.h>
 
@@ -942,12 +943,65 @@ DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     }
 }
 
+DTP void UTP::display_vtk( VtkOutput &vo, auto &&pt_to_vtk ) const {
+    // for now a simple, representation with cells => get connected vertices for each face
+    struct FaceInfo {
+        Vec<SmallVec<PI,2>> siblings; ///< touching vertices (for each vertex)
+        Vec<Vec<LI,nb_dims-1>> rays; ///< ray refs
+        PI start; ///< a first vertex
+    };
+    std::map<Vec<LI,nb_dims-2>,FaceInfo,Less> face_map; // TO_OPTIMIZE
+    for_each_edge( [&]( auto &&edge_refs, auto &&vertices ) {
+        // for each connected face
+        for( PI i = 0; i < nb_dims - 1; ++i ) {
+            Vec<PI32,nb_dims-2> face_cuts = edge_refs.without_index( i );
+            auto &fi = face_map[ face_cuts ];
+
+            // store connected vertices
+            fi.siblings.resize( _vertex_coords.size() );
+            fi.siblings[ vertices[ 0 ] ] << vertices[ 1 ];
+            fi.siblings[ vertices[ 1 ] ] << vertices[ 0 ];
+            fi.start = vertices[ 0 ];
+        }
+    } );
+
+    // for each face
+    Vec<LI> vs;
+    auto find_threads_in = [&]( const Vec<LI,nb_dims-2> &face_refs, FaceInfo &fi ) {
+        // else, get the thread
+        vs.clear();
+        for( PI n = fi.start; ; ) {
+            vs << n;
+
+            // do not go back
+            const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+            n = fi.siblings[ n ][ s ];
+
+            // if we're again in the first vertex, we're on a closed loop
+            if ( n == fi.start ) {
+                Vec<VtkOutput::Pt> pts( FromReservationSize(), vs.size() );
+                for( LI index : vs )
+                    pts << pt_to_vtk( _vertex_coords[ index ] );
+                vo.add_polygon( pts );
+                return;
+            }
+        }
+    };
+
+    // for each face
+    for( auto &p: face_map )
+        find_threads_in( p.first, p.second );
+}
+
 DTP void UTP::display_vtk( VtkOutput &vo ) const {
-    //
-
-
-    //
-    TODO;
+    display_vtk( vo, [&]( const Pt &pos ) {
+        VtkOutput::Pt res;
+        for( PI i = 0; i < min( PI( pos.size() ), PI( res.size() ) ); ++i )
+            res[ i ] = pos[ i ];
+        for( PI i = PI( pos.size() ); i < PI( res.size() ); ++i )
+            res[ i ] = 0;
+        return res;
+    } );
 }
 
 DTP void UTP::display( Displayer &ds ) const {

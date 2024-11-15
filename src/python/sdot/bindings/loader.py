@@ -8,6 +8,7 @@ import numpy
 import sys
 import os
 
+global_verbosity_level = 1
 auto_rebuild = False
 loader_cache = {}
 
@@ -112,6 +113,9 @@ def module_for( name, use_arch = False, **kwargs ):
 
     # else, build and load it
     if module is None:
+        if global_verbosity_level:
+            print( f"beg compilation of { name } for { kwargs }\r" )
+
         # call scons
         ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( name + '.SConstruct' ) }", '-s',
             f"module_name={ module_name }", 
@@ -120,6 +124,9 @@ def module_for( name, use_arch = False, **kwargs ):
         
         if ret_code:
             raise RuntimeError( f"Failed to compile the C++ { name } binding" )
+
+        if global_verbosity_level:
+            print( f"end compilation of { name } for { kwargs }\r" )
 
         # import
         module = __import__( module_name )

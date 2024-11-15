@@ -4,7 +4,7 @@ from .distributions.SumOfDiracs import SumOfDiracs
 
 from .space_subsets.UnitBox import UnitBox
 
-from .bindings.loader import set_auto_rebuild
+from .bindings.loader import set_auto_rebuild, global_verbosity_level
 
 from .optimal_transport_plan import optimal_transport_plan
 

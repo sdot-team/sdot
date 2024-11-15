@@ -73,6 +73,7 @@ pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 
 # We virtually repeat the seeds with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
 #   Specifying `[ 0, +1 ]` is enough because internally, it will also add the inverse transformation.
+#   Rk: each new transformation T is added with its inv( T ), P @ T and P @ inv( T ) for each previous transformation P
 # The transformations are internaly stored as transformation matrices (4x4 in 3D for instance)
 #   but can be constructed using tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
 #   or by a single vector for a simple translation
@@ -102,7 +103,7 @@ pd = PowerDiagram( np.random.random( [ 40, 3 ] ) )
 pd.plot( "out.vtk" )
 ```
 
-TODO: image
+![3D periodic PowerDiagram](pd_3D_pt_0.png)
 
 Cells
 -----
