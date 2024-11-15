@@ -27,8 +27,9 @@ class Cell:
     def __repr__( self ):
         return self._cell.__repr__()
 
-    def integral( self, func = '1', underling_measure_override = None ):
+    def integral( self, func = '1', underlying_measure_override = None ):
         # ...
+        pass
 
     @property
     def true_dimensionality( self ):
@@ -87,9 +88,9 @@ class Cell:
     def empty( self ):
         return self._cell.empty()
     
-    @property
-    def closed_faces( self ):
-        return self._cell.closed_faces()
+    # @property
+    # def closed_faces( self ):
+    #     return self._cell.closed_faces()
     
     @property
     def base( self ):
@@ -115,52 +116,122 @@ class Cell:
     def display_vtk( self, vtk_output ):
         return self._cell.display_vtk( vtk_output )
 
-    def for_each_face( self, on_face ):
+    # def for_each_face( self, on_face ):
+    #     """
+    #         Call args:
+    #             on_face( cut_refs, vertex_indices, ray_refs_list ),
+    #     """
+    #     return self._cell.for_each_face( on_face )
+
+    def for_each_edge( self, on_edge ):
         """
-            Call args:
-                on_face( cut_refs, vertex_indices, ray_refs_list ),
+            on_edge( edge_refs, vertex_indices )
+                * edge_refs = [ num_cut_0, ... ]
+                * vertex_indices => 
+                   - size = 2 for a regular edge
+                   - size = 1 for a ray
+
         """
-        return self._cell.for_each_face( on_face )
+        return self._cell.for_each_edge( on_edge, False )
+
+    def for_each_edge_td( self, on_edge ):
+        """
+            on_edge( edge_refs, vertex_indices )
+                * edge_refs = [ num_cut_0, ... ]
+                * vertex_indices => 
+                   - size = 2 for a regular edge
+                   - size = 1 for a ray
+
+        """
+        return self._cell.for_each_edge( on_edge, True )
 
     def ray_dir( self, ray_refs, base_vertex ):
         return self._cell.ray_dir( ray_refs, base_vertex )
 
-    def plot( self, fig, color = 'black', linestyle = '-', ray_length = 0.5, ray_color = None, ray_linestyle = '--' ):
-        """  
-            ray_size is used for infinite edges.
+    def plot_pyplot( self, fig, color = 'black', linestyle = '-', ray_length = 0.5, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':' ):
         """
-        if self.true_dimensionality == 2:
-            coords = self.vertex_coords_td @ self.base
+            ray_length is the length used to display infinite edges.
+        """
 
-            def disp_ray( ray_refs, vertex_index, rev ):
-                dir = self.ray_dir( ray_refs, vertex_index ) @ self.base.T
-                b_c = coords[ vertex_index ]
-                d_c = b_c + ray_length * dir / np.linalg.norm( dir )
-                x = [ b_c[ 0 ], d_c[ 0 ] ]
-                y = [ b_c[ 1 ], d_c[ 1 ] ]
-                if rev:
-                    x.reverse()
-                    y.reverse()
-                fig.plot( x, y, ray_linestyle or linestyle, color = ray_color or color )
+        # hard to understand in axis are not equal
+        fig.axis( 'equal' )
 
-            def on_face( cut_refs, vertex_indices, ray_refs ):
-                if len( ray_refs ) >= 1:
-                    disp_ray( ray_refs[ 0 ], vertex_indices[ 0 ], 1 )
+        #
+        coords = self.vertex_coords_td @ self.base
+        refs = self.vertex_refs_td
 
-                if len( vertex_indices ) >= 2:
-                    x = [ coords[ n, 0 ] for n in vertex_indices ]
-                    y = [ coords[ n, 1 ] for n in vertex_indices ]
-                    if len( ray_refs ) == 0: # closed
-                        x.append( x[ 0 ] )
-                        y.append( y[ 0 ] )
-                    fig.plot( x, y, linestyle, color = color )
+        # find a complementary base
+        cbase = list( np.eye( self.ndim ) )
+        for r in range( self.ndim ):
+            for c in self.base:
+                cbase[ r ] -= np.dot( cbase[ r ], c ) * c
+        cbase.sort( key = np.linalg.norm )
+        cbase = cbase[ - self.true_dimensionality : ]
 
-                if len( ray_refs ) >= 2:
-                    disp_ray( ray_refs[ 1 ], vertex_indices[ -1 ], 0 )
+        # helper to plot
+        def pl( array, gtype ):
+            array = np.array( array )
+            if gtype == 'free':
+                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = free_linestyle, color = free_color or color )
+            if gtype == 'ray':
+                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = ray_linestyle, color = ray_color or color )
+            if gtype == 'edge':
+                return fig.plot( array[ :, 0 ], array[ :, 1 ], linestyle = linestyle, color = color )
 
-            self.for_each_face( on_face )
-            fig.axis('equal')
+        # for each vertex, plot free items, get the edges and the rays
+        for n in range( coords.shape[ 0 ] ):
+            for cvec in cbase:
+                pl( [ coords[ n ] - ray_length * cvec, coords[ n ] + ray_length * cvec ], 'free' )
+
+        # plot edge
+        def edge_func( refs, vertices ):
+            print( refs, vertices )
+        self.for_each_edge_td( edge_func )
+
+    def plot( self, fig = None, **kwargs ):
+        """  
+        """
+        if fig is None:
+            import matplotlib.pyplot as plt
+            self.plot( plt )
+            plt.show()
             return
 
-        raise RuntimeError( f"TODO: plot for dim == { self.ndim }" )
+        self.plot_pyplot( fig, **kwargs )
+
+        # if self.true_dimensionality == 2:
+
+        #     def disp_ray( ray_refs, vertex_index, rev ):
+        #         print( "ray" )
+        #         dir = self.ray_dir( ray_refs, vertex_index ) @ self.base.T
+        #         b_c = coords[ vertex_index ]
+        #         d_c = b_c + ray_length * dir / np.linalg.norm( dir )
+        #         x = [ b_c[ 0 ], d_c[ 0 ] ]
+        #         y = [ b_c[ 1 ], d_c[ 1 ] ]
+        #         if rev:
+        #             x.reverse()
+        #             y.reverse()
+        #         fig.plot( x, y, ray_linestyle or linestyle, color = ray_color or color )
+
+        #     def on_face( edge_refs, vertex_indices, ray_refs ):
+        #         print( "cut_refs" )
+
+        #         if len( ray_refs ) >= 1:
+        #             disp_ray( ray_refs[ 0 ], vertex_indices[ 0 ], 1 )
+
+        #         if len( vertex_indices ) >= 2:
+        #             x = [ coords[ n, 0 ] for n in vertex_indices ]
+        #             y = [ coords[ n, 1 ] for n in vertex_indices ]
+        #             if len( ray_refs ) == 0: # closed
+        #                 x.append( x[ 0 ] )
+        #                 y.append( y[ 0 ] )
+        #             fig.plot( x, y, linestyle, color = color )
+
+        #         if len( ray_refs ) >= 2:
+        #             disp_ray( ray_refs[ 1 ], vertex_indices[ -1 ], 0 )
+
+        #     self.for_each_face( on_face )
+        #     return
+
+        # raise RuntimeError( f"TODO: plot for dim == { self.ndim }" )
         

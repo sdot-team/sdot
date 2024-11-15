@@ -3,12 +3,13 @@ Power diagram
 
 Power diagram (or Laguerre diagram) can be considered as a generalization of Voronoi diagrams where each seeds has "weights", enabling displacement of the cells.
 
-The convention is that $x$ is in cell $i$ if $|| x - \delta_i ||^2 - w_i < || x - \delta_j ||^2 - w_j$ \forall j`.
+The convention is that $x$ is in cell $i$ if $\| x - \delta_i \|^2 - w_i < \| x - \delta_j \|^2 - w_j ,\ \forall j \neq i$.
 
-In python the wrapper class is named `PowerDiagram`. 
-* It handles virtual seeds, for periodicity handling.
-* It works with any number of dimension (>= 1).
-* It can work with large vectors (notably for out-of-core or MPI computations).
+In short, the `PowerDiagram` class 
+* handles virtual seeds, for periodicity handling,
+* works with any number of dimension (>= 1),
+* can work with large vectors (notably for out-of-core or MPI computations),
+* is able to give siblings, parents or chilren for all the kinds of geometric entities.
 
 It is optionaly equiped with an underlying measure (Lebesgue by default), for methods like `cell_integrals`, `cell.boundary_integrals`...
 
@@ -68,9 +69,9 @@ import numpy as np
 
 pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
 
-# We virtually repeat the seed with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
+# We virtually repeat the seeds with `[ 0, +1 ]` and `[ 0, -1 ]` translations.
 # The "transformations" are internaly stored as transormation matrices (4x4 in 3D for instance)
-# But can be constructed using tuple ( M, V ) tu describe the transformation `M @ x + V` for a point `x`
+#   but can be constructed using tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
 pd.periodicity_seed_transformations = [
     ( np.eye( 2 ), [ 0, +1 ] ),
     ( np.eye( 2 ), [ 0, -1 ] ),

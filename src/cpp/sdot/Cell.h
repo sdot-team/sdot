@@ -55,13 +55,13 @@ public:
     void            display                  ( Displayer &ds ) const;
   
     //
-    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
-    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
+    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex ), edge_func( cut_refs, num_vertices )
+    void            for_each_ray_and_edge    ( auto &&ray_func, auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex ), edge_func( cut_refs, num_vertices )
     void            for_each_edge            ( auto &&edge_func, auto td ) const; ///< ray_func( cut_refs, num_of_base_vertex )
     void            for_each_edge            ( auto &&edge_func ) const; ///< ray_func( cut_refs, num_of_base_vertex )
 
-    void            for_each_closed_face     ( auto &&func ) const; ///< func( cut_refs, vertex_indices )
-    void            for_each_face            ( auto &&func ) const; ///< func( cut_refs, vertex_indices, ray_refs_list )
+    // void         for_each_closed_face     ( auto &&func ) const; ///< func( cut_refs, vertex_indices )
+    // void         for_each_face            ( auto &&func ) const; ///< func( cut_refs, vertex_indices, ray_refs_list )
    
     T_i Vec<TF,i+1> ray_dir                  ( const Vec<LI,i> &edge_refs, LI base_vertex ) const;
   

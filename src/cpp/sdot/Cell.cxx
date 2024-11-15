@@ -322,226 +322,315 @@ DTP void UTP::for_each_edge( auto &&edge_func ) const {
 }
 
 
-DTP void UTP::for_each_face( auto &&func ) const {
-    if ( _empty )
-        return;
+// DTP void UTP::for_each_face( auto &&func ) const {
+//     if ( _empty )
+//         return;
 
-    // nb_dims <= 1 => impossible to make faces
-    if ( nb_dims <= 1 )
-        return;
+//     // nb_dims <= 1 => impossible to make faces --------------------------------------------------------------------------------------
+//     if ( nb_dims <= 1 )
+//         return;
 
-    // nb_dims == 2 => we have exactly 1 face
-    if ( nb_dims == 2 ) {
-        // no cut
-        if ( _true_dimensionality == 0 ) {
-            func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{}, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
-            return;
-        }
+//     // nb_dims == 2 => we have exactly 1 face ----------------------------------------------------------------------------------------
+//     if ( nb_dims == 2 ) {
+//         // no cut
+//         if ( _true_dimensionality == 0 ) {
+//             func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{}, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
+//             return;
+//         }
 
-        // cut(s) in 1 direction
-        if ( _true_dimensionality == 1 ) {
-            for( PI i = 0; i < _vertex_refs.size(); ++i )
-                func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{ i }, /*ray refs*/ Vec<Vec<LI,1>,1>{ Vec<LI,1>{ _vertex_refs[ i ][ 0 ] } } );
-            return;
-        }
+//         // cut(s) in 1 direction
+//         if ( _true_dimensionality == 1 ) {
+//             for( PI i = 0; i < _vertex_refs.size(); ++i )
+//                 func( Vec<LI,0>{}, /*vertices*/Vec<LI,0>{ i }, /*ray refs*/ Vec<Vec<LI,1>,1>{ Vec<LI,1>{ _vertex_refs[ i ][ 0 ] } } );
+//             return;
+//         }
 
-        // else, get the siblings vertices
-        Vec<SmallVec<PI,2>> siblings( FromSize(), nb_vertices_true_dim() );
-        Vec<Vec<LI,nb_dims-1>> rays;
-        PI start = -1; ///< a first vertex in the thread
-        for_each_ray_and_edge( [&]( auto &&ray_refs, auto starting_vertex ) {
-            start = starting_vertex;
-            rays << ray_refs;
-        }, [&]( auto &&edge_refs, auto &&vertices ) {
-            // store connected vertices
-            // siblings.resize( _vertex_coords.size() );
-            siblings[ vertices[ 0 ] ] << vertices[ 1 ];
-            siblings[ vertices[ 1 ] ] << vertices[ 0 ];
-            start = vertices[ 0 ];
-        }, CtInt<nb_dims>() );
+//         // else, get the siblings vertices
+//         Vec<SmallVec<PI,2>> siblings( FromSize(), nb_vertices_true_dim() );
+//         Vec<Vec<LI,nb_dims-1>> rays;
+//         PI start = -1; ///< a first vertex in the thread
+//         for_each_ray_and_edge( [&]( auto &&ray_refs, auto starting_vertex ) {
+//             start = starting_vertex;
+//             rays << ray_refs;
+//         }, [&]( auto &&edge_refs, auto &&vertices ) {
+//             // store connected vertices
+//             // siblings.resize( _vertex_coords.size() );
+//             siblings[ vertices[ 0 ] ] << vertices[ 1 ];
+//             siblings[ vertices[ 1 ] ] << vertices[ 0 ];
+//             start = vertices[ 0 ];
+//         }, CtInt<nb_dims>() );
 
-        // no edge, no ray
-        if ( start == PI( -1 ) )
-            return;
+//         // no edge, no ray
+//         if ( start == PI( -1 ) )
+//             return;
 
-        // only 1 vertex (2 rays)
-        if ( siblings[ start ].size() == 0 ) {
-            func( Vec<LI,0>{}, /*vertices*/Vec<LI,1>{ start }, /*ray refs*/ rays );
-            return;
-        }
+//         // only 1 vertex (2 rays)
+//         if ( siblings[ start ].size() == 0 ) {
+//             func( Vec<LI,0>{}, /*vertices*/Vec<LI,1>{ start }, /*ray refs*/ rays );
+//             return;
+//         }
 
-        // get the thread
-        Vec<PI32> vs;
-        for( PI n = start; ; ) {
-            vs << n;
-
-            if ( vs.size() > 20 ) {
-                P( vs );
-                TODO;
-            }
+//         // get the thread
+//         Vec<PI32> vs;
+//         for( PI n = start; ; ) {
+//             vs << n;
  
-            // if we're on a ray
-            if ( siblings[ n ].size() == 1 ) {
-                // if the proposed sibling has already been seen, it means that we encountered the first ray and we have to go to the other side
-                if ( vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ] ) {
-                    std::reverse( vs.begin(), vs.end() );
-                    break;
-                }
+//             // if we're on a ray
+//             if ( siblings[ n ].size() == 1 ) {
+//                 // if the proposed sibling has already been seen, it means that we encountered the first ray and we have to go to the other side
+//                 if ( vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ] ) {
+//                     std::reverse( vs.begin(), vs.end() );
+//                     break;
+//                 }
 
-                // else, we can go toward this vertex
-                n = siblings[ n ][ 0 ];
-            } else {
-                // do not go back
-                const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
-                n = siblings[ n ][ s ];
+//                 // else, we can go toward this vertex
+//                 n = siblings[ n ][ 0 ];
+//             } else {
+//                 // do not go back
+//                 const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
+//                 n = siblings[ n ][ s ];
 
-                // if we're again in the first vertex, we're on a closed loop
-                if ( n == start ) {
-                    func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
-                    assert( rays.empty() );
-                    return;
-                }
-            }
-        }
+//                 // if we're again in the first vertex, we're on a closed loop
+//                 if ( n == start ) {
+//                     func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ Vec<Vec<LI,1>,0>{} );
+//                     assert( rays.empty() );
+//                     return;
+//                 }
+//             }
+//         }
 
-        // => find the other side with the other ray (not a loop)
-        for( PI n = start; ; ) {
-            // found the second ray ?
-            if ( siblings[ n ].size() == 1 ) {
-                // check te ordering
-                if ( vs.size() > 1 ) {
-                    LI nb_common_values = 0;
-                    for( LI nv = 0, nr = 0; ; ) {
-                        if ( _vertex_refs[ vs[ 0 ] ][ nv ] == rays[ 0 ][ nr ] ) {
-                            ++nb_common_values;
-                            if ( ++nv >= nb_dims || ++nr >= nb_dims - 1 )
-                                break;
-                        } else if ( _vertex_refs[ vs[ 0 ] ][ nv ] < rays[ 0 ][ nr ] ) {
-                            if ( ++nv >= nb_dims )
-                                break;
-                        } else {
-                            if ( ++nr >= nb_dims - 1 )
-                                break;
-                        }
-                    }
-                    if ( nb_common_values != nb_dims - 1 )
-                        std::swap( rays[ 0 ], rays[ 1 ] );
-                }
-                func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ rays );
-                return;
-            }
+//         // => find the other side with the other ray (not a loop)
+//         for( PI n = start; ; ) {
+//             // found the second ray ?
+//             if ( siblings[ n ].size() == 1 ) {
+//                 // check te ordering
+//                 if ( vs.size() > 1 ) {
+//                     LI nb_common_values = 0;
+//                     for( LI nv = 0, nr = 0; ; ) {
+//                         if ( _vertex_refs[ vs[ 0 ] ][ nv ] == rays[ 0 ][ nr ] ) {
+//                             ++nb_common_values;
+//                             if ( ++nv >= nb_dims || ++nr >= nb_dims - 1 )
+//                                 break;
+//                         } else if ( _vertex_refs[ vs[ 0 ] ][ nv ] < rays[ 0 ][ nr ] ) {
+//                             if ( ++nv >= nb_dims )
+//                                 break;
+//                         } else {
+//                             if ( ++nr >= nb_dims - 1 )
+//                                 break;
+//                         }
+//                     }
+//                     if ( nb_common_values != nb_dims - 1 )
+//                         std::swap( rays[ 0 ], rays[ 1 ] );
+//                 }
+//                 func( Vec<LI,0>{}, /*vertices*/vs, /*ray refs*/ rays );
+//                 return;
+//             }
 
-            // else, go "forward"
-            const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
-            n = siblings[ n ][ s ];
-            vs << n;
+//             // else, go "forward"
+//             const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == siblings[ n ][ 0 ];
+//             n = siblings[ n ][ s ];
+//             vs << n;
+//         }
+//     }    
 
-            if ( vs.size() > 20 ) {
-                P( vs );
-                TODO;
-            }
-        }
-    }    
+//     // nb dims >= 3 --------------------------------------------------------------------------------------
+//     // get the siblings vertices for each face
+//     struct FaceInfo { 
+//         Vec<SmallVec<PI,2>> siblings; ///< touching vertices (for each vertex)
+//         Vec<Vec<LI,nb_dims-1>> rays; ///< ray refs
+//         PI start; ///< a first vertex
+//     };
+//     std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map; ///< face refs => touching vertex lists, rays...
+//     with_ct_dim( [&]( auto td ) {
+//         if constexpr ( td >= 1 ) {
+//             for_each_ray_and_edge( [&]( auto &&ray_refs, auto starting_vertex ) {
+//                 for( PI i = 0; i < nb_dims - 1; ++i ) {
+//                     Vec<PI32,nb_dims-2> face_cuts = ray_refs.without_index( i );
+//                     auto &fi = face_map[ face_cuts ];
+//                     fi.start = starting_vertex;
+//                     fi.rays << ray_refs;
+//                 }
+//             }, [&]( auto &&edge_refs, auto &&vertices ) { 
+//                 // for each connected face
+//                 for( PI i = 0; i < nb_dims - 1; ++i ) {
+//                     Vec<PI32,nb_dims-2> face_cuts = edge_refs.without_index( i );
+//                     auto &fi = face_map[ face_cuts ];
 
-    TODO;
+//                     // store connected vertices
+//                     fi.siblings.resize( _vertex_coords.size() );
+//                     fi.siblings[ vertices[ 0 ] ] << vertices[ 1 ];
+//                     fi.siblings[ vertices[ 1 ] ] << vertices[ 0 ];
+//                     fi.start = vertices[ 0 ];
+//                 }
+//             }, td );
+//         }
+//     } );
 
-    // struct FaceInfo { 
-    //     Vec<SmallVec<PI,2>> siblings; ///< touching vertices (for each vertex)
-    //     PI start; ///< a first vertex
-    // };
-    // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map; ///< face refs => touching vertex lists
+//     // for each face
+//     Vec<PI32> vs;
+//     auto find_threads_in = [&]( const Vec<PI32,nb_dims-2> &face_refs, FaceInfo &fi ) {
+//         P( face_refs, _true_dimensionality, nb_dims );
 
-    // for_each_ray_and_edge( []( const Vec<LI,nb_dims-1> &ray_refs, LI vertex ) {
-    //     // nothing to do for rays
-    // }, [&]( const Vec<LI,nb_dims-1> &edge_refs, Span<LI,2> vertices ) {
-    //     // for each connected face
-    //     for( PI i = 0; i < nb_dims - 1; ++i ) {
-    //         Vec<PI32,nb_dims-2> face_cuts = edge_refs.without_index( i );
-    //         auto &fi = face_map[ face_cuts ];
+//         // no cut
+//         if ( _true_dimensionality < nb_dims - 1 ) {
+//             func( face_refs, /*vertices*/Vec<LI,0>{}, /*ray refs*/ Vec<Vec<LI,nb_dims-1>,0>{} );
+//             return;
+//         }
 
-    //         // store connected vertices
-    //         fi.siblings.resize( _vertex_coords.size() );
-    //         fi.siblings[ vertices[ 0 ] ] << vertices[ 1 ];
-    //         fi.siblings[ vertices[ 1 ] ] << vertices[ 0 ];
-    //         fi.start = vertices[ 0 ];
-    //     }
-    // }, nb_dims );
+//         // cut(s) in 1 direction
+//         if ( _true_dimensionality == nb_dims - 1 ) {
+//             for( LI i = 0; i < _vertex_refs.size(); ++i )
+//                 func( face_refs, /*vertices*/Vec<LI,1>{ i }, /*ray refs*/ Vec<Vec<LI,nb_dims-1>,1>{ Vec<LI,nb_dims-1>( _vertex_refs[ i ] ) } );
+//             return;
+//         }
 
-    // // for each face
-    // Vec<PI32> vs;
-    // for( const auto &p: face_map ) {
-    //     const Vec<PI32,nb_dims-2> &face_cuts = p.first;
-    //     const FaceInfo &fi = p.second;
+//         // only 1 vertex (=> 2 rays attached to 1 single vertex)
+//         if ( fi.siblings[ fi.start ].size() == 0 ) {
+//             func( face_refs, /*vertices*/Vec<LI,1>{ fi.start }, /*ray refs*/ fi.rays );
+//             return;
+//         }
 
-    //     // get the loop
-    //     vs.clear();
-    //     for( PI n = fi.start, j = 0; ; ++j ) {
-    //         vs << n;
+//         // else, get the thread
+//         vs.clear();
+//         for( PI n = fi.start; ; ) {
+//             vs << n;
 
-    //         const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
-    //         n = fi.siblings[ n ][ s ];
+//             // if we're on a ray
+//             if ( fi.siblings[ n ].size() == 1 ) {
+//                 // if the proposed sibling has already been seen, it means that we encountered the first ray and we have to go to the other side
+//                 if ( vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ] ) {
+//                     std::reverse( vs.begin(), vs.end() );
+//                     break;
+//                 }
 
-    //         if ( n == fi.start )
-    //             break;
+//                 // else, we can go toward this vertex
+//                 n = fi.siblings[ n ][ 0 ];
+//             } else {
+//                 // do not go back
+//                 const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+//                 n = fi.siblings[ n ][ s ];
 
-    //         // TODO: optimize
-    //         if ( vs.contains( n ) ) {
-    //             vs.clear();
-    //             break;
-    //         }
-    //     }
+//                 // if we're again in the first vertex, we're on a closed loop
+//                 if ( n == fi.start ) {
+//                     func( face_refs, /*vertices*/vs, /*ray refs*/ Vec<Vec<LI,nb_dims-1>,0>{} );
+//                     assert( fi.rays.empty() );
+//                     return;
+//                 }
+//             }
+//         }
 
-    //     // call f
-    //     if ( vs.size() )
-    //         func( face_cuts, vs );
-    // }
-    // with_ct_dim( [&]( auto td ) {
-    //     // no cut
-    //     if ( td == 0 ) {
-    //         return;
-    //     }
+//         // => find the other side with the other ray (not a loop)
+//         for( PI n = fi.start; ; ) {
+//             // found the second ray ?
+//             if ( fi.siblings[ n ].size() == 1 ) {
+//                 // check te ordering
+//                 if ( vs.size() > 1 ) {
+//                     LI nb_common_values = 0;
+//                     for( LI nv = 0, nr = 0; ; ) {
+//                         if ( _vertex_refs[ vs[ 0 ] ][ nv ] == fi.rays[ 0 ][ nr ] ) {
+//                             ++nb_common_values;
+//                             if ( ++nv >= nb_dims || ++nr >= nb_dims - 1 )
+//                                 break;
+//                         } else if ( _vertex_refs[ vs[ 0 ] ][ nv ] < fi.rays[ 0 ][ nr ] ) {
+//                             if ( ++nv >= nb_dims )
+//                                 break;
+//                         } else {
+//                             if ( ++nr >= nb_dims - 1 )
+//                                 break;
+//                         }
+//                     }
+//                     if ( nb_common_values != nb_dims - 1 )
+//                         std::swap( fi.rays[ 0 ], fi.rays[ 1 ] );
+//                 }
+//                 func( face_refs, /*vertices*/vs, /*ray refs*/ fi.rays );
+//                 return;
+//             }
 
-    //     // single cut
-    //     if ( td == 1 ) {
-    //         for( const auto &refs : _vertex_refs )
-    //             on_free( refs.slice( CtInt<0>(), CtInt<nb_dims-2>() ) );
-    //         return;
-    //     }
+//             // else, go "forward"
+//             const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+//             n = fi.siblings[ n ][ s ];
+//             vs << n;
+//         }
+//     };
 
-    //     //
-    //     // struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
-    //     // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
+//     // for each face
+//     for( auto &p: face_map )
+//         find_threads_in( p.first, p.second );
+//     // // for each face
+//     // Vec<PI32> vs;
+//     // for( const auto &p: face_map ) {
+//     //     const Vec<PI32,nb_dims-2> &face_cuts = p.first;
+//     //     const FaceInfo &fi = p.second;
+
+//     //     // get the loop
+//     //     vs.clear();
+//     //     for( PI n = fi.start, j = 0; ; ++j ) {
+//     //         vs << n;
+
+//     //         const PI s = vs.size() > 1 && vs[ vs.size() - 2 ] == fi.siblings[ n ][ 0 ];
+//     //         n = fi.siblings[ n ][ s ];
+
+//     //         if ( n == fi.start )
+//     //             break;
+
+//     //         // TODO: optimize
+//     //         if ( vs.contains( n ) ) {
+//     //             vs.clear();
+//     //             break;
+//     //         }
+//     //     }
+
+//     //     // call f
+//     //     if ( vs.size() )
+//     //         func( face_cuts, vs );
+//     // }
+//     // with_ct_dim( [&]( auto td ) {
+//     //     // no cut
+//     //     if ( td == 0 ) {
+//     //         return;
+//     //     }
+
+//     //     // single cut
+//     //     if ( td == 1 ) {
+//     //         for( const auto &refs : _vertex_refs )
+//     //             on_free( refs.slice( CtInt<0>(), CtInt<nb_dims-2>() ) );
+//     //         return;
+//     //     }
+
+//     //     //
+//     //     // struct FaceInfo { Vec<SmallVec<PI,2>> siblings; PI start; };
+//     //     // std::map<Vec<PI32,nb_dims-2>,FaceInfo,Less> face_map;
 
 
-    //     // for_each_ray_and_edge( []( const Vec<LI,td-1> &ray_refs, LI vertex ) {
+//     //     // for_each_ray_and_edge( []( const Vec<LI,td-1> &ray_refs, LI vertex ) {
 
-    //     // }, [&]( const Vec<LI,td-1> &edge_refs, Span<LI,2> vertices ) {
+//     //     // }, [&]( const Vec<LI,td-1> &edge_refs, Span<LI,2> vertices ) {
 
-    //     // } );
-    // } );
+//     //     // } );
+//     // } );
 
-    // // sibling for each vertex (index in `vertices`), for each face
-    // for_each_ray_and_edge( []( auto&&, auto&& ) {}, [&]( const Vec<PI32,nb_dims-1> &edge_cuts, Span<PI32,2> vs ) {
-    //     // for each connected face
-    //     for( PI i = 0; i < nb_dims - 1; ++i ) {
-    //         Vec<PI32,nb_dims-2> face_cuts = edge_cuts.without_index( i );
-    //         auto &fi = face_map[ face_cuts ];
+//     // // sibling for each vertex (index in `vertices`), for each face
+//     // for_each_ray_and_edge( []( auto&&, auto&& ) {}, [&]( const Vec<PI32,nb_dims-1> &edge_cuts, Span<PI32,2> vs ) {
+//     //     // for each connected face
+//     //     for( PI i = 0; i < nb_dims - 1; ++i ) {
+//     //         Vec<PI32,nb_dims-2> face_cuts = edge_cuts.without_index( i );
+//     //         auto &fi = face_map[ face_cuts ];
 
-    //         // store connected vertices
-    //         fi.siblings.resize( nb_vertices() );
-    //         fi.siblings[ vs[ 0 ] ] << vs[ 1 ];
-    //         fi.siblings[ vs[ 1 ] ] << vs[ 0 ];
-    //         fi.start = vs[ 0 ];
-    //     }
-    // } );
-}
+//     //         // store connected vertices
+//     //         fi.siblings.resize( nb_vertices() );
+//     //         fi.siblings[ vs[ 0 ] ] << vs[ 1 ];
+//     //         fi.siblings[ vs[ 1 ] ] << vs[ 0 ];
+//     //         fi.start = vs[ 0 ];
+//     //     }
+//     // } );
+// }
 
-DTP void UTP::for_each_closed_face( auto &&func ) const {
-    for_each_face( [&]( const auto &face_refs, const auto &vertices, const auto &ray_refs ) {
-        if ( vertices.size() && ray_refs.size() == 0 )
-            func( face_refs, vertices );
-    } );
-}
+// DTP void UTP::for_each_closed_face( auto &&func ) const {
+//     for_each_face( [&]( const auto &face_refs, const auto &vertices, const auto &ray_refs ) {
+//         if ( vertices.size() && ray_refs.size() == 0 )
+//             func( face_refs, vertices );
+//     } );
+// }
 
 DTP void UTP::for_each_vertex_coord( auto &&func, auto td ) const {
     if ( td != _true_dimensionality )

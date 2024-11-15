@@ -10,3 +10,7 @@ moment, integral xi, xj, ...
 * illustration pour périodique
 
 -> radial function
+À quoi sert for_each_face ?
+  Pour l'instant, pour la visu
+
+Pour la visu, on pourrait peut être se contenter de travailler sur 

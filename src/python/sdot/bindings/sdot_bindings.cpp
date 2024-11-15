@@ -321,13 +321,13 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             } );
         } )
         .def( "bounded", &TCell::bounded )
-        .def( "closed_faces", []( const TCell &cell ) {
-            std::vector<std::vector<PI>> faces;
-            cell.for_each_closed_face( [&]( auto &&refs, auto &&vertices ) {
-                faces.push_back( { vertices.begin(), vertices.end() } );
-            } );
-            return faces;
-        } )
+        // .def( "closed_faces", []( const TCell &cell ) {
+        //     std::vector<std::vector<PI>> faces;
+        //     cell.for_each_closed_face( [&]( auto &&refs, auto &&vertices ) {
+        //         faces.push_back( { vertices.begin(), vertices.end() } );
+        //     } );
+        //     return faces;
+        // } )
         .def( "empty", &TCell::empty )
         .def( "ndim", []( const TCell &cell ) { return nb_dims; } )
         .def( "base", []( TCell &cell ) { return Array_from_VecPt( cell.base() ); } )
@@ -383,14 +383,31 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             return Array_from_VecPt( refs );
         } )
 
-        .def( "for_each_face", []( const TCell &cell, const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices, const std::vector<std::vector<TCell::LI>> &ray_refs )> &func ) {
-            cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices, const auto &ray_refs ) {
-                std::vector<std::vector<TCell::LI>> a_ray_refs;
-                for( const auto &r : ray_refs )
-                    a_ray_refs.push_back( { r.begin(), r.end() } );
-                func( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() }, a_ray_refs );
-            } );
+        .def( "for_each_edge", []( const TCell &cell, const std::function<void( const std::vector<TCell::LI> &refs, const std::vector<TCell::LI> &vertices )> &func, bool allow_true_dim ) {
+            auto edge_func = [&]( const auto &cut_refs, const auto &vertices ) {
+                func( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() } );
+            };
+            auto ray_func = [&]( const auto &cut_refs, auto vertex ) {
+                func( { cut_refs.begin(), cut_refs.end() }, { vertex } );
+            };
+
+            if ( allow_true_dim ) {
+                return cell.with_ct_dim( [&]( auto td ) {
+                    if constexpr( td >= 1 )
+                        cell.for_each_ray_and_edge( ray_func, edge_func, td );
+                } );
+            }
+            cell.for_each_ray_and_edge( ray_func, edge_func );
         } )
+
+        // .def( "for_each_face", []( const TCell &cell, const std::function<void( const std::vector<PI> &cut_refs, const std::vector<TCell::LI> &vertices, const std::vector<std::vector<TCell::LI>> &ray_refs )> &func ) {
+        //     cell.for_each_face( [&]( const auto &cut_refs, const auto &vertices, const auto &ray_refs ) {
+        //         std::vector<std::vector<TCell::LI>> a_ray_refs;
+        //         for( const auto &r : ray_refs )
+        //             a_ray_refs.push_back( { r.begin(), r.end() } );
+        //         func( { cut_refs.begin(), cut_refs.end() }, { vertices.begin(), vertices.end() }, a_ray_refs );
+        //     } );
+        // } )
 
         // // output
         .def( "display_vtk", []( const TCell &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
