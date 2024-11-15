@@ -14,6 +14,5 @@ class VtkOutput:
         self._inst = self._module.VtkOutput()
 
 
-
     def save( self, filename ):
         self._inst.save( filename )

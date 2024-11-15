@@ -6,11 +6,11 @@ from .space_subsets.UnitBox import UnitBox
 
 from .bindings.loader import set_auto_rebuild
 
-# from .D2GTransportMap import D2GTransportMap
-# from .G2DTransportMap import G2DTransportMap
-# from .SdTransportPlan import SdTransportPlan
-# from .ot_plan import ot_plan
+from .optimal_transport_plan import optimal_transport_plan
 
+from .D2GTransportMap import D2GTransportMap
+from .G2DTransportMap import G2DTransportMap
+from .SdTransportPlan import SdTransportPlan
 
 from .PowerDiagram import PowerDiagram
 from .VtkOutput import VtkOutput

@@ -943,6 +943,10 @@ DTP void UTP::_bounded_cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
 }
 
 DTP void UTP::display_vtk( VtkOutput &vo ) const {
+    //
+
+
+    //
     TODO;
 }
 

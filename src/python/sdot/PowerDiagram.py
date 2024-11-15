@@ -279,15 +279,30 @@ class PowerDiagram:
 
         return res
 
+    def plot_pyplot( self, fig, **kwargs ):
+        """  
+            For optional arguments, see the `Cell.plot` method
+        """
+        if fig is None:
+            import matplotlib.pyplot as plt
+            self.plot( plt )
+            plt.show()
+            return
+
+        self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
+        return fig
+
     def plot_vtk( self, vtk_output ):
         if isinstance( vtk_output, str ):
             vo = VtkOutput()
-            self.plot_vtk( vtk_output )
+            self.plot_vtk( vo )
             vo.save( vtk_output )
             return 
         
         assert isinstance( vtk_output, VtkOutput )
-        return self._binding_module.plot_vtk( vtk_output, self._acceleration_structure, self._base_cell._cell )
+
+        self._update_internal_attributes()
+        self._binding_module.plot_vtk( vtk_output._inst, self._acceleration_structure, self._base_cell._cell )
 
     def plot( self, fig = None, **kwargs ):
         """  
@@ -297,18 +312,18 @@ class PowerDiagram:
 
             For optional arguments, see the `Cell.plot` method
         """
-        if fig is None:
-            import matplotlib.pyplot as plt
-            self.plot( plt )
-            plt.show()
-            return
+        # if fig is None:
+        #     import matplotlib.pyplot as plt
+        #     self.plot( plt )
+        #     plt.show()
+        #     return
 
         if isinstance( fig, str ):
-            if str.endswith( ".vtk" ):
+            if fig.endswith( ".vtk" ):
                 return self.plot_vtk( fig, **kwargs )
             raise ValueError( "Unhandled file type" )
 
-        self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
+        return self.plot_pyplot( fig )
 
     def _update_internal_attributes( self ):
         """ 

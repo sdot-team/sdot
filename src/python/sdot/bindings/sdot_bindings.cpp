@@ -248,7 +248,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         ;
 
     // utility functions ============================================================================
-    m.def( "display_vtk", []( VtkOutput &vo, AccelerationStructure<TCell> &as, const TCell &base_cell ) {
+    m.def( "plot_vtk", []( VtkOutput &vo, AccelerationStructure<TCell> &as, const TCell &base_cell ) {
         std::mutex m;
         as.for_each_cell( base_cell, [&]( TCell &cell, int ) { 
             m.lock();

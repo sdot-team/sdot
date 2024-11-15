@@ -10,7 +10,7 @@
 using namespace sdot;
 
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
-    pybind11::class_<VtkOutput>( m, PD_STR( VtkOutput ) )
+    pybind11::class_<VtkOutput>( m, "VtkOutput" )
         .def( pybind11::init<>() )
         .def( "save", []( VtkOutput &self, Str filename ) { self.save( filename ); } )
         ;

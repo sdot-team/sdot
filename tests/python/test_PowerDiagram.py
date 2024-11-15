@@ -4,7 +4,8 @@ import numpy as np
 
 pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 pd.periodicity_transformations = [[1,0],[0,1]]
-pd.plot()
+
+pd.plot( "yo.vtk" )
 
 # def test_PowerDiagram():
 #     # pd = PowerDiagram( positions = [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] )
