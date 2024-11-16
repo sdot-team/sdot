@@ -20,7 +20,7 @@ struct DiracVecHash {
 template<int dim,class nb_dims_> struct RefMapForDim {
     static constexpr int nb_dims = nb_dims_::value;
 
-    RefMapForDim( PI nb_refs ) : map( nb_refs, DiracVecHash( nb_refs ) ) {
+    RefMapForDim( PI nb_diracs, PI nb_bnds ) : map( nb_diracs + nb_bnds, DiracVecHash( nb_diracs + nb_bnds ) ) {
     }
 
     PI find( const Vec<PI,dim+1> vr, auto &&on_new_item ) {
@@ -47,9 +47,9 @@ template<int dim,class nb_dims_> struct RefMapForDim {
 template<class nb_dims_> struct RefMapForDim<0,nb_dims_> {
     static constexpr int nb_dims = nb_dims_::value;
 
-    RefMapForDim( PI nb_refs ) : seen( FromSizeAndItemValue(), nb_refs, false ) {
+    RefMapForDim( PI nb_diracs, PI nb_bnds ) : seen( FromSizeAndItemValue(), nb_diracs, false ) {
         for( Vec<Vec<PI>> &p : parenting )
-            p.resize( nb_refs );
+            p.resize( nb_diracs );
     }
 
     PI find( const Vec<PI,1> vr, auto &&on_new_item ) {

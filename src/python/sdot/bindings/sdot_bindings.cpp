@@ -335,7 +335,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         // Vec<SmallVec<PI,2>> internal_cut_cells( FromSize(), nb_diracs );
         Vec<Pt> vertex_coords( FromReservationSize(), nb_diracs );
         using RefMap = RangeOfClasses<RefMapForDim,0,nb_dims+1,CtInt<nb_dims>>;
-        RefMap ref_map( nb_diracs + nb_boundaries ); 
+        RefMap ref_map( nb_diracs, nb_boundaries ); 
         std::mutex mutex;
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
             cell.remove_inactive_cuts();
