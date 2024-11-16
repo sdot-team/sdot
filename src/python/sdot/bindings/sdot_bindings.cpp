@@ -345,15 +345,13 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             std::vector<PI> cell_summary;
             for( PI n = 0; n < cell.nb_vertices(); ++n ) {
                 // make a ref list (from the cut indices and cell.info)
-                Vec<PI,nb_dims+1> refs;
+                Vec<PI,nb_dims> refs;
                 auto cuts = cell.vertex_refs( n );
                 for( PI d = 0; d < nb_dims; ++d )
                     refs[ d ] = cell.cut_index( cuts[ d ], 0, nb_diracs );
-                refs[ nb_dims ] = cell.info.i0;
-                std::sort( refs.begin(), refs.end() );
 
                 // get refs and parenting for each vertex and sub-item
-                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, CtInt<nb_dims>(), Vec<PI,0>(), refs );
+                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, CtInt<nb_dims>(), Vec<PI,0>(), refs, cell.info.i0 );
             }
 
             mutex.unlock();

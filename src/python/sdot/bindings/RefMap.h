@@ -68,32 +68,30 @@ template<class nb_dims_> struct RefMapForDim<0,nb_dims_> {
 };
 
 template<int d,int nb_dims>
-void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref_map, CtInt<nb_dims> nd, const auto &children_indices, Vec<PI,d> refs ) {
-    if constexpr ( d ) {
-        // item refs => indices
-        auto &rm = ref_map[ refs.size() ];
+void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref_map, CtInt<nb_dims> nd, const auto &children_indices, Vec<PI,d> lefs, PI i0 ) {
+    Vec<PI,d+1> refs = lefs.with_pushed_value( i0 );
+    std::sort( refs.begin(), refs.end() );
 
-        // get index
-        PI ind = rm.find( refs, /*on new item*/ [&]( PI new_ind ) {
-            // if on a vertex, add the coordinates 
-            if ( d == nb_dims )
-                vertex_coords << vertex_coord;
+    // item refs => indices
+    auto &rm = ref_map[ lefs.size() ];
 
-            // register new parenting vectors
-            rm.on_new_ref();
-        } );
+    // get index
+    PI ind = rm.find( refs, /*on new item*/ [&]( PI new_ind ) {
+        // if on a vertex, add the coordinates 
+        if ( d == nb_dims )
+            vertex_coords << vertex_coord;
 
-        //
-        for( PI e = 0; e < children_indices.size(); ++e ) {
-            // if ( ! rm.parenting[ e ][ ind ].contains( children_indices[ e ] ) )
-            //     rm.parenting[ e ][ ind ] << children_indices[ e ];
-            rm.parenting[ e ][ ind ].push_back_unique( children_indices[ e ] );
-        }
+        // register new parenting vectors
+        rm.on_new_ref();
+    } );
 
-        // recursion
-        auto new_children_indices = children_indices.with_pushed_value( ind );
-        CtRange<0,d>::for_each_item( [&]( auto i ) {
-            get_rec_item_data( vertex_coords, vertex_coord, ref_map, nd, new_children_indices, lefs.without_index( i ), i0 );
-        } );
-    }
+    //
+    for( PI e = 0; e < children_indices.size(); ++e )
+        rm.parenting[ e ][ ind ].push_back_unique( children_indices[ e ] );
+
+    // recursion
+    auto new_children_indices = children_indices.with_pushed_value( ind );
+    CtRange<0,d>::for_each_item( [&]( auto i ) {
+        get_rec_item_data( vertex_coords, vertex_coord, ref_map, nd, new_children_indices, lefs.without_index( i ), i0 );
+    } );
 }
