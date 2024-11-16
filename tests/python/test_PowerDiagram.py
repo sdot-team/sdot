@@ -7,7 +7,8 @@ pd.add_box_boundaries( 0, 1 )
 
 s = pd.summary()
 # print( s.vertex_coords )
-# print( s.ref_lists )
+print( s.ref_lists[ 0 ] )
+print( s.ref_lists[ 1 ] )
 for r in range( 3 ):
     for c in range( 3 ):
         print( r, c )

@@ -3,6 +3,7 @@
 #include <tl/support/containers/Vec.h>
 #include <tl/support/compare.h>
 #include <unordered_map>
+#include <algorithm>
 
 struct DiracVecHash { 
     PI operator()( const auto &vr ) const {
@@ -22,7 +23,7 @@ template<int dim,class nb_dims_> struct RefMapForDim {
     RefMapForDim( PI nb_refs ) : map( nb_refs, DiracVecHash( nb_refs ) ) {
     }
 
-    PI find( const Vec<PI,dim> vr, auto &&on_new_item ) {
+    PI find( const Vec<PI,dim+1> vr, auto &&on_new_item ) {
         auto iter = map.find( vr );
         if ( iter == map.end() ) {
             iter = map.insert( iter, { vr, refs.size() } );
@@ -38,12 +39,12 @@ template<int dim,class nb_dims_> struct RefMapForDim {
             p.push_back();
     }
 
-    std::unordered_map<Vec<PI,dim>,PI,DiracVecHash,Equal> map;
+    std::unordered_map<Vec<PI,dim+1>,PI,DiracVecHash,Equal> map;
     Vec<Vec<Vec<PI>>,nb_dims+1> parenting; ///< [ parent dim ][ num_item ] => [ parent items ]
-    Vec<Vec<PI,dim>> refs;
+    Vec<Vec<PI,dim+1>> refs;
 };
 
-template<class nb_dims_> struct RefMapForDim<1,nb_dims_> {
+template<class nb_dims_> struct RefMapForDim<0,nb_dims_> {
     static constexpr int nb_dims = nb_dims_::value;
 
     RefMapForDim( PI nb_refs ) : seen( FromSizeAndItemValue(), nb_refs, false ) {
@@ -52,11 +53,11 @@ template<class nb_dims_> struct RefMapForDim<1,nb_dims_> {
     }
 
     PI find( const Vec<PI,1> vr, auto &&on_new_item ) {
-        if ( seen[ vr[ 1 ] ] == false ) {
-            seen[ vr[ 1 ] ] = true;
-            on_new_item( vr[ 1 ] );
+        if ( seen[ vr[ 0 ] ] == false ) {
+            seen[ vr[ 0 ] ] = true;
+            on_new_item( vr[ 0 ] );
         }
-        return vr[ 1 ];
+        return vr[ 0 ];
     }
 
     void on_new_ref() {
@@ -67,27 +68,32 @@ template<class nb_dims_> struct RefMapForDim<1,nb_dims_> {
 };
 
 template<int d,int nb_dims>
-void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref_map, Vec<PI,d> refs, CtInt<nb_dims>, const auto &children_indices ) {
+void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref_map, CtInt<nb_dims> nd, const auto &children_indices, Vec<PI,d> refs ) {
     if constexpr ( d ) {
+        // item refs => indices
         auto &rm = ref_map[ refs.size() ];
 
-        // if this item has not yet been seen
+        // get index
         PI ind = rm.find( refs, /*on new item*/ [&]( PI new_ind ) {
             // if on a vertex, add the coordinates 
-            if ( d == nb_dims + 1 )
+            if ( d == nb_dims )
                 vertex_coords << vertex_coord;
 
             // register new parenting vectors
             rm.on_new_ref();
-
-            // recursion
-            for( PI i = 0; i < d; ++i )
-                get_rec_item_data( vertex_coords, vertex_coord, ref_map, refs.without_index( i ), CtInt<nb_dims>(), children_indices.with_pushed_value( new_ind ) );
         } );
 
         //
         for( PI e = 0; e < children_indices.size(); ++e ) {
-            rm.parenting[ e ][ ind ] << children_indices[ e ];
+            // if ( ! rm.parenting[ e ][ ind ].contains( children_indices[ e ] ) )
+            //     rm.parenting[ e ][ ind ] << children_indices[ e ];
+            rm.parenting[ e ][ ind ].push_back_unique( children_indices[ e ] );
         }
+
+        // recursion
+        auto new_children_indices = children_indices.with_pushed_value( ind );
+        CtRange<0,d>::for_each_item( [&]( auto i ) {
+            get_rec_item_data( vertex_coords, vertex_coord, ref_map, nd, new_children_indices, lefs.without_index( i ), i0 );
+        } );
     }
 }

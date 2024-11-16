@@ -334,7 +334,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         //
         // Vec<SmallVec<PI,2>> internal_cut_cells( FromSize(), nb_diracs );
         Vec<Pt> vertex_coords( FromReservationSize(), nb_diracs );
-        using RefMap = RangeOfClasses<RefMapForDim,1,nb_dims+2,CtInt<nb_dims>>;
+        using RefMap = RangeOfClasses<RefMapForDim,0,nb_dims+1,CtInt<nb_dims>>;
         RefMap ref_map( nb_diracs + nb_boundaries ); 
         std::mutex mutex;
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
@@ -353,7 +353,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 std::sort( refs.begin(), refs.end() );
 
                 // get refs and parenting for each vertex and sub-item
-                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, refs, CtInt<nb_dims>(), Vec<PI,0>() );
+                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, CtInt<nb_dims>(), Vec<PI,0>(), refs );
             }
 
             mutex.unlock();
@@ -361,15 +361,15 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         // => ref_lists  
         std::vector<Array_PI> ref_lists( nb_dims );
-        CtRange<2,nb_dims+2>::for_each_item( [&]( auto d ) {
-            ref_lists[ nb_dims + 1 - d ] = Array_from_VecPt( ref_map[ d ].refs );
+        CtRange<1,nb_dims+1>::for_each_item( [&]( auto d ) {
+            ref_lists[ nb_dims - d ] = Array_from_VecPt( ref_map[ d ].refs );
         } );
 
         // => parenting
         std::vector<std::vector<std::vector<std::vector<PI>>>> parenting( nb_dims + 1 );
         CtRange<0,nb_dims+1>::for_each_item( [&]( auto r ) {
+            auto &lp = ref_map[ CtInt<nb_dims - r>() ];
             parenting[ r ].resize( nb_dims + 1 );
-            auto &lp = ref_map[ CtInt<nb_dims + 1 - r>() ];
             CtRange<0,nb_dims+1>::for_each_item( [&]( auto c ) {
                 for( const auto &p : lp.parenting[ c ] )
                     parenting[ r ][ c ].push_back( std::vector<PI>( p.begin(), p.end() ) );
