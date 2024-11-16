@@ -1,5 +1,6 @@
 from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, module_for
 from .distributions.normalized_distribution import normalized_distribution
+from .PowerDiagramSummary import PowerDiagramSummary
 from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec
 from .Cell import Cell
@@ -263,23 +264,14 @@ class PowerDiagram:
         return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
 
     def summary( self ):
-        """ return an object with arrays with global information to summarize the power diagram.
-            * vertex_coords...
+        """ return a PowerDiagramSummary with arrays that contain global information to summarize the power diagram (coords, parenting, ...).
         """
         if not self._update_internal_attributes():
-            raise ValueError( "TODO" )
+            raise ValueError( "missing some attribute to be able to make a summary" )
 
-        res = Munch()
-
-        # for each cell
+        # TODO: PowerDiagram in sub-spaces
         s = self._binding_module.summary( self._acceleration_structure, self._base_cell._cell )
-        res[ 'vertex_coords' ] = s[ 0 ]
-        res[ 'vertex_refs' ] = s[ 1 ]
-        res[ 'cells' ] = s[ 2 ]
-        res[ 'seed_cut_to_cell_index' ] = s[ 3 ]
-        res[ 'vertex_to_cell_index'] = s[ 4 ]
-
-        return res
+        return PowerDiagramSummary( *s, np.eye( self.ndim ) )
 
     def plot_pyplot( self, fig, **kwargs ):
         """  

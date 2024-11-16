@@ -7,10 +7,8 @@ pd.add_box_boundaries( 0, 1 )
 
 s = pd.summary()
 print( s.vertex_coords )
-print( s.vertex_refs )
-print( s.cells )
-print( s.seed_cut_to_cell_index )
-print( s.vertex_to_cell_index )
+for rl in s.ref_lists:
+    print( "d", rl )
 
 pd.plot()
 

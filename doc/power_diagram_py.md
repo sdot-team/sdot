@@ -61,7 +61,7 @@ This example should give something like:
 
 ## Periodicity
 
-Periodicity is handled in sdot by virtual seed affine transformations. Everytime a user add a transformation `T` (internally represented as a matrix), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
+Periodicity is handled in sdot by virtual seed affine transformations. Everytime a user adds a transformation `T` (internally represented as a (nd+1)² matrix), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
 
 In this example, we add periodicity along the `y` axis:
 
@@ -90,7 +90,7 @@ pd.plot()
 
 For large number of cells or complex 3D visualization, it is possible to generate files that can be read by softwares likes paraview...
 
-Currently, only `.vtk` files are supported, but more are planed.
+Currently, only `.vtk` files are supported, but more are planed (via `PyVista`).
 
 ```python
 from sdot import PowerDiagram, VtkOutput
@@ -187,7 +187,7 @@ s = pd.summary()
 
 # s.vertex_refs => cell or boundary indices for each vertex
 #  if index <  len( s.cells ), index = cell_index
-#  if index >= len( s.cells ), index = len( s.cells ) + boundary_index
+#  if index >= len( s.cells ), index = s.nb_cells + boundary_index
 [[0 2 4]
  [0 1 5]
  [0 2 5]
@@ -195,11 +195,11 @@ s = pd.summary()
  [1 3 4]
  [1 3 5]]
 
-# s.cells => vertex indices (position in s.vertex_coords and s.vertex_refs) for each cell
+# s.cell_vertices => vertex indices (position in s.vertex_coords and s.vertex_refs) for each cell
 [[0, 1, 2, 3]
  [1, 4, 3, 5]]
 
-# s.seed_cuts => pair of cells for each cut between seeds
+# s.iinternal_cut_to_cells => sorted pair of cell indices for each internal cut (i.e. not for boundary cuts)
 [[0 1]
  [0 1]]
 
