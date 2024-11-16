@@ -12,7 +12,7 @@ def pdir( dir, n = 1 ):
 def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
     # build directory
     cwd = os.getcwd()
-    bad = pdir( cwd, 2 )
+    bad = pdir( cwd, 3 )
 
     VariantDir( 'build', bad )
 

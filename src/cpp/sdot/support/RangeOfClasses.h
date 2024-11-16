@@ -5,11 +5,11 @@
 
 /*
 */
-template<template<int> typename CT,int beg,int end,typename...additionna_targs>
+template<template<int,typename...> typename CT,int beg,int end,typename...additionna_targs>
 class RangeOfClasses {
 public:
     using     Tail          = RangeOfClasses<CT,beg+1,end,additionna_targs...>;
-    using     Head          = CT<beg>;
+    using     Head          = CT<beg,additionna_targs...>;
 
     /**/      RangeOfClasses( const auto &...args ) : head( args... ), tail( args... ) {}
 
@@ -22,7 +22,7 @@ public:
     Tail      tail;
 };
 
-template<template<int> typename CT,int end,typename...additionna_targs>
+template<template<int,typename...> typename CT,int end,typename...additionna_targs>
 class RangeOfClasses<CT,end,end,additionna_targs...> {
 public:
     /**/      RangeOfClasses( const auto &...args ) {}

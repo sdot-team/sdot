@@ -66,13 +66,13 @@ def type_promote( dtypes ):
     return res
 
 
-def get_build_dir( suffix ):
+def get_build_dir( name, suffix ):
     """
       find a directory to copy .cpp/.h and store .so/.dylib/... files
     """
     
     # try one in the sources (check the write access)
-    res = Path( __file__ ).parent / 'variants' / suffix
+    res = Path( __file__ ).parent / 'variants' / name / suffix
     if os.access( res, os.W_OK ):
         return res 
     
@@ -109,7 +109,7 @@ def module_for( name, use_arch = False, **kwargs ):
         return loader_cache[ module_name ]
 
     # where to find/put the files
-    build_dir = get_build_dir( suffix )
+    build_dir = get_build_dir( name, suffix )
     if build_dir not in sys.path:
         sys.path.insert( 0, str( build_dir ) )
 

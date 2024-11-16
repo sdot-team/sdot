@@ -6,8 +6,13 @@ pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
 pd.add_box_boundaries( 0, 1 )
 
 s = pd.summary()
-print( s.vertex_coords )
-print( s.ref_lists )
+# print( s.vertex_coords )
+# print( s.ref_lists )
+for r in range( 3 ):
+    for c in range( 3 ):
+        print( r, c )
+        for l in s.parenting[ r ][ c ]:
+            print( "  ", l )
 
 pd.plot()
 

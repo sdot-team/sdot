@@ -11,12 +11,14 @@
 
 #include <sdot/support/VtkOutput.h>
 
+
 #include <sdot/poom/PoomVec.h>
 
 #include <sdot/Cell.h>
 
 #include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
+#include <tl/support/ERROR.h>
  
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -332,8 +334,8 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         //
         // Vec<SmallVec<PI,2>> internal_cut_cells( FromSize(), nb_diracs );
         Vec<Pt> vertex_coords( FromReservationSize(), nb_diracs );
-        using RefMap = RangeOfClasses<RefMapForDim,1,nb_dims+2>;
-        RefMap ref_map( nb_diracs );
+        using RefMap = RangeOfClasses<RefMapForDim,1,nb_dims+2,CtInt<nb_dims>>;
+        RefMap ref_map( nb_diracs + nb_boundaries ); 
         std::mutex mutex;
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
             cell.remove_inactive_cuts();
@@ -350,61 +352,34 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 refs[ nb_dims ] = cell.info.i0;
                 std::sort( refs.begin(), refs.end() );
 
-                // get an index for each item
-                for_each_subvec( refs, [&]( auto sv ) {
-                    auto &rm = ref_map[ sv.size() ];
-                    PI ind = rm.index( sv, [&]() {
-                        // store coordinate if on a vertex
-                        if ( sv.size() == nb_dims + 1 )
-                            vertex_coords << cell.vertex_coord( n );
-                    } );
-
-
-                } );
+                // get refs and parenting for each vertex and sub-item
+                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, refs, CtInt<nb_dims>(), Vec<PI,0>() );
             }
-
-            // cell.for_each_cut( [&]( const auto &info, auto &&dir, auto &&off ) {
-            //     if ( info.type == CutType::Dirac ) {
-            //         Cv cv{ cell.info.i0, info.i1 };
-            //         if ( cv[ 0 ] > cv[ 1 ] )
-            //             std::swap( cv[ 0 ], cv[ 1 ] );
-
-            //         // find the internal cut id
-            //         auto iter_cv = cut_map.find( cv );
-            //         if ( iter_cv == cut_map.end() ) {
-            //             iter_cv = cut_map.insert( iter_cv, { cv, cuts.size() } );
-            //             cuts << cv;
-            //         }
-
-            //         internal_cut_cells[ iter_cv->second ] << cell.info.i0;
-            //     }
-            // }, CtInt<nb_dims>() );
-
-            // cell_vertices[ cell.info.i0 ] = std::move( cell_summary );
 
             mutex.unlock();
         } );
 
-        // std::vector<std::vector<PI>> vertex_to_cell_index( vertex_refs.size() );
-        // for( PI cell_index = 0; cell_index < cell_vertices.size(); ++cell_index )
-        //     for( PI vertex_index : cell_vertices[ cell_index ] )
-        //         vertex_to_cell_index[ vertex_index ].push_back( cell_index );
-
-        // Vec<Vec<PI,2>> final_seed_cut_to_cell_index( FromSize(), as.nb_cells() );
-        // for( PI i = 0; i < as.nb_cells(); ++i ) {
-        //     // TODO: check size
-        //     final_seed_cut_to_cell_index[ i ] = internal_cut_cells[ i ];
-        // }
-
+        // => ref_lists  
         std::vector<Array_PI> ref_lists( nb_dims );
         CtRange<2,nb_dims+2>::for_each_item( [&]( auto d ) {
             ref_lists[ nb_dims + 1 - d ] = Array_from_VecPt( ref_map[ d ].refs );
         } );
 
+        // => parenting
+        std::vector<std::vector<std::vector<std::vector<PI>>>> parenting( nb_dims + 1 );
+        CtRange<0,nb_dims+1>::for_each_item( [&]( auto r ) {
+            parenting[ r ].resize( nb_dims + 1 );
+            auto &lp = ref_map[ CtInt<nb_dims + 1 - r>() ];
+            CtRange<0,nb_dims+1>::for_each_item( [&]( auto c ) {
+                for( const auto &p : lp.parenting[ c ] )
+                    parenting[ r ][ c ].push_back( std::vector<PI>( p.begin(), p.end() ) );
+            } );
+        } );
+
         return std::make_tuple(
             Array_from_VecPt( vertex_coords ),
             ref_lists,
-            17
+            parenting
         );
     } );
     
