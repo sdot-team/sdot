@@ -244,12 +244,6 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "__repr__"     , []( const LowCountAccelerationStructure<TCell> &a ) { return to_string( a ); } )
         ;
 
-    // ConstantValue ---------------------------------------------------------------------------------------------------------------
-    pybind11::class_<ConstantValue<TF>>( m, PD_STR( ConstantValue ) )
-        .def( pybind11::init ( []( TF value ) -> ConstantValue<TF> { return { value }; } ) )
-        .def( "__repr__"     , []( const ConstantValue<TF> &cv ) { return to_string( cv.value ); } )
-        ;
-
     // utility functions ============================================================================
     m.def( "plot_vtk", []( VtkOutput &vo, AccelerationStructure<TCell> &as, const TCell &base_cell ) {
         std::mutex m;
@@ -337,9 +331,9 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         //
         // Vec<SmallVec<PI,2>> internal_cut_cells( FromSize(), nb_diracs );
+        Vec<Pt> vertex_coords( FromReservationSize(), nb_diracs );
         using RefMap = RangeOfClasses<RefMapForDim,1,nb_dims+2>;
         RefMap ref_map( nb_diracs );
-        Vec<Pt> vertex_coords;
         std::mutex mutex;
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
             cell.remove_inactive_cuts();
@@ -359,7 +353,11 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 // get an index for each item
                 for_each_subvec( refs, [&]( auto sv ) {
                     auto &rm = ref_map[ sv.size() ];
-                    PI ind = rm.index( sv );
+                    PI ind = rm.index( sv, [&]() {
+                        // store coordinate if on a vertex
+                        if ( sv.size() == nb_dims + 1 )
+                            vertex_coords << cell.vertex_coord( n );
+                    } );
 
 
                 } );
@@ -410,6 +408,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         );
     } );
     
+    m.def( "dtype", []() {
+        return type_name<TF>();
+    } );
+
     m.def( "ndim", []() {
         return nb_dims;
     } );

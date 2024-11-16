@@ -5,10 +5,10 @@
 
 /*
 */
-template<template<int> typename CT,int beg,int end>
+template<template<int> typename CT,int beg,int end,typename...additionna_targs>
 class RangeOfClasses {
 public:
-    using     Tail          = RangeOfClasses<CT,beg+1,end>;
+    using     Tail          = RangeOfClasses<CT,beg+1,end,additionna_targs...>;
     using     Head          = CT<beg>;
 
     /**/      RangeOfClasses( const auto &...args ) : head( args... ), tail( args... ) {}
@@ -22,8 +22,8 @@ public:
     Tail      tail;
 };
 
-template<template<int> typename CT,int end>
-class RangeOfClasses<CT,end,end> {
+template<template<int> typename CT,int end,typename...additionna_targs>
+class RangeOfClasses<CT,end,end,additionna_targs...> {
 public:
     /**/      RangeOfClasses( const auto &...args ) {}
     void      for_each_item ( auto &&f ) const {}

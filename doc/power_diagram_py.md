@@ -162,22 +162,24 @@ cell.plot()
 Summary of coordinates, connectivity, parenting...
 --------------------------------------------------
 
-The method `PowerDiagram.summary` returns an object that contains arrays to summarize the coordinates, the connectivity and parenting information.
+The method `PowerDiagram.summary` returns a `PowerDiagramSummary` object that contains arrays describing the fully computed power diagram. It contains the coordinates, the connectivity and parenting information.
 
-For instance, for
+For instance, for this simple power diagram
 
 ```python
 from sdot import PowerDiagram
 
 pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
 pd.add_box_boundaries( 0, 1 )
-s = pd.summary()
+ps = pd.summary()
 ```
 
 ![2 cells power diagram](pd_simple_2.png)
 
+we have
+
 ```python
-# s.vertex_coords => coordinates for each vertex
+# ps.vertex_coords => coordinates for each vertex
 [[ 0.    0.  ]                                                       
  [ 0.41  1.  ]
  [ 0.    1.  ]
@@ -185,9 +187,10 @@ s = pd.summary()
  [ 1.   -0.  ]
  [ 1.    1.  ]]
 
-# s.vertex_refs => cell or boundary indices for each vertex
-#  if index <  len( s.cells ), index = cell_index
-#  if index >= len( s.cells ), index = s.nb_cells + boundary_index
+# ps.ref_lists[ 0 ] => references for item of dimensionality 0, i.e. for vertices
+#   if `reference <  ps.nb_cells`, `reference` is a cell index
+#   if `reference >= ps.nb_cells`, `reference` is a boundary index and equal to `ps.nb_cells + boundary_index`
+# In other words, ps.ref_lists[ 0 ] describes how thet vertices have been constructed (by which cells and boundaries)
 [[0 2 4]
  [0 1 5]
  [0 2 5]
@@ -195,25 +198,20 @@ s = pd.summary()
  [1 3 4]
  [1 3 5]]
 
-# s.cell_vertices => vertex indices (position in s.vertex_coords and s.vertex_refs) for each cell
-[[0, 1, 2, 3]
- [1, 4, 3, 5]]
+# ps.ref_lists[ 1 ] => references for item of dimensionality 1, i.e. for edges (and rays)
+[[2 4]
+ [0 4]
+ [0 2]
+ [1 5]
+ [0 5]
+ [0 1]
+ [2 5]
+ [1 4]
+ [3 4]
+ [1 3]
+ [3 5]]
 
-# s.iinternal_cut_to_cells => sorted pair of cell indices for each internal cut (i.e. not for boundary cuts)
-[[0 1]
- [0 1]]
-
-# s.seed_cut_to_cell_index => 
-[[0 1]
- [0 1]]
-
-# s.vertex_to_cell_index
-[[0],
- [0, 1],
- [0],
- [0, 1],
- [1], 
- [1]]
+# 
 ```
 
 

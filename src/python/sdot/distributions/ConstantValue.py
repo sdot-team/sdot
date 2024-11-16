@@ -1,3 +1,4 @@
+from ..bindings.loader import module_for
 from .Distribution import Distribution
 
 class ConstantValue( Distribution ):
@@ -9,4 +10,5 @@ class ConstantValue( Distribution ):
         self.value = value
 
     def binding( self, base_cell, binding_module ):
-        return binding_module.ConstantValue( self.value )
+        m = module_for( "TF_objects", scalar_type = binding_module.dtype() )
+        return m.ConstantValue( self.value )

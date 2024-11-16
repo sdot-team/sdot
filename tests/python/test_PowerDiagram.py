@@ -7,10 +7,10 @@ pd.add_box_boundaries( 0, 1 )
 
 s = pd.summary()
 print( s.vertex_coords )
-for rl in s.ref_lists:
-    print( "d", rl )
+print( s.ref_lists )
 
 pd.plot()
+
 
 # from pyvista import examples
 # mesh = examples.download_st_helens()

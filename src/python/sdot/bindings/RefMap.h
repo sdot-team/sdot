@@ -20,10 +20,11 @@ template<int dim> struct RefMapForDim {
     RefMapForDim( PI nb_diracs ) : map( nb_diracs, DiracVecHash( nb_diracs ) ) {
     }
 
-    PI index( const Vec<PI,dim> vr ) {
+    PI index( const Vec<PI,dim> vr, auto &&on_new_item ) {
         auto iter = map.find( vr );
         if ( iter == map.end() ) {
             iter = map.insert( iter, { vr, refs.size() } );
+            on_new_item();
             refs << vr;
         }
         return iter->second;
@@ -37,7 +38,7 @@ template<> struct RefMapForDim<1> {
     RefMapForDim( PI nb_diracs ) {
     }
 
-    PI index( const Vec<PI,1> vr ) {
+    PI index( const Vec<PI,1> vr, auto &&on_new_item ) {
         return vr[ 1 ];
     }
 };
