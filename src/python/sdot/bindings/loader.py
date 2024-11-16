@@ -12,6 +12,16 @@ global_verbosity_level = 1
 auto_rebuild = False
 loader_cache = {}
 
+activities = []
+def push_activity_log( name ):
+    activities.append( name )
+    print( ' -> '.join( activities ), end = '\r' )
+def pop_activity_log():
+    s = ' -> '.join( activities )
+    print( ' ' * len( s ), end = '\r' )
+    activities.pop()
+
+
 def set_auto_rebuild( value ):
     global auto_rebuild
     auto_rebuild = value
@@ -114,7 +124,7 @@ def module_for( name, use_arch = False, **kwargs ):
     # else, build and load it
     if module is None:
         if global_verbosity_level:
-            print( f"beg compilation of { name } for { kwargs }\r" )
+            push_activity_log( f"compilation of { name } for { kwargs }" )
 
         # call scons
         ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( name + '.SConstruct' ) }", '-s',
@@ -126,7 +136,7 @@ def module_for( name, use_arch = False, **kwargs ):
             raise RuntimeError( f"Failed to compile the C++ { name } binding" )
 
         if global_verbosity_level:
-            print( f"end compilation of { name } for { kwargs }\r" )
+            pop_activity_log()
 
         # import
         module = __import__( module_name )

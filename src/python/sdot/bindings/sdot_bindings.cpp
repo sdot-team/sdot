@@ -23,6 +23,7 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <unordered_map>
 
 #include "config.h"
 
@@ -87,6 +88,18 @@ static auto Array_from_Vec( const Vec<T,sts> &v ) {
         res.mutable_at( i ) = v[ i ];
     return res;
 }
+
+struct DiracVecHash { 
+    PI operator()( const auto &vr ) const {
+        PI m = 1, r = 0;
+        for( auto v : vr ) {
+            r += m * v;
+            m *= nb_diracs;
+        }
+        return r;
+    }
+    PI nb_diracs;
+};
 
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     using TCell = Cell<Arch,TF,nb_dims,PD_NAME( CutInfo ),PD_NAME( CellInfo )>;
@@ -316,6 +329,94 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             Array_from_Vec( v_vals ),
             tds[ 0 ].residual,
             error_code
+        );
+    } );
+    
+    m.def( "summary", []( AccelerationStructure<TCell> &as, const TCell &base_cell ) {
+        const PI nb_diracs = as.nb_cells();
+        using Sv = Vec<PI,nb_dims+1>; // seed vec
+        using Cv = Vec<PI,2>; // cut vec
+
+        PI nb_boundaries = 0;
+        base_cell.for_each_cut( [&]( const auto &info, auto &&dir, auto &&off ) {
+            if ( info.type == CutType::Boundary )
+                nb_boundaries = std::max( nb_boundaries, info.i1 + 1 );
+        }, CtInt<nb_dims>() );
+
+        std::unordered_map<Sv,PI,DiracVecHash,Equal> vertex_map( nb_diracs, DiracVecHash{ nb_diracs } );
+        std::unordered_map<Cv,PI,DiracVecHash,Equal> cut_map( nb_diracs, DiracVecHash{ nb_diracs } );
+        Vec<SmallVec<PI,2>> seed_cut_to_cell_index( FromSize(), nb_diracs );
+        // Vec<SmallVec<PI,2>> seed_cut_to_cell_index( FromSize(), nb_diracs );
+        std::vector<std::vector<PI>> cells( nb_diracs ); // vertex inds
+        Vec<Pt> vertex_coords;
+        Vec<Sv> vertex_refs;
+        Vec<Cv> cuts;
+        std::mutex mutex;
+        as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
+            cell.remove_inactive_cuts();
+
+            mutex.lock();
+
+            // for each vertex            
+            std::vector<PI> cell_summary;
+            for( PI n = 0; n < cell.nb_vertices(); ++n ) {
+                auto refs = cell.vertex_refs( n );
+                
+                Sv vr;
+                for( PI d = 0; d < nb_dims; ++d )
+                    vr[ d ] = cell.cut_index( refs[ d ], 0, nb_diracs );
+                vr[ nb_dims ] = cell.info.i0;
+                std::sort( vr.begin(), vr.end() );
+
+                // TODO: avoid lock at least for the test
+                auto iter = vertex_map.find( vr );
+                if ( iter == vertex_map.end() ) {
+                    iter = vertex_map.insert( iter, { vr, vertex_refs.size() } );
+                    vertex_coords << cell.vertex_coord( n );
+                    vertex_refs << vr;
+                }
+
+                cell_summary.push_back( iter->second );
+            }
+
+            cell.for_each_cut( [&]( const auto &info, auto &&dir, auto &&off ) {
+                if ( info.type == CutType::Dirac ) {
+                    Cv cv{ cell.info.i0, info.i1 };
+                    if ( cv[ 0 ] > cv[ 1 ] )
+                        std::swap( cv[ 0 ], cv[ 1 ] );
+
+                    auto iter_cv = cut_map.find( cv );
+                    if ( iter_cv == cut_map.end() ) {
+                        iter_cv = cut_map.insert( iter_cv, { cv, cuts.size() } );
+                        cuts << cv;
+                    }
+
+                    seed_cut_to_cell_index[ iter_cv->second ] << cell.info.i0;
+                }
+            }, CtInt<nb_dims>() );
+
+            cells[ cell.info.i0 ] = std::move( cell_summary );
+
+            mutex.unlock();
+        } );
+
+        std::vector<std::vector<PI>> vertex_to_cell_index( vertex_refs.size() );
+        for( PI cell_index = 0; cell_index < cells.size(); ++cell_index )
+            for( PI vertex_index : cells[ cell_index ] )
+                vertex_to_cell_index[ vertex_index ].push_back( cell_index );
+
+        Vec<Vec<PI,2>> final_seed_cut_to_cell_index( FromSize(), as.nb_cells() );
+        for( PI i = 0; i < as.nb_cells(); ++i ) {
+            // TODO: check size
+            final_seed_cut_to_cell_index[ i ] = seed_cut_to_cell_index[ i ];
+        }
+
+        return std::make_tuple(
+            Array_from_VecPt( vertex_coords ),
+            Array_from_VecPt( vertex_refs ),
+            cells,
+            Array_from_VecPt( final_seed_cut_to_cell_index ),
+            vertex_to_cell_index
         );
     } );
     

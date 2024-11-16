@@ -2,18 +2,17 @@ from sdot import PowerDiagram
 import numpy as np
 # import pytest
 
-pd = PowerDiagram( np.random.random( [ 100, 3 ] ) )
-pd.periodicity_transformations = [
-    [1,0,0],
-    [0,1,0],
-    [0,0,1],
-    [1,1,0],
-    [1,0,1],
-    [0,1,1],
-    [1,1,1],
-]
+pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
+pd.add_box_boundaries( 0, 1 )
 
-pd.plot( "yo.vtk" )
+s = pd.summary()
+print( s.vertex_coords )
+print( s.vertex_refs )
+print( s.cells )
+print( s.seed_cut_to_cell_index )
+print( s.vertex_to_cell_index )
+
+pd.plot()
 
 # from pyvista import examples
 # mesh = examples.download_st_helens()

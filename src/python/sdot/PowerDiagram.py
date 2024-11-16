@@ -56,7 +56,7 @@ class PowerDiagram:
         self.positions = positions
         self.weights = weights
 
-    def add_cube_boundaries( self, ndim = None, base = None, min_offset = None, max_offset = None ):
+    def add_box_boundaries( self, min_offset = None, max_offset = None, ndim = None, base = None ):
         """ delimit the power diagram by an (hyper-)cube (a square in 2D, and so on)
 
             if ndim is not specified, one tries to guess it from the defined attributes
@@ -263,19 +263,21 @@ class PowerDiagram:
         return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
 
     def summary( self ):
+        """ return an object with arrays with global information to summarize the power diagram.
+            * vertex_coords...
+        """
+        if not self._update_internal_attributes():
+            raise ValueError( "TODO" )
+
         res = Munch()
 
         # for each cell
-        vertex_coords = []
-        def cf( cell ):
-            for c in cell.vertex_coords:
-                vertex_coords.append( c )
-        
-        self.for_each_cell( cf )
-        
-        vertex_coords = np.array( vertex_coords )
-
-        res[ 'vertex_coords' ] = vertex_coords
+        s = self._binding_module.summary( self._acceleration_structure, self._base_cell._cell )
+        res[ 'vertex_coords' ] = s[ 0 ]
+        res[ 'vertex_refs' ] = s[ 1 ]
+        res[ 'cells' ] = s[ 2 ]
+        res[ 'seed_cut_to_cell_index' ] = s[ 3 ]
+        res[ 'vertex_to_cell_index'] = s[ 4 ]
 
         return res
 
@@ -358,7 +360,7 @@ class PowerDiagram:
             ndim = self._binding_module.ndim()
             for n, bnd in enumerate( self._boundaries ):
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
-        
+
         # density binding (possible modification of base cell)
         self._density_binding = self._underlying_measure.binding( self._base_cell, self._binding_module )
 

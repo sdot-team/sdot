@@ -14,6 +14,7 @@
 #include <limits>
 
 #include "Cell.h"
+#include "sdot/CutType.h"
 #include "sdot/support/VtkOutput.h"
 
 #include <tl/support/P.h>
@@ -97,6 +98,14 @@ DTP T_i Vec<PI32,i> UTP::vertex_refs( PI num_vertex, CtInt<i> choosen_nb_dims ) 
 
 DTP Vec<PI32,nb_dims> UTP::vertex_refs( PI num_vertex ) const {
     return _vertex_refs[ num_vertex ];
+}
+
+DTP PI UTP::cut_index( LI num_cut, PI offset_diracs, PI offset_boundaries ) const {
+    const _Cut &c = _cuts[ num_cut ];
+    PI o = c.info.type == CutType::Boundary ?
+        offset_boundaries :
+        offset_diracs;
+    return o + c.info.i1;
 }
 
 DTP T_i Vec<TF,i> UTP::vertex_coord( PI num_vertex, CtInt<i> choosen_nb_dims ) const {

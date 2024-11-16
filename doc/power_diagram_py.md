@@ -66,7 +66,7 @@ Periodicity is handled in sdot by virtual seed affine transformations. Everytime
 In this example, we add periodicity along the `y` axis:
 
 ```python
-from sdot import PowerDiagram, VtkOutput
+from sdot import PowerDiagram
 import numpy as np
 
 pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
@@ -96,7 +96,12 @@ Currently, only `.vtk` files are supported, but more are planed.
 from sdot import PowerDiagram, VtkOutput
 import numpy as np
 
-pd = PowerDiagram( np.random.random( [ 40, 3 ] ) )
+pd = PowerDiagram( np.random.random( [ 500, 3 ] ) )
+pd.periodicity_transformations = [
+    [1,0,0],
+    [0,1,0],
+    [0,0,1],
+]
 
 # plot understands the string as a filename and checks the extension to call the right plot function 
 #  (there is a pd.plot_vtk() function)
@@ -110,9 +115,9 @@ Cells
 
 ### Sweeping
 
-Cells can be scanned using the method `for_each_cell`. It calls the function given as argument with the corresponding `Cell` instances.
+Cells can be scanned using the method `for_each_cell`. It calls the function given as argument with the cells (as instances of `Cell`).
 
-`Cell` contains methods like `integral`, `boundaries`, etc... but most of theses methods have vectorized counterparts in the `PowerDiagram` class (prefixed with `cell_` and suffixed with a `s`). For instance for `cell.integral(...)` (with cell obtained for instance with `pd.for_each_cell`) there is a method `power_diagram.cell_integrals(...)` that returns a list with the results of `cell.integral(...)`.
+`Cell` contains methods like `integral`, `boundaries`, ..., enabling individual computations, but most of theses methods have vectorized counterparts in the `PowerDiagram` class (prefixed with `cell_` and suffixed with a `s`). For instance for `cell.integral(...)` (with cell obtained for instance with `pd.for_each_cell`) there is a method `power_diagram.cell_integrals(...)` that returns a list with the results of each `cell.integral(...)` (the computation actually done in the C++ code).
 
 One important comment: by default, to avoid unnecessary memory consumption, cells are computed on the fly. If the user plans to call methods that lead to the same cells being scanned several times (the diagram not being modified between the calls), and there's no particular memory pressure, it is possible to request caching with `power_diagram.use_cache = True` or set `use_cache = True` in argument of the methods.
 
@@ -154,20 +159,61 @@ cell.plot()
 
 ![2D cell in 3D space](pd_cell_2D3D.png)
 
-Siblings, connectivity
-----------------------
+Summary of coordinates, connectivity, parenting...
+--------------------------------------------------
 
-`PowerDiagram.summary` is designed to provide arrays to summarize the coordinates and the connectivity. They have optional parameters to provide what we consider as optionnal information like neighboring, masses, ...
+The method `PowerDiagram.summary` returns an object that contains arrays to summarize the coordinates, the connectivity and parenting information.
 
-For instance 
+For instance, for
 
 ```python
 from sdot import PowerDiagram
 
-pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
+pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
+pd.add_box_boundaries( 0, 1 )
+s = pd.summary()
+```
 
-print( pd.vertices(  ) )
+![2 cells power diagram](pd_simple_2.png)
 
+```python
+# s.vertex_coords => coordinates for each vertex
+[[ 0.    0.  ]                                                       
+ [ 0.41  1.  ]
+ [ 0.    1.  ]
+ [ 0.61  0.  ]
+ [ 1.   -0.  ]
+ [ 1.    1.  ]]
+
+# s.vertex_refs => cell or boundary indices for each vertex
+#  if index <  len( s.cells ), index = cell_index
+#  if index >= len( s.cells ), index = len( s.cells ) + boundary_index
+[[0 2 4]
+ [0 1 5]
+ [0 2 5]
+ [0 1 4]
+ [1 3 4]
+ [1 3 5]]
+
+# s.cells => vertex indices (position in s.vertex_coords and s.vertex_refs) for each cell
+[[0, 1, 2, 3]
+ [1, 4, 3, 5]]
+
+# s.seed_cuts => pair of cells for each cut between seeds
+[[0 1]
+ [0 1]]
+
+# s.seed_cut_to_cell_index => 
+[[0 1]
+ [0 1]]
+
+# s.vertex_to_cell_index
+[[0],
+ [0, 1],
+ [0],
+ [0, 1],
+ [1], 
+ [1]]
 ```
 
 

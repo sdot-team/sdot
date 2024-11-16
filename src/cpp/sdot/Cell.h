@@ -51,6 +51,8 @@ public:
     T_i Vec<LI,i>   vertex_refs              ( PI num_vertex, CtInt<i> choosen_nb_dims ) const;
     Pr              vertex_refs              ( PI num_vertex ) const;
 
+    PI              cut_index                ( LI num_cut, PI offset_diracs, PI offset_boundaries ) const;
+
     void            display_vtk              ( VtkOutput &vo, auto &&pt_to_vtk ) const;
     void            display_vtk              ( VtkOutput &vo ) const;
     void            display                  ( Displayer &ds ) const;
