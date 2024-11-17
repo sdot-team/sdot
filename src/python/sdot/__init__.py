@@ -15,4 +15,5 @@ from .SdTransportPlan import SdTransportPlan
 from .PowerDiagram import PowerDiagram
 from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec
+from .Expr import Expr
 from .Cell import Cell
