@@ -8,15 +8,20 @@ namespace sdot {
 /** */
 class Expr {
 public:
-    /**/        Expr     ( const BigRational &value = 0 );
-    /**/        Expr     ( const RcPtr<Inst> &inst );
-    /**/        Expr     ( const char *expr );
-    /**/        Expr     ( StrView expr );
-    /**/        Expr     ( int value );
+    explicit    Expr     ( const BigRational &value );
+    explicit    Expr     ( const RcPtr<Inst> &inst );
+    explicit    Expr     ( const char *expr );
+    explicit    Expr     ( StrView expr );
+    explicit    Expr     ( int value );
+    explicit    Expr     ();
   
     void        display  ( Displayer &ds ) const;
 
     friend Expr operator+( const Expr &a, const Expr &b );
+    friend Expr operator-( const Expr &a, const Expr &b );
+    friend Expr operator*( const Expr &a, const Expr &b );
+    friend Expr operator/( const Expr &a, const Expr &b );
+    friend Expr pow      ( const Expr &a, const Expr &b );
 
     RcPtr<Inst> inst;
 };

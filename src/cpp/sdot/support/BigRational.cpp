@@ -197,8 +197,21 @@ BigRational BigRational::operator-() const {
     return { FromNormalizedData(), - num, den, exp };
 }
 
+BigRational pow( const BigRational &a, const BigRational &b ) {
+    // if ( )
+    TODO;
+}
+
 BigRational abs( const BigRational &a ) {
     return { BigRational::FromNormalizedData(), boost::multiprecision::abs( a.num ), a.den, a.exp };
+}
+
+BigRational BigRational::pow( const BigRational &that ) const {
+    if ( that == 0 )
+        return 1;
+    if ( that == 1 )
+        return *this;
+    TODO;
 }
 
 BigRational BigRationalFrom<FP64>::create( FP64 value ) {
@@ -214,7 +227,6 @@ BigRational BigRationalFrom<FP64>::create( FP64 value ) {
 }
 
 int BigRational::compare( const sdot::BigRational &a, const sdot::BigRational &b ) {
-    return sdot::BigRational::compare( a, b );
     auto m_exp = std::min( a.exp, b.exp );
     auto a_num = a.num << ( a.exp - m_exp );
     auto b_num = b.num << ( b.exp - m_exp );
@@ -226,4 +238,5 @@ int BigRational::compare( const sdot::BigRational &a, const sdot::BigRational &b
         return +1;
     return 0;   
 }
+
 } // namespace sdot

@@ -1,4 +1,5 @@
 #include <tl/support/string/to_string.h>
+#include <tl/support/P.h>
 #include <algorithm>
 #include "Func.h"
 
@@ -15,7 +16,7 @@ struct CmpKey {
         for( PI i = 0; i < a.second.size(); ++i ) {
             if ( int c = compare( *a.second[ i ].first, *b.second[ i ].first ) )
                 return c < 0;
-            if ( int c = compare( a.second[ i ], b.second[ i ] ) )
+            if ( int c = BigRational::compare( a.second[ i ].second, b.second[ i ].second ) )
                 return c < 0;
         }
         return false;
@@ -58,13 +59,27 @@ RcPtr<Inst> Func::from_operands( const Str &name, Vec<RcPtr<Inst>> operands ) {
 void Func::display( Displayer &ds ) const {
     std::string res = name;
     res += '(';
+    
     for( PI i = 0; i < children.size(); ++i ) {
         res += i ? ", " : " ";
-        if ( coefficients[ i ] != 1 ) {
-            res += to_string( coefficients[ i ] ) + " * ";
+        
+        if ( name == "add" ) {
+            if ( const auto &ch = children[ i ] ) {
+                if ( coefficients[ i ] != 1 ) {
+                    if ( coefficients[ i ] == -1 )
+                        res += to_string( double( coefficients[ i ] ) ) + " * ";
+                    else
+                        res += "- ";
+                }
+                res += to_string( *ch );
+            } else
+                res += to_string( double( coefficients[ i ] ) );
+            continue;
         }
+
         res += to_string( *children[ i ] );
     }
+
     res += " )";
     ds << res;
 }

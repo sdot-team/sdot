@@ -19,5 +19,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     pybind11::class_<Expr>( m, "Expr" )
         .def( pybind11::init<Str>() )
         .def( "__repr__", []( const Expr &cell ) { return to_string( cell ); } )
+        .def( "add", []( const Expr &a, const Expr &b ) { return a + b; } )
+        .def( "sub", []( const Expr &a, const Expr &b ) { return a - b; } )
+        .def( "mul", []( const Expr &a, const Expr &b ) { return a * b; } )
+        .def( "div", []( const Expr &a, const Expr &b ) { return a / b; } )
+        .def( "pow", []( const Expr &a, const Expr &b ) { return pow( a, b ); } )
         ;
 }

@@ -14,8 +14,12 @@ void Inst::add_child( const RcPtr<Inst> &inst ) {
     children << inst;
 }
 
-std::pair<RcPtr<Inst>,BigRational> Inst::mul_pair() const {
-    return { const_cast<Inst *>( this ), 1 }; // TODO: use CstRcPtr
+std::pair<RcPtr<Inst>,BigRational> Inst::mul_pair( const BigRational &coeff ) const {
+    return { const_cast<Inst *>( this ), coeff }; // TODO: use CstRcPtr
+}
+
+std::pair<RcPtr<Inst>,BigRational> Inst::pow_pair( const BigRational &coeff ) const {
+    return { const_cast<Inst *>( this ), coeff }; // TODO: use CstRcPtr
 }
 
 }

@@ -65,9 +65,11 @@ public:
     BigRational        operator-          () const;
 
     static int         compare            ( const BigRational &a, const BigRational &b );
+    friend BigRational pow                ( const BigRational &a, const BigRational &b );
     friend BigRational abs                ( const BigRational &a );
 
     int                compare            ( const BigRational &that ) const { return BigRational::compare( *this, that ); }
+    BigRational        pow                ( const BigRational &that ) const;
         
 private:        
     void               normalize_all      ();

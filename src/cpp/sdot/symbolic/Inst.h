@@ -16,7 +16,8 @@ public:
     virtual         ~Inst     () {}
     
     bool             operator<( const Inst &that ) const;
-    virtual auto     mul_pair () const -> std::pair<RcPtr<Inst>,BigRational>;
+    virtual auto     mul_pair ( const BigRational &coeff ) const -> std::pair<RcPtr<Inst>,BigRational>;
+    virtual auto     pow_pair ( const BigRational &coeff ) const -> std::pair<RcPtr<Inst>,BigRational>;
     virtual void     display  ( Displayer &ds ) const = 0;
     virtual int      type     () const = 0;
 

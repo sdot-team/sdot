@@ -1,10 +1,13 @@
+#include <tl/support/ERROR.h>
+#include <tl/support/P.h>
+
 #include "Symbol.h"
 #include "Value.h"
 #include "Expr.h"
-#include "add.h"
 
-#include <tl/support/ERROR.h>
-#include <tl/support/P.h>
+#include "expr_add.h"
+#include "expr_mul.h"
+#include "expr_pow.h"
 
 namespace sdot {
 
@@ -46,6 +49,10 @@ Expr::Expr( const RcPtr<Inst> &inst ) : inst( inst ) {
 
 Expr::Expr( const BigRational &value ) {
     inst = Value::from_value( value );
+}
+
+Expr::Expr() {
+    inst = Value::from_value( 0 );
 }
 
 Expr::Expr( StrView expr ) {
@@ -108,8 +115,10 @@ void Expr::display( Displayer &ds ) const {
     ds << inst;
 }
 
-Expr operator+( const Expr &a, const Expr &b ) {
-    return add( a.inst, b.inst );
-}
+Expr operator+( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, +1, b.inst ) }; }
+Expr operator-( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, -1, b.inst ) }; }
+Expr operator*( const Expr &a, const Expr &b ) { return Expr{ expr_mul( 1, a.inst, +1, b.inst ) }; }
+Expr operator/( const Expr &a, const Expr &b ) { return Expr{ expr_mul( 1, a.inst, -1, b.inst ) }; }
+Expr pow( const Expr &a, const Expr &b ) { return Expr( expr_pow( a.inst, b.inst ) ); }
 
 }
