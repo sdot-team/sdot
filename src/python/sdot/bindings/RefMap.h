@@ -67,8 +67,8 @@ template<class nb_dims_> struct RefMapForDim<0,nb_dims_> {
     Vec<bool> seen;
 };
 
-template<int d,int nb_dims>
-void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref_map, CtInt<nb_dims> nd, const auto &children_indices, Vec<PI,d> lefs, PI i0 ) {
+template<int c,int d,int nb_dims>
+void get_rec_item_data( auto &boundary_items, PI nb_diracs, auto &vertex_coords, const auto &vertex_coord, auto &ref_map, CtInt<nb_dims> nd, const Vec<PI,c> &children_indices, Vec<PI,d> lefs, PI i0 ) {
     Vec<PI,d+1> refs = lefs.with_pushed_value( i0 );
     std::sort( refs.begin(), refs.end() );
 
@@ -76,22 +76,26 @@ void get_rec_item_data( auto &vertex_coords, const auto &vertex_coord, auto &ref
     auto &rm = ref_map[ lefs.size() ];
 
     // get index
-    PI ind = rm.find( refs, /*on new item*/ [&]( PI new_ind ) {
+    PI ind = rm.find( refs, /*on new item*/ [&]( PI ind ) {
         // if on a vertex, add the coordinates 
         if ( d == nb_dims )
             vertex_coords << vertex_coord;
+
+        // boundary_item
+        if ( d == 1 && lefs[ 0 ] >= nb_diracs )
+            boundary_items[ lefs[ 0 ] - nb_diracs ].push_back( ind );
 
         // register new parenting vectors
         rm.on_new_ref();
     } );
 
-    //
-    for( PI e = 0; e < children_indices.size(); ++e )
+    // parenting
+    for( PI e = 0; e < c; ++e )
         rm.parenting[ e ][ ind ].push_back_unique( children_indices[ e ] );
 
     // recursion
     auto new_children_indices = children_indices.with_pushed_value( ind );
     CtRange<0,d>::for_each_item( [&]( auto i ) {
-        get_rec_item_data( vertex_coords, vertex_coord, ref_map, nd, new_children_indices, lefs.without_index( i ), i0 );
+        get_rec_item_data( boundary_items, nb_diracs, vertex_coords, vertex_coord, ref_map, nd, new_children_indices, lefs.without_index( i ), i0 );
     } );
 }

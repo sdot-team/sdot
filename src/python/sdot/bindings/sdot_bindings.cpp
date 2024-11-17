@@ -334,6 +334,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         //
         // Vec<SmallVec<PI,2>> internal_cut_cells( FromSize(), nb_diracs );
         Vec<Pt> vertex_coords( FromReservationSize(), nb_diracs );
+        std::vector<std::vector<PI>> boundary_items( nb_boundaries );
         using RefMap = RangeOfClasses<RefMapForDim,0,nb_dims+1,CtInt<nb_dims>>;
         RefMap ref_map( nb_diracs, nb_boundaries ); 
         std::mutex mutex;
@@ -351,7 +352,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                     refs[ d ] = cell.cut_index( cuts[ d ], 0, nb_diracs );
 
                 // get refs and parenting for each vertex and sub-item
-                get_rec_item_data( vertex_coords, cell.vertex_coord( n ), ref_map, CtInt<nb_dims>(), Vec<PI,0>(), refs, cell.info.i0 );
+                get_rec_item_data( boundary_items, nb_diracs, vertex_coords, cell.vertex_coord( n ), ref_map, CtInt<nb_dims>(), Vec<PI,0>(), refs, cell.info.i0 );
             }
 
             mutex.unlock();
@@ -363,7 +364,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             ref_lists[ nb_dims - d ] = Array_from_VecPt( ref_map[ d ].refs );
         } );
 
-        // => parenting
+        // => children
         std::vector<std::vector<std::vector<std::vector<PI>>>> parenting( nb_dims + 1 );
         CtRange<0,nb_dims+1>::for_each_item( [&]( auto r ) {
             auto &lp = ref_map[ CtInt<nb_dims - r>() ];
@@ -374,10 +375,24 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             } );
         } );
 
+        // parents
+        for( PI parent_dim = 0; parent_dim < nb_dims+1; ++parent_dim ) {
+            for( PI child_dim = 0; child_dim < parent_dim; ++child_dim ) {
+                for( PI num_parent_item = 0; num_parent_item < parenting[ parent_dim ][ child_dim ].size(); ++num_parent_item ) {
+                    for( PI num_child_item : parenting[ parent_dim ][ child_dim ][ num_parent_item ] ) {
+                        auto &l = parenting[ child_dim ][ parent_dim ][ num_child_item ];
+                        if ( std::find( l.begin(), l.end(), num_parent_item ) == l.end() )
+                            l.push_back( num_parent_item );
+                    }
+                }
+            }
+        }
+
         return std::make_tuple(
             Array_from_VecPt( vertex_coords ),
             ref_lists,
-            parenting
+            parenting,
+            boundary_items
         );
     } );
     

@@ -14,11 +14,12 @@ class PowerDiagramSummary:
             `base`: can be use if `true_dimensionality` < `ndim` to get coordinate in the `ndim` space
 
     """
-    def __init__( self,vertex_coords, ref_lists, parenting, base ):
-        self.vertex_coords = vertex_coords
-        self.ref_lists     = ref_lists
-        self.parenting     = parenting
-        self.base          = base
+    def __init__( self,vertex_coords, ref_lists, parenting, boundary_items, base ):
+        self.boundary_items = boundary_items
+        self.vertex_coords  = vertex_coords
+        self.ref_lists      = ref_lists
+        self.parenting      = parenting
+        self.base           = base
 
     @property
     def nb_cells( self ):
@@ -31,3 +32,32 @@ class PowerDiagramSummary:
     @property
     def ndim( self ):
         return self.base.shape[ 0 ]
+
+    def nb_items( self, dim ):
+        """ nb items of dimensionality `dim` """
+        return len( self.parenting[ dim ][ 0 ] )
+
+    def barycenters( self, dim = None ):
+        """ by default, return the barycenters of the cells.
+
+            specifiying dim allows for returning the barycenters of vertices (dim=0), edges (dim=1), and so on.
+
+            TODO: underlying_measures
+        """
+        if dim is None:
+            dim = self.ndim
+
+        if dim == 0:
+            return self.vertex_coords
+
+        res = np.empty( [ self.nb_items( dim ), self.ndim ] )
+        for n, vs in enumerate( self.parenting[ dim ][ 0 ] ):
+            res[ n, : ] = np.mean( self.vertex_coords[ vs ], axis=0 )
+ 
+        return res
+ 
+    def integrals( self ):
+        """  """
+        raise RuntimeError( "TODO" )
+    
+    

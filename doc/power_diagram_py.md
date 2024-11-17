@@ -198,7 +198,7 @@ we have
  [1 3 4]
  [1 3 5]]
 
-# ps.ref_lists[ 1 ] => references for item of dimensionality 1, i.e. for edges (and rays)
+# ps.ref_lists[ 1 ] => references for item of dimensionality 1, i.e. for edges and rays
 [[2 4]
  [0 4]
  [0 2]
@@ -211,7 +211,45 @@ we have
  [1 3]
  [3 5]]
 
-# 
+# ps.parenting[ 2 ][ 0 ] => children of dim 0 (vertices) from items of dim 2 (faces)
+[0, 1, 2, 3]
+[1, 4, 3, 5]
+
+# ps.parenting[ 1 ][ 2 ] => parents of dim 2 (faces) from items of dim 1 (edges)
+[0]
+[0]
+[0, 1]
+[0]
+[1]
+[1]
+[1]
+
+# ps.boundary_items => items indices of part that belong to each boundary item.
+#   In this case, indices of edges included in each boudary item (by index of the boundary item)
+# add_box_boundaries added the boundaries [ [-1,0,0], [1,0,1], [0,-1,0], [0,1,1] ] 
+[[1], [6], [0, 5], [3, 4]]
 ```
 
+Integrations
+------------
+
+The method `PowerDiagram.cell_integrals( f )` (or `Cell.integral( f )`) takes as input a symbolic formula. By default, it uses the `PowerDiagram.underlying_measure` and the `PowerDiagram.underlying_radius_function` expression so that the integral is equal to `integral( underlying_measure * underlying_radius_function * f, cell )`. If is possible to use another underlying measure of radius functions by using the `override_...` arguments.
+
+`f` can be a scalar or a list, a list of list, ...
+
+```python
+# a simple triangle
+c = Cell( ndim = 2 )
+c.cut( [-1, 0 ], 0 )
+c.cut( [ 0,-1 ], 0 )
+c.cut( [ 1, 1 ], 1 )
+
+# c.integral() => integration of 1 on the cell
+0.5
+
+# c.integral([]) => integration of 1 on the cell
+0.5
+
+
+```
 
