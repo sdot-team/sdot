@@ -94,30 +94,12 @@ def test_faces():
         { 'dir': [ +0.0, -1.0 ], 'off': +1.0, 'faces': [ ('closed', [], [ [ 0, 2 ], [ 0, 3 ], [ 1, 3 ], [ 1, 2 ] ] ) ] }, # closed loop
     ] )
 
-from sdot import Cell
 
-cell = Cell( ndim = 3 )
+cell = Cell( ndim = 1 )
 
-# we create a triangle, infinitely extruded
-cell.cut( [ -1,  0, 0 ], 0 )
-cell.cut( [  0, -1, 0 ], 0 )
-cell.cut( [ +1, +1, 0 ], 1 )
+cell.cut( [ -1,  0 ], 0 )
+cell.cut( [  0, -1 ], 0 )
+cell.cut( [ +1, +1 ], 1 )
 
-# naturally, there's no 3D vertex...
-print( cell.nb_vertices ) # => 0
+print( cell.integral() )
 
-# and this cell is sill unbounded (in 3D)
-print( cell.bounded ) # => False
-
-# It's because we're in 2D
-print( cell.true_dimensionality ) # => 2
-
-# "td" is the shortcut for "true dimensionality".
-# Method with with prefix return the information for the subspace defined by `cell.base`
-print( cell.nb_vertices_td ) # => 3 (the 3 vertices of the triangle)
-
-# we can get coordinates to represent these points in 3D
-print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.]]
-
-# visualization will show the 2D content with thiner lines
-cell.plot()

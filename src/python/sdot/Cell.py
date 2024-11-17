@@ -1,4 +1,6 @@
 from .bindings.loader import module_for
+from .Expr import Expr
+
 from types import ModuleType
 import numpy as np
 
@@ -28,9 +30,15 @@ class Cell:
     def __repr__( self ):
         return self._cell.__repr__()
 
-    def integral( self, func = '1', underlying_measure_override = None ):
-        # ...
-        pass
+    def integral( self, func = '1', underlying_measure_override = None, underlying_radial_function_override = None ):
+        """ integral of a symbolic function or a list of symbolic functions """
+        if not isinstance( func, list ):
+            return self.integral( [ func ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
+        ct_repr, rt_data = Expr.ct_rt_split_of_list( func )
+        print( ct_repr, rt_data )
+        pouet()
+        # module = module_for( 'cell_integration', symbolic_func = ct_repr )
+        # return module.integral( self._cell, rt_data )
 
     @property
     def true_dimensionality( self ):

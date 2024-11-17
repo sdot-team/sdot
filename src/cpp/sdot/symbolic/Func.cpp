@@ -27,7 +27,7 @@ std::map<Key,RcPtr<Inst>,CmpKey> func_map;
 
 RcPtr<Inst> Func::from_operands( const Str &name, Vec<std::pair<RcPtr<Inst>,BigRational>> operands ) {
     std::sort( operands.begin(), operands.end(), []( const std::pair<RcPtr<Inst>,BigRational> &a, const std::pair<RcPtr<Inst>,BigRational> &b ) {
-        if ( int c = compare( *a.first, *b.first ) )
+        if ( int c = a.first->compare( *b.first ) )
             return c < 0;
         return a.second < b.second;
     } );
@@ -67,11 +67,23 @@ void Func::display( Displayer &ds ) const {
             if ( const auto &ch = children[ i ] ) {
                 if ( coefficients[ i ] != 1 ) {
                     if ( coefficients[ i ] == -1 )
-                        res += to_string( double( coefficients[ i ] ) ) + " * ";
-                    else
                         res += "- ";
+                    else
+                        res += to_string( double( coefficients[ i ] ) ) + " * ";
                 }
                 res += to_string( *ch );
+            } else
+                res += to_string( double( coefficients[ i ] ) );
+            continue;
+        }
+
+        if ( name == "mul" ) {
+            if ( const auto &ch = children[ i ] ) {
+                res += to_string( *ch );
+
+                if ( coefficients[ i ] != 1 ) {
+                    res += " ^ " + to_string( double( coefficients[ i ] ) );
+                }
             } else
                 res += to_string( double( coefficients[ i ] ) );
             continue;

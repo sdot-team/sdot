@@ -11,3 +11,5 @@ Plus tard:
 
 
 
+Une façon de gérer des images serait de permettre de les intégrer dans les expressions symboliques
+  => du coup, on pourrait faire une sortie "indépendante" (celle qui va générer le code) et une sortie "particulière", qui serait un map de valeurs en python
