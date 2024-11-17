@@ -2,6 +2,7 @@
 
 #include <boost/multiprecision/cpp_int.hpp>
 #include <tl/support/Displayer.h>
+#include <tl/support/compare.h>
 #include <Eigen/Dense>
 #include <cmath>
 
@@ -23,6 +24,7 @@ public:
     /**/               BigRational        ( FromNormalizedDiv, BI num = 0, BI den = 1, TE exp = 0 );
     /**/               BigRational        ( BI num, BI den, TE exp );
     /**/               BigRational        ( BI num, BI den );
+    /**/               BigRational        ( StrView str );
     /**/               BigRational        ( BI num );
     /**/               BigRational        ();
       
@@ -62,7 +64,10 @@ public:
         
     BigRational        operator-          () const;
 
+    static int         compare            ( const BigRational &a, const BigRational &b );
     friend BigRational abs                ( const BigRational &a );
+
+    int                compare            ( const BigRational &that ) const { return BigRational::compare( *this, that ); }
         
 private:        
     void               normalize_all      ();

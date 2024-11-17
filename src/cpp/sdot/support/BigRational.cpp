@@ -56,6 +56,20 @@ BigRational::BigRational( BI num ) : num( num ), den( 1 ), exp( 0 ) {
     normalize_exp();
 }
 
+BigRational::BigRational( StrView str ) : num( 0 ), den( 1 ), exp( 0 ) {
+    for( PI i = 0; i < str.size(); ) {
+        char c = str[ i ];
+
+        if ( c >= '0' && c <= '9' ) {
+            *this = 10 * *this + ( c - '0' );
+            ++i;
+            continue;
+        }
+
+        TODO;
+    }
+}
+
 BigRational::BigRational() : num( 0 ), den( 1 ), exp( 0 ) {
 }
 
@@ -199,4 +213,17 @@ BigRational BigRationalFrom<FP64>::create( FP64 value ) {
     return { BigRational::FromNormalizedDiv(), sgn ? - res : res, 1, bex - ( 1023 + 52 ) };
 }
 
+int BigRational::compare( const sdot::BigRational &a, const sdot::BigRational &b ) {
+    return sdot::BigRational::compare( a, b );
+    auto m_exp = std::min( a.exp, b.exp );
+    auto a_num = a.num << ( a.exp - m_exp );
+    auto b_num = b.num << ( b.exp - m_exp );
+    auto m0 = a_num * b.den;
+    auto m1 = b_num * a.den;
+    if ( m0 < m1 )
+        return -1;
+    if ( m0 > m1 )
+        return +1;
+    return 0;   
+}
 } // namespace sdot
