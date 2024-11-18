@@ -147,6 +147,18 @@ BigRational::operator bool() const {
     return bool( num );
 }
 
+BigRational::BI ceil( const BigRational &a ) {
+    BigRational::BI n = a.num;
+    BigRational::BI d = a.den;
+    if ( a.exp > 0 )
+        n <<= a.exp;
+    else
+        d <<= - a.exp;
+    if ( n >= 0 )
+        return n / d;
+    return ( n - d + 1 ) / d;
+}
+
 BigRational operator+( const BigRational &a, const BigRational &b ) {
     auto miexp = std::min( a.exp, b.exp );
     auto a_num = a.num << ( a.exp - miexp );

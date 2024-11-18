@@ -14,6 +14,10 @@ class Expr:
             value = 0
 
         # already an Expr ?
+        if isinstance( value, Expr ):
+            self._expr = value._expr
+            return
+
         _module = module_for( 'generic_objects' )
         if isinstance( value, _module.Expr ):
             self._expr = value
@@ -28,16 +32,28 @@ class Expr:
             map[ k ] = Expr( v )._expr
         return Expr( self._expr.subs( map ) )
 
+    def __getitem__( self, args ):
+        m = {}
+        if isinstance( args, tuple ):
+            for i, arg in enumerate( args ):
+                m[ f'x_{ i }' ] = arg
+        else:
+            m[ 'x_0' ] = args
+        return self.subs( m )
+
     @staticmethod
     def img_interpolation( array, transformation_matrix = None, interpolation_order = 0 ):
-        """ symbolic expression from image """
+        """ symbolic expression from image
+
+            Beware: it follows the numpy convention for the axes (for 2D, x_0 is the y axis, x_1 is the x axis)  
+        """
         #need to load the module to get Expr type
         module_for( 'generic_objects' )
         
         array = np.ascontiguousarray( array )
         trinv = np.linalg.inv( TransformationMatrix( transformation_matrix ).get( array.ndim ) )
         module = module_for( 'img_interpolation', scalar_type = type_promote([ array.dtype, trinv.dtype ]), nb_dims = array.ndim )
-        return module.Expr_from_image( array, trinv, interpolation_order )
+        return Expr( module.Expr_from_image( array, trinv, interpolation_order ) )
 
     @staticmethod
     def list_from_compact_repr( crepr ):

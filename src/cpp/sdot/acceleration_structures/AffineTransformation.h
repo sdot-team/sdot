@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tl/support/containers/Vec.h>
+#include <tl/support/operators/sp.h>
 #include <tl/support/Displayer.h>
 
 namespace sdot {

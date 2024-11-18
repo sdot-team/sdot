@@ -46,6 +46,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( pybind11::init( []( FP64 v ) { return Expr( BigRationalFrom<FP64>::create( v ) ); } ) )
         .def( pybind11::init<Str>() )
         .def( pybind11::init<SI>() )
+        
         .def( "__repr__", []( const Expr &cell ) { return to_string( cell ); } )
        
         .def( "subs", []( const Expr &expr, const std::map<Str,Expr> &symbol_map ) {

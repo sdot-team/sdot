@@ -106,9 +106,8 @@ def test_faces():
 # print( cell.integral() )
 
 from sdot import Expr
-
-# ima = [ [ 0, 1 ], [ 2, 3 ] ]
-# img = Expr.img_interpolation( ima, interpolation_order = 0 )
-# print( img.subs( [ "x_0" ], [ 0.5, 0.5 ] ) )
-print( Expr( 'r' ).subs( { 'rs' : 34 } ) )
+ima = [ [ 10, 1 ], [ 2, 3 ] ]
+img = Expr.img_interpolation( ima, interpolation_order = 0 )
+print( img[ 0.4, 0.4 ] )
+print( img[ 0.54, 0.4 ] )
 

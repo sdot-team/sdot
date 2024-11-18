@@ -1,6 +1,6 @@
+#include <sdot/symbolic/instructions/Img.h>
 #include <sdot/support/binding_config.h>
 #include <sdot/symbolic/Expr.h>
-#include <sdot/symbolic/Img.h>
 
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
     using namespace sdot;
@@ -9,7 +9,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
     using Array_TF = pybind11::array_t<TF, pybind11::array::c_style>;
 
     // Expr_from_image ---------------------------------------------------------------------------------------------------------------
-    m.def( "Expr_from_image", []( const Array_TF &array, const Array_TF &trinv, int interpolation_order ) -> Expr {
+    m.def( "Expr_from_image", []( const Array_TF &array, const Array_TF &trinv, int interpolation_order ) {
         auto *res = new Img<TF,nb_dims>;
         
         res->interpolation_order = interpolation_order;

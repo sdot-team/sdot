@@ -71,6 +71,7 @@ public:
     BigRational        operator-          () const;
 
     static int         compare            ( const BigRational &a, const BigRational &b );
+    friend BI          ceil               ( const BigRational &a );
     friend BigRational pow                ( const BigRational &a, const BigRational &b );
     friend BigRational abs                ( const BigRational &a );
 
