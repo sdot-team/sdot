@@ -107,4 +107,8 @@ void Func::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprDa
     }
 }
 
+RcPtr<Inst> Func::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+    TODO;
+}
+
 }

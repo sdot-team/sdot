@@ -1,5 +1,4 @@
 #include "Value.h"
-#include "sdot/symbolic/Inst.h"
 
 namespace sdot {
 
@@ -24,6 +23,10 @@ void Value::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprD
 void Value::display( Displayer &ds ) const {
     ds << double( value );
     // ds << value;
+}
+
+RcPtr<Inst> Value::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+    return const_cast<Value *>( this );
 }
 
 }

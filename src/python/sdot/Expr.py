@@ -3,8 +3,6 @@ from .TransformationMatrix import TransformationMatrix
 # from types import ModuleType
 import numpy as np
 
-_module = module_for( 'generic_objects' )
-
 class Expr:
     """ wrapper around cpp sdot::Expr class to store symbolic expressions """
 
@@ -24,9 +22,18 @@ class Expr:
         # else, call the cpp ctor
         self._expr = _module.Expr( value )
 
+    def subs( self, symbol_map ):
+        map = {}
+        for k, v in symbol_map.items():
+            map[ k ] = Expr( v )._expr
+        return Expr( self._expr.subs( map ) )
+
     @staticmethod
     def img_interpolation( array, transformation_matrix = None, interpolation_order = 0 ):
         """ symbolic expression from image """
+        #need to load the module to get Expr type
+        module_for( 'generic_objects' )
+        
         array = np.ascontiguousarray( array )
         trinv = np.linalg.inv( TransformationMatrix( transformation_matrix ).get( array.ndim ) )
         module = module_for( 'img_interpolation', scalar_type = type_promote([ array.dtype, trinv.dtype ]), nb_dims = array.ndim )

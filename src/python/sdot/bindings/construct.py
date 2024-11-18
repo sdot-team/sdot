@@ -115,11 +115,11 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
         "build/src/cpp/sdot/support/VtkOutput.cpp",
         "build/src/cpp/sdot/support/Mpi.cpp",
 
-        'build/src/cpp/sdot/symbolic/Symbol.cpp',
-        'build/src/cpp/sdot/symbolic/Value.cpp',
+        'build/src/cpp/sdot/symbolic/instructions/Symbol.cpp',
+        'build/src/cpp/sdot/symbolic/instructions/Value.cpp',
+        'build/src/cpp/sdot/symbolic/instructions/Func.cpp',
+        'build/src/cpp/sdot/symbolic/instructions/Inst.cpp',
         'build/src/cpp/sdot/symbolic/Expr.cpp',
-        'build/src/cpp/sdot/symbolic/Func.cpp',
-        'build/src/cpp/sdot/symbolic/Inst.cpp',
     ]
 
 

@@ -1,8 +1,8 @@
 #pragma once
 
+#include "instructions/Value.h"
+#include "instructions/Func.h"
 #include <tl/support/TODO.h>
-#include "Value.h"
-#include "Func.h"
 
 namespace sdot {
 

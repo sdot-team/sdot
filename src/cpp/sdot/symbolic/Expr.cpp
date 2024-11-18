@@ -1,8 +1,9 @@
 #include <tl/support/ERROR.h>
 #include <tl/support/P.h>
 
-#include "Symbol.h"
-#include "Value.h"
+#include "instructions/Symbol.h"
+#include "instructions/Value.h"
+
 #include "Expr.h"
 
 #include "expr_add.h"
@@ -113,6 +114,10 @@ Expr::Expr( int value ) {
 
 void Expr::display( Displayer &ds ) const {
     ds << inst;
+}
+
+Expr Expr::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+    return Expr{ inst->subs( map ) };
 }
 
 Expr operator+( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, +1, b.inst ) }; }

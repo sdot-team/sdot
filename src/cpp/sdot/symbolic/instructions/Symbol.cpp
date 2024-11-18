@@ -1,5 +1,4 @@
 #include "Symbol.h"
-#include "sdot/symbolic/Inst.h"
 
 namespace sdot {
 
@@ -23,6 +22,14 @@ void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,Expr
 
 void Symbol::display( Displayer &ds ) const {
     ds << name;
+}
+
+
+RcPtr<Inst> Symbol::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+    auto iter = map.find( name );
+    if ( iter != map.end() )
+        return iter->second;
+    return const_cast<Symbol *>( this );
 }
 
 }

@@ -48,6 +48,13 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( pybind11::init<SI>() )
         .def( "__repr__", []( const Expr &cell ) { return to_string( cell ); } )
        
+        .def( "subs", []( const Expr &expr, const std::map<Str,Expr> &symbol_map ) {
+            std::map<Str,RcPtr<Inst>> map;
+            for( const auto &p : symbol_map )
+                map[ p.first ] = p.second.inst;
+            return expr.subs( map );
+        } )
+        
         .def( "add", []( const Expr &a, const Expr &b ) { return a + b; } )
         .def( "sub", []( const Expr &a, const Expr &b ) { return a - b; } )
         .def( "mul", []( const Expr &a, const Expr &b ) { return a * b; } )
@@ -57,9 +64,4 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
     m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
     m.def( "expr_list_from_compact_repr", expr_list_from_compact_repr );
-    // m.def( "Expr_from_image", []( const Array_TF &img ) {
-
-    // } );
-
-    //     return module.( array, tr_coords, interpolation_order )
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../support/BigRational.h"
-#include "Inst.h"
+#include "instructions/Inst.h"
 
 namespace sdot {
 
@@ -16,12 +16,14 @@ public:
     explicit    Expr     ();
   
     void        display  ( Displayer &ds ) const;
+    Expr        subs     ( const std::map<Str,RcPtr<Inst>> &map ) const;
 
     friend Expr operator+( const Expr &a, const Expr &b );
     friend Expr operator-( const Expr &a, const Expr &b );
     friend Expr operator*( const Expr &a, const Expr &b );
     friend Expr operator/( const Expr &a, const Expr &b );
     friend Expr pow      ( const Expr &a, const Expr &b );
+
 
     RcPtr<Inst> inst;
 };

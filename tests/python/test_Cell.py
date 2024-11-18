@@ -107,7 +107,8 @@ def test_faces():
 
 from sdot import Expr
 
-ima = [ [ 0, 1 ], [ 2, 3 ] ]
-img = Expr.img_interpolation( ima, interpolation_order = 0 )
-print( img )
+# ima = [ [ 0, 1 ], [ 2, 3 ] ]
+# img = Expr.img_interpolation( ima, interpolation_order = 0 )
+# print( img.subs( [ "x_0" ], [ 0.5, 0.5 ] ) )
+print( Expr( 'r' ).subs( { 'rs' : 34 } ) )
 

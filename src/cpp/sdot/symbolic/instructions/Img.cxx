@@ -26,4 +26,11 @@ DTP void UTP::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,Exp
     TODO;
 }
 
+
+DTP RcPtr<Inst> UTP::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+    TODO;
+    return this;
+}
+
+
 }
