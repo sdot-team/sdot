@@ -76,6 +76,8 @@ public:
 
     void            for_each_cut             ( auto &&func, auto td ) const; ///< func( cut_info, dir, off )
 
+    void            simplex_split            ( auto &&func ) const; ///< func( simplex )
+
     // computations
     TF              for_each_cut_with_measure( const std::function<void( const Cut<TF,nb_dims,CutInfo> &cut, TF measure )> &f ) const;
     TF              measure                  ( const ConstantValue<TF> &cv ) const;
@@ -100,6 +102,7 @@ private:
     //
     T_i void        _remove_inactive_cuts    ( CtInt<i> ); ///< 
     void            _remove_ext_vertices     ( PI old_nb_vertices );
+    void            _simplex_split_rec       ( auto &&func, Vec<Pt,nb_dims+1> &simplex, const auto &num_cuts, LI prev_vertex, PI op_id ) const;
     PI              _new_coid_ref_map        ( PI size ) const;
     void            _add_measure_rec         ( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id, Vec<TF> &measure_for_each_cut ) const;
     void            _add_measure_rec         ( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id ) const;
@@ -108,7 +111,7 @@ private:
     void            _unbounded_cut           ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     void            _bounded_cut             ( const Pt &dir, TF off, CutInfo &&cut_info ); ///< 
     T_i void        _update_sps              ( const Vec<TF,i> &dir, TF off );
-  
+
     T_i  auto       _with_ct_dim             ( auto &&func, CtInt<i> min_td, CtInt<i> max_td ) const;
     T_ij auto       _with_ct_dim             ( auto &&func, CtInt<i> min_td, CtInt<j> max_td ) const;
     T_i  auto       _with_ct_dim             ( auto &&func, CtInt<i> min_td, CtInt<i> max_td );

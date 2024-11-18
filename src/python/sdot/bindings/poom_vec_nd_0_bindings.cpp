@@ -1,7 +1,7 @@
 #include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
+#include <sdot/support/binding_config.h>
 #include <sdot/poom/PoomVec.h>
-#include "config.h"
  
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>

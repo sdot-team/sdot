@@ -1030,6 +1030,48 @@ DTP void UTP::cut( const Pt &dir, TF off, CutInfo &&cut_info ) {
     return _bounded ? _bounded_cut( dir, off, std::move( cut_info ) ) : _unbounded_cut( dir, off, std::move( cut_info ) ) ;
 }
 
+DTP void UTP::_simplex_split_rec( auto &&func, Vec<Pt,nb_dims+1> &simplex, const auto &num_cuts, LI prev_vertex, PI op_id ) const {
+    // store vertex
+    constexpr PI c = num_cuts.ct_size;
+    simplex[ c ] = _vertex_coords[ prev_vertex ];    
+    
+    // recursion or call f
+    if constexpr ( c ) {
+        CtRange<0,c>::for_each_item( [&]( auto n ) {
+            // next item ref
+            auto next_num_cuts = num_cuts.without_index( n );
+
+            // vertex choice for this item
+            auto &iv = _ref_map[ CtInt<c-1>() ].map[ next_num_cuts ];
+            if ( iv < op_id ) {
+                iv = op_id + prev_vertex;
+                return;
+            }
+
+            //
+            const PI32 next_vertex = iv - op_id;
+            if ( next_vertex == prev_vertex )
+                return;
+
+            // recursion
+            _simplex_split_rec( func, simplex, next_num_cuts, next_vertex, op_id );
+        } );
+    } else {
+        func( simplex );
+    }
+}
+
+DTP void UTP::simplex_split( auto &&func ) const {
+    // map to get a vertex for each item
+    _ref_map.for_each_item( [&]( auto &obj ) { obj.map.prepare_for( _cuts.size() ); } );
+    PI op_id = _new_coid_ref_map( nb_vertices_true_dim() );
+
+    TF res = 0;
+    Vec<Pt,nb_dims+1> simplex;
+    for( PI n = 0; n < nb_vertices(); ++n )
+        _simplex_split_rec( func, simplex, _vertex_refs[ n ], n, op_id );
+}
+
 DTP void UTP::_add_measure_rec( auto &res, auto &M, const auto &num_cuts, PI32 prev_vertex, PI op_id, Vec<TF> &measure_for_each_cut ) const {
     using std::sqrt;
     using std::abs;

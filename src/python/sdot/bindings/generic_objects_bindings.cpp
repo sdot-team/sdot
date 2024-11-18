@@ -1,9 +1,9 @@
 #include <tl/support/string/CompactReprReader.h>
 #include <tl/support/string/to_string.h>
+#include <sdot/support/binding_config.h>
 #include <sdot/support/VtkOutput.h>
 #include <sdot/symbolic/ExprData.h>
 #include <sdot/symbolic/Expr.h>
-#include "config.h"
  
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>

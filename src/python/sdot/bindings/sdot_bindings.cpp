@@ -1,35 +1,16 @@
-// #include <sdot/DiracVecFromLocallyKnownValues.h>
-// #include <sdot/HomogeneousWeights.h>
-// #include <sdot/WeightsWithBounds.h>
-// #include <sdot/PavingWithDiracs.h>
-// #include <sdot/VoronoiAccelerationStructure.h>
-
-// #include <sdot/acceleration_structures/VoronoiAccelerationStructure.h>
 #include <sdot/acceleration_structures/LowCountAccelerationStructure.h>
-
 #include <sdot/distributions/ConstantValue.h>
-
+#include <sdot/support/binding_config.h>
 #include <sdot/support/VtkOutput.h>
-
-
 #include <sdot/poom/PoomVec.h>
-
 #include <sdot/Cell.h>
 
 #include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
 #include <tl/support/ERROR.h>
  
-#include <pybind11/functional.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
-
 #include "RefMap.h"
-#include "config.h"
 
-namespace sdot { struct SDOT_CONFIG_arch {}; }
 using namespace sdot;
 
 static constexpr int nb_dims = SDOT_CONFIG_nb_dims;
@@ -38,6 +19,7 @@ using TF = SDOT_CONFIG_scalar_type;
 
 using Array_TF = pybind11::array_t<TF, pybind11::array::c_style>;
 using Array_PI = pybind11::array_t<PI, pybind11::array::c_style>;
+
 using Pt = Vec<TF, nb_dims>;
 
 struct PD_NAME( CutInfo ) {
@@ -53,45 +35,6 @@ struct PD_NAME( CellInfo ) {
     PI i0;
 };
 
-static Vec<Pt> VecPt_from_Array( const Array_TF &array ) {
-    Vec<Pt> res;
-    if ( array.shape( 1 ) < nb_dims )
-        throw pybind11::value_error( "array is not large enough" );
-    res.resize( array.shape( 0 ) );
-    for( PI r = 0; r < res.size(); ++r )
-        for( PI d = 0; d < nb_dims; ++d )
-           res[ r ][ d ] = array.at( r, d );
-    return res;
-}
-
-static Pt Pt_from_Array( const Array_TF &array ) {
-    Pt res;
-    if ( array.size() < nb_dims )
-        throw pybind11::value_error( "array is not large enough" );
-    for( PI d = 0; d < nb_dims; ++d )
-       res[ d ] = array.at( d );
-    return res;
-}
-
-template<class T,int s>
-static auto Array_from_VecPt( const Vec<Vec<T,s>> &v ) {
-    Vec<PI,2> shape{ v.size(), PI( s ) };
-    pybind11::array_t<T, pybind11::array::c_style> res( shape );
-    for( PI i = 0; i < v.size(); ++i )
-        for( PI d = 0; d < s; ++d )
-            res.mutable_at( i, d ) = v[ i ][ d ];
-    return res;
-}
-
-template<class T,int sts>
-static auto Array_from_Vec( const Vec<T,sts> &v ) {
-    Vec<PI,1> shape{ v.size() };
-    pybind11::array_t<T, pybind11::array::c_style> res( shape );
-    for( PI i = 0; i < v.size(); ++i )
-        res.mutable_at( i ) = v[ i ];
-    return res;
-}
-
 
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     using TCell = Cell<Arch,TF,nb_dims,PD_NAME( CutInfo ),PD_NAME( CellInfo )>;
@@ -103,8 +46,8 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( pybind11::init<>() )
 
         // modifications
-        .def( "cut_boundary", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Boundary, .i1 = ind } ); } )
-        .def( "cut", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( Pt_from_Array( dir ), off, { .type = CutType::Undefined, .i1 = ind } ); } )
+        .def( "cut_boundary", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( svec_from_array<TF,nb_dims>( dir ), off, { .type = CutType::Boundary, .i1 = ind } ); } )
+        .def( "cut", []( TCell &cell, const Array_TF &dir, TF off, PI ind ) { return cell.cut( svec_from_array<TF,nb_dims>( dir ), off, { .type = CutType::Undefined, .i1 = ind } ); } )
         
         // properties
         .def( "true_dimensionality", &TCell::true_dimensionality )
@@ -115,7 +58,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             return cell.with_ct_dim( [&]( auto td ) {
                 if ( refs.size() != td - 1 )
                     throw pybind11::value_error( "wrong refs size" );
-                return Array_from_Vec( cell.ray_dir( Vec<TCell::LI,td-1>( refs ), starting_vertex ) );
+                return array_from_vec( cell.ray_dir( Vec<TCell::LI,td-1>( refs ), starting_vertex ) );
             } );
         } )
         .def( "bounded", &TCell::bounded )
@@ -128,7 +71,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         // } )
         .def( "empty", &TCell::empty )
         .def( "ndim", []( const TCell &cell ) { return nb_dims; } )
-        .def( "base", []( TCell &cell ) { return Array_from_VecPt( cell.base() ); } )
+        .def( "base", []( TCell &cell ) { return array_from_vec( cell.base() ); } )
 
         .def( "cuts", []( TCell &cell ) {
             return cell.with_ct_dim( [&]( auto td ) {
@@ -141,7 +84,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                     offsets << off;
                     inds << cut_info.i1;
                 }, td );
-                return std::make_tuple( Array_from_VecPt( directions ), Array_from_Vec( offsets ), Array_from_Vec( inds ) );
+                return std::make_tuple( array_from_vec( directions ), array_from_vec( offsets ), array_from_vec( inds ) );
             } );
         } )
 
@@ -152,7 +95,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                     cell.for_each_vertex_coord( [&]( const auto &pt ) {
                         coords << pt;
                     }, td );
-                    return Array_from_VecPt( coords );
+                    return array_from_vec( coords );
                 } );
             }
 
@@ -160,7 +103,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             cell.for_each_vertex_coord( [&]( const auto &pt ) {
                 coords << pt;
             } );
-            return Array_from_VecPt( coords );
+            return array_from_vec( coords );
         } )
 
         .def( "vertex_refs", []( const TCell &cell, bool allow_lower_dim ) {
@@ -170,7 +113,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                     cell.for_each_vertex_ref( [&]( const auto &pt ) {
                         refs << pt;
                     }, td );
-                    return Array_from_VecPt( refs );
+                    return array_from_vec( refs );
                 } );
             }
 
@@ -178,7 +121,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             cell.for_each_vertex_ref( [&]( const auto &pt ) {
                 refs << pt;
             } );
-            return Array_from_VecPt( refs );
+            return array_from_vec( refs );
         } )
 
         .def( "for_each_edge", []( const TCell &cell, const std::function<void( const std::vector<TCell::LI> &refs, const std::vector<TCell::LI> &vertices )> &func, bool allow_true_dim ) {
@@ -309,10 +252,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         // pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
         return std::make_tuple( 
-            Array_from_Vec( tds[ 0 ].m_rows ),
-            Array_from_Vec( tds[ 0 ].m_cols ),
-            Array_from_Vec( tds[ 0 ].m_vals ),
-            Array_from_Vec( v_vals ),
+            array_from_vec( tds[ 0 ].m_rows ),
+            array_from_vec( tds[ 0 ].m_cols ),
+            array_from_vec( tds[ 0 ].m_vals ),
+            array_from_vec( v_vals ),
             tds[ 0 ].residual,
             error_code
         );
@@ -361,7 +304,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         // => ref_lists  
         std::vector<Array_PI> ref_lists( nb_dims );
         CtRange<1,nb_dims+1>::for_each_item( [&]( auto d ) {
-            ref_lists[ nb_dims - d ] = Array_from_VecPt( ref_map[ d ].refs );
+            ref_lists[ nb_dims - d ] = array_from_vec( ref_map[ d ].refs );
         } );
 
         // => children
@@ -389,7 +332,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         }
 
         return std::make_tuple(
-            Array_from_VecPt( vertex_coords ),
+            array_from_vec( vertex_coords ),
             ref_lists,
             parenting,
             boundary_items

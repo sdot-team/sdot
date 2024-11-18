@@ -1,6 +1,6 @@
 #include <sdot/distributions/ConstantValue.h>
+#include <sdot/support/binding_config.h>
 #include <tl/support/string/to_string.h>
-#include "config.h"
  
 #include <pybind11/pybind11.h>
 

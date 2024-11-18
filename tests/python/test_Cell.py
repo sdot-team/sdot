@@ -95,7 +95,7 @@ def test_faces():
     ] )
 
 
-cell = Cell( ndim = 1 )
+cell = Cell( ndim = 2 )
 
 cell.cut( [ -1,  0 ], 0 )
 cell.cut( [  0, -1 ], 0 )

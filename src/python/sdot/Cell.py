@@ -1,3 +1,4 @@
+from .bindings.integration_module import integration_module
 from .bindings.loader import module_for
 from .Expr import Expr
 
@@ -30,12 +31,13 @@ class Cell:
     def __repr__( self ):
         return self._cell.__repr__()
 
-    def integral( self, func = '1', underlying_measure_override = None, underlying_radial_function_override = None ):
+    def integral( self, funcs = '1', underlying_measure_override = None, underlying_radial_function_override = None ):
         """ integral of a symbolic function or a list of symbolic functions """
-        if not isinstance( func, list ):
-            return self.integral( [ func ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
-        ct_repr, rt_data = Expr.ct_rt_split_of_list( func )
-        module = module_for( 'integration', symbolic_func = ct_repr, scalar_type = self._binding_module.dtype(), nb_dims = self._binding_module.ndim() )
+        if not isinstance( funcs, list ):
+            return self.integral( [ funcs ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
+        
+        # module généré
+        module, rt_data = integration_module( funcs, self._binding_module.dtype(), self._binding_module.ndim() )
         return module.cell_integral( self._cell, rt_data )
 
     @property

@@ -13,6 +13,9 @@ perf.data*
 *.dblite
 *.exe
 *.o
+*.os
+*.dylib
+*.dll
 *.xyz
 *.bin
 *.gif

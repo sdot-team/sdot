@@ -66,13 +66,15 @@ def type_promote( dtypes ):
     return res
 
 
-def get_build_dir( name, suffix ):
+def get_build_dir( *kargs ):
     """
       find a directory to copy .cpp/.h and store .so/.dylib/... files
     """
     
     # try one in the sources (check the write access)
-    res = Path( __file__ ).parent / 'variants' / name / suffix
+    res = Path( __file__ ).parent
+    for karg in kargs:
+        res = res / karg
     if os.access( res, os.W_OK ):
         return res 
     
@@ -86,7 +88,7 @@ def get_build_dir( name, suffix ):
     # else, make something in the home 
     raise RuntimeError( "TODO: make a loc or tmp build dir" )
 
-def module_for( name, use_arch = False, **kwargs ):
+def module_for( name, base_dir = Path( __file__ ).parent, use_arch = False, **kwargs ):
     # sorted list of parameters
     plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
     plist.sort()
@@ -109,7 +111,7 @@ def module_for( name, use_arch = False, **kwargs ):
         return loader_cache[ module_name ]
 
     # where to find/put the files
-    build_dir = get_build_dir( name, suffix )
+    build_dir = get_build_dir( 'variants', name, suffix )
     if build_dir not in sys.path:
         sys.path.insert( 0, str( build_dir ) )
 
@@ -127,7 +129,7 @@ def module_for( name, use_arch = False, **kwargs ):
             push_activity_log( f"compilation of { name } for { kwargs }" )
 
         # call scons
-        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ Path( __file__ ).parent / ( name + '.SConstruct' ) }", '-s',
+        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ base_dir / ( name + '.SConstruct' ) }", '-s',
             f"module_name={ module_name }", 
             f"suffix={ suffix }"
         ] + ilist, cwd = str( build_dir ), shell = False )
