@@ -59,11 +59,13 @@ RcPtr<Inst> Inst::read_from( CompactReprReader &cr ) {
     TODO;
 }
 
-PI Inst::rt_data_num( Vec<std::pair<const Inst *,ExprData>> &data_map, const Inst *inst, const std::function<ExprData()> &make_rt_data ) {
+PI Inst::rt_data_num( Vec<ExprData> &data_map, const Inst *inst, const std::function<ExprData::Val *()> &make_rt_data ) {
     for( PI i = 0; i < data_map.size(); ++i )
-        if ( data_map[ i ].first == inst )
+        if ( data_map[ i ].inst == inst )
             return i;
-    return data_map.push_back_ind( inst, make_rt_data() );
+    PI res = data_map.size();
+    data_map.push_back( res, inst, make_rt_data() );
+    return res;
 }
 
 }

@@ -12,7 +12,7 @@
 using namespace sdot;
 
 std::tuple<std::vector<Str>,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Expr> &expr_list ) {
-    Vec<std::pair<const Inst *,ExprData>> data_map;
+    Vec<ExprData> data_map;
     std::vector<Str> ct_expr;
     for( const Expr &expr : expr_list ) {
         CompactReprWriter cw;

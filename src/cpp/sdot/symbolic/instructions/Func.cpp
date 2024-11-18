@@ -96,7 +96,7 @@ void Func::display( Displayer &ds ) const {
     ds << res;
 }
 
-void Func::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+void Func::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
     cw.write_positive_int( type_Func, nb_types );
     cw << name;
 

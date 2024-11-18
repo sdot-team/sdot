@@ -15,7 +15,7 @@ RcPtr<Inst> Symbol::from_name( const Str &name ) {
     return iter->second;
 }
 
-void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
     cw.write_positive_int( type_Symbol, nb_types );
     cw << name;
 }

@@ -16,9 +16,9 @@ DTP void UTP::display( Displayer &ds ) const {
     ds << "img";
 }
 
-DTP void UTP::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+DTP void UTP::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
     PI num_var = rt_data_num( data_map, this, [&]() {
-        return ExprData{ new ExprVal<const Img *>{ this } };
+        return new ExprVal<const Img *>{ this };
     } );
 
     // Inst type

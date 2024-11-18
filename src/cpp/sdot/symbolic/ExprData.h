@@ -1,8 +1,10 @@
 #pragma once
 
 #include <tl/support/memory/UniquePtr.h>
+#include <tl/support/common_types.h>
 
 namespace sdot {
+class Inst;
 
 /** */
 class ExprData {
@@ -11,8 +13,10 @@ public:
         virtual ~Val() {}
     };
 
-    ExprData( Val *val ) : val{ val } {}
+    /**/ ExprData( PI num_in_list, const Inst *inst, Val *val ) : num_in_list( num_in_list ), inst( inst ), val{ val } {}
 
+    PI             num_in_list;
+    const Inst*    inst;
     UniquePtr<Val> val;
 };
 
