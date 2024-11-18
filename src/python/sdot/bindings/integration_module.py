@@ -88,7 +88,7 @@ def integration_module( funcs, scalar_type, nb_dims ):
     sf = bd / ( module_name + ".SConstruct" )
     with open( sf, 'w' ) as f:
         f.write( 'from sdot.bindings.construct import construct\n' )
-        f.write( 'construct( Environment, VariantDir, ARGLIST, "' + module_name + '", [ "scalar_type", "nb_dims" ], [\n' )
+        f.write( 'construct( Environment, VariantDir, Configure, ARGLIST, "' + module_name + '", [ "scalar_type", "nb_dims" ], [\n' )
         f.write( '    "' + str( cf ) + '",\n' )
         f.write( '] )\n' )
 

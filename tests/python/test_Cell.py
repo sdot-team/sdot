@@ -101,8 +101,7 @@ cell.cut( [ -1,  0 ], 0 )
 cell.cut( [  0, -1 ], 0 )
 cell.cut( [ +1, +1 ], 1 )
 
-
-
-img = Expr.img_interpolation( [ [ 10, 1 ], [ 2, 3 ] ], interpolation_order = 0 )
-print( cell.integral( img ) )
+print( cell )
+# img = Expr.img_interpolation( [ [ 10, 1 ], [ 2, 3 ] ], interpolation_order = 0 )
+# print( cell.integral( img ) )
 

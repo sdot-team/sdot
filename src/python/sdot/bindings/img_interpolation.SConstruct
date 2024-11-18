@@ -1,6 +1,6 @@
 from sdot.bindings.construct import construct
 
-construct( Environment, VariantDir, ARGLIST, "img_interpolation", [ "scalar_type", "nb_dims", "interpolation_order" ], [
+construct( Environment, VariantDir, Configure, ARGLIST, "img_interpolation", [ "scalar_type", "nb_dims", "interpolation_order" ], [
     'build/src/python/sdot/bindings/img_interpolation_bindings.cpp',
 ] )
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "sdot/CutType.h"
 #include <tl/support/containers/Vec.h>
 #include <tl/support/Displayer.h>
+#include "sdot/CutType.h"
 
 namespace sdot {
 

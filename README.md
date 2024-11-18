@@ -15,7 +15,13 @@ Currently, there are bindings C++ and Python, but more languages are in the pipe
 Installation
 ------------
 
-For python, `pip install sdot` should do the job, including some precompiled libraries for the most common cases (2D/3D, float64, ...). If your case is not included in the distribution, the required dynamic libraries will be automatically compiled on first use. For this case, you will need to have a C++ compiler installed on your machine. As scons is used to find and call the compiler, all you need to do is install one compiler that is compatible with this builder (for instance g++, clang, xcode, vscode, ...). 
+### Pip
+
+For python, `pip install sdot` should do the job, including some precompiled libraries for the most common cases (2D/3D, float64, ...). If your cases are not included in the distribution, the required dynamic libraries will be automatically compiled on first use. In this situation, you will need to have a C++ compiler installed on your machine. As scons is used to find and call the compiler, all you need to do is install one compiler that is compatible with this builder (for instance g++, clang, xcode, vscode, ...). 
+
+
+
+### Sources
 
 To get that latest version, `sdot` can also be installed from the git repository.
 

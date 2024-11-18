@@ -1,7 +1,9 @@
 from urllib.parse import unquote_plus
 from munch import Munch
+import subprocess
 import sysconfig
 import pybind11
+import sys
 import os
 
 # helper to get n-th parent directory
@@ -19,7 +21,21 @@ def args_to_obj( ARGLIST ):
             args[ k ] = unquote_plus( v )
     return args
 
-def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
+def download_and_unzip( link, src, dst ):
+    p = pdir( os.getcwd(), n = 7 ) + "/ext"
+    import dload
+ 
+    print( "Download ", link )
+
+    dload.save_unzip( link, p, delete_after = True )
+    os.rename( p + "/" + src, p + "/" + dst )
+
+# def git_clone( link ):
+#     from git import Repo  # pip install gitpython
+
+#     Repo.clone_from( ,  )
+
+def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names, files ):
     # build directory
     cwd = os.getcwd()
     bad = pdir( cwd, 3 )
@@ -48,8 +64,8 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
 
         # ext
         os.path.join( bad, 'ext', 'tl20', 'src', 'cpp' ),
-        os.path.join( bad, 'ext', 'Catch2', 'src' ),
         os.path.join( bad, 'ext', 'asimd', 'src' ),
+        os.path.join( bad, 'ext', 'boost' ),
         os.path.join( bad, 'ext', 'eigen' ),
 
         # systelm
@@ -123,7 +139,20 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
         'build/src/cpp/sdot/symbolic/Expr.cpp',
     ]
 
-
-    # make the library
+    # Environment
     env = Environment( CPPPATH = CPPPATH, CXXFLAGS = CXXFLAGS, LIBS = LIBS, LIBPATH = LIBPATH, SHLIBPREFIX = '' )
+
+    # check the libraries
+    conf = Configure( env )
+    if not conf.CheckCXXHeader( 'boost/multiprecision/cpp_int.hpp' ):
+        download_and_unzip( "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.zip", "boost_1_86_0", "boost" )
+    if not conf.CheckCXXHeader( 'Eigen/Dense' ):
+        download_and_unzip( "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip", "eigen-3.4.0", "eigen" )
+    if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
+        download_and_unzip( "https://github.com/hleclerc/asimd/archive/refs/tags/asimd-v0.0.1-alpha.zip", "asimd-asimd-v0.0.1-alpha", "asimd" )
+    if not conf.CheckCXXHeader( 'tl/support/Displayer.h' ):
+        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.1.zip", "tl20-0.0.1", "tl20" )
+    env = conf.Finish()
+
+    # register the library
     env.SharedLibrary( module_name + env[ 'SHLIBSUFFIX' ], sources )
