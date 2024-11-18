@@ -15,6 +15,8 @@ def integration_module( funcs, scalar_type, nb_dims ):
     ct_repr, rt_data = Expr.ct_rt_split_of_list( funcs )
     module_name = 'integration_' + ct_repr
 
+    print( "rt_data", rt_data )
+
     # generate .cpp and SConstruct files
     bd = get_build_dir( 'generated', ct_repr )
     cf = bd / ( module_name + ".cpp" )
@@ -69,7 +71,7 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( '};\n' )
 
         f.write( 'PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {\n' )
-        f.write( '    m.def( "cell_integral", []( TCell &cell, const std::vector<int> &rt_data ) -> std::vector<TF> {\n' )
+        f.write( '    m.def( "cell_integral", []( TCell &cell, const std::vector<ExprData> &rt_data ) -> std::vector<TF> {\n' )
         f.write( '        PD_NAME( Integration ) res;\n' )
         f.write( '        for( auto &v : res.out )\n' )
         f.write( '            v = 0;\n' )

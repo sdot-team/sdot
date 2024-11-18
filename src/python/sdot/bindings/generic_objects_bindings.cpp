@@ -15,6 +15,7 @@ std::tuple<Str,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Exp
     Vec<std::pair<const Inst *,ExprData>> data_map;
     CompactReprWriter cw;
     cw.write_positive_int( expr_list.size() );
+
     for( const Expr &expr : expr_list )
         expr.inst->ct_rt_split( cw, data_map );
 
@@ -46,7 +47,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( pybind11::init( []( FP64 v ) { return Expr( BigRationalFrom<FP64>::create( v ) ); } ) )
         .def( pybind11::init<Str>() )
         .def( pybind11::init<SI>() )
-        
+
         .def( "__repr__", []( const Expr &cell ) { return to_string( cell ); } )
        
         .def( "subs", []( const Expr &expr, const std::map<Str,Expr> &symbol_map ) {
@@ -61,6 +62,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "mul", []( const Expr &a, const Expr &b ) { return a * b; } )
         .def( "div", []( const Expr &a, const Expr &b ) { return a / b; } )
         .def( "pow", []( const Expr &a, const Expr &b ) { return pow( a, b ); } )
+        ;
+
+    pybind11::class_<ExprData>( m, "ExprData" )
+        .def( "__repr__", []( const ExprData &cell ) { return "ExprData"; } )
         ;
 
     m.def( "ct_rt_split_of_list", ct_rt_split_of_list );

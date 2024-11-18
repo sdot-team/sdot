@@ -2,17 +2,20 @@
 #include <sdot/support/binding_config.h>
 #include <sdot/symbolic/Expr.h>
 
+#ifndef SDOT_CONFIG_interpolation_order
+#define SDOT_CONFIG_interpolation_order 0
+#endif
+
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
     using namespace sdot;
     using TF = SDOT_CONFIG_scalar_type;
     static constexpr int nb_dims = SDOT_CONFIG_nb_dims;
+    static constexpr int interpolation_order = SDOT_CONFIG_interpolation_order;
     using Array_TF = pybind11::array_t<TF, pybind11::array::c_style>;
 
     // Expr_from_image ---------------------------------------------------------------------------------------------------------------
-    m.def( "Expr_from_image", []( const Array_TF &array, const Array_TF &trinv, int interpolation_order ) {
-        auto *res = new Img<TF,nb_dims>;
-        
-        res->interpolation_order = interpolation_order;
+    m.def( "Expr_from_image", []( const Array_TF &array, const Array_TF &trinv ) {
+        auto *res = new Img<TF,nb_dims,interpolation_order>;
         
         for( PI d = 0; d < nb_dims; ++d )
             res->extents[ d ] = array.shape( d );

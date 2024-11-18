@@ -7,7 +7,7 @@
 namespace sdot {
 
 /** */
-template<class TF,int nb_dims>
+template<class TF,int nb_dims,int interpolation_order>
 class Img : public Inst {
 public:
     using               Tr           = AffineTransformation<TF,nb_dims>;
@@ -19,7 +19,6 @@ public:
 
     PI                  nb_values    () const { return product( extents ); }
  
-    int                 interpolation_order;
     Vec<PI,nb_dims>     extents;
     Vec<TF>             values;
     Tr                  trinv;

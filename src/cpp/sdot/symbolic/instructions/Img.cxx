@@ -1,31 +1,36 @@
 #pragma once
 
+#include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
 #include <tl/support/containers/Opt.h>
-#include <tl/support/P.h>
-// #include <algorithm>
+#include "../ExprData.h"
 #include "Value.h"
 #include "Img.h"
 
 namespace sdot {
 
-#define DTP template<class TF,int nb_dims>
-#define UTP Img<TF,nb_dims>
+#define DTP template<class TF,int nb_dims,int interpolation_order>
+#define UTP Img<TF,nb_dims,interpolation_order>
 
 DTP void UTP::display( Displayer &ds ) const {
     ds << "img";
 }
 
 DTP void UTP::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
-    // cw.write_positive_int( type_Func, nb_types );
-    // cw << name;
+    PI num_var = rt_data_num( data_map, this, [&]() {
+        return ExprData{ new ExprVal<const Img *>{ this } };
+    } );
 
-    // cw.write_positive_int( children.size() );
-    // for( PI i = 0; i < children.size(); ++i ) {
-    //     cw << coefficients[ i ];
-    //     children[ i ]->ct_rt_split( cw, data_map );
-    // }
-    TODO;
+    // Inst type
+    cw.write_positive_int( type_Img, nb_types );
+
+    // type info
+    cw.write_string      ( type_name( CtType<TF>() ) );
+    cw.write_positive_int( nb_dims );
+    cw.write_positive_int( interpolation_order );
+
+    // number
+    cw.write_positive_int( num_var );
 }
 
 

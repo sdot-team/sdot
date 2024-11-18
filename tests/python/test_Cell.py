@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 from munch import Munch
-from sdot import Cell
+from sdot import Cell, Expr
 import pytest
 import numpy
 
@@ -95,19 +95,14 @@ def test_faces():
     ] )
 
 
-# cell = Cell( ndim = 2 )
+cell = Cell( ndim = 2 )
 
-# cell.cut( [ -1,  0 ], 0 )
-# cell.cut( [  0, -1 ], 0 )
-# cell.cut( [ +1, +1 ], 1 )
+cell.cut( [ -1,  0 ], 0 )
+cell.cut( [  0, -1 ], 0 )
+cell.cut( [ +1, +1 ], 1 )
 
 
 
-# print( cell.integral() )
-
-from sdot import Expr
-ima = [ [ 10, 1 ], [ 2, 3 ] ]
-img = Expr.img_interpolation( ima, interpolation_order = 0 )
-print( img[ 0.4, 0.4 ] )
-print( img[ 0.54, 0.4 ] )
+img = Expr.img_interpolation( [ [ 10, 1 ], [ 2, 3 ] ], interpolation_order = 0 )
+print( cell.integral( img ) )
 

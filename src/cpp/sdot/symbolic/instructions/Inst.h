@@ -29,6 +29,8 @@ public:
    
     void                add_child  ( const RcPtr<Inst> &inst );
     int                 compare    ( const Inst &that ) const;
+
+    static PI           rt_data_num( Vec<std::pair<const Inst *,ExprData>> &data_map, const Inst *inst, const std::function<ExprData()> &make_rt_data );
    
     PI                  ref_count = 0;
     Vec<RcPtr<Inst>>    children;

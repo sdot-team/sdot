@@ -47,13 +47,17 @@ class Expr:
 
             Beware: it follows the numpy convention for the axes (for 2D, x_0 is the y axis, x_1 is the x axis)  
         """
-        #need to load the module to get Expr type
+        # need to load the module to get the Expr type
         module_for( 'generic_objects' )
         
         array = np.ascontiguousarray( array )
         trinv = np.linalg.inv( TransformationMatrix( transformation_matrix ).get( array.ndim ) )
-        module = module_for( 'img_interpolation', scalar_type = type_promote([ array.dtype, trinv.dtype ]), nb_dims = array.ndim )
-        return Expr( module.Expr_from_image( array, trinv, interpolation_order ) )
+        module = module_for( 'img_interpolation', 
+            scalar_type = type_promote([ array.dtype, trinv.dtype ]), 
+            interpolation_order = interpolation_order,
+            nb_dims = array.ndim 
+        )
+        return Expr( module.Expr_from_image( array, trinv ) )
 
     @staticmethod
     def list_from_compact_repr( crepr ):
