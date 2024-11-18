@@ -51,30 +51,32 @@ TEST_CASE( "BigRational ctors", "" ) {
     CHECK_REPR( abs( BR( -3.5 ) ), BR( 3.5 ) );
 }
 
-void check_compact_repr( BigRational b, PI p = 0, PI m = 1 ) {
-    Str c = b.compact_str_repr( 0, m );
-    P( c );
+void check_compact_repr( BigRational b ) {
+    CompactReprWriter cw;
+    cw << b;
 
-    StrView s = c;
-    CHECK_REPR( BigRational::from_compact_str( s, m ), b );
-    CHECK_REPR( s.size(), 0 );
+    CompactReprReader cr( cw.str() );
+    CHECK_REPR( BigRational::read_from( cr ), b );
 }
 
 TEST_CASE( "BigRational compact repr", "" ) {
-    // check_compact_repr( 17 );
+    check_compact_repr( + 17 );
+    check_compact_repr( - 17 );
+    check_compact_repr( "18/53" );
+    check_compact_repr( "-18/53" );
     // check_compact_repr( 18 );
     // P( BigRational( "18/53" ) );
     // check_compact_repr( "18/53" );
-    CompactReprWriter cw;
-    cw.write_positive_int( 7, 10 );
-    cw.write_string( "yo" );
-    cw.write_string( "ya" );
-    P( cw.str() );
+    // CompactReprWriter cw;
+    // cw.write_positive_int( 7, 10 );
+    // cw.write_string( "yo" );
+    // cw.write_string( "ya" );
+    // P( cw.str() );
 
-    CompactReprReader cr( cw.str() );
-    P( cr.read_positive_int( 10 ) );
-    P( cr.read_string() );
-    P( cr.read_string() );
+    // CompactReprReader cr( cw.str() );
+    // P( cr.read_positive_int( 10 ) );
+    // P( cr.read_string() );
+    // P( cr.read_string() );
 }
 
 // TEST_CASE( "BigRational matrix", "" ) {

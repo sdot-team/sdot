@@ -5,6 +5,8 @@
 #include <tl/support/compare.h>
 #include <Eigen/Dense>
 #include <cmath>
+class CompactReprWriter;
+class CompactReprReader;
 
 namespace sdot {
 T_T struct BigRationalFrom;
@@ -41,7 +43,7 @@ public:
     BI                 numerator          () const { return num; }
     BI                 exponent           () const { return exp; }
 
-    bool               positive_or_null   () const { return num >= 0; }
+    bool               is_positive_or_null() const { return num >= 0; }
     bool               is_integer         () const { return den == 1 && exp >= 0; }
 
     void               display            ( Displayer &ds ) const;
@@ -75,8 +77,8 @@ public:
     int                compare            ( const BigRational &that ) const { return BigRational::compare( *this, that ); }
     BigRational        pow                ( const BigRational &that ) const;
         
-    static BigRational from_compact_str   ( StrView &res, PI m );
-    Str                compact_str_repr   ( PI p, PI m ) const;
+    static BigRational read_from          ( CompactReprReader &cr );
+    void               write_to           ( CompactReprWriter &cw ) const;
 
 private:        
     void               normalize_all      ();

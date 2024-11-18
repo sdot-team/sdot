@@ -1,7 +1,7 @@
 // #include <boost/multiprecision/detail/default_ops.hpp>
 // #include <boost/multiprecision/detail/integer_ops.hpp>
-#include <string>
-#include <tl/support/string/read_number.h>
+#include <tl/support/string/CompactReprReader.h>
+#include <tl/support/string/CompactReprWriter.h>
 #include <tl/support/ASSERT.h>
 #include "BigRational.h"
 
@@ -79,6 +79,12 @@ BigRational::BigRational( StrView str ) : num( 0 ), den( 1 ), exp( 0 ) {
         }
     };
 
+    bool is_neg = false;
+    if ( str.starts_with( '-' ) ) {
+        str.remove_prefix( 1 );
+        is_neg = true;
+    }
+
     for( PI i = 0; i < str.size(); ) {
         char c = str[ i ];
 
@@ -95,6 +101,9 @@ BigRational::BigRational( StrView str ) : num( 0 ), den( 1 ), exp( 0 ) {
 
         TODO;
     }
+
+    if ( is_neg )
+        num = - num;
 
     normalize_all();
 }
@@ -272,54 +281,34 @@ int BigRational::compare( const sdot::BigRational &a, const sdot::BigRational &b
     return 0;   
 }
 
-Str BigRational::compact_str_repr( PI p, PI m ) const {
-    // subtypes: full_rational , int
-    p += m * is_integer(); m *= 2;
-    // pos or neg num
-    p += m * positive_or_null(); m *= 2;
-
-    //
-    if ( is_integer() ) {
-        Str num_str = BI( boost::multiprecision::abs( num ) << exp ).str();
-        p += m * num_str.size();
-  
-        return std::to_string( p ) + "_" + num_str;
+BigRational BigRational::read_from( CompactReprReader &cr ) {
+    const bool is_int( cr.read_positive_int( 2 ) );
+    if ( is_int ) {
+        const bool num_is_pos( cr.read_positive_int( 2 ) );
+        return num_is_pos ? cr.read_positive_int() : - cr.read_positive_int();
     } else {
-        // exp is positive 
-        p += m * ( exp >= 0 ); m *= 2;
-
-        Str num_str = BI( boost::multiprecision::abs( num ) ).str();
-        Str den_str = den.str();
-        p += m * num_str.size();
-  
-        return std::to_string( p ) + "_" + num_str +
-               std::to_string( den_str.size() ) + "_" + den_str +
-               std::to_string( std::abs( exp ) );
+        const bool num_is_pos( cr.read_positive_int( 2 ) );
+        const bool exp_is_pos( cr.read_positive_int( 2 ) );
+        const BI num( num_is_pos ? cr.read_positive_int() : - cr.read_positive_int() );
+        const BI den( cr.read_positive_int() );
+        const TE exp( exp_is_pos ? cr.read_positive_int() : - cr.read_positive_int() );
+        return { num, den, exp };
     }
 }
 
-BigRational BigRational::from_compact_str( StrView &res, PI m ) {
-    PI p = read_number<PI>( res ); ASSERT( res.starts_with( '_' ) ); res.remove_prefix( 1 );
-    PI sub_type = p % 2; p /= 2;
+void BigRational::write_to( CompactReprWriter &cw ) const {
+    cw.write_positive_int( is_integer(), 2 );
 
-    // int
-    if ( sub_type == 1 ) {
-        bool positive_num = p % 2; p /= 2;
-        
-        BI num( res.substr( 0, p ) ); res.remove_prefix( p );
-
-        return positive_num ? num : - num;
+    if ( is_integer() ) {
+        cw.write_positive_int( is_positive_or_null(), 2 );
+        cw.write_positive_int( boost::multiprecision::abs( num ) << exp );
     } else {
-        bool positive_num = p % 2; p /= 2;
-        bool positive_exp = p % 2; p /= 2;
+        cw.write_positive_int( is_positive_or_null(), 2 );
+        cw.write_positive_int( exp >= 0, 2 );
+        cw.write_positive_int( boost::multiprecision::abs( num ) );
+        cw.write_positive_int( den );
+        cw.write_positive_int( std::abs( exp ) );
 
-        BI num( res.substr( 0, p ) ); res.remove_prefix( p );
-
-        PI sden = read_number<PI>( res ); ASSERT( res.starts_with( '_' ) ); res.remove_prefix( 1 );
-        BI den( res.substr( 0, sden ) ); res.remove_prefix( sden );
-        TE exp = read_number<TE>( res );
-
-        return { positive_num ? num : -num, den, positive_exp ? exp : - exp };
     }
 }
 
