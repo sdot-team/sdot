@@ -15,8 +15,6 @@ def integration_module( funcs, scalar_type, nb_dims ):
     ct_repr, rt_data = Expr.ct_rt_split_of_list( funcs )
     module_name = 'integration_' + ct_repr
 
-    print( "rt_data", rt_data )
-
     # generate .cpp and SConstruct files
     bd = get_build_dir( 'generated', ct_repr )
     cf = bd / ( module_name + ".cpp" )
@@ -53,6 +51,8 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( 'using TCell = Cell<Arch,TF,nb_dims,PD_NAME( CutInfo ),PD_NAME( CellInfo )>;\n' )
         f.write( 'using TCut = Cut<TF,nb_dims,PD_NAME( CutInfo )>;\n' )
 
+        splits, final_funcs = Expr.cell_splits_of_list( funcs, rt_data )
+
         f.write( 'struct PD_NAME( Integration ) {\n' )
         f.write( '    void operator()( const Vec<Pt,nb_dims+1> &simplex ) {\n' )
         f.write( '        using namespace std;\n' )
@@ -63,10 +63,10 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( f'        TF loc_vol = M.determinant() / { math.factorial( nb_dims ) };\n' )
         f.write( f'        TF coeff = loc_vol >= 0 ? 1 : -1;\n' )
         f.write( f'        vol += coeff * loc_vol;\n' )
-        for i in range( len( funcs ) ):
-           f.write( f'        out[ { i } ] += coeff * ( { symbolic_integration( funcs[ i ], nb_dims ) } );\n' )
+        for i in range( len( final_funcs ) ):
+           f.write( f'        out[ { i } ] += coeff * ( { symbolic_integration( final_funcs[ i ], nb_dims ) } );\n' )
         f.write( '    }\n' )
-        f.write( f'    Vec<TF,{ len( funcs ) }> out;\n' )
+        f.write( f'    Vec<TF,{ len( final_funcs ) }> out;\n' )
         f.write( f'    TF vol;\n' )
         f.write( '};\n' )
 
@@ -76,7 +76,11 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( '        for( auto &v : res.out )\n' )
         f.write( '            v = 0;\n' )
         f.write( '        res.vol = 0;\n' )
+        for split in splits:
+            f.write( split[ 0 ] )
         f.write( '        cell.simplex_split( res );\n' )
+        for split in reversed( splits ):
+            f.write( split[ 1 ] )
         f.write( '        return { res.out.begin(), res.out.end() };\n' )
         f.write( '    } );\n' )
         f.write( '}\n' )

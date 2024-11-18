@@ -79,6 +79,12 @@ class Expr:
         module = module_for( 'generic_objects' )
         return module.ct_rt_split_of_list( [ Expr.as_expr( e )._expr for e in expr_list ] )
 
+    @staticmethod
+    def cell_splits_of_list( funcs, rt_data ):
+        """ splits, final_funcs """
+        module = module_for( 'generic_objects' )
+        return module.cell_splits_of_list( [ Expr.as_expr( e )._expr for e in funcs ], rt_data )
+
     def ct_repr( self ):
         return self._expr.ct_repr()
 

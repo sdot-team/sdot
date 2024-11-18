@@ -17,8 +17,20 @@ Installation
 
 For python, `pip install sdot` should do the job, including some precompiled libraries for the most common cases (2D/3D, float64, ...). If your case is not included in the distribution, the required dynamic libraries will be automatically compiled on first use. For this case, you will need to have a C++ compiler installed on your machine. As scons is used to find and call the compiler, all you need to do is install one compiler that is compatible with this builder (for instance g++, clang, xcode, vscode, ...). 
 
-Tutorials
----------
+To get that latest version, `sdot` can also be installed from the git repository.
+
+For the python modules:
+
+```bash
+git clone https://github.com/sdot-team/sdot.git
+# maybe after a micromamba activate ...
+cd sdot/src/python
+pip install flit
+flit install -s # -s makes symbolic links to the sources
+```
+
+Modules
+-------
 
 * [Optimal transport operations in python](doc/optimal_transport_py.md).
 * [Power or voronoi diagrams and cells in python](doc/power_diagram_py.md).

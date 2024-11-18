@@ -26,6 +26,10 @@ std::tuple<Str,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Exp
     return { cw.str(), std::move( rt_data ) };
 }
 
+std::tuple<std::pair<Str,Str>,std::vector<Expr>> cell_splits_of_list( const std::vector<Expr> &expr_list, const std::vector<ExprData> &expr_data ) {
+    TODO;
+}
+
 std::vector<Expr> expr_list_from_compact_repr( const Str &str ) {
     CompactReprReader cr( str );
 
@@ -68,6 +72,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "__repr__", []( const ExprData &cell ) { return "ExprData"; } )
         ;
 
-    m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
     m.def( "expr_list_from_compact_repr", expr_list_from_compact_repr );
+    m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
+    m.def( "cell_splits_of_list", cell_splits_of_list );
 }
