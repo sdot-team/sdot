@@ -1,4 +1,5 @@
 #include "Value.h"
+#include "sdot/symbolic/Inst.h"
 
 namespace sdot {
 
@@ -15,8 +16,9 @@ RcPtr<Inst> Value::from_value( const BigRational &value ) {
     return iter->second;
 }
 
-Str Value::ct_rt_split( Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
-    return value.compact_str_repr();
+void Value::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+    cw.write_positive_int( type_Value, nb_types );
+    cw << value;
 }
 
 void Value::display( Displayer &ds ) const {

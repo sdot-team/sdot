@@ -35,10 +35,8 @@ class Cell:
         if not isinstance( func, list ):
             return self.integral( [ func ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
         ct_repr, rt_data = Expr.ct_rt_split_of_list( func )
-        print( ct_repr, rt_data )
-        pouet()
-        # module = module_for( 'cell_integration', symbolic_func = ct_repr )
-        # return module.integral( self._cell, rt_data )
+        module = module_for( 'integration', symbolic_func = ct_repr, scalar_type = self._binding_module.dtype(), nb_dims = self._binding_module.ndim() )
+        return module.cell_integral( self._cell, rt_data )
 
     @property
     def true_dimensionality( self ):

@@ -69,11 +69,11 @@ void Func::display( Displayer &ds ) const {
                     if ( coefficients[ i ] == -1 )
                         res += "- ";
                     else
-                        res += to_string( double( coefficients[ i ] ) ) + " * ";
+                        res += to_string( coefficients[ i ] ) + " * ";
                 }
                 res += to_string( *ch );
             } else
-                res += to_string( double( coefficients[ i ] ) );
+                res += to_string( coefficients[ i ] );
             continue;
         }
 
@@ -82,10 +82,10 @@ void Func::display( Displayer &ds ) const {
                 res += to_string( *ch );
 
                 if ( coefficients[ i ] != 1 ) {
-                    res += " ^ " + to_string( double( coefficients[ i ] ) );
+                    res += " ^ " + to_string( coefficients[ i ] );
                 }
             } else
-                res += to_string( double( coefficients[ i ] ) );
+                res += to_string( coefficients[ i ] );
             continue;
         }
 
@@ -94,6 +94,17 @@ void Func::display( Displayer &ds ) const {
 
     res += " )";
     ds << res;
+}
+
+void Func::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+    cw.write_positive_int( type_Func, nb_types );
+    cw << name;
+
+    cw.write_positive_int( children.size() );
+    for( PI i = 0; i < children.size(); ++i ) {
+        cw << coefficients[ i ];
+        children[ i ]->ct_rt_split( cw, data_map );
+    }
 }
 
 }

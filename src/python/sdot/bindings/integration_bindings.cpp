@@ -1,4 +1,4 @@
-#include <tl/support/string/CompactReprReader.h>
+// #include <tl/support/type_info/type_name.h>
 #include <tl/support/string/to_string.h>
 #include <sdot/support/VtkOutput.h>
 #include <sdot/symbolic/ExprData.h>
@@ -11,29 +11,20 @@
 
 using namespace sdot;
 
-std::tuple<Str,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Expr> &expr_list ) {
+std::tuple<std::vector<Str>,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Expr> &expr_list ) {
     Vec<std::pair<const Inst *,ExprData>> data_map;
-    CompactReprWriter cw;
-    cw.write_positive_int( expr_list.size() );
-    for( const Expr &expr : expr_list )
+    std::vector<Str> ct_expr;
+    for( const Expr &expr : expr_list ) {
+        CompactReprWriter cw;
         expr.inst->ct_rt_split( cw, data_map );
+        ct_expr.push_back( cw.str() );
+    }
 
     std::vector<ExprData> rt_data;
     for( auto &p : data_map )
         rt_data.push_back( std::move( p.second ) );
 
-    return { cw.str(), std::move( rt_data ) };
-}
-
-std::vector<Expr> expr_list_from_compact_repr( const Str &str ) {
-    CompactReprReader cr( str );
-
-    PI size( cr.read_positive_int() );
-
-    std::vector<Expr> res;
-    for( PI i = 0; i < size; ++i )
-        res.push_back( Expr{ Inst::read_from( cr ) } );
-    return res;
+    return { std::move( ct_expr ), std::move( rt_data ) };
 }
 
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
@@ -54,5 +45,4 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         ;
 
     m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
-    m.def( "expr_list_from_compact_repr", expr_list_from_compact_repr );
 }

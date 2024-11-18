@@ -1,4 +1,5 @@
 #include "Symbol.h"
+#include "sdot/symbolic/Inst.h"
 
 namespace sdot {
 
@@ -13,6 +14,11 @@ RcPtr<Inst> Symbol::from_name( const Str &name ) {
         iter = symbol_map.insert( iter, { name, v } );
     }
     return iter->second;
+}
+
+void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+    cw.write_positive_int( type_Symbol, nb_types );
+    cw << name;
 }
 
 void Symbol::display( Displayer &ds ) const {

@@ -1,4 +1,5 @@
 from urllib.parse import unquote_plus
+from munch import Munch
 import sysconfig
 import pybind11
 import os
@@ -8,6 +9,15 @@ def pdir( dir, n = 1 ):
     if n == 0:
         return dir
     return pdir( os.path.dirname( dir ), n - 1 )
+
+def args_to_obj( ARGLIST ):
+    args = Munch()
+    for k, v in ARGLIST:
+        if k in [ 'module_name', 'suffix' ]:
+            args[ k ] = v
+        else:
+            args[ k ] = unquote_plus( v )
+    return args
 
 def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
     # build directory
@@ -95,6 +105,8 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
         "build/ext/tl20/src/cpp/tl/support/display/DisplayContext.cpp",
         "build/ext/tl20/src/cpp/tl/support/display/DisplayItem.cpp",
 
+        "build/ext/tl20/src/cpp/tl/support/string/CompactReprWriter.cpp",
+        "build/ext/tl20/src/cpp/tl/support/string/CompactReprReader.cpp",
         "build/ext/tl20/src/cpp/tl/support/string/read_arg_name.cpp",
         "build/ext/tl20/src/cpp/tl/support/string/va_string.cpp",
         "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",

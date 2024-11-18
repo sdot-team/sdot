@@ -12,6 +12,11 @@ class Expr:
         self._expr = self._module.Expr( value )
     
     @staticmethod
+    def list_from_compact_repr( crepr ):
+        _module = module_for( 'generic_objects' )
+        return _module.expr_list_from_compact_repr( crepr )
+    
+    @staticmethod
     def as_expr( expr ):
         if expr is None:
             return Expr( "0" )

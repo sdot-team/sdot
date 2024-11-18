@@ -56,4 +56,8 @@ int Inst::compare( const sdot::Inst &b ) const {
     TODO;
 }
 
+RcPtr<Inst> Inst::read_from( CompactReprReader &cr ) {
+    TODO;
+}
+
 }

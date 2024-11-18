@@ -11,6 +11,7 @@ public:
     static RcPtr<Inst> from_operands( const Str &name, Vec<std::pair<RcPtr<Inst>,BigRational>> operands );
     static RcPtr<Inst> from_operands( const Str &name, Vec<RcPtr<Inst>> operands );
 
+    virtual void       ct_rt_split  ( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprData>> &data_map ) const override;
     virtual void       display      ( Displayer &ds ) const override;
     virtual int        type         () const override { return type_Func; }
        
