@@ -24,6 +24,7 @@ public:
     /**/               BigRational        ( FromNormalizedDiv, BI num = 0, BI den = 1, TE exp = 0 );
     /**/               BigRational        ( BI num, BI den, TE exp );
     /**/               BigRational        ( BI num, BI den );
+    /**/               BigRational        ( const char *str );
     /**/               BigRational        ( StrView str );
     /**/               BigRational        ( BI num );
     /**/               BigRational        ();
@@ -39,6 +40,9 @@ public:
     BI                 denominator        () const { return den; }
     BI                 numerator          () const { return num; }
     BI                 exponent           () const { return exp; }
+
+    bool               positive_or_null   () const { return num >= 0; }
+    bool               is_integer         () const { return den == 1 && exp >= 0; }
 
     void               display            ( Displayer &ds ) const;
    
@@ -71,6 +75,9 @@ public:
     int                compare            ( const BigRational &that ) const { return BigRational::compare( *this, that ); }
     BigRational        pow                ( const BigRational &that ) const;
         
+    static BigRational from_compact_str   ( StrView &res, PI m );
+    Str                compact_str_repr   ( PI p, PI m ) const;
+
 private:        
     void               normalize_all      ();
     void               normalize_div      ();

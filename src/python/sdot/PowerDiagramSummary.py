@@ -5,7 +5,7 @@ class PowerDiagramSummary:
     """
         Aggregation of arrays that represents a fully computed PowerDiagram.
 
-        In these arrays, if < `nb_cells`, a `ref` represents a cell index. Else (if >= `nb_cells`) it represents a boundary index + `nb_cells` (i.e. `boundary_index = ref - summary.nb_cells`).
+        In these arrays, if < `nb_seeds`, a `ref` represents a cell index. Else (if >= `nb_seeds`) it represents a boundary index + `nb_seeds` (i.e. `boundary_index = ref - summary.nb_seeds`).
         
         Attributes:
             `vertex_coords`: coordinates for each vertex
@@ -22,7 +22,7 @@ class PowerDiagramSummary:
         self.base           = base
 
     @property
-    def nb_cells( self ):
+    def nb_seeds( self ):
         return len( self.vertex_coords )
 
     @property

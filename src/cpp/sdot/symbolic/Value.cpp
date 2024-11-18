@@ -15,6 +15,10 @@ RcPtr<Inst> Value::from_value( const BigRational &value ) {
     return iter->second;
 }
 
+Str Value::ct_rt_split( Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
+    return value.compact_str_repr();
+}
+
 void Value::display( Displayer &ds ) const {
     ds << double( value );
 }

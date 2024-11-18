@@ -56,8 +56,4 @@ int Inst::compare( const sdot::Inst &b ) const {
     TODO;
 }
 
-Str Inst::ct_rt_split( Vec<std::pair<const Inst *,ExprData>> &data_map ) const {
-    return "pouet";    
-}
-
 }

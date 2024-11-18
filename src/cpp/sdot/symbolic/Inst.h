@@ -12,7 +12,7 @@ namespace sdot {
 /** */
 class Inst {
 public:
-    enum {           type_Value, type_Symbol, type_Func };
+    enum {           type_Value, type_Symbol, type_Func, nb_types };
 
     virtual         ~Inst       () {}
       
@@ -22,7 +22,7 @@ public:
     virtual void     display    ( Displayer &ds ) const = 0;
     virtual int      type       () const = 0;
 
-    Str              ct_rt_split( Vec<std::pair<const Inst *,ExprData>> &data_map ) const;
+    virtual Str      ct_rt_split( Vec<std::pair<const Inst *,ExprData>> &data_map ) const = 0;
   
     void             add_child  ( const RcPtr<Inst> &inst );
     int              compare    ( const Inst &that ) const;
