@@ -2,6 +2,14 @@ from .loader import get_build_dir, module_for
 from ..Expr import Expr
 import math
 
+def symbolic_integration( func, nb_dims ):
+    if func == Expr( "1" ):
+        return Expr( "loc_vol" )
+    # / { math.factorial( nb_dims ) }
+    #   simplex = []
+    pouet()
+    return 1 / math.factorial( nb_dims )
+
 def integration_module( funcs, scalar_type, nb_dims ):
     # get summary
     ct_repr, rt_data = Expr.ct_rt_split_of_list( funcs )
@@ -50,9 +58,14 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( '        for( PI r = 0; r < nb_dims; ++r )\n' )
         f.write( '            for( PI c = 0; c < nb_dims; ++c )\n' )
         f.write( '                M( r, c ) = simplex[ r + 1 ][ c ] - simplex[ 0 ][ c ];\n' )
-        f.write( f'        out[ 0 ] += M.determinant() / { math.factorial( nb_dims ) };\n' )
+        f.write( f'        TF loc_vol = M.determinant() / { math.factorial( nb_dims ) };\n' )
+        f.write( f'        TF coeff = loc_vol >= 0 ? 1 : -1;\n' )
+        f.write( f'        vol += coeff * loc_vol;\n' )
+        for i in range( len( funcs ) ):
+           f.write( f'        out[ { i } ] += coeff * ( { symbolic_integration( funcs[ i ], nb_dims ) } );\n' )
         f.write( '    }\n' )
         f.write( f'    Vec<TF,{ len( funcs ) }> out;\n' )
+        f.write( f'    TF vol;\n' )
         f.write( '};\n' )
 
         f.write( 'PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {\n' )
@@ -60,6 +73,7 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( '        PD_NAME( Integration ) res;\n' )
         f.write( '        for( auto &v : res.out )\n' )
         f.write( '            v = 0;\n' )
+        f.write( '        res.vol = 0;\n' )
         f.write( '        cell.simplex_split( res );\n' )
         f.write( '        return { res.out.begin(), res.out.end() };\n' )
         f.write( '    } );\n' )

@@ -43,7 +43,9 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         ;
 
     pybind11::class_<Expr>( m, "Expr" )
+        .def( pybind11::init( []( FP64 v ) { return Expr( BigRationalFrom<FP64>::create( v ) ); } ) )
         .def( pybind11::init<Str>() )
+        .def( pybind11::init<SI>() )
         .def( "__repr__", []( const Expr &cell ) { return to_string( cell ); } )
        
         .def( "add", []( const Expr &a, const Expr &b ) { return a + b; } )
@@ -55,4 +57,9 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
     m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
     m.def( "expr_list_from_compact_repr", expr_list_from_compact_repr );
+    // m.def( "Expr_from_image", []( const Array_TF &img ) {
+
+    // } );
+
+    //     return module.( array, tr_coords, interpolation_order )
 }

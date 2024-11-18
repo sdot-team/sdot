@@ -13,7 +13,7 @@ namespace sdot {
 /** */
 class Inst {
 public:
-    enum {             type_Value, type_Symbol, type_Func, nb_types };
+    enum {             type_Value, type_Symbol, type_Func, type_Img, nb_types };
   
     virtual           ~Inst       () {}
         

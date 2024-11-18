@@ -1,6 +1,9 @@
-from .bindings.loader import module_for
+from .bindings.loader import module_for, normalized_dtype, type_promote
+from .TransformationMatrix import TransformationMatrix
 # from types import ModuleType
 import numpy as np
+
+_module = module_for( 'generic_objects' )
 
 class Expr:
     """ wrapper around cpp sdot::Expr class to store symbolic expressions """
@@ -8,9 +11,27 @@ class Expr:
     def __init__( self, value = None ):
         """ 
         """
-        self._module = module_for( 'generic_objects' )
-        self._expr = self._module.Expr( value )
-    
+        # default value
+        if value is None:
+            value = 0
+
+        # already an Expr ?
+        _module = module_for( 'generic_objects' )
+        if isinstance( value, _module.Expr ):
+            self._expr = value
+            return
+
+        # else, call the cpp ctor
+        self._expr = _module.Expr( value )
+
+    @staticmethod
+    def img_interpolation( array, transformation_matrix = None, interpolation_order = 0 ):
+        """ symbolic expression from image """
+        array = np.ascontiguousarray( array )
+        trinv = np.linalg.inv( TransformationMatrix( transformation_matrix ).get( array.ndim ) )
+        module = module_for( 'img_interpolation', scalar_type = type_promote([ array.dtype, trinv.dtype ]), nb_dims = array.ndim )
+        return module.Expr_from_image( array, trinv, interpolation_order )
+
     @staticmethod
     def list_from_compact_repr( crepr ):
         _module = module_for( 'generic_objects' )

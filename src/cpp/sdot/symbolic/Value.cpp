@@ -23,6 +23,7 @@ void Value::ct_rt_split( CompactReprWriter &cw, Vec<std::pair<const Inst *,ExprD
 
 void Value::display( Displayer &ds ) const {
     ds << double( value );
+    // ds << value;
 }
 
 }

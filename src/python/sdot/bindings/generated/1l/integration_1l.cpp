@@ -31,15 +31,20 @@ struct PD_NAME( Integration ) {
         for( PI r = 0; r < nb_dims; ++r )
             for( PI c = 0; c < nb_dims; ++c )
                 M( r, c ) = simplex[ r + 1 ][ c ] - simplex[ 0 ][ c ];
-        out[ 0 ] += M.determinant() / 2;
+        TF loc_vol = M.determinant() / 2;
+        TF coeff = loc_vol >= 0 ? 1 : -1;
+        vol += coeff * loc_vol;
+        out[ 0 ] += coeff * ( 0.5 );
     }
     Vec<TF,1> out;
+    TF vol;
 };
 PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
     m.def( "cell_integral", []( TCell &cell, const std::vector<int> &rt_data ) -> std::vector<TF> {
         PD_NAME( Integration ) res;
         for( auto &v : res.out )
             v = 0;
+        res.vol = 0;
         cell.simplex_split( res );
         return { res.out.begin(), res.out.end() };
     } );

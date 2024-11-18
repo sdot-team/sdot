@@ -1,5 +1,6 @@
 from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, module_for
 from .distributions.normalized_distribution import normalized_distribution
+from .TransformationMatrix import TransformationMatrix
 from .PowerDiagramSummary import PowerDiagramSummary
 from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec
@@ -33,14 +34,14 @@ class PowerDiagram:
     """
     def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
-        self._periodicity_transformations = [] # 
+        self._periodicity_transformations = [] # list of TransformationMatrix 
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
+        self._underlying_measure = None # instance of Distribution
         self._density_binding = None
         self._binding_module = None
         self._boundaries = None # expected to be a ndarray
         self._positions = None # PoomVec
         self._weights = None # PoomVec
-        self._underlying_measure = None # instance of Distribution
         self._dtype = None # can be used to force the data type
         self._ndim = None # can be used to force the dimension
 
@@ -99,45 +100,12 @@ class PowerDiagram:
 
     @property
     def periodicity_transformations( self ):
-        return self._periodicity_transformations[ ::2 ]
+        return self._periodicity_transformations
     
     @periodicity_transformations.setter
     def periodicity_transformations( self, values ):
-        self._periodicity_transformations = []
+        self._periodicity_transformations = [ TransformationMatrix( v ) for v in values ]
         self._acceleration_structure = None
-
-        for value in values:
-            if isinstance( value, tuple ):
-                assert( len( value ) == 2 )
-                M = np.array( value[ 0 ] )
-                V = np.array( value[ 1 ] )
-                
-                assert( M.shape[ 0 ] == M.shape[ 1 ] )
-                assert( M.shape[ 0 ] == V.shape[ 0 ] )
-                s = M.shape[ 0 ]
-
-                value = np.eye( s + 1 )
-                value[ :s, :s ] = M
-                value[ :s, s ] = V
-            else:
-                value = np.array( value )
-
-                if len( value.shape ) == 2:
-                    assert( value.shape[ 0 ] == value.shape[ 1 ] )
-                    if self.ndim is not None:
-                        assert( value.shape[ 0 ] == self.ndim + 1 )
-                elif len( value.shape ) == 1:
-                    V = value
-                    s = V.size
-
-                    value = np.eye( s + 1 )
-                    value[ :s, s ] = V
-                else:
-                    raise ValueError( "invalid transformation" )
-
-            self._periodicity_transformations.append( value )
-            self._periodicity_transformations.append( np.linalg.inv( value ) )
-
 
     @property
     def boundaries( self ):
@@ -343,8 +311,23 @@ class PowerDiagram:
             if self._weights.dtype != dtype:
                 self._weights = PoomVec( self._weights.as_ndarray.astype( numpy_dtype_for( dtype ) ) )
 
+            #
+            transformation_matrices = []
+            for i, pt in enumerate( self._periodicity_transformations ):
+                tm = pt.get( ndim )
+                ti = np.linalg.inv( tm )
+                transformation_matrices.append( tm )
+                transformation_matrices.append( ti )
+                for j in range( i ):
+                    om = self._periodicity_transformations[ j ].get( ndim )
+                    oi = np.linalg.inv( om )
+                    transformation_matrices.append( om @ tm )
+                    transformation_matrices.append( oi @ tm )
+                    transformation_matrices.append( om @ ti )
+                    transformation_matrices.append( oi @ ti )
+
             # make self._acceleration_structure
-            self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec, self._periodicity_transformations )
+            self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec, transformation_matrices )
 
         # base cell
         self._base_cell = Cell( _cell = self._binding_module.Cell(), _binding_module = self._binding_module )

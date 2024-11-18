@@ -139,7 +139,7 @@ void BigRational::display( Displayer &ds ) const {
     if ( den != 1 )
         res += "/" + den.str();
     if ( exp != 0 )
-        res += "e" + std::to_string( exp );
+        res += "p" + std::to_string( exp );
     ds << res;
 }
 

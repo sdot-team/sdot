@@ -95,11 +95,19 @@ def test_faces():
     ] )
 
 
-cell = Cell( ndim = 2 )
+# cell = Cell( ndim = 2 )
 
-cell.cut( [ -1,  0 ], 0 )
-cell.cut( [  0, -1 ], 0 )
-cell.cut( [ +1, +1 ], 1 )
+# cell.cut( [ -1,  0 ], 0 )
+# cell.cut( [  0, -1 ], 0 )
+# cell.cut( [ +1, +1 ], 1 )
 
-print( cell.integral() )
+
+
+# print( cell.integral() )
+
+from sdot import Expr
+
+ima = [ [ 0, 1 ], [ 2, 3 ] ]
+img = Expr.img_interpolation( ima, interpolation_order = 0 )
+print( img )
 

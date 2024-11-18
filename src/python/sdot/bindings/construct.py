@@ -111,8 +111,15 @@ def construct( Environment, VariantDir, ARGLIST, name, used_arg_names, files ):
         "build/ext/tl20/src/cpp/tl/support/string/va_string.cpp",
         "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",
 
+        'build/src/cpp/sdot/support/BigRational.cpp',
         "build/src/cpp/sdot/support/VtkOutput.cpp",
         "build/src/cpp/sdot/support/Mpi.cpp",
+
+        'build/src/cpp/sdot/symbolic/Symbol.cpp',
+        'build/src/cpp/sdot/symbolic/Value.cpp',
+        'build/src/cpp/sdot/symbolic/Expr.cpp',
+        'build/src/cpp/sdot/symbolic/Func.cpp',
+        'build/src/cpp/sdot/symbolic/Inst.cpp',
     ]
 
 
