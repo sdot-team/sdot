@@ -1,4 +1,4 @@
-from .loader import get_global_build_directory, module_for
+from .loader import global_build_directory, module_for
 from ..Expr import Expr
 import math
 

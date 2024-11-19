@@ -1,4 +1,5 @@
 from urllib.parse import unquote_plus
+from pathlib import Path
 from munch import Munch
 import subprocess
 import sysconfig
@@ -24,9 +25,9 @@ def args_to_obj( ARGLIST ):
 def download_and_unzip( link, src, dst, ext_directory ):
     import dload
  
-    print( "Downloading ", link )
+    print( f"Downloading { dst } in { ext_directory }" )
 
-    dload.save_unzip( link, ext_directory, delete_after = True )
+    dload.save_unzip( link, str( ext_directory ), delete_after = True )
     os.rename( ext_directory / src, ext_directory / dst )
 
 # def git_clone( link ):
@@ -43,8 +44,8 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         else:
             args[ k ] = v
 
-    source_directory = args[ 'source_directory' ]
-    ext_directory = args[ 'ext_directory' ]
+    source_directory = Path( args[ 'source_directory' ] )
+    ext_directory = Path( args[ 'ext_directory' ] )
     module_name = args[ 'module_name' ]
     suffix = args[ 'suffix' ]
 
@@ -106,31 +107,32 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
     # .cpp files
     sources = files + [
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Pointer.cpp",
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Number.cpp",
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_String.cpp",
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_List.cpp",
-
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayParameters.cpp",
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayContext.cpp",
-        "build/ext/tl20/src/cpp/tl/support/display/DisplayItem.cpp",
-
-        "build/ext/tl20/src/cpp/tl/support/string/CompactReprWriter.cpp",
-        "build/ext/tl20/src/cpp/tl/support/string/CompactReprReader.cpp",
-        "build/ext/tl20/src/cpp/tl/support/string/read_arg_name.cpp",
-        "build/ext/tl20/src/cpp/tl/support/string/va_string.cpp",
-        
         "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Pointer.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Number.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_String.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_List.cpp",
 
-        'build/src/cpp/sdot/support/BigRational.cpp',
-        "build/src/cpp/sdot/support/VtkOutput.cpp",
-        "build/src/cpp/sdot/support/Mpi.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayParameters.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayContext.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem.cpp",
 
-        'build/src/cpp/sdot/symbolic/instructions/Symbol.cpp',
-        'build/src/cpp/sdot/symbolic/instructions/Value.cpp',
-        'build/src/cpp/sdot/symbolic/instructions/Func.cpp',
-        'build/src/cpp/sdot/symbolic/instructions/Inst.cpp',
-        'build/src/cpp/sdot/symbolic/Expr.cpp',
+        # "build/ext/tl20/src/cpp/tl/support/string/CompactReprWriter.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/string/CompactReprReader.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/string/read_arg_name.cpp",
+        # "build/ext/tl20/src/cpp/tl/support/string/va_string.cpp",
+        
+        # "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",
+
+        # 'build/src/cpp/sdot/support/BigRational.cpp',
+        # "build/src/cpp/sdot/support/VtkOutput.cpp",
+        # "build/src/cpp/sdot/support/Mpi.cpp",
+
+        # 'build/src/cpp/sdot/symbolic/instructions/Symbol.cpp',
+        # 'build/src/cpp/sdot/symbolic/instructions/Value.cpp',
+        # 'build/src/cpp/sdot/symbolic/instructions/Func.cpp',
+        # 'build/src/cpp/sdot/symbolic/instructions/Inst.cpp',
+        # 'build/src/cpp/sdot/symbolic/Expr.cpp',
     ]
 
     # Environment

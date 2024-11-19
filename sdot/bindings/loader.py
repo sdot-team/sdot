@@ -8,11 +8,38 @@ import numpy
 import sys
 import os
 
-global_verbosity_level = 1
-auto_rebuild = False
-loader_cache = {}
+# ------------------------------------------------------------------------------------------------------------------------------------------
+def get_global_directory_for( name ):
+    """
+      find a directory to 
+        * copy .cpp/.h
+        * install ext libraries
+        * store .so/.dylib/... files
+    """
+    
+    # Try in source/build
+    sources = Path( __file__ ).parent.parent.parent
+    res = sources / name
+    if can_use_dir( res ):
+        return res
+    
+    # Else, try in $HOME/sdot_build
+    local = Path.home() / ".local" / "lib" / "sdot"
+    res = local / name
+    if can_use_dir( res ):
+        return res    
+    
+    raise RuntimeError( f"found no way to make a { name } dir (tried in { sources } and in { local }" )
 
-activities = []
+def can_use_dir( dir ):
+    try:
+        os.makedirs( dir, exist_ok = True )
+        return os.access( dir, os.W_OK )
+    except OSError:
+        pass
+    return False
+
+# ------------------------------------------------------------------------------------------------------------------------------------------
 def push_activity_log( name ):
     activities.append( name )
     print( ' -> '.join( activities ), end = '' )
@@ -65,34 +92,6 @@ def type_promote( dtypes ):
 
     return res
 
-def can_use_dir( dir ):
-    try:
-        os.makedirs( dir, exist_ok = True )
-        return os.access( dir, os.W_OK )
-    except OSError:
-        pass
-    return False
-
-def get_global_build_directory():
-    """
-      find a directory to 
-        * copy .cpp/.h
-        * install ext libraries
-        * store .so/.dylib/... files
-    """
-    
-    # Try in source/build
-    sources = Path( __file__ ).parent.parent.parent
-    res = sources / "build"
-    if can_use_dir( res ):
-        return res
-    
-    # Else, try in $HOME/sdot_build
-    res = Path.home() / ".local" / "lib" / "sdot_build"
-    if can_use_dir( res ):
-        return res    
-    
-    raise RuntimeError( f"found no way to make a build dir (trie in the sources, i.e. in { sources / "build" }) and in home { res }" )
 
 def get_local_build_directory( global_build_directory, *kargs ):
     res = global_build_directory
@@ -129,7 +128,6 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
         return loader_cache[ module_name ]
 
     # where to find/put the files
-    global_build_directory = get_global_build_directory()
     local_build_directory = get_local_build_directory( global_build_directory, name, suffix )
     if local_build_directory not in sys.path:
         sys.path.insert( 0, str( local_build_directory ) )
@@ -155,7 +153,7 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
         # call scons
         ret_code = subprocess.call( [ 'scons', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", '-s',
             f"source_directory={ source_directory }", 
-            f"ext_directory={ ext_directory }", 
+            f"ext_directory={ global_ext_directory }", 
             f"module_name={ module_name }", 
             f"suffix={ suffix }",
         ] + ilist, cwd = str( local_build_directory ), shell = False )
@@ -180,3 +178,11 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
     loader_cache[ module_name ] = res
 
     return res
+
+# --------------------------------------- global variable ---------------------------------------
+global_build_directory = get_global_directory_for( "build" )
+global_ext_directory = get_global_directory_for( "ext" )
+global_verbosity_level = 1
+auto_rebuild = False
+loader_cache = {}
+activities = []
