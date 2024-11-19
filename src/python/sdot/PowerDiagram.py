@@ -1,9 +1,11 @@
 from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, module_for
 from .distributions.normalized_distribution import normalized_distribution
+from .bindings.integration_module import integration_module
 from .TransformationMatrix import TransformationMatrix
 from .PowerDiagramSummary import PowerDiagramSummary
 from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec
+from .Expr import Expr
 from .Cell import Cell
 
 from munch import Munch
@@ -34,7 +36,7 @@ class PowerDiagram:
     """
     def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
-        self._density_under_final_boundaries = None # symbolic expression representing 
+        self._density_under_final_boundaries = None # symbolic expression representing the value inside the convex boundaries 
         self._periodicity_transformations = [] # list of TransformationMatrix 
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
         self._underlying_measure = None # instance of Distribution
@@ -223,7 +225,12 @@ class PowerDiagram:
         """ volumes/area/length/... for each cell """
         if not self._update_internal_attributes():
             return np.empty( [ 0, self.ndim or 0 ] )
-        return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, self._density_under_final_boundaries )
+
+        if self._density_under_final_boundaries == Expr( 1 ):
+            todo()
+
+        module, rt_data = integration_module( self._density_under_final_boundaries._expr, self.dtype, self.ndim )
+        return module.power_diagram_integrals( self._acceleration_structure, self._base_cell._cell, rt_data )
 
     def dmeasures_dweights( self ):
         """ return ( m_rows, m_cols, m_vals, v_vals, error ) with m = matrix, v = vector """
@@ -329,15 +336,19 @@ class PowerDiagram:
             # make self._acceleration_structure
             self._acceleration_structure = self._binding_module.LowCountAccelerationStructure( self._positions._vec, self._weights._vec, transformation_matrices )
 
-        # base cell
+        # beginning of base cell
         self._base_cell = Cell( _cell = self._binding_module.Cell(), _binding_module = self._binding_module )
         if self._boundaries is not None:
             ndim = self._binding_module.ndim()
             for n, bnd in enumerate( self._boundaries ):
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
-        # density binding (possible modification of base cell)
-        self._density_under_final_boundaries = self._underlying_measure.split_boundaries_and_value( self._base_cell, self._binding_module )
+        # density split between boundaries and value (possible modification of base cell)
+        bnds, value = self._underlying_measure.boundary_split( ndim )
+        self._density_under_final_boundaries = Expr( value )
+
+        for n, bnd in enumerate( bnds ):
+            self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], len( self._boundaries ) + n )
 
         return True
 

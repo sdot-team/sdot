@@ -83,6 +83,15 @@ def integration_module( funcs, scalar_type, nb_dims ):
             f.write( split[ 1 ] )
         f.write( '        return { res.out.begin(), res.out.end() };\n' )
         f.write( '    } );\n' )
+
+        # m.def( "measures", []( AccelerationStructure<TCell> &as, const TCell &base_cell, ConstantValue<TF> cv ) {
+        #     pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
+        #     as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
+        #         res.mutable_at( cell.info.i0 ) = cell.measure( cv );
+        #     } );
+        #     return res;
+        # } );
+
         f.write( '}\n' )
 
     sf = bd / ( module_name + ".SConstruct" )

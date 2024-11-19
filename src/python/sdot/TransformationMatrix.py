@@ -2,7 +2,10 @@ import numpy as np
 
 class TransformationMatrix:
     def __init__( self, value = None ):
-        self.value = value
+        if isinstance( value, TransformationMatrix ):
+            self.value = value.value
+        else:
+            self.value = value
 
     def get( self, ndim = None ):
         # None
