@@ -52,8 +52,6 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     module_name = args[ 'module_name' ]
     suffix = args[ 'suffix' ]
 
-    print( "================", source_directory )
-
     # build directory
     VariantDir( 'build', source_directory, duplicate=False )
     VariantDir( 'ext', ext_directory, duplicate=False )
