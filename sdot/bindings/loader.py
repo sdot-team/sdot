@@ -155,13 +155,17 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
         #
         source_directory = Path( __file__ ).parent
 
-        # call scons
-        ret_code = subprocess.call( [ 'scons', '-j8', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',
+        args = [ 'scons', '-j8', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',
             f"source_directory={ source_directory }", 
             f"ext_directory={ global_ext_directory }", 
             f"module_name={ module_name }", 
             f"suffix={ suffix }",
-        ] + ilist, cwd = str( local_build_directory ), shell = False )
+        ] + ilist
+
+        print( " ".join( args ) )
+
+        # call scons
+        ret_code = subprocess.call( args, cwd = str( local_build_directory ), shell = False )
         
         if ret_code:
             raise RuntimeError( f"Failed to compile the C++ { name } binding" )
