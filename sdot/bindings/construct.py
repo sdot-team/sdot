@@ -21,14 +21,13 @@ def args_to_obj( ARGLIST ):
             args[ k ] = unquote_plus( v )
     return args
 
-def download_and_unzip( link, src, dst ):
-    p = pdir( os.getcwd(), n = 7 ) + "/ext"
+def download_and_unzip( link, src, dst, ext_directory ):
     import dload
  
-    print( "Download ", link )
+    print( "Downloading ", link )
 
-    dload.save_unzip( link, p, delete_after = True )
-    os.rename( p + "/" + src, p + "/" + dst )
+    dload.save_unzip( link, ext_directory, delete_after = True )
+    os.rename( ext_directory / src, ext_directory / dst )
 
 # def git_clone( link ):
 #     from git import Repo  # pip install gitpython
@@ -36,39 +35,34 @@ def download_and_unzip( link, src, dst ):
 #     Repo.clone_from( ,  )
 
 def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names, files ):
-    # build directory
-    cwd = os.getcwd()
-    bad = pdir( cwd, 3 )
-
-    VariantDir( 'build', bad )
-
     # common args
     args = {}
     for k, v in ARGLIST:
-        if k in [ 'module_name', 'suffix' ]:
-            args[ k ] = v
-        else:
+        if k not in [ 'ext_directory', 'source_directory', 'module_name', 'suffix' ]:
             args[ k ] = unquote_plus( v )
+        else:
+            args[ k ] = v
 
+    source_directory = args[ 'source_directory' ]
+    ext_directory = args[ 'ext_directory' ]
     module_name = args[ 'module_name' ]
     suffix = args[ 'suffix' ]
 
-    # scalar_type = args[ 'scalar_type' ]
-    # nb_dims = args[ 'nb_dims' ]
-    # arch = args[ 'arch' ]
+    # build directory
+    VariantDir( 'build', source_directory )
 
     # includes
     CPPPATH = [
         # src
-        os.path.join( bad, 'src', 'cpp' ),
+        os.path.join( source_directory, 'lib', 'cpp' ),
 
         # ext
-        os.path.join( bad, 'ext', 'tl20', 'src', 'cpp' ),
-        os.path.join( bad, 'ext', 'asimd', 'src' ),
-        os.path.join( bad, 'ext', 'boost' ),
-        os.path.join( bad, 'ext', 'eigen' ),
+        os.path.join( ext_directory, 'tl20', 'src', 'cpp' ),
+        os.path.join( ext_directory, 'asimd', 'src' ),
+        os.path.join( ext_directory, 'boost' ),
+        os.path.join( ext_directory, 'eigen' ),
 
-        # systelm
+        # system
         sysconfig.get_paths()[ 'include' ], # Python.h
         pybind11.get_include(), # pybind11.h
     ]
@@ -145,13 +139,13 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     # check the libraries
     conf = Configure( env )
     if not conf.CheckCXXHeader( 'boost/multiprecision/cpp_int.hpp' ):
-        download_and_unzip( "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.zip", "boost_1_86_0", "boost" )
+        download_and_unzip( "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.zip", "boost_1_86_0", "boost", ext_directory )
     if not conf.CheckCXXHeader( 'Eigen/Dense' ):
-        download_and_unzip( "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip", "eigen-3.4.0", "eigen" )
+        download_and_unzip( "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip", "eigen-3.4.0", "eigen", ext_directory )
     if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
-        download_and_unzip( "https://github.com/hleclerc/asimd/archive/refs/tags/asimd-v0.0.1-alpha.zip", "asimd-asimd-v0.0.1-alpha", "asimd" )
+        download_and_unzip( "https://github.com/hleclerc/asimd/archive/refs/tags/asimd-v0.0.1-alpha.zip", "asimd-asimd-v0.0.1-alpha", "asimd", ext_directory )
     if not conf.CheckCXXHeader( 'tl/support/Displayer.h' ):
-        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.2.zip", "tl20-0.0.2", "tl20" )
+        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.2.zip", "tl20-0.0.2", "tl20", ext_directory )
     env = conf.Finish()
 
     # register the library

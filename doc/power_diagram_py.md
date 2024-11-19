@@ -75,10 +75,13 @@ pd = PowerDiagram( np.random.random( [ 30, 2 ] ) )
 #   Specifying `[ 0, +1 ]` is enough because internally, it will also add the inverse transformation.
 #   Rk: each new transformation T is added with its inv( T ), P @ T and P @ inv( T ) for each previous transformation P
 # The transformations are internaly stored as transformation matrices (4x4 in 3D for instance)
-#   but can be constructed using tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
-#   or by a single vector for a simple translation
+#   it can be constructed using 
+#     * a matrix
+#     * a tuple ( M, V ) to describe the transformation `M @ x + V` for a point `x`
+#     * or by a single vector for a simple translation
 pd.periodicity_transformations = [
-    ( np.eye( 2 ), [ 0, 1 ] )
+    [ 1, 0 ]
+    [ 0, 1 ]
 ]
 
 pd.plot()

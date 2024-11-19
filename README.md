@@ -35,12 +35,21 @@ pip install flit
 flit install -s # -s makes symbolic links to the sources
 ```
 
-Modules
--------
+Notebook examples
+-----------------
 
-* [Optimal transport operations in python](doc/optimal_transport_py.md).
-* [Power or voronoi diagrams and cells in python](doc/power_diagram_py.md).
-* [Polyhedral convex function in python](doc/polyhedral_convex_py.md).
+Here are some notebooks you can download and test on your own machine to understand the overall spirit.
+
+* Optimal transport operations in python: [file](examples/tutorials/0_optimal_transport_py.ipynb), [colab](...).
+* Power or voronoi diagrams and cells in python: [file](examples/tutorials/0_power_diagram_py.ipynb), [colab](...).
+* Polyhedral convex function in python: [file](examples/tutorials/0_polyhedral_convex_py.ipynb), [colab](...).
+
+If you're looking for more simple, you will find in [the example directory](examples/) more concise notebooks.
+
+Extensive documentation
+-----------------------
+
+[The generated pydoc files](...)
 
 A word on performance
 ---------------------

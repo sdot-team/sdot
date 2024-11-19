@@ -13,6 +13,7 @@ name = "sdot"
 
 [tool.flit.sdist]
 include = [ "**/*.cpp", "**/*.cxx", "**/*.h", "**/*.tcc" ]
+exclude = [ "ext/" ]
 
 # Documentation = "https://readthedocs.org"
 # Repository = "https://github.com/me/spam.git"

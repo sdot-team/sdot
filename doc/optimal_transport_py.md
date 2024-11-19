@@ -15,40 +15,42 @@ A basic example
 This is a very explicit example, where all the inputs are in their final expected type:
 
 ```python
-from sdot import optimal_transport_plan, SumOfDiracs, IndicatorFunction, UnitBox
+from sdot import optimal_transport_plan, SumOfDiracs, UnitBox
 import numpy as np
 
 # find an optimal plan to go from diracs to an UnitBox
 tp = optimal_transport_plan(
     source_measure = SumOfDiracs( np.random.random( [ 40, 2 ] )  ),
-    target_measure = IndicatorFunction( UnitBox() ),
-    # stopping criterion
-    goal_for_infinite_norm_of_mass_ratio_error = 1e-4, # actually the default value
-    # what to display during execution (verbosity_level is a way to force display)
-    display_of_infinite_norm_of_mass_ratio_error = True
+    target_measure = UnitBox(),
+    stop_when = { 'max_error_ratio': 1e-4 }, # stopping criterion (actually the default value)
+    display = [ 'max_error_ratio' ] # what to display during execution (actually also the default value)
 )
 
-# tp is of type SdotSolver.
+# tp is of type SdotPlan
 tp.plot()
 
 # In this case, `tp.forward_map` (of type `D2GTransportMap`) will typically provide methods that give informations for each dirac
-print( tp.forward_map.kantorovitch_potentials ) # a vector that corresponds to the weights of the powerdiagram
-print( tp.forward_map.brenier_potentials ) # discrete Brenier potentials for each dirac (convex if `tp` is optimal)
+print( tp.forward_map.kantorovitch_potentials ) # a vector that corresponds to the weights of the powerdiagram. psi_i
+print( tp.forward_map.brenier_potentials ) # discrete Brenier potentials for each dirac (convex if `tp` is optimal). psi_i + y_i^2
 print( tp.forward_map.barycenters ) # barycenters of the cells for each dirac
 
 # `tp.backward_map` typically provides functions of coordinates or coordinates list.
 x = [ 0.5, 0.6 ] # a point where target_measure is defined
-print( tp.backward_map.kantorovitch_potential( x ) ) # scalar value of the Kantorovitch_potential function at `x`
-print( tp.backward_map.brenier_potential( x ) ) # scalar value of the Brenier potentials (nicely convex of tp is optimal) at `x`
+print( tp.backward_map.kantorovitch_potential( x ) ) # scalar value of the Kantorovitch_potential function at `x`, phi( x ) = psi_i + ( x - y_i ) ^ 2
+print( tp.backward_map.brenier_potential( x ) ) # scalar value of the Brenier potentials (nicely convex of tp is optimal) at `x`. phi( x ) - x^2
 print( tp.backward_map.dirac_index( x ) ) # index of the dirac for cell at `x`
 print( tp.backward_map.barycenter( x ) ) # position of the dirac for cell at `x`
 
+# functions have `plot` methods that work as in PowerDiagram and Cell (for instance, they use a default display fif not specified)
+tp.backward_map.kantorovitch_potential.plot()
+
 # Besides, `tp` gives directly access to the power diagram where the generic (not discrete) measure is stored as the `underlying_measure`
-print( tp.power_diagram.integrals() ) # => should give a vector with 1/40 for each cell
-print( tp.power_diagram.weights ) # => Kantorovitch potentials for each cell
-print( tp.power_diagram.brenier ) # => Brenier potentials for each cell
-print( tp.power_diagram.barycenters ) # => first moment for each cell
-print( tp.power_diagram.inertia_matrices ) # => second moment for each cell
+print( tp.power_diagram.cell_integrals() ) # should give a vector with 1/40 for each cell
+print( tp.power_diagram.cell_integrals( '(x-y_i)^2' ) ) # can work with symbolic formula.
+print( tp.power_diagram.cell_inertia_matrices() ) # => integral( [ [ ( x_0 - y_i ) * ( x_0 - y_i ), ( x_0 - y_i ) * ( x_1 - y_i ), ... ], [ ( x_1 - y_i ) * ( x_1 - y_i ), ... ], ... ] )
+print( tp.power_diagram.cell_second_moment() ) # => 
+print( tp.power_diagram.cell_barycenters( f ) ) # integral( f * [ 'x_0', 'x_1', ... ] ) / integral( f ). f is equal to 1 by default.
+print( tp.power_diagram.weights ) # => weight for each cell
 ```
 
 This code will give something like (arrows goes from the dirac positions to the barycenter of the cells)

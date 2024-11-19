@@ -15,10 +15,10 @@ loader_cache = {}
 activities = []
 def push_activity_log( name ):
     activities.append( name )
-    print( ' -> '.join( activities ), end = '\r' )
+    print( ' -> '.join( activities ), end = '' )
 def pop_activity_log():
     s = ' -> '.join( activities )
-    print( ' ' * len( s ), end = '\r' )
+    print( '\r' + ' ' * len( s ), end = '\r' )
     activities.pop()
 
 
@@ -65,30 +65,48 @@ def type_promote( dtypes ):
 
     return res
 
-
-def get_build_dir( *kargs ):
-    """
-      find a directory to copy .cpp/.h and store .so/.dylib/... files
-    """
-    
-    # try one in the sources (check the write access)
-    res = Path( __file__ ).parent
-    for karg in kargs:
-        res = res / karg
-    if os.access( res, os.W_OK ):
-        return res 
-    
-    # else, try to create it
+def can_use_dir( dir ):
     try:
-        os.makedirs( res )
-        return res
+        os.makedirs( dir, exist_ok = True )
+        return os.access( dir, os.W_OK )
     except OSError:
         pass
+    return False
 
-    # else, make something in the home 
-    raise RuntimeError( "TODO: make a loc or tmp build dir" )
+def get_global_build_directory():
+    """
+      find a directory to 
+        * copy .cpp/.h
+        * install ext libraries
+        * store .so/.dylib/... files
+    """
+    
+    # Try in source/build
+    sources = Path( __file__ ).parent.parent.parent
+    res = sources / "build"
+    if can_use_dir( res ):
+        return res
+    
+    # Else, try in $HOME/sdot_build
+    res = Path.home() / ".local" / "lib" / "sdot_build"
+    if can_use_dir( res ):
+        return res    
+    
+    raise RuntimeError( f"found no way to make a build dir (trie in the sources, i.e. in { sources / "build" }) and in home { res }" )
 
-def module_for( name, base_dir = Path( __file__ ).parent, use_arch = False, **kwargs ):
+def get_local_build_directory( global_build_directory, *kargs ):
+    res = global_build_directory
+    for arg in kargs:
+        res = res / arg
+
+    os.makedirs( res, exist_ok = True )
+    if os.access( res, os.W_OK ):
+        return res
+    
+    raise RuntimeError( f"failed to make the local build dir '{ res }'" )
+
+
+def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_arch = False, **kwargs ):
     # sorted list of parameters
     plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
     plist.sort()
@@ -111,9 +129,10 @@ def module_for( name, base_dir = Path( __file__ ).parent, use_arch = False, **kw
         return loader_cache[ module_name ]
 
     # where to find/put the files
-    build_dir = get_build_dir( 'variants', name, suffix )
-    if build_dir not in sys.path:
-        sys.path.insert( 0, str( build_dir ) )
+    global_build_directory = get_global_build_directory()
+    local_build_directory = get_local_build_directory( global_build_directory, name, suffix )
+    if local_build_directory not in sys.path:
+        sys.path.insert( 0, str( local_build_directory ) )
 
     # if allowed, try to load directly the library
     module = None
@@ -128,11 +147,18 @@ def module_for( name, base_dir = Path( __file__ ).parent, use_arch = False, **kw
         if global_verbosity_level:
             push_activity_log( f"compilation of { name } for { kwargs }" )
 
+        #
+        source_directory = Path( __file__ ).parent.parent.parent
+        ext_directory = global_build_directory / "ext"
+        os.makedirs( ext_directory, exist_ok = True )
+
         # call scons
-        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ base_dir / ( name + '.SConstruct' ) }", '-s',
+        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", '-s',
+            f"source_directory={ source_directory }", 
+            f"ext_directory={ ext_directory }", 
             f"module_name={ module_name }", 
-            f"suffix={ suffix }"
-        ] + ilist, cwd = str( build_dir ), shell = False )
+            f"suffix={ suffix }",
+        ] + ilist, cwd = str( local_build_directory ), shell = False )
         
         if ret_code:
             raise RuntimeError( f"Failed to compile the C++ { name } binding" )

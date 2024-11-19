@@ -1,4 +1,4 @@
-from .loader import get_build_dir, module_for
+from .loader import get_global_build_directory, module_for
 from ..Expr import Expr
 import math
 
@@ -101,5 +101,5 @@ def integration_module( funcs, scalar_type, nb_dims ):
         f.write( '    "' + str( cf ) + '",\n' )
         f.write( '] )\n' )
 
-    module = module_for( module_name, base_dir = bd, scalar_type = scalar_type, nb_dims = nb_dims )
+    module = module_for( module_name, dir_of_the_SConstruct_file = bd, scalar_type = scalar_type, nb_dims = nb_dims )
     return module, rt_data
