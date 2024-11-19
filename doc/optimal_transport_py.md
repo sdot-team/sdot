@@ -16,7 +16,6 @@ This is a very explicit example, where all the inputs are in their final expecte
 
 ```python
 from sdot import optimal_transport_plan, SumOfDiracs, IndicatorFunction, UnitBox
-import matplotlib.pyplot as plt
 import numpy as np
 
 # find an optimal plan to go from diracs to an UnitBox
@@ -29,9 +28,8 @@ tp = optimal_transport_plan(
     display_of_infinite_norm_of_mass_ratio_error = True
 )
 
-# tp is of type SdTransportPlan.
-tp.plot( plt )
-plt.show()
+# tp is of type SdotSolver.
+tp.plot()
 
 # In this case, `tp.forward_map` (of type `D2GTransportMap`) will typically provide methods that give informations for each dirac
 print( tp.forward_map.kantorovitch_potentials ) # a vector that corresponds to the weights of the powerdiagram
@@ -91,22 +89,22 @@ Moreau-Yosida regularization
 
 TBC
 
-Direct use of SdTransportPlan
+Direct use of SdotSolver
 -----------------------------
 
-Functions like `optimal_transport_plan`, `optimal_partial_transport_plan` and `optimal_moreau_yosida_transport_plan` are actually very thin wrapper around the `SdTransportPlan` class. They simply call the constructor and the method `adjust_potentials` before returning the created instance.
+Functions like `optimal_transport_plan`, `optimal_partial_transport_plan` and `optimal_moreau_yosida_transport_plan` are actually very thin wrapper around the `SdotSolver` class. They simply call the constructor and the method `adjust_potentials` before returning the created instance.
 
-If you plan to work on several successive transport plans that share similar datasets, it can be very profitable to directly use instances of `SdTransportPlan`. It provides the same level of usability, while allowing a wide number of optimizations in terms of execution speed and memory usage (for instance, it may avoid to recompute the acceleration structures, ...).
+If you plan to work on several successive transport plans that share similar datasets, it can be very profitable to directly use instances of `SdotSolver`. It provides the same level of usability, while allowing a wide number of optimizations in terms of execution speed and memory usage (for instance, it may avoid to recompute the acceleration structures, ...).
 
 Here is a simple example
 
 ```python
-from sdot import SdTransportPlan
+from sdot import SdotSolver
 import numpy as np
 
-# define a transport plan to go from some diracs to an UnitBox (arguments of `optimal_transport_plan` are presents in the same way than in `SdTransportPlan`)
+# define a transport plan to go from some diracs to an UnitBox (arguments of `optimal_transport_plan` are presents in the same way than in `SdotSolver`)
 # this transport plan is not yet optimal
-tp = SdTransportPlan( np.random.random( [ 40, 2 ] ) )
+tp = SdotSolver( np.random.random( [ 40, 2 ] ) )
 
 # one can define or redefine ctor arguments. For instance:
 tp.display_of_infinite_norm_of_mass_ratio_error = True
@@ -114,7 +112,7 @@ tp.display_of_infinite_norm_of_mass_ratio_error = True
 # solve (uses a Newton solver by default)
 tp.adjust_potentials()
 
-# of course one has access to the previously seen methods (the functions like `optimal_transport_plan` return a `SdTransportPlan`)
+# of course one has access to the previously seen methods (the functions like `optimal_transport_plan` return a `SdotSolver`)
 tp.plot()
 
 # now, it's possible to change only some parts of the inputs without having to redefine (and recompute) everything

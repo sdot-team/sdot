@@ -15,10 +15,14 @@ import numpy as np
 
 class PowerDiagram:
     """
-        Stores all the data needed to compute a power diagram (i.e. seed positions and weights) + optional boundaries and underlying measure.
+        Stores all the data needed to compute a power diagram, i.e.
+            * seed positions
+            * seed weights
+            * optional boundaries
+            * an optional underlying measure and an optional underlying radius function for method like integration, barycenter, ...
 
         Boundaries can be represented as
-            * an array [ [ dir_{num_axis}, ..., val ]_{num_boundary}, ... ] where a point is exterior if scalar_product( dir, point ) > val.
+            * an array [ [ dir_{num_axis}, ..., val ]_{num_boundary}, ... ] where a point `x` is considered as exterior if `np.dot( dir, point ) > val`.
             * a tuple of arrays, one for the directions (each row has a direction), and one for the values (a 1D array)
 
         Underlying measure is internally stored as an instance of `Distribution`. It is used to compute measures (volumes/areas/...) and can give boundaries (for instance, IndicatorFunction(UnitBox()) will naturally add boundaries).
@@ -221,23 +225,39 @@ class PowerDiagram:
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
         self._acceleration_structure.for_each_cell( self._base_cell._cell, cwc, max_nb_threads or 0 )
 
-    def measures( self ):
-        """ volumes/area/length/... for each cell """
+    def cell_integrals( self, func = 1 ):
+        """ get integration of `func` other each cell """
         if not self._update_internal_attributes():
             return np.empty( [ 0, self.ndim or 0 ] )
 
-        if self._density_under_final_boundaries == Expr( 1 ):
-            todo()
+        # final expression to integrate other the cell
+        final_expr = self._density_under_final_boundaries * Expr( func )
 
-        module, rt_data = integration_module( self._density_under_final_boundaries._expr, self.dtype, self.ndim )
+        cv = final_expr.constant_value()
+        if cv is not None:
+            return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, cv )
+
+        module, rt_data = integration_module( final_expr, self.dtype, self.ndim )
         return module.power_diagram_integrals( self._acceleration_structure, self._base_cell._cell, rt_data )
 
-    def dmeasures_dweights( self ):
-        """ return ( m_rows, m_cols, m_vals, v_vals, error ) with m = matrix, v = vector """
+    def dintegrals_dweights( self, func = 1 ):
+        """ 
+            get derivatives of integration of `func` other each cell
+
+            return ( m_rows, m_cols, m_vals, v_vals, error_code ) with m = matrix, v = vector
+        """
         if not self._update_internal_attributes():
             raise ( [], [], [], [], 0 )
-        return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_under_final_boundaries )
+        
+        # final expression to integrate other the cell
+        final_expr = self._density_under_final_boundaries * Expr( func )
 
+        cv = final_expr.constant_value()
+        if cv is not None:
+            return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, cv )
+
+        raise RuntimeError( "TODO" )
+    
     def summary( self ):
         """ return a PowerDiagramSummary with arrays that contain global information to summarize the power diagram (coords, parenting, ...).
         """
@@ -338,8 +358,10 @@ class PowerDiagram:
 
         # beginning of base cell
         self._base_cell = Cell( _cell = self._binding_module.Cell(), _binding_module = self._binding_module )
+        nb_base_bnds = 0
         if self._boundaries is not None:
             ndim = self._binding_module.ndim()
+            nb_base_bnds = len( self._boundaries )
             for n, bnd in enumerate( self._boundaries ):
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
@@ -348,7 +370,7 @@ class PowerDiagram:
         self._density_under_final_boundaries = Expr( value )
 
         for n, bnd in enumerate( bnds ):
-            self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], len( self._boundaries ) + n )
+            self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], nb_base_bnds + n )
 
         return True
 

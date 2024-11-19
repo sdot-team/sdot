@@ -1,4 +1,4 @@
-from sdot import SdTransportPlan, SumOfDiracs, UnitBox, optimal_transport_plan
+from sdot import SdotSolver, SumOfDiracs, UnitBox, optimal_transport_plan
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -36,12 +36,19 @@ import pytest
 positions = np.random.random( [ 40, 2 ] )
 positions[ :, 0 ] *= 0.5
 
-pl = optimal_transport_plan(
-    SumOfDiracs( positions ),
-    UnitBox()
-)
+sp = SdotSolver( positions )
+sp.display.max_dw = 1
 
-pl.plot()
+
+# print( sum( sp.power_diagram.cell_integrals() ) )
+sp.adjust_potentials()
+
+# pl = optimal_transport_plan(
+#     SumOfDiracs( positions ),
+#     UnitBox()
+# )
+
+# pl.plot()
 
 # ot = pysdot.OptimalTransport( p )
 # ot.verbosity = 2

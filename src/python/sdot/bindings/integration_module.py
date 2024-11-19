@@ -7,7 +7,7 @@ def symbolic_integration( func, nb_dims ):
         return Expr( "loc_vol" )
     # / { math.factorial( nb_dims ) }
     #   simplex = []
-    pouet()
+    yo()
     return 1 / math.factorial( nb_dims )
 
 def integration_module( funcs, scalar_type, nb_dims ):

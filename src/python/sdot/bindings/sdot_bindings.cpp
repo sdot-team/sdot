@@ -199,31 +199,31 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         } );
     } );
     
-    m.def( "measures", []( AccelerationStructure<TCell> &as, const TCell &base_cell, ConstantValue<TF> cv ) {
+    m.def( "measures", []( AccelerationStructure<TCell> &as, const TCell &base_cell, TF cv ) {
         pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
-            res.mutable_at( cell.info.i0 ) = cell.measure( cv );
+            res.mutable_at( cell.info.i0 ) = cell.measure( ConstantValue<TF>{ cv } );
         } );
         return res;
     } );
     
-    m.def( "dmeasures_dweights", []( AccelerationStructure<TCell> &as, const TCell &base_cell, ConstantValue<TF> cv ) {
+    m.def( "dmeasures_dweights", []( AccelerationStructure<TCell> &as, const TCell &base_cell, TF cv ) {
         using std::pow;
 
         const PI nb_cells = as.nb_cells();
 
         /// return a tuple with m_rows, m_cols, m_vals, v_vals, residual
-        struct ThreadData { Vec<PI> m_rows, m_cols; Vec<TF> m_vals; TF residual = 0; };
+        struct ThreadData { Vec<PI> m_rows, m_cols; Vec<TF> m_vals; };
         Vec<ThreadData> tds( FromSize(), as.recommended_nb_threads() );
         Vec<TF> v_vals( FromSize(), nb_cells );
         int error_code = as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
             ThreadData &td = tds[ num_thread ];
 
             TF sum = 0;
-            TF mea = cell.for_each_cut_with_measure( [&]( const TCut &cut, TF measure ) { 
+            TF mea = cv * cell.for_each_cut_with_measure( [&]( const TCut &cut, TF measure ) { 
                 if ( cut.info.type != CutType::Dirac )
                     return;
-                TF der = measure / ( 2 * norm_2( cut.info.p1 - cell.info.p0 ) );
+                TF der = cv * measure / ( 2 * norm_2( cut.info.p1 - cell.info.p0 ) );
                 td.m_rows << cell.info.i0;
                 td.m_cols << cut.info.i1;
                 td.m_vals << - der;
@@ -237,9 +237,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             td.m_cols << cell.info.i0;
             td.m_vals << sum;
 
-            TF loc = mea - TF( 1 ) / nb_cells;
-            v_vals[ cell.info.i0 ] = loc;
-            td.residual += pow( loc, 2 );
+            v_vals[ cell.info.i0 ] = mea;
         } );
 
         ///
@@ -247,7 +245,6 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             tds[ 0 ].m_rows.append( std::move( tds[ i ].m_rows ) );
             tds[ 0 ].m_cols.append( std::move( tds[ i ].m_cols ) );
             tds[ 0 ].m_vals.append( std::move( tds[ i ].m_vals ) );
-            tds[ 0 ].residual += std::move( tds[ i ].residual );
         }
 
         // pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
@@ -256,7 +253,6 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
             array_from_vec( tds[ 0 ].m_cols ),
             array_from_vec( tds[ 0 ].m_vals ),
             array_from_vec( v_vals ),
-            tds[ 0 ].residual,
             error_code
         );
     } );

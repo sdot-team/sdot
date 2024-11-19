@@ -8,21 +8,24 @@ namespace sdot {
 /** */
 class Expr {
 public:
-    explicit    Expr     ( const BigRational &value );
-    explicit    Expr     ( const RcPtr<Inst> &inst );
-    explicit    Expr     ( const char *expr );
-    explicit    Expr     ( StrView expr );
-    explicit    Expr     ( int value );
-    explicit    Expr     ();
-  
-    void        display  ( Displayer &ds ) const;
-    Expr        subs     ( const std::map<Str,RcPtr<Inst>> &map ) const;
+    explicit    Expr          ( const BigRational &value );
+    explicit    Expr          ( const RcPtr<Inst> &inst );
+    explicit    Expr          ( const char *expr );
+    explicit    Expr          ( StrView expr );
+    explicit    Expr          ( int value );
+    explicit    Expr          ();
 
-    friend Expr operator+( const Expr &a, const Expr &b );
-    friend Expr operator-( const Expr &a, const Expr &b );
-    friend Expr operator*( const Expr &a, const Expr &b );
-    friend Expr operator/( const Expr &a, const Expr &b );
-    friend Expr pow      ( const Expr &a, const Expr &b );
+    auto        constant_value() const -> Opt<BigRational>;
+    bool        always_equal  ( const Expr &that ) const;
+    void        display       ( Displayer &ds ) const;
+    Expr        subs          ( const std::map<Str,RcPtr<Inst>> &map ) const;
+     
+     
+    friend Expr operator+     ( const Expr &a, const Expr &b );
+    friend Expr operator-     ( const Expr &a, const Expr &b );
+    friend Expr operator*     ( const Expr &a, const Expr &b );
+    friend Expr operator/     ( const Expr &a, const Expr &b );
+    friend Expr pow           ( const Expr &a, const Expr &b );
 
 
     RcPtr<Inst> inst;

@@ -33,6 +33,7 @@ class Expr:
         return Expr( self._expr.subs( map ) )
 
     def __getitem__( self, args ):
+        """ assumes args are space variables """
         m = {}
         if isinstance( args, tuple ):
             for i, arg in enumerate( args ):
@@ -40,6 +41,23 @@ class Expr:
         else:
             m[ 'x_0' ] = args
         return self.subs( m )
+
+    # def __eq__( self, other ):
+    #     if not isinstance( other, Expr ):
+    #         return self.__eq__( Expr( other ) )
+    #     return self._expr == other._expr
+
+    def always_equal( self, that ):
+        if not isinstance( that, Expr ):
+            return self.always_equal( Expr( that ) )
+        return self._expr.always_equal( that._expr )
+
+    def constant_value( self ):
+        """ if not constant, return None. Else, return the value """
+        valid, value = self._expr.constant_value()
+        if valid:
+            return value
+        return None
 
     @staticmethod
     def img_interpolation( array, transformation_matrix = None, interpolation_order = 0 ):
@@ -91,31 +109,34 @@ class Expr:
     def rt_data( self ):
         return self._expr.rt_data()
 
+    def boundary_split( self, ndim ):
+        return self._expr.boundary_split( ndim )
+
     def __repr__( self ):
         return self._expr.__repr__()
 
     def __add__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
-        return self._expr.add( that._expr )
+        return Expr( self._expr.add( that._expr ) )
 
     def __sub__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
-        return self._expr.sub( that._expr )
+        return Expr( self._expr.sub( that._expr ) )
 
     def __mul__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
-        return self._expr.mul( that._expr )
+        return Expr( self._expr.mul( that._expr ) )
 
     def __truediv__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
-        return self._expr.div( that._expr )
+        return Expr( self._expr.div( that._expr ) )
     
     def __pow__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
-        return self._expr.pow( that._expr )
+        return Expr( self._expr.pow( that._expr ) )
 

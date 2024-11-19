@@ -4,6 +4,16 @@ namespace sdot {
 
 std::map<BigRational,RcPtr<Inst>> value_map;
 
+Opt<BigRational> Value::constant_value() const {
+    return value;
+}
+
+bool Value::always_equal( const Inst &that ) const {
+    if ( auto *t = dynamic_cast<const Value *>( &that ) )
+        return t->value == value;
+    return false;
+}
+
 RcPtr<Inst> Value::from_value( const BigRational &value ) {
     auto iter = value_map.find( value );
     if ( iter == value_map.end() ) {

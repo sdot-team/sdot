@@ -17,7 +17,7 @@ class UnitBox( Distribution ):
         """
 
         self.transformation = TransformationMatrix( transformation )
-        self.ndim = ndim
+        self._ndim = ndim
         self.mass = mass
 
     def boundary_split( self, ndim = None ):
@@ -33,6 +33,9 @@ class UnitBox( Distribution ):
             bnds.append( [ - ( i == d ) for i in range( ndim ) ] + [ 0 ] )
 
         return bnds, 1
-
+    
+    @property
+    def ndim( self ):
+        return self._ndim
 
 

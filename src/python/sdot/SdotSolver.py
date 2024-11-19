@@ -1,8 +1,7 @@
 from .distributions.normalized_distribution import normalized_distribution
 from .distributions.Distribution import Distribution
 from .distributions.SumOfDiracs import SumOfDiracs
-
-from .space_subsets.UnitBox import UnitBox
+from .distributions.UnitBox import UnitBox
 
 from .D2GTransportMap import D2GTransportMap
 from .G2DTransportMap import G2DTransportMap
@@ -10,36 +9,76 @@ from .PowerDiagram import PowerDiagram
 
 import numpy as np
 
-class SdTransportPlan:
+class DisplayParameters:
+    num_newton_iteration = 0
+    nb_relaxation_steps = 1
+    max_error_ratio = 2
+    norm_2_error = 0
+    max_error = 0
+    max_dw = 0 # max delta weight
+
+    def __init__( self, list = [ 'max_error_ratio' ] ):
+        if list is not None:
+            for n, attr in enumerate( list ):
+                assert attr in self
+                setattr( self, attr, n + 1 )
+
+    def write( self, solver ): 
+        l = [ 'max_error_ratio', 'max_error', 'norm_2_error', 'nb_relaxation_steps', 'max_dw' ]
+        display_first_iteration = False
+        displayed_something = False
+        for attr in l:
+            if getattr( self, attr ):
+                if len( getattr( solver, attr + '_history' ) ):
+                    value = getattr( solver, attr + '_history' )[ -1 ]
+                    if isinstance( value, float ):
+                        print( f'{ attr }: {value:.4e}', end=' ' )
+                    else:
+                        print( f'{ attr }: {value}', end=' ' )
+                    displayed_something = True
+                else:
+                    display_first_iteration = True
+
+        if displayed_something:
+            if display_first_iteration:
+                print( '(first iteration)', end=' ' )
+            print()
+
+
+class SdotSolver:
     """
         Class to find a transport plan between a sum of dirac and a density.
 
     """
-    def __init__( self, source_measure, target_measure = None, norm = 2 ):
+    def __init__( self, source_measure, target_measure = None, norm = 2, display: DisplayParameters = None ):
         # internal attributes
         self._source_measure = None
         self._target_measure = None
+
+        # type update
+        if not isinstance( display, DisplayParameters ):
+            display = DisplayParameters( display )
 
         # the PowerDiagram used for the computations stores the acceleration structure with the positions and the weights
         self.power_diagram = PowerDiagram()
 
         # stopping criteria
-        self.max_mass_error_ratio_target = None
-        self.max_mass_error_target = None
+        self.max_error_ratio_target = None
+        self.max_error_target = None
 
         # solver parameters
         self.max_nb_newton_iterations = 500
-        self.max_lg2_relaxation = 20
+        self.max_nb_relaxation_steps = 20
 
         # error history
-        self.max_mass_error_ratio_history = []
-        self.norm_2_mass_error_history = []
-        self.nb_relaxation_divs_history = []
-        self.max_mass_error_history = []
+        self.nb_relaxation_steps_history = []
+        self.max_error_ratio_history = []
+        self.norm_2_error_history = []
+        self.max_error_history = []
         self.max_dw_history = []
 
         self.raise_if_error = True
-        self.log_items = []
+        self.display = display
         self.status = 'none'
 
         # properties and attributes from ctor arguments
@@ -53,23 +92,23 @@ class SdTransportPlan:
     def backward_map( self ):
         return D2GTransportMap()
 
-    def adjust_weights( self ):
+    def adjust_potentials( self ):
         return self.newton_solve()
 
     def newton_solve( self, relaxation_coefficient = 1.0 ):
         # first system
-        m_rows, m_cols, m_vals, v_vals, n2_err, error_code = self.newton_system()
+        m_rows, m_cols, m_vals, residual, error_code = self.newton_system()
         if error_code:
             return self._set_status( 'void cells before the first iteration' )
 
         # check convergence
-        if self._convergence_test( v_vals, n2_err, None ):
+        if self._convergence_test( residual, None ):
             return self._set_status( 'ok' )
 
         # newton iteration
         for _ in range( self.max_nb_newton_iterations ):
             # linear solve
-            mw = self._system_solve( m_rows, m_cols, m_vals, v_vals )
+            mw = self._system_solve( m_rows, m_cols, m_vals, residual )
             dw = relaxation_coefficient * mw
 
             # update the weights
@@ -77,12 +116,12 @@ class SdTransportPlan:
             self.power_diagram._weight_have_been_modified() # TODO: keep the same acceleration structure
 
             # loop if void cell
-            for nb_relax_divs in range( self.max_lg2_relaxation ):
+            for nb_relax_divs in range( self.max_nb_relaxation_steps ):
                 # solve again the linear system
-                m_rows, m_cols, m_vals, v_vals, n2_err, error_code = self.newton_system()
+                m_rows, m_cols, m_vals, residual, error_code = self.newton_system()
 
                 if error_code == 0:
-                    self.nb_relaxation_divs_history.append( nb_relax_divs )
+                    self.nb_relaxation_steps_history.append( nb_relax_divs )
                     break
 
                 # smaller weights update
@@ -93,7 +132,7 @@ class SdTransportPlan:
                 return self._set_status( 'max_lg2_relaxation reached' )
 
             # check convergence
-            if self._convergence_test( v_vals, n2_err, mw ):
+            if self._convergence_test( residual, mw ):
                 break
         else:
             return self._set_status( 'max_nb_newton_iterations reached' )
@@ -101,39 +140,30 @@ class SdTransportPlan:
         return self._set_status( 'ok' )
                 
 
-    def _convergence_test( self, v_vals, n2_err, dw ):
-        self.max_mass_error_ratio_history.append( np.max( v_vals ) * self.nb_unknowns )
-        self.norm_2_mass_error_history.append( np.linalg.norm( v_vals ) )
-        self.max_mass_error_history.append( np.max( v_vals ) )
+    def _convergence_test( self, residual, dw ):
+        # update history
+        self.max_error_ratio_history.append( np.max( residual ) * self.nb_unknowns )
+        self.norm_2_error_history.append( np.linalg.norm( residual ) )
+        self.max_error_history.append( np.max( residual ) )
         if dw is not None:
             self.max_dw_history.append( np.max( np.abs( dw ) ) )
 
-        if 'nb_relaxation_divs' in self.log_items and len( self.nb_relaxation_divs_history ):
-            print( 'nb_relaxation_divs:', self.nb_relaxation_divs_history[ -1 ], end=' ' )
-        if 'max_mass_error_ratio' in self.log_items:
-            print( 'max_mass_error_ratio:', self.max_mass_error_ratio_history[ -1 ], end=' ' )
-        if 'norm_2_mass_error' in self.log_items:
-            print( 'norm_2_mass_error:', self.norm_2_mass_error_history[ -1 ], end=' ' )
-        if 'max_mass_error' in self.log_items:
-            print( 'max_mass_error:', self.max_mass_error_history[ -1 ], end=' ' )
-        if 'max_dw' in self.log_items and len( self.max_dw_history ):
-            print( 'max_dw:', self.max_dw_history[ -1 ], end=' ' )
+        # display
+        self.display.write( self )
 
-        if len( self.log_items ):
-            print()
-
+        # test convergence
         ok = True
         tested = False
-        if self.max_mass_error_ratio_target is not None:
-            ok = ok and self.max_mass_error_ratio_history[ -1 ] <= self.max_mass_error_ratio_target
+        if self.max_error_ratio_target is not None:
+            ok = ok and self.max_error_ratio_history[ -1 ] <= self.max_error_ratio_target
             tested = True
-        if self.max_mass_error_target is not None:
-            ok = ok and self.max_mass_error_history[ -1 ] <= self.max_mass_error_target
+        if self.max_error_target is not None:
+            ok = ok and self.max_error_history[ -1 ] <= self.max_error_target
             tested = True
 
         if tested:
             return ok
-        return self.max_mass_error_ratio_history[ -1 ] <= 1e-4
+        return self.max_error_ratio_history[ -1 ] <= 1e-4
 
     def _set_status( self, status ):
         self.status = status
@@ -159,16 +189,16 @@ class SdTransportPlan:
         self._check_inputs()
 
         # data from the power diagram
-        m_rows, m_cols, m_vals, v_vals, n2_err, error_code = self.power_diagram.dmeasures_dweights()
+        m_rows, m_cols, m_vals, v_vals, error_code = self.power_diagram.dintegrals_dweights()
+        residual = v_vals - np.full( [ self.nb_unknowns ], 1 / self.nb_unknowns )
 
         # force a delta weight to be equal to 0 (the first one...)
-        if m_vals.size:
-            for i in range( v_vals.size ):
-                if m_rows[ i ] == m_cols[ i ]:
-                    m_vals[ i ] *= 2
-                    break
+        for i in range( m_rows.size ):
+            if m_rows[ i ] == m_cols[ i ]:
+                m_vals[ i ] *= 2
+                break
 
-        return m_rows, m_cols, m_vals, v_vals, n2_err, error_code
+        return m_rows, m_cols, m_vals, residual, error_code
     
     def _system_solve( self, m_rows, m_cols, m_vals, v_vals ):
         from scipy.sparse.linalg import spsolve
@@ -217,6 +247,7 @@ class SdTransportPlan:
         return None
 
     def _normalize_and_use_measure( self, distribution ):
+        """ register distribution (use it as self.power_diagram.positions or self.power_diagram.underlying_measure) """
         if distribution is None:
             return distribution
 

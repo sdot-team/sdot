@@ -21,6 +21,14 @@ std::pair<RcPtr<Inst>,BigRational> Inst::pow_pair( const BigRational &coeff ) co
     return { const_cast<Inst *>( this ), coeff }; // TODO: use CstRcPtr
 }
 
+Opt<BigRational> Inst::constant_value() const {
+    return {};
+}
+
+bool Inst::always_equal( const Inst &that ) const {
+    return this == &that;
+}
+
 int Inst::compare( const sdot::Inst &b ) const {
     const sdot::Inst &a = *this;
 

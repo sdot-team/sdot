@@ -120,6 +120,14 @@ Expr Expr::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
     return Expr{ inst->subs( map ) };
 }
 
+bool Expr::always_equal( const Expr &that ) const {
+    return inst->always_equal( *that.inst );
+}
+
+Opt<BigRational> Expr::constant_value() const {
+    return inst->constant_value();
+}
+
 Expr operator+( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, +1, b.inst ) }; }
 Expr operator-( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, -1, b.inst ) }; }
 Expr operator*( const Expr &a, const Expr &b ) { return Expr{ expr_mul( 1, a.inst, +1, b.inst ) }; }

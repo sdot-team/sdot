@@ -4,6 +4,7 @@
 #include <tl/support/string/CompactReprWriter.h>
 #include <tl/support/ASSERT.h>
 #include "BigRational.h"
+#include "asimd/support/N.h"
 
 namespace sdot {
 
@@ -252,7 +253,24 @@ BigRational BigRational::operator-() const {
 }
 
 BigRational pow( const BigRational &a, const BigRational &b ) {
-    // if ( )
+    if ( b.is_integer() ) {
+        if ( b > 0 ) {
+            BigRational res = a; // OPTIMIZE
+            for( PI i = 0, n = PI( ceil( b ) ); i < n; ++i )
+                res *= a;
+            return res;
+        }
+
+        if ( b < 0 ) {
+            BigRational res = 1 / a; // OPTIMIZE
+            for( PI i = 0, n = PI( - ceil( b ) ); i < n; ++i )
+                res *= a;
+            return res;
+        }
+
+        return 1;
+    }
+
     TODO;
 }
 
