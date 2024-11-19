@@ -7,9 +7,12 @@ description = "Tools to construct/handle PowerDiagram, notably for semi-discrete
 authors = [ { name = "Hugo Leclerc", email = "hugo.leclerc@universite-paris-saclay.fr" }, ]
 keywords = ["optimal transport","power diagram","Laguerre diagram"]
 dependencies = [ "munch", "pybind11", "archspec", "scons", "pytest", "numpy", "matplotlib", "dload", "gitpython" ]
-version = "2024.10.25.0"
+version = "2024.11.23.0"
 readme = "README.md"
 name = "sdot"
+
+[tool.flit.sdist]
+include = [ "**/*.cpp", "**/*.cxx", "**/*.h", "**/*.tcc" ]
 
 # Documentation = "https://readthedocs.org"
 # Repository = "https://github.com/me/spam.git"

@@ -1,0 +1,26 @@
+name: build and upload
+on: []
+# workflow_dispatch:
+#  push:
+#    branches: [ "main" ]
+#  pull_request:
+#    branches: [ "main" ]
+
+jobs:
+  build_and_upload:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macOS-latest, ubuntu-latest] # 
+
+    steps:
+    - uses: mamba-org/setup-micromamba@v1
+    - uses: actions/checkout@v4
+    - name: install flit
+      run: pip install flit
+    - name: download the dependencies
+      run: flit install --only-deps
+    - name: build the library for the most common cases
+      run: make build_for_the_most_common_cases
+    - name: upload the packages
+      run: cd src/python; FLIT_USERNAME=${{ secrets.PIPY_USERNAME }} FLIT_PASSWORD=${{ secrets.PIPY_PASSWORD }} flit publish
