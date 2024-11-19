@@ -21,7 +21,7 @@ def get_global_directory_for( name ):
     """
     
     # Try in source/build
-    sources = Path( __file__ ).parent.parent.parent
+    sources = Path( __file__ ).parent.parent
     res = sources / name
     if can_use_dir( res ):
         return res
@@ -153,7 +153,7 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
             push_activity_log( f"compilation of { name } for { kwargs }" )
 
         #
-        source_directory = Path( __file__ ).parent.parent.parent
+        source_directory = Path( __file__ ).parent
 
         # call scons
         ret_code = subprocess.call( [ 'scons', '-j8', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',

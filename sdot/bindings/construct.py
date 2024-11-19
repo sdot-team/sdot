@@ -28,7 +28,10 @@ def download_and_unzip( link, src, dst, ext_directory ):
     print( f"Downloading { dst } in { ext_directory }" )
 
     dload.save_unzip( link, str( ext_directory ), delete_after = True )
-    os.rename( ext_directory / src, ext_directory / dst )
+    try:
+        os.rename( ext_directory / src, ext_directory / dst )
+    except OSError:
+        pass
 
 # def git_clone( link ):
 #     from git import Repo  # pip install gitpython
@@ -49,6 +52,8 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     module_name = args[ 'module_name' ]
     suffix = args[ 'suffix' ]
 
+    print( "================", source_directory )
+
     # build directory
     VariantDir( 'build', source_directory, duplicate=False )
     VariantDir( 'ext', ext_directory, duplicate=False )
@@ -56,7 +61,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     # includes
     CPPPATH = [
         # src
-        os.path.join( source_directory, 'lib', 'cpp' ),
+        os.path.join( source_directory, 'cpp' ),
 
         # ext
         os.path.join( ext_directory, 'tl20', 'src', 'cpp' ),

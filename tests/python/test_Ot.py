@@ -33,8 +33,6 @@ import pytest
 
 # test_SdotSolver()
 
-positions = np.random.random( [ 40, 2 ] )
-positions[ :, 0 ] *= 0.5
 
 # sp = SdotSolver( positions )
 # sp.display.max_dw = 1
@@ -42,6 +40,8 @@ positions[ :, 0 ] *= 0.5
 
 # # print( sum( sp.power_diagram.cell_integrals() ) )
 # sp.adjust_potentials()
+positions = np.random.random( [ 40, 2 ] )
+positions[ :, 0 ] *= 0.5
 
 pl = optimal_transport_plan(
     SumOfDiracs( positions ),
