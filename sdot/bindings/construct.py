@@ -125,7 +125,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
         download_and_unzip( "https://github.com/hleclerc/asimd/archive/refs/tags/asimd-v0.0.1-alpha.zip", "asimd-asimd-v0.0.1-alpha", "asimd", ext_directory )
     if not conf.CheckCXXHeader( 'tl/support/Displayer.h' ):
-        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.3.zip", "tl20-0.0.3", "tl20", ext_directory )
+        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.4.zip", "tl20-0.0.4", "tl20", ext_directory )
     env = conf.Finish()
 
     # register the library
