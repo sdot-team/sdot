@@ -151,7 +151,7 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
         os.makedirs( ext_directory, exist_ok = True )
 
         # call scons
-        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", '-s',
+        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',
             f"source_directory={ source_directory }", 
             f"ext_directory={ global_ext_directory }", 
             f"module_name={ module_name }", 

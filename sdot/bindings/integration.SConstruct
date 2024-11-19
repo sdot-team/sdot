@@ -7,7 +7,7 @@ print( Expr.list_from_compact_repr( args.symbolic_func ) )
 oue()
 
 construct( Environment, VariantDir, Configure, ARGLIST, "integration", [], [
-    'build/src/python/sdot/bindings/integration_bindings.cpp',
+    'build/sdot/bindings/integration_bindings.cpp',
 ] )
 
 

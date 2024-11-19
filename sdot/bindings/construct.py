@@ -50,7 +50,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     suffix = args[ 'suffix' ]
 
     # build directory
-    VariantDir( 'build', source_directory )
+    VariantDir( 'build', source_directory, duplicate=False )
 
     # includes
     CPPPATH = [
@@ -107,7 +107,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
     # .cpp files
     sources = files + [
-        "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",
+        ext_directory / "tl20/src/cpp/tl/support/Displayer.cpp",
         # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Pointer.cpp",
         # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Number.cpp",
         # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_String.cpp",
@@ -151,4 +151,4 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     env = conf.Finish()
 
     # register the library
-    env.SharedLibrary( module_name + env[ 'SHLIBSUFFIX' ], sources )
+    env.SharedLibrary( module_name + env[ 'SHLIBSUFFIX' ], list( map( str, sources ) ) )
