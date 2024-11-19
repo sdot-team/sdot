@@ -214,8 +214,8 @@ class SdotSolver:
             plt.show()
             return
 
-        generic_dist, dirac_dist, dirac_is_tgt = self._check_inputs()
-        self.power_diagram.plot_in_pyplot( plt )
+        self._check_inputs()
+        self.power_diagram.plot( plt )
 
     @property
     def nb_unknowns( self ):

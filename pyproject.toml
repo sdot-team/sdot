@@ -6,7 +6,7 @@ build-backend = "flit_core.buildapi"
 description = "Tools to construct/handle PowerDiagram, notably for semi-discrete optimal transport"
 authors = [ { name = "Hugo Leclerc", email = "hugo.leclerc@universite-paris-saclay.fr" }, ]
 keywords = ["optimal transport","power diagram","Laguerre diagram"]
-dependencies = [ "munch", "pybind11", "archspec", "scons", "pytest", "numpy", "matplotlib", "dload", "gitpython" ]
+dependencies = [ "munch", "pybind11", "archspec", "scons", "pytest", "numpy", "matplotlib", "dload", "gitpython", 'scipy' ]
 version = "2024.11.23.0"
 readme = "README.md"
 name = "sdot"

@@ -18,4 +18,4 @@ Prop de base pour l'intégration : on fournit une fonction pour intégrer sur le
   On pourra par exemple partir des coordonnées 
   
 
-* fichiers de base à mutualiser
+* mettre pd en getter
