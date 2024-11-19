@@ -34,10 +34,10 @@ class PowerDiagram:
     """
     def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
+        self._density_under_final_boundaries = None # symbolic expression representing 
         self._periodicity_transformations = [] # list of TransformationMatrix 
         self._acceleration_structure = None # paving + hierarchical repr of positions and weights
         self._underlying_measure = None # instance of Distribution
-        self._density_binding = None
         self._binding_module = None
         self._boundaries = None # expected to be a ndarray
         self._positions = None # PoomVec
@@ -223,13 +223,13 @@ class PowerDiagram:
         """ volumes/area/length/... for each cell """
         if not self._update_internal_attributes():
             return np.empty( [ 0, self.ndim or 0 ] )
-        return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, self._density_binding )
+        return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, self._density_under_final_boundaries )
 
     def dmeasures_dweights( self ):
         """ return ( m_rows, m_cols, m_vals, v_vals, error ) with m = matrix, v = vector """
         if not self._update_internal_attributes():
-            raise ValueError( "TODO" )
-        return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_binding )
+            raise ( [], [], [], [], 0 )
+        return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, self._density_under_final_boundaries )
 
     def summary( self ):
         """ return a PowerDiagramSummary with arrays that contain global information to summarize the power diagram (coords, parenting, ...).
@@ -247,17 +247,17 @@ class PowerDiagram:
         """
         if fig is None:
             import matplotlib.pyplot as plt
-            self.plot( plt )
+            self.plot( plt, **kwargs )
             plt.show()
             return
 
         self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
         return fig
 
-    def plot_vtk( self, vtk_output ):
+    def plot_vtk( self, vtk_output, **kwargs ):
         if isinstance( vtk_output, str ):
             vo = VtkOutput()
-            self.plot_vtk( vo )
+            self.plot_vtk( vo, **kwargs )
             vo.save( vtk_output )
             return 
         
@@ -285,7 +285,7 @@ class PowerDiagram:
                 return self.plot_vtk( fig, **kwargs )
             raise ValueError( "Unhandled file type" )
 
-        return self.plot_pyplot( fig )
+        return self.plot_pyplot( fig, **kwargs )
 
     def _update_internal_attributes( self ):
         """ 
@@ -337,26 +337,7 @@ class PowerDiagram:
                 self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], n )
 
         # density binding (possible modification of base cell)
-        self._density_binding = self._underlying_measure.binding( self._base_cell, self._binding_module )
+        self._density_under_final_boundaries = self._underlying_measure.split_boundaries_and_value( self._base_cell, self._binding_module )
 
         return True
-
-#     def write_vtk( self, filename, fit_boundaries = 0.1 ):
-#         display_vtk_laguerre_cells = vfs.function( 'display_vtk_laguerre_cells', [ f'inc_file:sdot/display_vtk_laguerre_cells.h' ] )
-#         VtkOutput = vfs.function( 'VtkOutput', [ f'inc_file:sdot/VtkOutput.h' ] )
-#         save = vfs.method( 'save' )
-
-#         vo = VtkOutput()
-#         display_vtk_laguerre_cells( vo, self.wps, self.b_dirs, self.b_offs, fit_boundaries )
-#         save( vo, filename )
-
-#     def cell_points( self ):
-#         """ return a tuple with
-#              * a numpy array with the id of the diracs that made this point 
-#              * a numpy array with the coordinates 
-#         """
-#         func = vfs.function( 'cell_points', [ f'inc_file:sdot/cell_points.h' ] )
-        
-#         coords, ids = func( self.wps, self.b_dirs, self.b_offs )
-#         return np.reshape( coords, [ -1, self.nb_dims ] ), np.reshape( ids, [ -1, self.nb_dims + 1 ] )
 

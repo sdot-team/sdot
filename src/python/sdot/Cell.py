@@ -209,6 +209,7 @@ class Cell:
             # ray
             if len( vertices ) == 1:
                 rd = self.ray_dir( refs, vertices[ 0 ] ) @ self.base
+                rd /= np.linalg.norm( rd )
                 bc = coords[ vertices[ 0 ] ]
                 pl( [ bc, bc + ray_length * rd ], 'ray' )
                 return

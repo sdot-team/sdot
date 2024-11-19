@@ -32,6 +32,7 @@ class UnitBox( SpaceSubset ):
             base_cell.cut( [ + ( i == d ) for i in range( ndim ) ], 1 )
             base_cell.cut( [ - ( i == d ) for i in range( ndim ) ], 0 )
             
-        return binding_module.ConstantValue( 1 )
+        # we can use a constant value, with modified boundaries
+        return 1
 
 

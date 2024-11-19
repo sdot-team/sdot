@@ -19,7 +19,7 @@ Installation
 
 For python, `pip install sdot` should do the job, including some precompiled libraries for the most common cases (2D/3D, float64, ...). If your cases are not included in the distribution, the required dynamic libraries will be automatically compiled on first use. In this situation, you will need to have a C++ compiler installed on your machine. As scons is used to find and call the compiler, all you need to do is install one compiler that is compatible with this builder (for instance g++, clang, xcode, vscode, ...). 
 
-
+For a compiler : under Debian like, `sudo apt install g++`. Under Mac os, `xcode-select --install`. Under Windows, you can follow [this link](https://code.visualstudio.com/docs/cpp/config-mingw#_prerequisites).
 
 ### Sources
 
