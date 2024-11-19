@@ -51,6 +51,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
     # build directory
     VariantDir( 'build', source_directory, duplicate=False )
+    VariantDir( 'ext', ext_directory, duplicate=False )
 
     # includes
     CPPPATH = [
@@ -107,32 +108,6 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
     # .cpp files
     sources = files + [
-        ext_directory / "tl20/src/cpp/tl/support/Displayer.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Pointer.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_Number.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_String.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem_List.cpp",
-
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayParameters.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayContext.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/display/DisplayItem.cpp",
-
-        # "build/ext/tl20/src/cpp/tl/support/string/CompactReprWriter.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/string/CompactReprReader.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/string/read_arg_name.cpp",
-        # "build/ext/tl20/src/cpp/tl/support/string/va_string.cpp",
-        
-        # "build/ext/tl20/src/cpp/tl/support/Displayer.cpp",
-
-        # 'build/src/cpp/sdot/support/BigRational.cpp',
-        # "build/src/cpp/sdot/support/VtkOutput.cpp",
-        # "build/src/cpp/sdot/support/Mpi.cpp",
-
-        # 'build/src/cpp/sdot/symbolic/instructions/Symbol.cpp',
-        # 'build/src/cpp/sdot/symbolic/instructions/Value.cpp',
-        # 'build/src/cpp/sdot/symbolic/instructions/Func.cpp',
-        # 'build/src/cpp/sdot/symbolic/instructions/Inst.cpp',
-        # 'build/src/cpp/sdot/symbolic/Expr.cpp',
     ]
 
     # Environment

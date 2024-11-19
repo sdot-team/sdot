@@ -8,6 +8,9 @@ import numpy
 import sys
 import os
 
+# needed to share the symbols
+sys.setdlopenflags( os.RTLD_GLOBAL | os.RTLD_LAZY )
+
 # ------------------------------------------------------------------------------------------------------------------------------------------
 def get_global_directory_for( name ):
     """
@@ -106,6 +109,10 @@ def get_local_build_directory( global_build_directory, *kargs ):
 
 
 def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_arch = False, **kwargs ):
+    # ensure that the std objects are loaded
+    if name != 'generic_objects':
+        module_for( 'generic_objects', dir_of_the_SConstruct_file, False )
+
     # sorted list of parameters
     plist = [ ( x, str( y ) ) for x, y in kwargs.items() ]
     plist.sort()
@@ -147,11 +154,9 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
 
         #
         source_directory = Path( __file__ ).parent.parent.parent
-        ext_directory = global_build_directory / "ext"
-        os.makedirs( ext_directory, exist_ok = True )
 
         # call scons
-        ret_code = subprocess.call( [ 'scons', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',
+        ret_code = subprocess.call( [ 'scons', '-j8', f"--sconstruct={ dir_of_the_SConstruct_file / ( name + '.SConstruct' ) }", # '-s',
             f"source_directory={ source_directory }", 
             f"ext_directory={ global_ext_directory }", 
             f"module_name={ module_name }", 
@@ -165,6 +170,7 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
             pop_activity_log()
 
         # import
+        print('impot', module_name )
         module = __import__( module_name )
 
     # change names
