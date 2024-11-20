@@ -29,7 +29,7 @@ class UnitBox( Distribution ):
         # TODO: include transformations
         bnds = []
         s = 1
-        M = self.transformation.get()
+        M = self.transformation.get( ndim )
         for d in range( ndim ):
             v0 = self.transformation.dir( np.array( [ + ( i == d ) for i in range( ndim ) ] ) )
             v1 = self.transformation.dir( np.array( [ - ( i == d ) for i in range( ndim ) ] ) )
