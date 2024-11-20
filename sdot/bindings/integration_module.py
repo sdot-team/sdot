@@ -1,6 +1,7 @@
 from .loader import global_build_directory, module_for
 from ..Expr import Expr
 import math
+import os
 
 def symbolic_integration( func, nb_dims ):
     if func == Expr( "1" ):
@@ -16,7 +17,10 @@ def integration_module( funcs, scalar_type, nb_dims ):
     module_name = 'integration_' + ct_repr
 
     # generate .cpp and SConstruct files
-    bd = get_build_dir( 'generated', ct_repr )
+    bd = global_build_directory / 'generated' / ct_repr
+    os.makedirs( bd, exist_ok = True )
+    assert os.access( bd, os.W_OK )
+
     cf = bd / ( module_name + ".cpp" )
     with open( cf, 'w' ) as f:
         f.write( '#include <sdot/support/binding_config.h>\n' )

@@ -33,12 +33,27 @@ class Cell:
 
     def integral( self, funcs = '1', underlying_measure_override = None, underlying_radial_function_override = None ):
         """ integral of a symbolic function or a list of symbolic functions """
-        if not isinstance( funcs, list ):
-            return self.integral( [ funcs ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
+        if isinstance( funcs, list ):
+            #return self.integral( [ funcs ], underlying_measure_override, underlying_radial_function_override )[ 0 ]
+            raise RuntimeError( "not implemented yet :(" )
         
+        # very naughty...
+        from .distributions.ScaledImage import ScaledImage
+        if isinstance( funcs, ScaledImage ):
+            import pysdot 
+            pd = pysdot.PowerDiagram( [ 0.0 for _ in range( self.ndim ) ], domain = pysdot.ScaledImage( mi, ma, ar ) )
+            print( pd )
+            return 17
+
+        # not so naughty...
+        cv = Expr( funcs ).constant_value()
+        if cv is not None:
+            return self._cell.integral( cv )
+
         # module généré
-        module, rt_data = integration_module( funcs, self._binding_module.dtype(), self._binding_module.ndim() )
-        return module.cell_integral( self._cell, rt_data )
+        # module, rt_data = integration_module( funcs, self._binding_module.dtype(), self._binding_module.ndim() )
+        # return module.cell_integral( self._cell, rt_data )
+        raise RuntimeError( "not implemented yet :(" )
 
     @property
     def true_dimensionality( self ):

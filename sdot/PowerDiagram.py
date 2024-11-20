@@ -229,10 +229,30 @@ class PowerDiagram:
         """ get integration of `func` other each cell """
         if not self._update_internal_attributes():
             return np.empty( [ 0, self.ndim or 0 ] )
+        
+        # very naughty...
+        from .distributions.ScaledImage import ScaledImage
+
+        if func == 1 and isinstance( self._underlying_measure, ScaledImage ):
+            import pysdot 
+            mi = [ 0 for _ in range( self.ndim ) ]
+            ma = [ 1 for _ in range( self.ndim ) ]
+            ar = self._underlying_measure.array / np.mean( self._underlying_measure.array )
+            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            return pd.integrals()
+
+        if isinstance( func, ScaledImage ):
+            import pysdot 
+            mi = [ 0 for _ in range( self.ndim ) ]
+            ma = [ 1 for _ in range( self.ndim ) ]
+            ar = func.array / np.mean( func.array )
+            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            return pd.integrals()
 
         # final expression to integrate other the cell
         final_expr = self._density_under_final_boundaries * Expr( func )
 
+        # not so naughty...
         cv = final_expr.constant_value()
         if cv is not None:
             return self._binding_module.measures( self._acceleration_structure, self._base_cell._cell, cv )
@@ -240,7 +260,7 @@ class PowerDiagram:
         module, rt_data = integration_module( final_expr, self.dtype, self.ndim )
         return module.power_diagram_integrals( self._acceleration_structure, self._base_cell._cell, rt_data )
 
-    def dintegrals_dweights( self, func = 1 ):
+    def cell_dintegrals_dweights( self, func = 1 ):
         """ 
             get derivatives of integration of `func` other each cell
 
@@ -248,7 +268,26 @@ class PowerDiagram:
         """
         if not self._update_internal_attributes():
             raise ( [], [], [], [], 0 )
-        
+
+        # very naughty...
+        from .distributions.ScaledImage import ScaledImage
+        if func == 1 and isinstance( self._underlying_measure, ScaledImage ):
+            import pysdot 
+            mi = [ 0 for _ in range( self.ndim ) ]
+            ma = [ 1 for _ in range( self.ndim ) ]
+            ar = self._underlying_measure.array / np.mean( self._underlying_measure.array )
+            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            mvs = pd.der_integrals_wrt_weights()
+            # print( pd.integrals() )
+            from scipy.sparse import csr_matrix
+            M = csr_matrix( ( mvs.m_values, mvs.m_columns, mvs.m_offsets ) )
+            C = M.tocoo()
+            # print( M.todense() )
+            # print( C.data )
+            # print( "v", mvs.m_values )
+            # todo()
+            return C.coords[ 0 ].copy(), C.coords[ 1 ].copy(), C.data.copy(), mvs.v_values.copy(), 0
+
         # final expression to integrate other the cell
         final_expr = self._density_under_final_boundaries * Expr( func )
 
@@ -371,7 +410,10 @@ class PowerDiagram:
 
         # density split between boundaries and value (possible modification of base cell)
         bnds, value = self._underlying_measure.boundary_split( ndim )
-        self._density_under_final_boundaries = Expr( value )
+        # naughty
+        from .distributions.ScaledImage import ScaledImage
+        if not isinstance( value, ScaledImage ):
+            self._density_under_final_boundaries = Expr( value )
 
         for n, bnd in enumerate( bnds ):
             self._base_cell.cut_boundary( bnd[ : ndim ],  bnd[ ndim ], nb_base_bnds + n )

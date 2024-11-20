@@ -1,6 +1,7 @@
 from .distributions.SymbolicFunction import SymbolicFunction
 from .distributions.Distribution import Distribution
 from .distributions.SumOfDiracs import SumOfDiracs
+from .distributions.ScaledImage import ScaledImage
 from .distributions.UnitBox import UnitBox
 
 from .bindings.loader import set_auto_rebuild, global_verbosity_level

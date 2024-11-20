@@ -69,6 +69,7 @@ class SdotSolver:
         # solver parameters
         self.max_nb_newton_iterations = 500
         self.max_nb_relaxation_steps = 20
+        self.default_relaxation = 1
 
         # error history
         self.nb_relaxation_steps_history = []
@@ -95,7 +96,11 @@ class SdotSolver:
     def adjust_potentials( self ):
         return self.newton_solve()
 
-    def newton_solve( self, relaxation_coefficient = 1.0 ):
+    def newton_solve( self, relaxation_coefficient = None ):
+        # input parameters
+        if relaxation_coefficient is None:
+            relaxation_coefficient = self.default_relaxation
+
         # first system
         m_rows, m_cols, m_vals, residual, error_code = self.newton_system()
         if error_code:
@@ -171,25 +176,11 @@ class SdotSolver:
             raise SdotSolverError( status )
         return self.status
 
-    # def measure_ratio_error( self, norm = 'inf' ):
-    #     f = np.full( [ self.nb_unknowns ], 1 / self.nb_unknowns )
-    #     m = self.power_diagram.measures()
-    #     if norm == 'inf':
-    #         return np.max( np.abs( m - f ) / f )
-    #     if norm == 2:
-    #         return np.linalg.norm( ( m - f ) / f )
-    #     raise RuntimeError( "TODO" )
-
-    # def n2_error( self ):
-    #     f = np.full( [ self.nb_unknowns ], 1 / self.nb_unknowns )
-    #     m = self.power_diagram.measures()
-    #     return np.linalg.norm( m - f )
-
     def newton_system( self ):
         self._check_inputs()
 
         # data from the power diagram
-        m_rows, m_cols, m_vals, v_vals, error_code = self.power_diagram.dintegrals_dweights()
+        m_rows, m_cols, m_vals, v_vals, error_code = self.power_diagram.cell_dintegrals_dweights()
         residual = v_vals - np.full( [ self.nb_unknowns ], 1 / self.nb_unknowns )
 
         # force a delta weight to be equal to 0 (the first one...)

@@ -177,7 +177,6 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
             pop_activity_log()
 
         # import
-        print('impot', module_name )
         module = __import__( module_name )
 
     # change names

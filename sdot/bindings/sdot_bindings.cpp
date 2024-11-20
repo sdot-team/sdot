@@ -150,7 +150,9 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         //     } );
         // } )
 
-        // // output
+        .def( "integral", []( const TCell &cell, TF c ) { return cell.measure( ConstantValue<TF>{ c } ); } )
+
+        // output
         .def( "display_vtk", []( const TCell &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
         .def( "__repr__", []( const TCell &cell ) { return to_string( cell ); } )
         ;

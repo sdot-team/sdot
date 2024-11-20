@@ -235,8 +235,8 @@ we have
 [[1], [6], [0, 5], [3, 4]]
 ```
 
-Integrations
-------------
+Integrals
+---------
 
 The method `PowerDiagram.cell_integrals( f )` (or `cell.integral( f )` if you have a cell) takes as input a symbolic formula. By default, it uses the `PowerDiagram.underlying_measure` and the `PowerDiagram.underlying_radius_function` expression so that the integral is equal to `integral( underlying_measure * underlying_radius_function * f, cell )`. If is possible to use another underlying measure of radius functions by using the `override_...` arguments.
 

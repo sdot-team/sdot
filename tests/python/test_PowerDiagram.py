@@ -177,30 +177,90 @@ def poute():
 # print( p.dtype )
 # print( p.shape )
 
-from sdot import Cell
+from sdot import PowerDiagram, ScaledImage, optimal_transport_plan
+import numpy as np
+# cell = Cell( ndim = 3 )
 
-cell = Cell( ndim = 3 )
+# # we create a infinitely extruded triangle
+# cell.cut( [ -1,  0, 0 ], 0 )
+# cell.cut( [  0, -1, 0 ], 0 )
+# cell.cut( [ +1, +1, 0 ], 1 )
 
-# we create a infinitely extruded triangle
-cell.cut( [ -1,  0, 0 ], 0 )
-cell.cut( [  0, -1, 0 ], 0 )
-cell.cut( [ +1, +1, 0 ], 1 )
+# # of course, there's no 3D vertex...
+# print( cell.nb_vertices ) # => 0
 
-# of course, there's no 3D vertex...
-print( cell.nb_vertices ) # => 0
+# # and this cell is sill unbounded (in the 3D space)
+# print( cell.bounded ) # => False
 
-# and this cell is sill unbounded (in the 3D space)
-print( cell.bounded ) # => False
+# # ... it's because we're internally in 2D :)
+# print( cell.true_dimensionality ) # => 2
 
-# ... it's because we're internally in 2D :)
-print( cell.true_dimensionality ) # => 2
+# # "_td" is the shortcut suffix for "true dimensionality".
+# # Methods with prefix return the information for the subspace that is defined by `cell.base`
+# print( cell.nb_vertices_td ) # => 3 (the 3 vertices of the triangle)
 
-# "_td" is the shortcut suffix for "true dimensionality".
-# Methods with prefix return the information for the subspace that is defined by `cell.base`
-print( cell.nb_vertices_td ) # => 3 (the 3 vertices of the triangle)
+# # we can get sample coordinates to represent these points in ndim (3D in this case)
+# print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.]]
 
-# we can get sample coordinates to represent these points in ndim (3D in this case)
-print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.]]
+# # visualization will show the "sub-dimensional" content with thiner lines
+# cell.plot()
+# pd = PowerDiagram( [ [ 0.1, 0.1 ], [ 0.9, 0.9 ] ] )
+# pd.add_box_boundaries( 0, 1 )
+# pd.plot()
 
-# visualization will show the "sub-dimensional" content with thiner lines
-cell.plot()
+# # c.integral() => integration of 1 on the cell
+# print( pd.cell_integrals() )
+
+# # by default piecewise constant, positionned in [0,1]^n
+# s = ScaledImage( [ [ 1, 2 ],[ 2, 1 ] ] )
+# print( pd.cell_integrals( s ) )
+
+# print( pd.cell_dintegrals_dweights( s ) )
+
+# [[24.20364779 -5.58586914 -1.29423728 -4.49760374 -0.72411373]
+#  [-5.58586914 10.07493089 -2.17554026  0.         -2.31352149]
+#  [-1.29423728 -2.17554026  4.35958259 -0.88980504  0.        ]
+#  [-4.49760374  0.         -0.88980504  5.38740878  0.        ]
+#  [-0.72411373 -2.31352149  0.          0.          3.03763522]]
+# max dw: 0.03202312743320352
+# [[24.27041608 -3.87760666 -2.04750292 -5.38098489 -0.82911358]
+#  [-3.87760666  9.84755188 -3.60245276  0.         -2.36749246]
+#  [-2.04750292 -3.60245276  7.36901638 -1.71906069  0.        ]
+#  [-5.38098489  0.         -1.71906069  7.10004558  0.        ]
+#  [-0.82911358 -2.36749246  0.          0.          3.19660604]]
+def pys():
+    import pysdot
+    np.random.seed( 0 )
+
+    ar = np.array( [ [ 1, 1 ],[ 1, 5.0 ] ] )
+    ar /= np.mean( ar )
+    do = pysdot.ScaledImage( [0,0], [1,1], ar )
+    print( do.measure() )
+
+    ot = pysdot.OptimalTransport( np.random.random( [ 50, 2 ] ), domain = do )
+    ot.verbosity = 3
+    ot.adjust_weights()
+
+def pl():
+    np.random.seed( 0 )
+    pl = optimal_transport_plan(
+        ScaledImage( [ [ 1, 1 ],[ 1, 5 ] ] ),
+        np.random.random( [ 50, 2 ] ),
+        # relaxation = 0.1
+    )
+    # [[12.10182389 -2.79293457 -0.64711864 -2.24880187 -0.36205687]
+    #  [-2.79293457  5.03746544 -1.08777013  0.         -1.15676074]
+    #  [-0.64711864 -1.08777013  2.17979129 -0.44490252  0.        ]
+    #  [-2.24880187  0.         -0.44490252  2.69370439  0.        ]
+    #  [-0.36205687 -1.15676074  0.          0.          1.51881761]]
+
+    # [[12.75390154 -2.14731503 -1.0620068  -2.75399311 -0.41363583]
+    #  [-2.14731503  5.06445409 -1.73506019  0.         -1.18207886]
+    #  [-1.0620068  -1.73506019  3.50263446 -0.70556747  0.        ]
+    #  [-2.75399311  0.         -0.70556747  3.45956058  0.        ]
+    #  [-0.41363583 -1.18207886  0.          0.          1.5957147 ]]
+
+    pl.plot()
+
+# pys()
+pl()
