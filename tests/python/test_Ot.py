@@ -41,7 +41,7 @@ import pytest
 # # print( sum( sp.power_diagram.cell_integrals() ) )
 # sp.adjust_potentials()
 # we use another dirac positions for illustration
-from sdot import SdotPlan, TransformationMatrix
+from sdot import SdotPlan, TransformationMatrix, optimal_transport_plan
 from matplotlib import pyplot
 import numpy as np
 
