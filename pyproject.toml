@@ -7,7 +7,7 @@ description = "Tools to construct/handle PowerDiagram, notably for semi-discrete
 authors = [ { name = "Hugo Leclerc", email = "hugo.leclerc@universite-paris-saclay.fr" }, ]
 keywords = ["optimal transport","power diagram","Laguerre diagram"]
 dependencies = [ "munch", "pybind11", "archspec", "scons", "pytest", "numpy", "matplotlib", "dload", "gitpython", 'scipy', 'pysdot' ]
-version = "2024.11.23.13"
+version = "2024.11.23.14"
 readme = "README.md"
 name = "sdot"
 
