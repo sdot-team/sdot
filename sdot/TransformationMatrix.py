@@ -18,16 +18,16 @@ class TransformationMatrix:
             raise RuntimeError( "TODO" )
 
     def translate( self, v ):
-        self.value = self.get( v.size )
+        self.value = self.get( np.array( v ).size )
         self.value[ :-1, -1 ] = v
 
     def dir( self, d ):
-        M = self.get( d.size )
+        M = self.get( np.array( d ).size )
         return M[ :-1, :-1 ] @ d
 
     def pos( self, p ):
         n = np.array( list( p ) + [ 1 ] )
-        M = self.get( p.size )
+        M = self.get( np.array( p ).size )
         return M[ :-1, : ] @ n
     
     def get( self, ndim = None ):
