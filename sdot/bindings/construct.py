@@ -80,7 +80,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
         '-Wdeprecated-declarations',
         '-std=c++20',
-        '-fopenmp',
+        # '-fopenmp',
 
         '-fdiagnostics-color=always',
         
