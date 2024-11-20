@@ -1,4 +1,4 @@
-from sdot import SdotSolver, SumOfDiracs, UnitBox, optimal_transport_plan
+from sdot import SdotPlan, SumOfDiracs, UnitBox, optimal_transport_plan
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -40,29 +40,26 @@ import pytest
 
 # # print( sum( sp.power_diagram.cell_integrals() ) )
 # sp.adjust_potentials()
-positions = np.random.random( [ 40, 2 ] )
-positions[ :, 0 ] *= 0.5
+# we use another dirac positions for illustration
+from sdot import SdotPlan
+import numpy as np
 
-pl = optimal_transport_plan(
-    SumOfDiracs( positions ),
-    UnitBox()
-)
+tp = SdotPlan( np.random.random( [ 40, 2 ] ) )
 
-pl.plot()
+# ctor argument can be defined or redefined after calling the constructor
+tp.target_measure = UnitBox()
 
-# ot = pysdot.OptimalTransport( p )
-# ot.verbosity = 2
-# ot.adjust_weights()
-# ot.display_vtk( "yo.vtk" )
+# one can default parameters, for instance for the solver
+tp.display.max_dw = True
 
-# m_rows, m_cols, m_vals, v_vals, n2_err, error_code = sd.newton_system()
-# print( coo_matrix( ( m_vals, ( m_rows, m_cols ) ) ).toarray() )
+# call the solves (uses a Newton solver by default)
+tp.adjust_potentials()
 
-# sd.log_items = [ 'nb_relaxation_divs', 'max_dw' ]
-# sd.newton_solve( relaxation_coefficient = 1.0 )  
+# it's possible to change only some parts of the inputs without having to redefine and recompute everything
+tp.dirac_positions = tp.power_diagram.cell_barycenters()
 
-# sd.power_diagram.weights = ot.get_weights()
-# print( sd.power_diagram.measures() )
+# Make the Transport Plan Optimal Again
+tp.adjust_potentials()
 
-# # tp.plot_in_vtk_output( vo )
-# sd.plot_in_pyplot( plt )
+# it was the first iteration of a quantization procedure
+tp.plot()

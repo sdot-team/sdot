@@ -20,7 +20,7 @@ class DisplayParameters:
     def __init__( self, list = [ 'max_error_ratio' ] ):
         if list is not None:
             for n, attr in enumerate( list ):
-                assert attr in self
+                # assert attr in self
                 setattr( self, attr, n + 1 )
 
     def write( self, solver ): 
@@ -45,7 +45,7 @@ class DisplayParameters:
             print()
 
 
-class SdotSolver:
+class SdotPlan:
     """
         Class to find a transport plan between a sum of dirac and a density.
 
@@ -207,6 +207,12 @@ class SdotSolver:
 
         self._check_inputs()
         self.power_diagram.plot( plt )
+
+        ps = self.power_diagram.summary()
+        for i in range( len( self.power_diagram.positions ) ):
+            p0 = self.power_diagram.positions[ i ]
+            p1 = ps.barycenters( self.ndim )[ i ]
+            plt.plot( [ p0[ 0 ], p1[ 0 ] ], [ p0[ 1 ], p1[ 1 ] ] )
 
     @property
     def nb_unknowns( self ):

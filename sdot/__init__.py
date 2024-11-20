@@ -10,7 +10,7 @@ from .optimal_transport_plan import optimal_transport_plan
 
 from .D2GTransportMap import D2GTransportMap
 from .G2DTransportMap import G2DTransportMap
-from .SdotSolver import SdotSolver
+from .SdotPlan import SdotPlan
 
 from .PowerDiagram import PowerDiagram
 from .VtkOutput import VtkOutput
