@@ -224,7 +224,11 @@ class Cell:
         """
         if fig is None:
             import matplotlib.pyplot as plt
-            self.plot( plt )
+            fig = plt
+            if self.ndim == 3:
+                fig = fig.figure()
+                fig = fig.add_subplot( projection = '3d' )
+            self.plot( fig )
             plt.show()
             return
 

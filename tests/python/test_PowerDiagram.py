@@ -53,52 +53,50 @@
 
 
 
-import matplotlib.pyplot as plt
-from sdot import PowerDiagram
-import numpy as np
-# import pytest
+# import matplotlib.pyplot as plt
+# from sdot import PowerDiagram
+# import numpy as np
+# # import pytest
 
-# def text( p, txt, color ):
-#     plt.text( p[ 0 ], p[ 1 ], txt, ha='center', va='center', color = color )
 
-# pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ], [ 0.5, 0.5 ] ] )
-# pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
+# # pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ], [ 0.5, 0.5 ] ] )
+# # pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
+# # pd.plot()
+
+# # np.random.seed( 357 )
+# # positions = np.random.random( [ 40, 2 ] )
+
+# # pd = PowerDiagram( positions )
+# # print( pd.boundaries )
+# # pd.plot()
+
+# # for n in range( 60 ):
+# #     np.random.seed( n )
+# #     pd = PowerDiagram( np.random.random( [ 40, 2 ] ) 
+# #     print( n,  )
+# #     # pd.plot( plt )
+
+# best_ptp = 100000000
+# best_p = None
+# best_i = None
+# for i in range( 20000 ):
+#     np.random.seed( i )
+#     p = np.random.random( [ 30, 2 ] )
+#     pd = PowerDiagram( positions = p )
+
+#     pd.periodicity_transformations = [ [ 0, 1 ] ]
+
+#     ptp = np.ptp( pd.summary().vertex_coords[ :, 0 ] )
+#     if best_ptp > ptp:
+#         best_ptp = ptp
+#         best_p = p
+#         best_i = i
+
+# pd = PowerDiagram( best_p )
+# pd.periodicity_transformations = [
+#      [ 0, 1 ],
+# ]
 # pd.plot()
-
-# np.random.seed( 357 )
-# positions = np.random.random( [ 40, 2 ] )
-
-# pd = PowerDiagram( positions )
-# print( pd.boundaries )
-# pd.plot()
-
-# for n in range( 60 ):
-#     np.random.seed( n )
-#     pd = PowerDiagram( np.random.random( [ 40, 2 ] ) 
-#     print( n,  )
-#     # pd.plot( plt )
-
-best_ptp = 100000000
-best_p = None
-best_i = None
-for i in range( 20000 ):
-    np.random.seed( i )
-    p = np.random.random( [ 30, 2 ] )
-    pd = PowerDiagram( positions = p )
-
-    pd.periodicity_transformations = [ [ 0, 1 ] ]
-
-    ptp = np.ptp( pd.summary().vertex_coords[ :, 0 ] )
-    if best_ptp > ptp:
-        best_ptp = ptp
-        best_p = p
-        best_i = i
-
-pd = PowerDiagram( best_p )
-pd.periodicity_transformations = [
-     [ 0, 1 ],
-]
-pd.plot()
 
 # pd.add_box_boundaries( 0, 1 )
 
@@ -113,25 +111,38 @@ pd.plot()
 #             print( "  ", l )
 # print( s.boundary_items )
 
-# b0 = s.barycenters( dim = 0 )
-# b1 = s.barycenters( dim = 1 )
-# b2 = s.barycenters( dim = 2 )
-# bc = np.array([0.5,0.5])
 # print( b1 )
 
-# pd.plot( plt )
-# for lb, color in zip( [ b0, b1, b2 ], [ 'blue', 'green', 'red' ]):
-#     for i, b in enumerate( lb ):
-#         dir = b - bc
-#         if np.linalg.norm( dir ):
-#             dir = dir / np.linalg.norm( dir )
-#         for e in range( 2 ):
-#             if abs( dir[ e ] ) >= 0.3:
-#                 dir[ e ] = dir[ e ] / abs( dir[ e ] ) # * 0.5
-#         text( b + 0.03 * dir, f'{ i }', color )
-# plt.xlim( -0.1, 1.1 )
-# plt.ylim( -0.1, 1.1 )
-# plt.show()
+def poute():
+    from sdot import PowerDiagram
+    import pylab as plt
+    import numpy as np
+
+    def text( p, txt, color ):
+        plt.text( p[ 0 ], p[ 1 ], txt, ha='center', va='center', color = color )
+
+    pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
+    pd.add_box_boundaries( 0, 1 )
+    ps = pd.summary()
+
+    b0 = ps.barycenters( dim = 0 )
+    b1 = ps.barycenters( dim = 1 )
+    b2 = ps.barycenters( dim = 2 )
+    bc = np.array([0.5,0.5])
+
+    pd.plot( plt )
+    for lb, color in zip( [ b0, b1, b2 ], [ 'blue', 'green', 'red' ]):
+        for i, b in enumerate( lb ):
+            dir = b - bc
+            if np.linalg.norm( dir ):
+                dir = dir / np.linalg.norm( dir )
+            for e in range( 2 ):
+                if abs( dir[ e ] ) >= 0.3:
+                    dir[ e ] = dir[ e ] / abs( dir[ e ] ) # * 0.5
+            text( b + 0.03 * dir, f'{ i }', color )
+    plt.xlim( -0.1, 1.1 )
+    plt.ylim( -0.1, 1.1 )
+    plt.show()
 
 # from pyvista import examples
 # mesh = examples.download_st_helens()
@@ -165,3 +176,31 @@ pd.plot()
 # p = PoomVec( [[1, 2]] )
 # print( p.dtype )
 # print( p.shape )
+
+from sdot import Cell
+
+cell = Cell( ndim = 3 )
+
+# we create a infinitely extruded triangle
+cell.cut( [ -1,  0, 0 ], 0 )
+cell.cut( [  0, -1, 0 ], 0 )
+cell.cut( [ +1, +1, 0 ], 1 )
+
+# of course, there's no 3D vertex...
+print( cell.nb_vertices ) # => 0
+
+# and this cell is sill unbounded (in the 3D space)
+print( cell.bounded ) # => False
+
+# ... it's because we're internally in 2D :)
+print( cell.true_dimensionality ) # => 2
+
+# "_td" is the shortcut suffix for "true dimensionality".
+# Methods with prefix return the information for the subspace that is defined by `cell.base`
+print( cell.nb_vertices_td ) # => 3 (the 3 vertices of the triangle)
+
+# we can get sample coordinates to represent these points in ndim (3D in this case)
+print( cell.vertex_coords_td @ cell.base ) # => [[0. 0. 0.] [1. 0. 0.] [0. 1. 0.]]
+
+# visualization will show the "sub-dimensional" content with thiner lines
+cell.plot()
