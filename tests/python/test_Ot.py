@@ -44,7 +44,7 @@ import pytest
 from sdot import SdotPlan
 import numpy as np
 
-tp = SdotPlan( np.random.random( [ 40, 2 ] ) )
+tp = SdotPlan( np.random.random( [ 40, 2 ] ) * 0.5 )
 
 # ctor argument can be defined or redefined after calling the constructor
 tp.target_measure = UnitBox()
@@ -58,7 +58,7 @@ tp.adjust_potentials()
 # it's possible to change only some parts of the inputs without having to redefine and recompute everything
 tp.dirac_positions = tp.power_diagram.cell_barycenters()
 
-# Make the Transport Plan Optimal Again
+# Make the Transport Plan valid and Optimal Again
 tp.adjust_potentials()
 
 # it was the first iteration of a quantization procedure
