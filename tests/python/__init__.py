@@ -6,4 +6,4 @@ import sys
 
 # check the cpp sources
 from sdot import set_auto_rebuild
-set_auto_rebuild( True )
+# set_auto_rebuild( True )

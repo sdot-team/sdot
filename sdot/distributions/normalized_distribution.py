@@ -1,15 +1,18 @@
 from .SymbolicFunction import SymbolicFunction
 from .Distribution import Distribution
+from .Lebesgue import Lebesgue
 from .UnitBox import UnitBox
 
-def normalized_distribution( dist, return_unit_box_if_not_defined = True ):
+def normalized_distribution( dist, if_not_defined = "UnitBox" ):
     """ return a Distribution instance from `dist`, which can be a scalar, a string, ... """
 
     # default value
     if dist is None:
-        if return_unit_box_if_not_defined:
+        if if_not_defined == "Lebesgue":
+            return Lebesgue()
+        if if_not_defined == "UnitBox":
             return UnitBox()
-        return None
+        raise ValueError( f"Undefined distribution name { if_not_defined }" )
     
     # already the good type
     if isinstance( dist, Distribution ):

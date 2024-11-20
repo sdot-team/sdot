@@ -1,16 +1,16 @@
 SDOT
 ====
 
-This package contains tool to handle
+This package contains tools to handle
 * semi-discrete transport plans (between discrete and generic densities),
-* polyhedral convex functions (represented as a max of affine functions),
-* and power diagrams (that can be seen as a generalization of Voronoi diagrams).
+* polyhedral convex functions (max of affine functions),
+* and power diagrams (a generalization of Voronoi diagrams).
 
-It works in any number of dimensions, and is highly optimized, in terms of execution speed and memory usage.
+It works in any number of dimensions. It is highly optimized, in terms of execution speed and memory usage.
 
-Historically, this package is a re-design of the `pysdot` package, which was written to handle a wide number of semi-discrete transport applications (partial transport, Moreau-Yosida regularization, etc...) but only worked in 2D or 3D. Additionaly, and more specifically, we wanted to make operations on power diagram much more comprehensive and generic.
+Historically, this package is a re-design of the `pysdot` package, which was written to handle a wide number of semi-discrete transport applications (partial transport, Moreau-Yosida regularization, etc...) but only worked in 2D or 3D. Additionaly, and more specifically, we wanted the APIs much more comprehensive and generic.
 
-Currently, there are bindings C++ and Python, but more languages are in the pipeline (feel free to ask if your favorite language is not represented :) ).
+Currently, there are bindings for C++ and Python.
 
 Installation
 ------------
@@ -40,11 +40,11 @@ Notebook examples
 
 Here are some notebooks you can download and test on your own machine to understand the overall spirit.
 
-* Optimal transport operations in python: [file](examples/tutorials/0_optimal_transport_py.ipynb), [colab](...).
-* Power or voronoi diagrams and cells in python: [file](examples/tutorials/0_power_diagram_py.ipynb), [colab](...).
-* Polyhedral convex function in python: [file](examples/tutorials/0_polyhedral_convex_py.ipynb), [colab](...).
+* Power or voronoi diagrams in python: [file](examples/tutorials/0_power_diagram_py.ipynb), [colab](https://colab.research.google.com/drive/1yT62po-HFCxeXD4D_6XF8pHMgl3Fut34?usp=sharing).
+* Optimal transport operations in python: [file](examples/tutorials/1_optimal_transport_py.ipynb), [colab](...).
+* Polyhedral convex function in python: [file](examples/tutorials/2_polyhedral_convex_py.ipynb), [colab](...).
 
-If you're looking for more simple, you will find in [the example directory](examples/) more concise notebooks.
+If you're looking for more simple examples, there is an [example directory](examples/) with more concise notebooks, oriented on specific tasks.
 
 Extensive documentation
 -----------------------

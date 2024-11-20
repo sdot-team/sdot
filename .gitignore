@@ -21,6 +21,7 @@ perf.data*
 *.gif
 *.zip
 .sconf_temp/
+results/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

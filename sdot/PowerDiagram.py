@@ -169,7 +169,7 @@ class PowerDiagram:
 
     @underlying_measure.setter
     def underlying_measure( self, values ):
-        self._underlying_measure = normalized_distribution( values )
+        self._underlying_measure = normalized_distribution( values, "Lebesgue" )
 
     @property
     def dtype( self ):
