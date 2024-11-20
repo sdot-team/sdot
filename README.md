@@ -40,9 +40,9 @@ Notebook examples
 
 Here are some notebooks you can download and test on your own machine to understand the overall spirit.
 
-* Power or voronoi diagrams in python: [file](examples/tutorials/0_power_diagram_py.ipynb), [colab](https://colab.research.google.com/drive/1yT62po-HFCxeXD4D_6XF8pHMgl3Fut34?usp=sharing).
-* Optimal transport operations in python: [file](examples/tutorials/1_optimal_transport_py.ipynb), [colab](https://colab.research.google.com/drive/1P7l7_8QaEUFiVz49Ll1Avhwi8meaHojl?usp=sharing).
-* Polyhedral convex function in python: [file](examples/tutorials/2_polyhedral_convex_py.ipynb), [colab](...).
+* Power or voronoi diagrams in python: [file](tutorials/python/tutorial_power_diagram.ipynb), [colab](https://colab.research.google.com/drive/1yT62po-HFCxeXD4D_6XF8pHMgl3Fut34?usp=sharing).
+* Optimal transport operations in python: [file](tutorials/python/tutorial_optimal_transport.ipynb), [colab](https://colab.research.google.com/drive/1P7l7_8QaEUFiVz49Ll1Avhwi8meaHojl?usp=sharing).
+* Polyhedral convex function in python: [file](doc/polyhedral_convex_py.md), [colab](https://colab.research.google.com/drive/1EDk557WqxuIdlpqTV62rQWcRDklqZcai?usp=sharing).
 
 If you're looking for more simple examples, there is an [example directory](examples/) with more concise notebooks, oriented on specific tasks.
 
@@ -65,6 +65,6 @@ Internally, it is written in C++/Cuda with SIMD/SIMT instructions. It support la
 On going work
 -------------
 
-* pytorch compatible operations
 * pre-guess of the weight to avoid void cells at the beginning
 * non-linear solvers to avoid bad newton directions
+* pytorch compatible operations
