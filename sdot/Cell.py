@@ -166,10 +166,6 @@ class Cell:
         if isinstance( fig, ModuleType ):
             fig.axis( 'equal' )
 
-        if self.ndim == 3:
-            fig = fig.figure()
-            fig = fig.add_subplot( projection = '3d' )
-
         #
         coords = self.vertex_coords_td @ self.base
 

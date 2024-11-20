@@ -278,6 +278,10 @@ class PowerDiagram:
             plt.show()
             return
 
+        if self.ndim == 3:
+            fig = fig.figure()
+            fig = fig.add_subplot( projection = '3d' )
+
         self.for_each_cell( lambda cell: cell.plot( fig, **kwargs ), max_nb_threads = 1 )
         return fig
 

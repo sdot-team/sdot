@@ -59,7 +59,7 @@ This example should give something like:
 
 ![Bounded 2D PowerDiagram](pd_1.png)
 
-## Periodicity
+### Periodicity
 
 Periodicity is handled in sdot by virtual seed affine transformations. Everytime a user adds a transformation `T` (internally represented as a (nd+1)² matrix), sdot virtually adds a copy of the seed with `T` and `inverse( T )` transformations.
 

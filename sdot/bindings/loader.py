@@ -150,7 +150,10 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
     # else, build and load it
     if module is None:
         if global_verbosity_level:
-            push_activity_log( f"compilation of { name } for { kwargs }" )
+            if len( kwargs ):
+                push_activity_log( f"compilation of { name } for { kwargs }" )
+            else:
+                push_activity_log( f"compilation of { name }" )
 
         #
         source_directory = Path( __file__ ).parent
@@ -162,7 +165,7 @@ def module_for( name, dir_of_the_SConstruct_file = Path( __file__ ).parent, use_
             f"suffix={ suffix }",
         ] + ilist
 
-        print( " ".join( args ) )
+        # print( " ".join( args ) )
 
         # call scons
         ret_code = subprocess.call( args, cwd = str( local_build_directory ), shell = False )
