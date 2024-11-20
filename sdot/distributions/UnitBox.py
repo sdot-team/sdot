@@ -28,11 +28,18 @@ class UnitBox( Distribution ):
 
         # TODO: include transformations
         bnds = []
+        s = 1
+        M = self.transformation.get()
         for d in range( ndim ):
-            bnds.append( [ + ( i == d ) for i in range( ndim ) ] + [ 1 ] )
-            bnds.append( [ - ( i == d ) for i in range( ndim ) ] + [ 0 ] )
+            v0 = self.transformation.dir( np.array( [ + ( i == d ) for i in range( ndim ) ] ) )
+            v1 = self.transformation.dir( np.array( [ - ( i == d ) for i in range( ndim ) ] ) )
+            p0 = self.transformation.pos( np.full( [ ndim ], 1 ) )
+            p1 = self.transformation.pos( np.full( [ ndim ], 0 ) )
+            bnds.append( list( v0 ) + [ np.dot( v0, p0 ) ] )
+            bnds.append( list( v1 ) + [ np.dot( v1, p1 ) ] )
+            s /= M[ d, d ]
 
-        return bnds, 1
+        return bnds, s
     
     @property
     def ndim( self ):

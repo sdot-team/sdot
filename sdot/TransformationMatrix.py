@@ -1,12 +1,35 @@
 import numpy as np
 
 class TransformationMatrix:
-    def __init__( self, value = None ):
+    def __init__( self, value = None, ndim = None ):
         if isinstance( value, TransformationMatrix ):
             self.value = value.value
+        elif value is None and ndim is not None:
+            self.value = np.eye( ndim + 1 )
         else:
             self.value = value
 
+    def scale( self, s ):
+        if isinstance( s, float ) or isinstance( s, int ):
+            self.value = self.get()
+            for i in range( self.value.shape[ 0 ] ):
+                self.value[ i, i ] *= s
+        else:
+            raise RuntimeError( "TODO" )
+
+    def translate( self, v ):
+        self.value = self.get()
+        self.value[ :-1, -1 ] = v
+
+    def dir( self, d ):
+        M = self.get()
+        return M[ :-1, :-1 ] @ d
+
+    def pos( self, p ):
+        n = np.array( list( p ) + [ 1 ] )
+        M = self.get()
+        return M[ :-1, : ] @ n
+    
     def get( self, ndim = None ):
         # None
         if self.value is None:
@@ -42,5 +65,6 @@ class TransformationMatrix:
             res = np.eye( s + 1 )
             res[ :s, s ] = array
             return res
-        
+
+        print( self.value )        
         raise ValueError( "invalid transformation" )

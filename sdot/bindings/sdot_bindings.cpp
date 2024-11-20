@@ -10,6 +10,7 @@
 #include <tl/support/ERROR.h>
  
 #include "RefMap.h"
+#include "cpp/sdot/support/binding_config.h"
 
 using namespace sdot;
 
@@ -152,6 +153,13 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         .def( "integral", []( const TCell &cell, TF c ) { return cell.measure( ConstantValue<TF>{ c } ); } )
 
+        .def( "seed_position", []( const TCell &cell ) { return array_from_vec( cell.info.p0 ); } )
+        .def( "weight", []( const TCell &cell ) { return cell.info.w0; } )
+        .def( "index", []( const TCell &cell ) { return cell.info.i0; } )
+
+        .def( "exteriorness", []( const TCell &cell, Array_TF x ) { return cell.exteriorness( svec_from_array<TF,nb_dims>( x ) ); } )
+        .def( "contains", []( const TCell &cell, Array_TF x ) { return cell.contains( svec_from_array<TF,nb_dims>( x ) ); } )
+
         // output
         .def( "display_vtk", []( const TCell &cell, VtkOutput &vo ) { return cell.display_vtk( vo ); } )
         .def( "__repr__", []( const TCell &cell ) { return to_string( cell ); } )
@@ -205,6 +213,16 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,1>{ as.nb_cells() } );
         as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
             res.mutable_at( cell.info.i0 ) = cell.measure( ConstantValue<TF>{ cv } );
+        } );
+        return res;
+    } );
+    
+    m.def( "cell_barycenters", []( AccelerationStructure<TCell> &as, const TCell &base_cell, TF cv ) {
+        pybind11::array_t<TF, pybind11::array::c_style> res( Vec<PI,2>{ as.nb_cells(), PI( nb_dims ) } );
+        as.for_each_cell( base_cell, [&]( TCell &cell, int num_thread ) {
+            Pt barycenter = cell.barycenter( ConstantValue<TF>{ cv } );
+            for( PI d = 0; d < nb_dims; ++d )
+                res.mutable_at( cell.info.i0, d ) = barycenter[ d ];
         } );
         return res;
     } );

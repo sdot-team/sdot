@@ -41,25 +41,45 @@ import pytest
 # # print( sum( sp.power_diagram.cell_integrals() ) )
 # sp.adjust_potentials()
 # we use another dirac positions for illustration
-from sdot import SdotPlan
+from sdot import SdotPlan, TransformationMatrix
+from matplotlib import pyplot
 import numpy as np
 
-tp = SdotPlan( np.random.random( [ 40, 2 ] ) )
+t = TransformationMatrix( ndim = 2 )
+t.scale( 2 )
+t.translate( [ -1, -1 ] )
+print( t.get() )
 
-# ctor argument can be defined or redefined after calling the constructor
-tp.target_measure = UnitBox()
+tp = SdotPlan( np.random.random( [ 20, 2 ] ) * 2 - 1 )
+tp.target_measure = UnitBox( transformation = t )
 
-# one can default parameters, for instance for the solver
-tp.display.max_dw = True
-
-# call the solves (uses a Newton solver by default)
 tp.adjust_potentials()
 
-# it's possible to change only some parts of the inputs without having to redefine and recompute everything
-tp.dirac_positions = tp.power_diagram.cell_barycenters()
+# tp.plot()
 
-# Make the Transport Plan Optimal Again
-tp.adjust_potentials()
+# vectors
+# fm = tp.forward_map
 
-# it was the first iteration of a quantization procedure
-tp.plot()
+# print( tp.power_diagram.weights )
+
+# tp.backward_map.kantorovitch_potential.plot()
+tp.backward_map.brenier_potential.plot()
+# print( tp.backward_map.kantorovitch_potential( [ 0.5, 0.5 ] ) )
+
+# print( tp.backward_map.brenier_potential( [ 0.5, 0.5 ] ) )
+
+# print( fm.brenier_potentials )
+
+# fig = pyplot.figure()
+# fig = fig.add_subplot( projection = '3d' )
+# pyplot.plot( fm.dirac_positions[ :, 0 ], fm.dirac_positions[ :, 1 ], fm.brenier_potentials, '+' )
+# pyplot.show()
+
+# # it's possible to change only some parts of the inputs without having to redefine and recompute everything
+# tp.dirac_positions = tp.power_diagram.cell_barycenters()
+
+# # Make the Transport Plan Optimal Again
+# tp.adjust_potentials()
+
+# # it was the first iteration of a quantization procedure
+# tp.plot()

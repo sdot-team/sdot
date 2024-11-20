@@ -1,5 +1,6 @@
 from .bindings.loader import normalized_dtype, numpy_dtype_for, type_promote, module_for
 from .distributions.normalized_distribution import normalized_distribution
+from .distributions.Lebesgue import Lebesgue
 from .bindings.integration_module import integration_module
 from .TransformationMatrix import TransformationMatrix
 from .PowerDiagramSummary import PowerDiagramSummary
@@ -211,7 +212,7 @@ class PowerDiagram:
             return
         self._ndim = int( value )
 
-    def for_each_cell( self, function, max_nb_threads = None ):
+    def for_each_cell( self, function, max_nb_threads = None, *args, **kargs ):
         """
             Call `function( cell: Cell )` for each cell in the power diagram.
 
@@ -222,13 +223,13 @@ class PowerDiagram:
             return
 
         # call the compiled function and wrap the cell
-        cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ) )
+        cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ), *args, **kargs )
         self._acceleration_structure.for_each_cell( self._base_cell._cell, cwc, max_nb_threads or 0 )
 
     def cell_integrals( self, func = 1 ):
         """ get integration of `func` other each cell """
         if not self._update_internal_attributes():
-            return np.empty( [ 0, self.ndim or 0 ] )
+            return np.empty( [ 0 ] )
         
         # very naughty...
         from .distributions.ScaledImage import ScaledImage
@@ -296,7 +297,40 @@ class PowerDiagram:
             return self._binding_module.dmeasures_dweights( self._acceleration_structure, self._base_cell._cell, cv )
 
         raise RuntimeError( "TODO" )
-    
+
+    def cell_barycenters( self, func = 1 ):
+        """ integral( func * x ) / integral( func ) """
+        if not self._update_internal_attributes():
+            return np.empty( [ 0, self.ndim or 0 ] )
+        
+        # final expression to integrate other the cell
+        final_expr = self._density_under_final_boundaries * Expr( func )
+
+        # not so naughty...
+        cv = final_expr.constant_value()
+        if cv is not None:
+            return self._binding_module.cell_barycenters( self._acceleration_structure, self._base_cell._cell, cv )
+
+        raise RecursionError( "TODO (integration_module)" )
+        # module, rt_data = integration_module( final_expr, self.dtype, self.ndim )
+        # return module.power_diagram_integrals( self._acceleration_structure, self._base_cell._cell, rt_data )
+
+    def find_cell( self, x ):
+        args = {
+            "best_exteriorness" : 1,
+            "best_cell" : None,
+        }
+
+        def on_cell( cell, args ):
+            exteriorness = cell.exteriorness( x )
+            if args[ "best_exteriorness" ] > exteriorness:
+                args[ "best_exteriorness" ] = exteriorness
+                args[ "best_cell" ] = cell
+
+        self.for_each_cell( on_cell, None, args )
+
+        return args[ "best_cell" ]
+
     def summary( self ):
         """ return a PowerDiagramSummary with arrays that contain global information to summarize the power diagram (coords, parenting, ...).
         """

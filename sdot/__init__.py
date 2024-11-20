@@ -12,6 +12,7 @@ from .D2GTransportMap import D2GTransportMap
 from .G2DTransportMap import G2DTransportMap
 from .SdotPlan import SdotPlan
 
+from .TransformationMatrix import TransformationMatrix
 from .PowerDiagram import PowerDiagram
 from .VtkOutput import VtkOutput
 from .PoomVec import PoomVec

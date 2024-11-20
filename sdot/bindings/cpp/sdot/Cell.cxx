@@ -1179,6 +1179,48 @@ DTP TF UTP::for_each_cut_with_measure( const std::function<void( const _Cut &cut
     return res / ( coe * nb_dims );
 }
 
+inline PI factorial( PI v ) {
+    if ( v > 1 )
+        return v * factorial( v - 1 );
+    return 1;
+}
+
+DTP Vec<TF,nb_dims> UTP::barycenter( const ConstantValue<TF> &cv ) const {
+    if ( ! _bounded )
+        return { FromItemValue(), std::numeric_limits<TF>::infinity() };
+
+    Pt sum{ FromItemValue(), 0 };
+    TF coe{ 0 };
+    simplex_split( [&]( auto &&simplex ) {
+        using namespace std;
+        Eigen::Matrix<TF,nb_dims,nb_dims> M;
+        for( PI r = 0; r < nb_dims; ++r )
+            for( PI c = 0; c < nb_dims; ++c )
+                M( r, c ) = simplex[ r + 1 ][ c ] - simplex[ 0 ][ c ];
+        TF loc_vol = abs( M.determinant() / factorial( nb_dims ) );
+
+        coe += loc_vol * simplex.size();
+        for( const auto &p : simplex )
+            sum += loc_vol * p;
+    } );
+
+    return coe ? sum / coe : sum;
+}
+
+DTP TF UTP::exteriorness( Pt x ) const {
+    TF res = std::numeric_limits<TF>::lowest();
+    for( const _Cut &cut : _cuts )
+        res = std::max( res, sp( cut.dir, x ) - cut.off );
+    return res;
+}
+
+DTP bool UTP::contains( Pt x ) const {
+    for( const _Cut &cut : _cuts )
+        if ( sp( cut.dir, x ) > cut.off )
+            return false;
+    return true;
+}
+
 DTP TF UTP::measure( const ConstantValue<TF> &cv ) const {
     if ( ! _bounded )
         return std::numeric_limits<TF>::infinity();

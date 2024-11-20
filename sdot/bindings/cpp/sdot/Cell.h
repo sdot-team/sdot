@@ -80,7 +80,11 @@ public:
 
     // computations
     TF              for_each_cut_with_measure( const std::function<void( const Cut<TF,nb_dims,CutInfo> &cut, TF measure )> &f ) const;
+    Pt              barycenter               ( const ConstantValue<TF> &cv ) const;
     TF              measure                  ( const ConstantValue<TF> &cv ) const;
+
+    TF              exteriorness             ( Pt x ) const;
+    bool            contains                 ( Pt x ) const;
 
     // utility  
     auto            with_ct_dim              ( auto &&func ) const;

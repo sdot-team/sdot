@@ -111,7 +111,19 @@ class Cell:
     @property
     def empty( self ):
         return self._cell.empty()
-    
+
+    @property
+    def seed_position( self ):
+        return self._cell.seed_position()
+
+    @property
+    def weight( self ):
+        return self._cell.weight()
+
+    @property
+    def index( self ):
+        return self._cell.index()
+
     # @property
     # def closed_faces( self ):
     #     return self._cell.closed_faces()
@@ -130,6 +142,9 @@ class Cell:
     @property
     def cuts( self ):
         return self._cell.cuts()
+    
+    def exteriorness( self, x ):
+        return self._cell.exteriorness( x )
     
     def cut_boundary( self, dir, val, index = 0 ):
         return self._cell.cut_boundary( np.ascontiguousarray( dir ), val, int( index ) )
@@ -172,7 +187,7 @@ class Cell:
     def ray_dir( self, ray_refs, base_vertex ):
         return self._cell.ray_dir( ray_refs, base_vertex )
 
-    def plot_pyplot( self, fig, color = 'black', linestyle = '-', linewidth = 2, low_dim_linewidth_coeff = 0.25, ray_length = 0.2, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':' ):
+    def plot_pyplot( self, fig, color = 'black', linestyle = '-', linewidth = 2, low_dim_linewidth_coeff = 0.25, ray_length = 0.2, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':', elevation_function = None ):
         """
             ray_length is the length used to display infinite edges.
         """
@@ -196,6 +211,8 @@ class Cell:
         def pl( array, gtype ):
             array = np.array( array )
             xyz = [ array[ :, d ] for d in range( min( self.ndim, 3 ) ) ]
+            if elevation_function is not None:
+                xyz.append( [ elevation_function( p ) for p in array ] )
             kwa = { 'linewidth': linewidth }
             if self.true_dimensionality < self.ndim and gtype != 'free':
                 kwa[ 'linewidth' ] *= low_dim_linewidth_coeff

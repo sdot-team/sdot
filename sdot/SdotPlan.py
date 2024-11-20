@@ -87,11 +87,24 @@ class SdotPlan:
         self.target_measure = target_measure
         self.norm = norm
 
+    @property
     def forward_map( self ):
-        return D2GTransportMap()
+        generic_dist, dirac_dist, dirac_is_tgt = self._check_inputs()
+        if dirac_is_tgt:
+            return G2DTransportMap( self )
+        return D2GTransportMap( self )
 
+    @property
     def backward_map( self ):
-        return D2GTransportMap()
+        generic_dist, dirac_dist, dirac_is_tgt = self._check_inputs()
+        if dirac_is_tgt:
+            return D2GTransportMap( self )
+        return G2DTransportMap( self )
+
+    @property
+    def dirac_positions( self ):
+        self._check_inputs()
+        return self.power_diagram.positions
 
     def adjust_potentials( self ):
         return self.newton_solve()
@@ -198,20 +211,20 @@ class SdotPlan:
         M = coo_matrix( ( m_vals, ( m_rows, m_cols ) ), shape = ( v_vals.size, v_vals.size ) ).tocsr()
         return spsolve( M, v_vals )
 
-    def plot( self, plt = None ):
+    def plot( self, plt = None, display_arrows = True ):
         if plt is None:
             import matplotlib.pyplot as plt
-            self.plot( plt )
+            self.plot( plt, display_arrows = display_arrows )
             plt.show()
             return
 
         self._check_inputs()
         self.power_diagram.plot( plt )
 
-        ps = self.power_diagram.summary()
+        bs = self.power_diagram.cell_barycenters()
         for i in range( len( self.power_diagram.positions ) ):
             p0 = self.power_diagram.positions[ i ]
-            p1 = ps.barycenters( self.ndim )[ i ]
+            p1 = bs[ i ]
             plt.plot( [ p0[ 0 ], p1[ 0 ] ], [ p0[ 1 ], p1[ 1 ] ] )
 
     @property
