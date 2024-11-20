@@ -38,7 +38,7 @@ flit install -s # -s makes symbolic links to the sources
 Notebook examples
 -----------------
 
-Here are some notebooks you can download and test on your own machine to understand the overall spirit.
+Here are some notebooks you can download and test on your own machine or via google colab to understand the overall spirit.
 
 * Power or voronoi diagrams in python: [file](tutorials/python/tutorial_power_diagram.ipynb), [colab](https://colab.research.google.com/drive/1yT62po-HFCxeXD4D_6XF8pHMgl3Fut34?usp=sharing).
 * Optimal transport operations in python: [file](tutorials/python/tutorial_optimal_transport.ipynb), [colab](https://colab.research.google.com/drive/1P7l7_8QaEUFiVz49Ll1Avhwi8meaHojl?usp=sharing).
