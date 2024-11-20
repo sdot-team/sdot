@@ -226,6 +226,11 @@ class PowerDiagram:
         cwc = lambda cell: function( Cell( _cell = cell, _binding_module = self._binding_module ), *args, **kargs )
         self._acceleration_structure.for_each_cell( self._base_cell._cell, cwc, max_nb_threads or 0 )
 
+    def cell_barycenters( self, func = 1 ):
+        # wrong value for now (!)
+        ps = self.summary()
+        return ps.barycenters( self.ndim )
+    
     def cell_integrals( self, func = 1 ):
         """ get integration of `func` other each cell """
         if not self._update_internal_attributes():

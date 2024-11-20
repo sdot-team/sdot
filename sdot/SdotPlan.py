@@ -256,6 +256,15 @@ class SdotPlan:
                 return p
         return None
 
+    @property
+    def dirac_positions( self ):
+        return self.power_diagram.positions
+
+    @dirac_positions.setter
+    def dirac_positions( self, positions ):
+        self.power_diagram.positions = positions
+        self.power_diagram.weights *= 0
+
     def _normalize_and_use_measure( self, distribution ):
         """ register distribution (use it as self.power_diagram.positions or self.power_diagram.underlying_measure) """
         if distribution is None:
