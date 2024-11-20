@@ -45,17 +45,10 @@ from sdot import SdotPlan, TransformationMatrix, optimal_transport_plan
 from matplotlib import pyplot
 import numpy as np
 
-t = TransformationMatrix( ndim = 2 )
-t.scale( 2 )
-t.translate( [ -1, -1 ] )
-print( t.get() )
-
-tp = SdotPlan( np.random.random( [ 20, 2 ] ) * 2 - 1 )
-tp.target_measure = UnitBox( transformation = t )
-
+tp = SdotPlan( np.random.random( [ 20, 2 ] ) )
 tp.adjust_potentials()
 
-# tp.plot()
+tp.plot()
 
 # vectors
 # fm = tp.forward_map
@@ -63,7 +56,7 @@ tp.adjust_potentials()
 # print( tp.power_diagram.weights )
 
 # tp.backward_map.kantorovitch_potential.plot()
-tp.backward_map.brenier_potential.plot()
+# tp.backward_map.brenier_potential.plot()
 # print( tp.backward_map.kantorovitch_potential( [ 0.5, 0.5 ] ) )
 
 # print( tp.backward_map.brenier_potential( [ 0.5, 0.5 ] ) )

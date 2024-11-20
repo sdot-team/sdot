@@ -27,7 +27,7 @@ class TransformationMatrix:
 
     def pos( self, p ):
         n = np.array( list( p ) + [ 1 ] )
-        M = self.get()
+        M = self.get( p.size )
         return M[ :-1, : ] @ n
     
     def get( self, ndim = None ):
