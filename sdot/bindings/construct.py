@@ -72,6 +72,14 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         pybind11.get_include(), # pybind11.h
     ]
 
+    # Allow to change the compiler using the CXX environment
+    # variable.
+    # On some systems (e.g. openSUSE), the default
+    # compiler may not have yet `-std=c++20` but it is possible
+    # to install in addition e.g. `g++-12` . Then, setting
+    # `CXX=g++-12` before starting jupyter will allow to overrride
+    # the default `g++`.
+    CXX=os.getenv('CXX','g++')
 
     # CXXFLAGS
     CXXFLAGS = [
@@ -114,7 +122,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     ]
 
     # Environment
-    env = Environment( CPPPATH = CPPPATH, CXXFLAGS = CXXFLAGS, LIBS = LIBS, LIBPATH = LIBPATH, SHLIBPREFIX = '' )
+    env = Environment( CPPPATH = CPPPATH, CXX = CXX, CXXFLAGS = CXXFLAGS, LIBS = LIBS, LIBPATH = LIBPATH, SHLIBPREFIX = '' )
 
     # check the libraries
     conf = Configure( env )
