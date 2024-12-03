@@ -1,67 +1,12 @@
-# from pysdot.domain_types import ScaledImage
-# from pysdot import OptimalTransport
-# import pylab as plt
-# import numpy as np
-
-# # helper function
-# # def quantization(ot, tau=.3, niter=10):
-# #     for iter in range(niter):
-# #         if ot.verbosity >= 2:
-# #             print( "niter quant:", iter )
-# #         ot.adjust_weights()
-# #         B = ot.get_centroids()
-# #         ot.set_positions( ot.get_positions() + tau * ( B - ot.get_positions() ) )
-# #     ot.adjust_weights()
-
-# # initial positions
-# n = 40
-# positions = []
-# for y in range( n ):
-#     for x in range( n ):
-#         positions.append( [ ( y + 0.25 + 0.5 * np.random.rand() ) / n, ( x + 0.25 + 0.5 * np.random.rand() ) / n ] )
-# ot = OptimalTransport(np.array(positions))
-# ot.verbosity = 2
-
-# def f( r2, o ):
-#     return ( r2**0.5 - o**2 ) ** 2
-# # solve
-# for n, t in enumerate( np.linspace( 1, 60, 120 ) ):
-#     print( n )
-
-#     s = 0.5 + 0.5 * np.sin( 2 * np.pi * ( t + 0 ) / 60 )
-#     l = 5 * np.sin( 2 * np.pi * ( t + 40 ) / 60 )
-#     o = 0.3 + 0.3 * np.sin( 2 * np.pi * ( t + 80 ) / 60 )
-
-#     t = np.linspace(-1,1,100)
-#     x, y = np.meshgrid(t,t)
-#     i_0 = np.exp( -l * f( x**2 + y**2, o ) )
-#     i_1 = 0.5 + ( x**2 > 0.5**2 )
-    
-#     img = ( 1 - s ) * i_0 + s * i_1    
-#     img /= np.mean(img)
-    
+import matplotlib.pyplot as plt
+from sdot import PowerDiagram
+import numpy as np
+# import pytest
 
 
-#     # domain
-#     ot.set_domain(ScaledImage([0, 0], [1, 1], img))
-#     ot.adjust_weights()
-
-#     # display
-#     nt = OptimalTransport( np.array(positions), ot.get_weights() )
-#     nt.pd.display_vtk( f"results/pd_{ n }.vtk", centroids=False )
-
-
-
-
-# import matplotlib.pyplot as plt
-# from sdot import PowerDiagram
-# import numpy as np
-# # import pytest
-
-
-# # pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ], [ 0.5, 0.5 ] ] )
-# # pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
-# # pd.plot()
+# pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ], [ 0.5, 0.5 ] ] )
+# pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
+# pd.plot()
 
 # # np.random.seed( 357 )
 # # positions = np.random.random( [ 40, 2 ] )
@@ -177,8 +122,6 @@ def poute():
 # print( p.dtype )
 # print( p.shape )
 
-from sdot import PowerDiagram, ScaledImage, optimal_transport_plan
-import numpy as np
 # cell = Cell( ndim = 3 )
 
 # # we create a infinitely extruded triangle
@@ -217,50 +160,50 @@ import numpy as np
 
 # print( pd.cell_dintegrals_dweights( s ) )
 
-# [[24.20364779 -5.58586914 -1.29423728 -4.49760374 -0.72411373]
-#  [-5.58586914 10.07493089 -2.17554026  0.         -2.31352149]
-#  [-1.29423728 -2.17554026  4.35958259 -0.88980504  0.        ]
-#  [-4.49760374  0.         -0.88980504  5.38740878  0.        ]
-#  [-0.72411373 -2.31352149  0.          0.          3.03763522]]
-# max dw: 0.03202312743320352
-# [[24.27041608 -3.87760666 -2.04750292 -5.38098489 -0.82911358]
-#  [-3.87760666  9.84755188 -3.60245276  0.         -2.36749246]
-#  [-2.04750292 -3.60245276  7.36901638 -1.71906069  0.        ]
-#  [-5.38098489  0.         -1.71906069  7.10004558  0.        ]
-#  [-0.82911358 -2.36749246  0.          0.          3.19660604]]
-def pys():
-    import pysdot
-    np.random.seed( 0 )
+# # [[24.20364779 -5.58586914 -1.29423728 -4.49760374 -0.72411373]
+# #  [-5.58586914 10.07493089 -2.17554026  0.         -2.31352149]
+# #  [-1.29423728 -2.17554026  4.35958259 -0.88980504  0.        ]
+# #  [-4.49760374  0.         -0.88980504  5.38740878  0.        ]
+# #  [-0.72411373 -2.31352149  0.          0.          3.03763522]]
+# # max dw: 0.03202312743320352
+# # [[24.27041608 -3.87760666 -2.04750292 -5.38098489 -0.82911358]
+# #  [-3.87760666  9.84755188 -3.60245276  0.         -2.36749246]
+# #  [-2.04750292 -3.60245276  7.36901638 -1.71906069  0.        ]
+# #  [-5.38098489  0.         -1.71906069  7.10004558  0.        ]
+# #  [-0.82911358 -2.36749246  0.          0.          3.19660604]]
+# def pys():
+#     import pysdot
+#     np.random.seed( 0 )
 
-    ar = np.array( [ [ 1, 1 ],[ 1, 5.0 ] ] )
-    ar /= np.mean( ar )
-    do = pysdot.ScaledImage( [0,0], [1,1], ar )
-    print( do.measure() )
+#     ar = np.array( [ [ 1, 1 ],[ 1, 5.0 ] ] )
+#     ar /= np.mean( ar )
+#     do = pysdot.ScaledImage( [0,0], [1,1], ar )
+#     print( do.measure() )
 
-    ot = pysdot.OptimalTransport( np.random.random( [ 50, 2 ] ), domain = do )
-    ot.verbosity = 3
-    ot.adjust_weights()
+#     ot = pysdot.OptimalTransport( np.random.random( [ 50, 2 ] ), domain = do )
+#     ot.verbosity = 3
+#     ot.adjust_weights()
 
-def pl():
-    np.random.seed( 0 )
-    pl = optimal_transport_plan(
-        ScaledImage( [ [ 1, 1 ],[ 1, 5 ] ] ),
-        np.random.random( [ 50, 2 ] ),
-        # relaxation = 0.1
-    )
-    # [[12.10182389 -2.79293457 -0.64711864 -2.24880187 -0.36205687]
-    #  [-2.79293457  5.03746544 -1.08777013  0.         -1.15676074]
-    #  [-0.64711864 -1.08777013  2.17979129 -0.44490252  0.        ]
-    #  [-2.24880187  0.         -0.44490252  2.69370439  0.        ]
-    #  [-0.36205687 -1.15676074  0.          0.          1.51881761]]
+# def pl():
+#     np.random.seed( 0 )
+#     pl = optimal_transport_plan(
+#         ScaledImage( [ [ 1, 1 ],[ 1, 5 ] ] ),
+#         np.random.random( [ 50, 2 ] ),
+#         # relaxation = 0.1
+#     )
+#     # [[12.10182389 -2.79293457 -0.64711864 -2.24880187 -0.36205687]
+#     #  [-2.79293457  5.03746544 -1.08777013  0.         -1.15676074]
+#     #  [-0.64711864 -1.08777013  2.17979129 -0.44490252  0.        ]
+#     #  [-2.24880187  0.         -0.44490252  2.69370439  0.        ]
+#     #  [-0.36205687 -1.15676074  0.          0.          1.51881761]]
 
-    # [[12.75390154 -2.14731503 -1.0620068  -2.75399311 -0.41363583]
-    #  [-2.14731503  5.06445409 -1.73506019  0.         -1.18207886]
-    #  [-1.0620068  -1.73506019  3.50263446 -0.70556747  0.        ]
-    #  [-2.75399311  0.         -0.70556747  3.45956058  0.        ]
-    #  [-0.41363583 -1.18207886  0.          0.          1.5957147 ]]
+#     # [[12.75390154 -2.14731503 -1.0620068  -2.75399311 -0.41363583]
+#     #  [-2.14731503  5.06445409 -1.73506019  0.         -1.18207886]
+#     #  [-1.0620068  -1.73506019  3.50263446 -0.70556747  0.        ]
+#     #  [-2.75399311  0.         -0.70556747  3.45956058  0.        ]
+#     #  [-0.41363583 -1.18207886  0.          0.          1.5957147 ]]
 
-    pl.plot()
+#     pl.plot()
 
-# pys()
-pl()
+# # pys()
+# pl()

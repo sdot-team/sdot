@@ -7,6 +7,11 @@ import pybind11
 import sys
 import os
 
+asimd_version = 'v0.0.1-alpha'
+boost_version = '1.86.0'
+eigen_version = '3.4.0'
+tl20_version = '0.0.5'
+
 # helper to get n-th parent directory
 def pdir( dir, n = 1 ):
     if n == 0:
@@ -22,23 +27,23 @@ def args_to_obj( ARGLIST ):
             args[ k ] = unquote_plus( v )
     return args
 
-def download_and_unzip( link, src, dst, ext_directory ):
+def download_and_unzip( link, ext_directory ):
     import dload
  
-    print( f"Downloading { dst } in { ext_directory }" )
+    print( f"Downloading { link } in { ext_directory }" )
 
     dload.save_unzip( link, str( ext_directory ), delete_after = True )
-    try:
-        os.rename( ext_directory / src, ext_directory / dst )
-    except OSError:
-        pass
+    #try:
+    #    os.rename( ext_directory / src, ext_directory / dst )
+    #except OSError:
+    #    pass
 
 # def git_clone( link ):
 #     from git import Repo  # pip install gitpython
 
 #     Repo.clone_from( ,  )
 
-def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names, files ):
+def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names, files, add_srcs_for_windows = [] ):
     # common args
     args = {}
     for k, v in ARGLIST:
@@ -66,6 +71,10 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         os.path.join( ext_directory, 'asimd', 'src' ),
         os.path.join( ext_directory, 'boost' ),
         os.path.join( ext_directory, 'eigen' ),
+
+        os.path.join( ext_directory, f'tl20-{ tl20_version }', 'src', 'cpp' ),
+        os.path.join( ext_directory, f'asimd-{ asimd_version }', 'src' ),
+        os.path.join( ext_directory, f'eigen-{ eigen_version }', 'src' ),
 
         # system
         sysconfig.get_paths()[ 'include' ], # Python.h
@@ -108,6 +117,9 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     sources = files + [
     ]
 
+    if os.name == 'nt':
+        sources += add_srcs_for_windows
+
     # Environment
     env = Environment( 
         CPPPATH = CPPPATH, 
@@ -136,13 +148,13 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     # check the libraries
     conf = Configure( env )
     if not conf.CheckCXXHeader( 'boost/multiprecision/cpp_int.hpp' ):
-        download_and_unzip( "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.zip", "boost_1_86_0", "boost", ext_directory )
+        download_and_unzip( f"https://archives.boost.io/release/{ boost_version }/source/boost_{ boost_version.replace( '.', '_' ) }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'Eigen/Dense' ):
-        download_and_unzip( "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip", "eigen-3.4.0", "eigen", ext_directory )
+        download_and_unzip( f"https://gitlab.com/libeigen/eigen/-/archive/{ eigen_version }/eigen-{ eigen_version }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
-        download_and_unzip( "https://github.com/hleclerc/asimd/archive/refs/tags/asimd-v0.0.1-alpha.zip", "asimd-asimd-v0.0.1-alpha", "asimd", ext_directory )
+        download_and_unzip( f"https://github.com/hleclerc/asimd/archive/refs/tags/asimd-{ asimd_version }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'tl/support/Displayer.h' ):
-        download_and_unzip( "https://github.com/hleclerc/tl20/archive/refs/tags/v0.0.5.zip", "tl20-0.0.5", "tl20", ext_directory )
+        download_and_unzip( f"https://github.com/hleclerc/tl20/archive/refs/tags/{ tl20_version }.zip", ext_directory )
     env = conf.Finish()
 
     # register the library

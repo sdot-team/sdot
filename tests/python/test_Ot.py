@@ -42,7 +42,7 @@ import pytest
 # sp.adjust_potentials()
 # we use another dirac positions for illustration
 from sdot import SdotPlan, TransformationMatrix, optimal_transport_plan
-from matplotlib import pyplot
+# from matplotlib import pyplot
 import numpy as np
 
 tp = SdotPlan( np.random.random( [ 20, 2 ] ) )

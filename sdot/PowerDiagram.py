@@ -278,7 +278,7 @@ class PowerDiagram:
         # very naughty...
         from .distributions.ScaledImage import ScaledImage
         if func == 1 and isinstance( self._underlying_measure, ScaledImage ):
-            import pysdot 
+            raise RuntimeError( "TODO: reimplement scaled image" )
             mi = [ 0 for _ in range( self.ndim ) ]
             ma = [ 1 for _ in range( self.ndim ) ]
             ar = self._underlying_measure.array / np.mean( self._underlying_measure.array )
