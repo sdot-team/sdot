@@ -109,10 +109,18 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     ]
 
     # Environment
-    env = Environment( CPPPATH = CPPPATH, CXXFLAGS = CXXFLAGS, LIBS = LIBS, LIBPATH = LIBPATH, SHLIBPREFIX = '' )
+    env = Environment( 
+        CPPPATH = CPPPATH, 
+        CXXFLAGS = CXXFLAGS, 
+        LIBS = LIBS, 
+        LIBPATH = LIBPATH, 
+        SHLIBPREFIX = '',
+        SHLIBSUFFIX = sysconfig.get_config_var( 'EXT_SUFFIX' ),
+    )
 
     if env[ "CC" ] == 'cl':
         env.Append( CXXFLAGS = [
+            '/Zc:zeroSizeArrayNew',
             '/std:c++20',
             '/EHsc',
             '/O2',
@@ -138,4 +146,4 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     env = conf.Finish()
 
     # register the library
-    env.SharedLibrary( module_name + env[ 'SHLIBSUFFIX' ], list( map( str, sources ) ) )
+    env.SharedLibrary( module_name, list( map( str, sources ) ) )
