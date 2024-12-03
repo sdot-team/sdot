@@ -146,7 +146,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     else:
         env.Append( CXXFLAGS = [
             '-ffast-math',
-            '-std=c++20'
+            '-std=c++20',
             '-O3',
             '-g3',
         ] )
