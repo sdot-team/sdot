@@ -9,7 +9,8 @@ import sys
 import os
 
 # needed to share the symbols
-sys.setdlopenflags( os.RTLD_GLOBAL | os.RTLD_LAZY )
+if os.name != 'nt':
+    sys.setdlopenflags( os.RTLD_GLOBAL | os.RTLD_LAZY )
 
 # ------------------------------------------------------------------------------------------------------------------------------------------
 def get_global_directory_for( name ):

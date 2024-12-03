@@ -93,7 +93,7 @@ private:
 
 // template definitions
 T_T BigRational::operator T() const { 
-    return T( num << std::max( + exp, 0l ) ) / T( den << std::max( - exp, 0l ) );
+    return T( num << std::max( + exp, TE( 0 ) ) ) / T( den << std::max( - exp, TE( 0 ) ) );
 }
 
 

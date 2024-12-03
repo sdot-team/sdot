@@ -1,3 +1,6 @@
+BumpPointer:      PI frame_size = max( PI( 4096 ), PI( sizeof( Frame * ) + sizeof( char * ) + alig - 1 + size ) );
+
+
 Urgent:
 * les integrations utiles pour sdot (quantization)
 * perioditicy complète

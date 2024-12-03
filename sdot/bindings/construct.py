@@ -78,20 +78,14 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         f'-DSDOT_CONFIG_module_name={ module_name }',
         f'-DSDOT_CONFIG_suffix={ suffix }',
 
-        '-Wdeprecated-declarations',
-        '-std=c++20',
+        # '-Wdeprecated-declarations',
         # '-fopenmp',
 
-        '-fdiagnostics-color=always',
-        
-        '-ffast-math',
-        '-O3',
-
-        '-g3',
+        # '-fdiagnostics-color=always',
     ]
 
     if 'arch' in used_arg_names:
-       CXXFLAGS.append( '-march=' + args[ 'arch' ].replace( '_', '-' ) )
+        CXXFLAGS.append( '-march=' + args[ 'arch' ].replace( '_', '-' ) )
 
     for name in used_arg_names:
         CXXFLAGS.append( f'"-DSDOT_CONFIG_{ name }={ args[ name ] }"' )
@@ -107,6 +101,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     LIBPATH = [
         # '/home/hugo.leclerc/.vfs_build/ext/Catch2/install/lib',
         # '/home/leclerc/.vfs_build/ext/Catch2/install/lib'
+        sysconfig.get_config_var( 'LIBDIR' ), # Python.h
     ]
 
     # .cpp files
@@ -115,6 +110,20 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
 
     # Environment
     env = Environment( CPPPATH = CPPPATH, CXXFLAGS = CXXFLAGS, LIBS = LIBS, LIBPATH = LIBPATH, SHLIBPREFIX = '' )
+
+    if env[ "CC" ] == 'cl':
+        env.Append( CXXFLAGS = [
+            '/std:c++20',
+            '/EHsc',
+            '/O2',
+        ] )
+    else:
+        env.Append( CXXFLAGS = [
+            '-ffast-math',
+            '-std=c++20'
+            '-O3',
+            '-g3',
+        ] )
 
     # check the libraries
     conf = Configure( env )

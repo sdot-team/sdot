@@ -272,6 +272,7 @@ BigRational pow( const BigRational &a, const BigRational &b ) {
     }
 
     TODO;
+    return 0;
 }
 
 BigRational abs( const BigRational &a ) {
@@ -284,17 +285,18 @@ BigRational BigRational::pow( const BigRational &that ) const {
     if ( that == 1 )
         return *this;
     TODO;
+    return 0;
 }
 
 BigRational BigRationalFrom<FP64>::create( FP64 value ) {
-    auto res = ( boost::multiprecision::cpp_int( 1 ) << 52 ) + ( reinterpret_cast<const PI64 &>( value ) & ( ( 1ul << 52 ) - 1 ) ); 
-    SI64 bex = ( reinterpret_cast<const PI64 &>( value ) >> 52 ) & ( ( 1ul << 11 ) - 1 );
+    auto res = ( boost::multiprecision::cpp_int( 1 ) << 52 ) + ( reinterpret_cast<const PI64 &>( value ) & ( ( PI64( 1 ) << 52 ) - 1 ) ); 
+    SI64 bex = ( reinterpret_cast<const PI64 &>( value ) >> 52 ) & ( ( PI64( 1 ) << 11 ) - 1 );
 
     // zero ?
     if ( bex == 0 )
         return { BigRational::FromNormalizedData(), 0, 1, 0 };
 
-    bool sgn = reinterpret_cast<const PI64 &>( value ) & ( 1ul << 63 );
+    bool sgn = reinterpret_cast<const PI64 &>( value ) & ( PI64( 1 ) << 63 );
     return { BigRational::FromNormalizedDiv(), sgn ? - res : res, 1, bex - ( 1023 + 52 ) };
 }
 

@@ -30,6 +30,7 @@ std::tuple<Str,std::vector<ExprData>> ct_rt_split_of_list( const std::vector<Exp
 
 std::tuple<std::pair<Str,Str>,std::vector<Expr>> cell_splits_of_list( const std::vector<Expr> &expr_list, const std::vector<ExprData> &expr_data ) {
     TODO;
+    return {};
 }
 
 std::vector<Expr> expr_list_from_compact_repr( const Str &str ) {

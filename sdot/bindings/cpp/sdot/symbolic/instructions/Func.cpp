@@ -109,6 +109,7 @@ void Func::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
 
 RcPtr<Inst> Func::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
     TODO;
+    return {};
 }
 
 }

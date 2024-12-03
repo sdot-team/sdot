@@ -61,10 +61,12 @@ int Inst::compare( const sdot::Inst &b ) const {
     }
 
     TODO;
+    return 0;
 }
 
 RcPtr<Inst> Inst::read_from( CompactReprReader &cr ) {
     TODO;
+    return {};
 }
 
 PI Inst::rt_data_num( Vec<ExprData> &data_map, const Inst *inst, const std::function<ExprData::Val *()> &make_rt_data ) {
