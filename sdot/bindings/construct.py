@@ -7,10 +7,10 @@ import pybind11
 import sys
 import os
 
-asimd_version = 'v0.0.1-alpha'
 boost_version = '1.86.0'
 eigen_version = '3.4.0'
-tl20_version = '0.0.5'
+asimd_version = '0.0.3'
+tl20_version = '0.0.6'
 
 # helper to get n-th parent directory
 def pdir( dir, n = 1 ):
@@ -72,9 +72,11 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         os.path.join( ext_directory, 'boost' ),
         os.path.join( ext_directory, 'eigen' ),
 
+        os.path.join( ext_directory, f'boost_{ boost_version.replace( '.', '_' ) }' ),
         os.path.join( ext_directory, f'tl20-{ tl20_version }', 'src', 'cpp' ),
         os.path.join( ext_directory, f'asimd-{ asimd_version }', 'src' ),
-        os.path.join( ext_directory, f'eigen-{ eigen_version }', 'src' ),
+        os.path.join( ext_directory, f'eigen-{ eigen_version }' ),
+        
 
         # system
         sysconfig.get_paths()[ 'include' ], # Python.h
@@ -116,9 +118,13 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     # .cpp files
     sources = files + [
     ]
-
     if os.name == 'nt':
         sources += add_srcs_for_windows
+    sources = list( map( str, sources ) )
+
+    # repl tl20 by tl20-version if necessary
+    if not os.path.exists( os.path.join( ext_directory, 'tl20' ) ):
+        sources = [ source.replace( 'tl20', f'tl20-{ tl20_version }' ) for source in sources ]
 
     # Environment
     env = Environment( 
@@ -152,10 +158,10 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     if not conf.CheckCXXHeader( 'Eigen/Dense' ):
         download_and_unzip( f"https://gitlab.com/libeigen/eigen/-/archive/{ eigen_version }/eigen-{ eigen_version }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
-        download_and_unzip( f"https://github.com/hleclerc/asimd/archive/refs/tags/asimd-{ asimd_version }.zip", ext_directory )
+        download_and_unzip( f"https://github.com/hleclerc/asimd/archive/refs/tags/v{ asimd_version }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'tl/support/Displayer.h' ):
-        download_and_unzip( f"https://github.com/hleclerc/tl20/archive/refs/tags/{ tl20_version }.zip", ext_directory )
+        download_and_unzip( f"https://github.com/hleclerc/tl20/archive/refs/tags/v{ tl20_version }.zip", ext_directory )
     env = conf.Finish()
 
     # register the library
-    env.SharedLibrary( module_name, list( map( str, sources ) ) )
+    env.SharedLibrary( module_name, sources )
