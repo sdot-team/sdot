@@ -62,6 +62,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     VariantDir( 'ext', ext_directory, duplicate=False )
 
     # includes
+    br = boost_version.replace( '.', '_' )
     CPPPATH = [
         # src
         os.path.join( source_directory, 'cpp' ),
@@ -72,7 +73,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         os.path.join( ext_directory, 'boost' ),
         os.path.join( ext_directory, 'eigen' ),
 
-        os.path.join( ext_directory, f'boost_{ boost_version.replace( '.', '_' ) }' ),
+        os.path.join( ext_directory, f'boost_{ br }' ),
         os.path.join( ext_directory, f'tl20-{ tl20_version }', 'src', 'cpp' ),
         os.path.join( ext_directory, f'asimd-{ asimd_version }', 'src' ),
         os.path.join( ext_directory, f'eigen-{ eigen_version }' ),
@@ -154,7 +155,8 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
     # check the libraries
     conf = Configure( env )
     if not conf.CheckCXXHeader( 'boost/multiprecision/cpp_int.hpp' ):
-        download_and_unzip( f"https://archives.boost.io/release/{ boost_version }/source/boost_{ boost_version.replace( '.', '_' ) }.zip", ext_directory )
+        br = boost_version.replace( '.', '_' )
+        download_and_unzip( f"https://archives.boost.io/release/{ boost_version }/source/boost_{ br }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'Eigen/Dense' ):
         download_and_unzip( f"https://gitlab.com/libeigen/eigen/-/archive/{ eigen_version }/eigen-{ eigen_version }.zip", ext_directory )
     if not conf.CheckCXXHeader( 'asimd/SimdVec.h' ):
