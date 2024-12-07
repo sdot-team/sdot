@@ -10,7 +10,7 @@ import os
 
 boost_version = '1.86.0'
 eigen_version = '3.4.0'
-asimd_version = '0.0.3'
+asimd_version = '0.0.5'
 tl20_version = '0.0.6'
 
 # helper to get n-th parent directory
