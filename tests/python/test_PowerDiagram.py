@@ -4,9 +4,10 @@ import numpy as np
 # import pytest
 
 
-# pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ], [ 0.5, 0.5 ] ] )
-# pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
-# pd.plot()
+pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
+pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
+pd.plot()
+# print( pd )
 
 # # np.random.seed( 357 )
 # # positions = np.random.random( [ 40, 2 ] )

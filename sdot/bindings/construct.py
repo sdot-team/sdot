@@ -3,6 +3,7 @@ from pathlib import Path
 from munch import Munch
 import subprocess
 import sysconfig
+import platform
 import pybind11
 import sys
 import os
@@ -116,6 +117,13 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         sysconfig.get_config_var( 'LIBDIR' ), # Python.h
     ]
 
+    # LINKFLAGS
+    LINKFLAGS = [
+    ]
+
+    if platform.system() == 'Darwin':
+        LINKFLAGS += [ "-undefined", "dynamic_lookup" ]
+
     # .cpp files
     sources = files + [
     ]
@@ -123,7 +131,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         sources += add_srcs_for_windows
     sources = list( map( str, sources ) )
 
-    # repl tl20 by tl20-version if necessary
+    # repl tl20 by tl20-version if present
     if not os.path.exists( os.path.join( ext_directory, 'tl20' ) ):
         sources = [ source.replace( 'tl20', f'tl20-{ tl20_version }' ) for source in sources ]
 
@@ -133,6 +141,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         CXXFLAGS = CXXFLAGS, 
         LIBS = LIBS, 
         LIBPATH = LIBPATH, 
+        LINKFLAGS = LINKFLAGS, 
         SHLIBPREFIX = '',
         SHLIBSUFFIX = sysconfig.get_config_var( 'EXT_SUFFIX' ),
     )

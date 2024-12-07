@@ -1,4 +1,5 @@
 # user specific
+.DS_Store
 .vfs_symbol_cache/
 .qtc_clangd/
 ext/
