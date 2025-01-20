@@ -39,7 +39,7 @@ class PowerDiagram:
         For instance, `self.positions` will return a `ndarray` instead of a `PoomVec`
 
     """
-    def __init__( self, positions = None, weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
+    def __init__( self, seed_positions = None, seed_weights = None, boundaries = None, underlying_measure = None, dtype = None, ndim = None, automatic_conversion_to_ndarrays = True ):
         # base init
         self._density_under_final_boundaries = None # symbolic expression representing the value inside the convex boundaries 
         self._periodicity_transformations = [] # list of TransformationMatrix 
@@ -61,9 +61,9 @@ class PowerDiagram:
 
         # ctor arguments phase 2
         self.underlying_measure = underlying_measure
+        self.seed_positions = seed_positions
+        self.seed_weights = seed_weights
         self.boundaries = boundaries
-        self.positions = positions
-        self.weights = weights
 
     def add_box_boundaries( self, min_offset = None, max_offset = None, ndim = None, base = None ):
         """ delimit the power diagram by an (hyper-)cube (a square in 2D, and so on)
@@ -136,26 +136,26 @@ class PowerDiagram:
             self._boundaries = np.ascontiguousarray( values )
 
     @property
-    def positions( self ):
+    def seed_positions( self ):
         if self.automatic_conversion_to_ndarrays and self._positions is not None:
             return self._positions.as_ndarray
         return self._positions
 
-    @positions.setter
-    def positions( self, values ):
+    @seed_positions.setter
+    def seed_positions( self, values ):
         if values is None:
             return
         self._acceleration_structure = None
         self._positions = PoomVec( values )
 
     @property
-    def weights( self ):
+    def seed_weights( self ):
         if self.automatic_conversion_to_ndarrays and self._weights is not None:
             return self._weights.as_ndarray
         return self._weights
 
-    @weights.setter
-    def weights( self, values ):
+    @seed_weights.setter
+    def seed_weights( self, values ):
         if values is None:
             return
         self._weights = PoomVec( values )
@@ -244,7 +244,7 @@ class PowerDiagram:
             mi = [ 0 for _ in range( self.ndim ) ]
             ma = [ 1 for _ in range( self.ndim ) ]
             ar = self._underlying_measure.array / np.mean( self._underlying_measure.array )
-            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            pd = pysdot.PowerDiagram( self.seed_positions, self.seed_weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
             return pd.integrals()
 
         if isinstance( func, ScaledImage ):
@@ -252,7 +252,7 @@ class PowerDiagram:
             mi = [ 0 for _ in range( self.ndim ) ]
             ma = [ 1 for _ in range( self.ndim ) ]
             ar = func.array / np.mean( func.array )
-            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            pd = pysdot.PowerDiagram( self.seed_positions, self.seed_weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
             return pd.integrals()
 
         # final expression to integrate other the cell
@@ -282,7 +282,7 @@ class PowerDiagram:
             mi = [ 0 for _ in range( self.ndim ) ]
             ma = [ 1 for _ in range( self.ndim ) ]
             ar = self._underlying_measure.array / np.mean( self._underlying_measure.array )
-            pd = pysdot.PowerDiagram( self.positions, self.weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
+            pd = pysdot.PowerDiagram( self.seed_positions, self.seed_weights, domain = pysdot.ScaledImage( mi, ma, ar ) )
             mvs = pd.der_integrals_wrt_weights()
             # print( pd.integrals() )
             from scipy.sparse import csr_matrix

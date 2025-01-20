@@ -187,7 +187,7 @@ class Cell:
     def ray_dir( self, ray_refs, base_vertex ):
         return self._cell.ray_dir( ray_refs, base_vertex )
 
-    def plot_pyplot( self, fig, color = 'black', linestyle = '-', linewidth = 2, low_dim_linewidth_coeff = 0.25, ray_length = 0.2, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':', elevation_function = None ):
+    def plot_pyplot( self, fig, color = 'black', linestyle = '-', linewidth = 2, low_dim_linewidth_coeff = 0.25, ray_length = 0.2, ray_color = None, ray_linestyle = '--', free_color = None, free_linestyle = ':', elevation_function = None, default_height = 0.02 ):
         """
             ray_length is the length used to display infinite edges.
         """
@@ -217,6 +217,11 @@ class Cell:
             if self.true_dimensionality < self.ndim and gtype != 'free':
                 kwa[ 'linewidth' ] *= low_dim_linewidth_coeff
 
+            # 1D case => add some thickness
+            if len( xyz ) == 1:
+                xyz.append( [ - default_height / 2 ] * len( xyz[ 0 ] ) + [ + default_height / 2 ] * len( xyz[ 0 ] ) )
+                xyz[ 0 ] = np.concat( [ xyz[ 0 ], np.flip( xyz[ 0 ] ) ] )
+
             if gtype == 'free':
                 return fig.plot( *xyz, **kwa, linestyle = free_linestyle, color = free_color or color )
             if gtype == 'ray':
@@ -231,8 +236,8 @@ class Cell:
 
         # plot edge
         def edge_func( refs, vertices ):
-            if len( refs ) == 0:
-                return
+            # if len( refs ) == 0:
+            #     return
 
             # ray
             if len( vertices ) == 1:

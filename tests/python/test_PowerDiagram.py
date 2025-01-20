@@ -4,10 +4,12 @@ import numpy as np
 # import pytest
 
 
+# pd = PowerDiagram( np.random.random( [ 40, 2 ] ), underlying_measure = "exp( - x ^ 2 )" )
 pd = PowerDiagram( np.random.random( [ 40, 2 ] ) )
 pd.periodicity_transformations = [ [ 0, 1 ],  [ 1, 0 ] ]
-pd.plot()
+# pd.plot()
 # print( pd )
+print( pd.cell_barycenters() )
 
 # # np.random.seed( 357 )
 # # positions = np.random.random( [ 40, 2 ] )
@@ -59,36 +61,36 @@ pd.plot()
 
 # print( b1 )
 
-def poute():
-    from sdot import PowerDiagram
-    import pylab as plt
-    import numpy as np
+# def poute():
+#     from sdot import PowerDiagram
+#     import pylab as plt
+#     import numpy as np
 
-    def text( p, txt, color ):
-        plt.text( p[ 0 ], p[ 1 ], txt, ha='center', va='center', color = color )
+#     def text( p, txt, color ):
+#         plt.text( p[ 0 ], p[ 1 ], txt, ha='center', va='center', color = color )
 
-    pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
-    pd.add_box_boundaries( 0, 1 )
-    ps = pd.summary()
+#     pd = PowerDiagram( [ [ 0.25, 0.5 ], [ 0.75, 0.6 ] ] )
+#     pd.add_box_boundaries( 0, 1 )
+#     ps = pd.summary()
 
-    b0 = ps.barycenters( dim = 0 )
-    b1 = ps.barycenters( dim = 1 )
-    b2 = ps.barycenters( dim = 2 )
-    bc = np.array([0.5,0.5])
+#     b0 = ps.barycenters( dim = 0 )
+#     b1 = ps.barycenters( dim = 1 )
+#     b2 = ps.barycenters( dim = 2 )
+#     bc = np.array([0.5,0.5])
 
-    pd.plot( plt )
-    for lb, color in zip( [ b0, b1, b2 ], [ 'blue', 'green', 'red' ]):
-        for i, b in enumerate( lb ):
-            dir = b - bc
-            if np.linalg.norm( dir ):
-                dir = dir / np.linalg.norm( dir )
-            for e in range( 2 ):
-                if abs( dir[ e ] ) >= 0.3:
-                    dir[ e ] = dir[ e ] / abs( dir[ e ] ) # * 0.5
-            text( b + 0.03 * dir, f'{ i }', color )
-    plt.xlim( -0.1, 1.1 )
-    plt.ylim( -0.1, 1.1 )
-    plt.show()
+#     pd.plot( plt )
+#     for lb, color in zip( [ b0, b1, b2 ], [ 'blue', 'green', 'red' ]):
+#         for i, b in enumerate( lb ):
+#             dir = b - bc
+#             if np.linalg.norm( dir ):
+#                 dir = dir / np.linalg.norm( dir )
+#             for e in range( 2 ):
+#                 if abs( dir[ e ] ) >= 0.3:
+#                     dir[ e ] = dir[ e ] / abs( dir[ e ] ) # * 0.5
+#             text( b + 0.03 * dir, f'{ i }', color )
+#     plt.xlim( -0.1, 1.1 )
+#     plt.ylim( -0.1, 1.1 )
+#     plt.show()
 
 # from pyvista import examples
 # mesh = examples.download_st_helens()

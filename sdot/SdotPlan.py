@@ -104,7 +104,7 @@ class SdotPlan:
     @property
     def dirac_positions( self ):
         self._check_inputs()
-        return self.power_diagram.positions
+        return self.power_diagram.seed_positions
 
     def adjust_potentials( self ):
         return self.newton_solve()
@@ -211,7 +211,10 @@ class SdotPlan:
         M = coo_matrix( ( m_vals, ( m_rows, m_cols ) ), shape = ( v_vals.size, v_vals.size ) ).tocsr()
         return spsolve( M, v_vals )
 
-    def plot( self, plt = None, display_arrows = True ):
+    def plot( self, plt = None, display_arrows = True, default_height = 0.1 ):
+        """
+            default_height is used only for the 1D case, to get the 
+        """
         if plt is None:
             import matplotlib.pyplot as plt
             self.plot( plt, display_arrows = display_arrows )
@@ -221,11 +224,24 @@ class SdotPlan:
         self._check_inputs()
         self.power_diagram.plot( plt )
 
-        bs = self.power_diagram.cell_barycenters()
-        for i in range( len( self.power_diagram.positions ) ):
-            p0 = self.power_diagram.positions[ i ]
-            p1 = bs[ i ]
-            plt.plot( [ p0[ 0 ], p1[ 0 ] ], [ p0[ 1 ], p1[ 1 ] ] )
+        if display_arrows:
+            bs = self.power_diagram.cell_barycenters()
+            for i in range( len( self.power_diagram.seed_positions ) ):
+                p0 = self.power_diagram.seed_positions[ i ]
+                p1 = bs[ i ]
+                if self.ndim == 2:
+                    plt.plot( [ p0[ 0 ], p1[ 0 ] ], [ p0[ 1 ], p1[ 1 ] ] )
+                elif self.ndim == 1:
+                    xs = []
+                    ys = []
+                    x0 = p0[ 0 ]
+                    x1 = p1[ 0 ]
+                    for a in np.linspace( 0, np.pi, 15 ):
+                        xs.append( ( x0 + x1 ) / 2 + ( x1 - x0 ) / 2 * np.cos( a ) )
+                        ys.append( default_height / 2 * np.sin( a ) )
+                    plt.plot( xs, ys )
+                else:
+                    raise RuntimeError( "TODO: " )
 
     @property
     def nb_unknowns( self ):
@@ -258,12 +274,12 @@ class SdotPlan:
 
     @property
     def dirac_positions( self ):
-        return self.power_diagram.positions
+        return self.power_diagram.seed_positions
 
     @dirac_positions.setter
     def dirac_positions( self, positions ):
-        self.power_diagram.positions = positions
-        self.power_diagram.weights *= 0
+        self.power_diagram.seed_positions = positions
+        self.power_diagram.seed_weights *= 0
 
     def _normalize_and_use_measure( self, distribution ):
         """ register distribution (use it as self.power_diagram.positions or self.power_diagram.underlying_measure) """
@@ -280,7 +296,7 @@ class SdotPlan:
 
         # register power diagram data        
         if isinstance( distribution, SumOfDiracs ):
-            self.power_diagram.positions = distribution.positions
+            self.power_diagram.seed_positions = distribution.positions
         else:
             self.power_diagram.underlying_measure = distribution
 

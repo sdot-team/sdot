@@ -42,7 +42,7 @@ RcPtr<Inst> parse_rec( Vec<ParseItem> &items ) {
 inline bool is_let( char c ) { return ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || c == '_'; }
 inline bool is_num( char c ) { return c >= '0' && c <= '9'; }
 inline bool is_alp( char c ) { return is_let( c ) || is_num( c ); }
-inline bool is_ope( char c ) { return c == '+' || c == '+' || c == '*' || c == '/' || c == '^'; }
+inline bool is_ope( char c ) { return c == '+' || c == '-' || c == '*' || c == '/' || c == '^'; }
 inline bool is_spa( char c ) { return c == ' '; }
 
 Expr::Expr( const RcPtr<Inst> &inst ) : inst( inst ) {
@@ -99,6 +99,7 @@ Expr::Expr( StrView expr ) {
             continue;
         }
 
+        P( c );
         TODO;
     }
 

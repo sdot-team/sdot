@@ -41,14 +41,14 @@ import pytest
 # # print( sum( sp.power_diagram.cell_integrals() ) )
 # sp.adjust_potentials()
 # we use another dirac positions for illustration
-from sdot import SdotPlan, TransformationMatrix, optimal_transport_plan
-# from matplotlib import pyplot
-import numpy as np
+# from sdot import SdotPlan, TransformationMatrix, optimal_transport_plan
+# # from matplotlib import pyplot
+# import numpy as np
 
-tp = SdotPlan( np.random.random( [ 20, 2 ] ) )
-tp.adjust_potentials()
+# tp = SdotPlan( np.random.random( [ 20, 2 ] ) )
+# tp.adjust_potentials()
 
-tp.plot()
+# tp.plot()
 
 # vectors
 # fm = tp.forward_map
@@ -76,3 +76,14 @@ tp.plot()
 
 # # it was the first iteration of a quantization procedure
 # tp.plot()
+
+# from matplotlib import pyplot
+from sdot import SdotPlan, ScaledImage
+import numpy as np
+
+tp = SdotPlan( 
+    np.random.random( [ 20, 1 ] ),
+    ScaledImage.interpolation( [ -1 ], [ +1 ], [ 10 ], lambda x: np.exp( - x ** 2 ) )
+)
+tp.adjust_potentials()
+tp.plot()
