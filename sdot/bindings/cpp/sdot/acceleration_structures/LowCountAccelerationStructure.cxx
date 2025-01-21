@@ -36,7 +36,7 @@ DTP UTP::~LowCountAccelerationStructure() {
 }
 
 DTP void UTP::display( Displayer &ds ) const {
-    DS_OJBECT( position_and_weights, transformations );
+    DS_OBJECT( position_and_weights, transformations );
 }
 
 DTP PI UTP::recommended_nb_threads() const {

@@ -1,9 +1,22 @@
+from sdot.bindings import loader
 from sdot import Expr
 import pytest
+import numpy
 
-e = Expr( "x" )
-f = Expr( "10" )
+loader.set_auto_rebuild( True )
 
-print( e * f )
-print( e - f )
-print( e / f )
+
+v = Expr.array( [ 1, 2 ], [ "x_0" ] )
+print( v )
+# print( v.subs( { "x_0": 0 } ) )
+print( v[ 0 ] )
+print( v[ "yo" ] )
+# e = Expr( "x_0" )
+# print( v[ e ] )
+# f = Expr( "10" )
+
+# print( e )
+# # print( e * f )
+# # print( e - f )
+# print( e / f )
+# print( e[ 2, 3 ] )

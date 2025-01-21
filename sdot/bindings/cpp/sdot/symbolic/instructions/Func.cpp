@@ -25,7 +25,7 @@ struct CmpKey {
 
 std::map<Key,RcPtr<Inst>,CmpKey> func_map;
 
-RcPtr<Inst> Func::from_operands( const Str &name, Vec<std::pair<RcPtr<Inst>,BigRational>> operands ) {
+RcPtr<Inst> Func::from_operands( const Str &name, Vec<std::pair<RcPtr<Inst>,BigRational>> &&operands ) {
     std::sort( operands.begin(), operands.end(), []( const std::pair<RcPtr<Inst>,BigRational> &a, const std::pair<RcPtr<Inst>,BigRational> &b ) {
         if ( int c = a.first->compare( *b.first ) )
             return c < 0;
@@ -53,7 +53,7 @@ RcPtr<Inst> Func::from_operands( const Str &name, Vec<RcPtr<Inst>> operands ) {
     Vec<std::pair<RcPtr<Inst>,BigRational>> foperands;
     for( PI i = 0; i < operands.size(); ++i )
         foperands << std::pair<RcPtr<Inst>,BigRational>{ operands[ i ], 1 };
-    return from_operands( name, foperands );
+    return from_operands( name, std::move( foperands ) );
 }
 
 void Func::display( Displayer &ds ) const {

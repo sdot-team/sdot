@@ -4,7 +4,7 @@ from .TransformationMatrix import TransformationMatrix
 import numpy as np
 
 class Expr:
-    """ wrapper around cpp sdot::Expr class to store symbolic expressions """
+    """ wrapper around the cpp class sdot::Expr used to store symbolic expressions """
 
     def __init__( self, value = None ):
         """ 
@@ -33,7 +33,7 @@ class Expr:
         return Expr( self._expr.subs( map ) )
 
     def __getitem__( self, args ):
-        """ assumes args are space variables """
+        """ assumes args are space variables x_0, x_1, ... """
         m = {}
         if isinstance( args, tuple ):
             for i, arg in enumerate( args ):
@@ -60,22 +60,19 @@ class Expr:
         return None
 
     @staticmethod
-    def img_interpolation( array, transformation_matrix = None, interpolation_order = 0 ):
-        """ symbolic expression from image
+    def array( values, indices ):
+        """ symbolic expression from an array
 
-            Beware: it follows the numpy convention for the axes (for 2D, x_0 is the y axis, x_1 is the x axis)  
         """
         # need to load the module to get the Expr type
         module_for( 'generic_objects' )
         
-        array = np.ascontiguousarray( array )
-        trinv = np.linalg.inv( TransformationMatrix( transformation_matrix ).get( array.ndim ) )
-        module = module_for( 'img_interpolation', 
-            scalar_type = type_promote([ array.dtype, trinv.dtype ]), 
-            interpolation_order = interpolation_order,
-            nb_dims = array.ndim 
+        array = np.ascontiguousarray( values )
+        module = module_for( 'symbolic_array', 
+            scalar_type = type_promote( [ array.dtype ] ), 
+            nb_dims = array.ndim
         )
-        return Expr( module.Expr_from_image( array, trinv ) )
+        return Expr( module.symbolic_array( array, list( map( lambda x: Expr( x )._expr, indices ) ) ) )
 
     @staticmethod
     def list_from_compact_repr( crepr ):

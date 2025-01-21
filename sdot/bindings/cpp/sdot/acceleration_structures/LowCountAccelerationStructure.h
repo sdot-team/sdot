@@ -19,7 +19,7 @@ public:
     static constexpr int nb_dims                      = Pt::ct_size;
     
     using                Trans                        = AffineTransformation<TF,nb_dims>; ///< transformation matrix + translation
-    struct               Paw                          { Pt position; TF weight; void display( Displayer &ds ) const { DS_OJBECT( position, weight ); } };
+    struct               Paw                          { Pt position; TF weight; void display( Displayer &ds ) const { DS_OBJECT( position, weight ); } };
                      
     /**/                 LowCountAccelerationStructure( const PoomVec<Pt> &positions, const PoomVec<TF> &weights, const Vec<Trans> &transformations );
     virtual             ~LowCountAccelerationStructure();

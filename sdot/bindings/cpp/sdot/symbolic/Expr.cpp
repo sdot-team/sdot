@@ -15,7 +15,7 @@ namespace sdot {
 enum { sym, ope, num, paro, parc };
 
 struct ParseItem {
-    void display( Displayer &ds ) const { DS_OJBECT( type, str ); }
+    void display( Displayer &ds ) const { DS_OBJECT( type, str ); }
 
     int type;
     Str str;

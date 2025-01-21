@@ -17,7 +17,7 @@ public:
     using       Pt        = Vec<TF,nb_dims>; ///< 
 
     Pt          operator()( const Pt &p ) const { return sp( linear_transformation, p ) + translation; }
-    void        display   ( Displayer &ds ) const { DS_OJBECT( linear_transformation, translation ); }
+    void        display   ( Displayer &ds ) const { DS_OBJECT( linear_transformation, translation ); }
 
     LT          linear_transformation; ///<
     Pt          translation;           ///<

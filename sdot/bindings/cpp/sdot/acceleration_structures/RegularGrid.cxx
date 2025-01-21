@@ -123,7 +123,7 @@ DTP UTP::VoronoiAccelerationStructure( const auto &point_reader, const Vec<Trans
 }
 
 DTP void UTP::display( Displayer &ds ) const {
-    DS_OJBECT( limits, nb_divs );
+    DS_OBJECT( limits, nb_divs );
 }
 
 DTP PI UTP::recommended_nb_threads() const {

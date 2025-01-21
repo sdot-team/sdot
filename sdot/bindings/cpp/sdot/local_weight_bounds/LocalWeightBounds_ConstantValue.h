@@ -22,7 +22,7 @@ public:
     
     virtual TF   operator[]                     ( PI index ) const { return value; }
 
-    virtual void display                        ( Displayer &ds ) const { DS_OJBECT( value ); }
+    virtual void display                        ( Displayer &ds ) const { DS_OBJECT( value ); }
 
     TF           value;
 };

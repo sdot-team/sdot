@@ -14,7 +14,7 @@ namespace sdot {
 /** */
 class Inst {
 public:
-    enum {              type_Value, type_Symbol, type_Func, type_Img, nb_types };
+    enum {              type_Value, type_ValueFromVec, type_Symbol, type_Func, type_SymbolicArray, nb_types };
    
     virtual            ~Inst          () {}
          
@@ -37,6 +37,7 @@ public:
    
     PI                  ref_count = 0;
     Vec<RcPtr<Inst>>    children;
+    Vec<Inst*>          parents;
 };
 
 

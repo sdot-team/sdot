@@ -10,6 +10,7 @@ bool Inst::operator<( const Inst &that ) const {
 }
 
 void Inst::add_child( const RcPtr<Inst> &inst ) {
+    inst->parents << this;
     children << inst;
 }
 

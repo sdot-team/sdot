@@ -108,7 +108,7 @@ DTP UTP::VoronoiAccelerationStructure( const PoomVec<Pt> &positions, const PoomV
 }
 
 DTP void UTP::display( Displayer &ds ) const {
-    // DS_OJBECT( limits, nb_divs );
+    // DS_OBJECT( limits, nb_divs );
     ds << "pouet";
 }
 
