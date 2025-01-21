@@ -1,9 +1,22 @@
 #include <tl/support/compare.h>
+#include <tl/support/ASSERT.h>
+#include <tl/support/ERROR.h>
 #include "Symbol.h"
 #include "Value.h"
-#include "Func.h"
 
 namespace sdot {
+
+void Inst::display( Str &res, int prio ) const {
+    res += base_info();
+    if ( children.size() ) {
+        res += "(";
+        for( PI i = 0; i < children.size(); ++i ) {
+            res += ( i ? "," : "" );
+            children[ i ]->display( res );
+        }
+        res += ")";
+    }
+}
 
 bool Inst::operator<( const Inst &that ) const {
     return compare( that ) < 0;
@@ -14,16 +27,20 @@ void Inst::add_child( const RcPtr<Inst> &inst ) {
     children << inst;
 }
 
-std::pair<RcPtr<Inst>,BigRational> Inst::mul_pair( const BigRational &coeff ) const {
-    return { const_cast<Inst *>( this ), coeff }; // TODO: use CstRcPtr
+std::pair<BigRational,RcPtr<Inst>> Inst::mul_pair( const BigRational &coeff ) const {
+    return { coeff, const_cast<Inst *>( this ) }; // TODO: use CstRcPtr
 }
 
-std::pair<RcPtr<Inst>,BigRational> Inst::pow_pair( const BigRational &coeff ) const {
-    return { const_cast<Inst *>( this ), coeff }; // TODO: use CstRcPtr
+std::pair<BigRational,RcPtr<Inst>> Inst::pow_pair( const BigRational &coeff ) const {
+    return { coeff, const_cast<Inst *>( this ) }; // TODO: use CstRcPtr
 }
 
 Opt<BigRational> Inst::constant_value() const {
     return {};
+}
+
+RcPtr<Inst> Inst::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+    ERROR( "this instruction should not be cloned" );
 }
 
 bool Inst::always_equal( const Inst &that ) const {
@@ -51,15 +68,15 @@ int Inst::compare( const sdot::Inst &b ) const {
         return ::compare( sa->value, sb->value );
     }
 
-    if ( ta == sdot::Inst::type_Func ) {
-        const auto *sa = static_cast<const sdot::Func *>( &a );
-        const auto *sb = static_cast<const sdot::Func *>( &b );
-        if ( int c = ::compare( sa->name, sb->name ) )
-            return c;
-        if ( int c = ::compare( sa->children, sb->children ) )
-            return c;
-        return ::compare( sa->coefficients, sa->coefficients );
-    }
+    // if ( ta == sdot::Inst::type_Func ) {
+    //     const auto *sa = static_cast<const sdot::Func *>( &a );
+    //     const auto *sb = static_cast<const sdot::Func *>( &b );
+    //     if ( int c = ::compare( sa->name, sb->name ) )
+    //         return c;
+    //     if ( int c = ::compare( sa->children, sb->children ) )
+    //         return c;
+    //     return ::compare( sa->coefficients, sa->coefficients );
+    // }
 
     TODO;
     return 0;
@@ -68,6 +85,25 @@ int Inst::compare( const sdot::Inst &b ) const {
 RcPtr<Inst> Inst::read_from( CompactReprReader &cr ) {
     TODO;
     return {};
+}
+
+RcPtr<Inst> Inst::subs( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map ) {
+    auto iter = map.find( this );
+    if ( iter != map.end() )
+        return iter->second;
+
+    Vec<RcPtr<Inst>> new_children( FromReservationSize(), children.size() );
+    bool all_the_same = true;
+    for( const RcPtr<Inst> &ch : children ) {
+        RcPtr<Inst> nch = ch->subs( map );
+        all_the_same &= ( ch == nch );
+        new_children << nch;
+    }
+
+    if ( all_the_same )
+        return this;
+
+    return clone( new_children );
 }
 
 PI Inst::rt_data_num( Vec<ExprData> &data_map, const Inst *inst, const std::function<ExprData::Val *()> &make_rt_data ) {

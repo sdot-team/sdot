@@ -1,18 +1,12 @@
+#include <tl/support/ERROR.h>
 #include "Symbol.h"
 
 namespace sdot {
 
-std::map<Str,RcPtr<Inst>> symbol_map;
-
 RcPtr<Inst> Symbol::from_name( const Str &name ) {
-    auto iter = symbol_map.find( name );
-    if ( iter == symbol_map.end() ) {
-        auto *v = new Symbol;
-        v->name = name;
-
-        iter = symbol_map.insert( iter, { name, v } );
-    }
-    return iter->second;
+    auto *v = new Symbol;
+    v->name = name;
+    return v;
 }
 
 void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
@@ -20,16 +14,12 @@ void Symbol::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const
     cw << name;
 }
 
-void Symbol::display( Displayer &ds ) const {
-    ds << name;
+Str Symbol::base_info() const {
+    return name;
 }
 
-
-RcPtr<Inst> Symbol::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
-    auto iter = map.find( name );
-    if ( iter != map.end() )
-        return iter->second;
-    return const_cast<Symbol *>( this );
+RcPtr<Inst> Symbol::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+    ERROR( "cannot be cloned" );
 }
 
 }

@@ -3,12 +3,9 @@
 
 #include "instructions/Symbol.h"
 #include "instructions/Value.h"
+#include "instructions/Add.h"
 
 #include "Expr.h"
-
-#include "expr_add.h"
-#include "expr_mul.h"
-#include "expr_pow.h"
 
 namespace sdot {
 
@@ -114,10 +111,15 @@ Expr::Expr( int value ) {
 }
 
 void Expr::display( Displayer &ds ) const {
-    ds << inst;
+    Str res;
+    if ( inst )
+        inst->display( res );
+    else
+        res = "NULL";
+    ds << res;
 }
 
-Expr Expr::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+Expr Expr::subs( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map ) const {
     return Expr{ inst->subs( map ) };
 }
 
@@ -129,10 +131,13 @@ Opt<BigRational> Expr::constant_value() const {
     return inst->constant_value();
 }
 
-Expr operator+( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, +1, b.inst ) }; }
-Expr operator-( const Expr &a, const Expr &b ) { return Expr{ expr_add( 1, a.inst, -1, b.inst ) }; }
-Expr operator*( const Expr &a, const Expr &b ) { return Expr{ expr_mul( 1, a.inst, +1, b.inst ) }; }
-Expr operator/( const Expr &a, const Expr &b ) { return Expr{ expr_mul( 1, a.inst, -1, b.inst ) }; }
-Expr pow( const Expr &a, const Expr &b ) { return Expr( expr_pow( a.inst, b.inst ) ); }
+Expr operator+( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( 1, a.inst, +1, b.inst ) }; }
+Expr operator-( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( 1, a.inst, -1, b.inst ) }; }
+Expr operator*( const Expr &a, const Expr &b ) { TODO; }
+Expr operator/( const Expr &a, const Expr &b ) { TODO; }
+Expr pow( const Expr &a, const Expr &b ) { TODO; }
+// Expr operator*( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( 1, a.inst, +1, b.inst ) }; }
+// Expr operator/( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( 1, a.inst, -1, b.inst ) }; }
+// Expr pow( const Expr &a, const Expr &b ) { return Expr( expr_pow( a.inst, b.inst ) ); }
 
 }

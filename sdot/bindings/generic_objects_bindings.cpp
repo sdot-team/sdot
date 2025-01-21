@@ -1,4 +1,3 @@
-#include "sdot/support/BigRational.h"
 #include <tl/support/string/CompactReprReader.h>
 #include <tl/support/string/to_string.h>
 #include <sdot/support/binding_config.h>
@@ -61,10 +60,10 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
 
         .def( "constant_value", []( const Expr &a ) { Opt<BigRational> v = a.constant_value(); bool valid( v ); FP64 value; if ( valid ) value = FP64( *v ); return std::make_tuple( valid, value ); } )
        
-        .def( "subs", []( const Expr &expr, const std::map<Str,Expr> &symbol_map ) {
-            std::map<Str,RcPtr<Inst>> map;
+        .def( "subs", []( const Expr &expr, const std::vector<std::pair<Expr,Expr>> &symbol_map ) {
+            std::map<RcPtr<Inst>,RcPtr<Inst>> map;
             for( const auto &p : symbol_map )
-                map[ p.first ] = p.second.inst;
+                map[ p.first.inst ] = p.second.inst;
             return expr.subs( map );
         } )
         

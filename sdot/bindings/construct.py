@@ -77,8 +77,7 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         os.path.join( ext_directory, f'boost_{ br }' ),
         os.path.join( ext_directory, f'tl20-{ tl20_version }', 'src', 'cpp' ),
         os.path.join( ext_directory, f'asimd-{ asimd_version }', 'src' ),
-        os.path.join( ext_directory, f'eigen-{ eigen_version }' ),
-        
+        os.path.join( ext_directory, f'eigen-{ eigen_version }' ),        
 
         # system
         sysconfig.get_paths()[ 'include' ], # Python.h

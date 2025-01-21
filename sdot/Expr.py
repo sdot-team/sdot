@@ -27,10 +27,8 @@ class Expr:
         self._expr = _module.Expr( value )
 
     def subs( self, symbol_map ):
-        map = {}
-        for k, v in symbol_map.items():
-            map[ k ] = Expr( v )._expr
-        return Expr( self._expr.subs( map ) )
+        m = [ ( Expr( k )._expr, Expr( v )._expr ) for k, v in symbol_map ]
+        return Expr( self._expr.subs( m ) )
 
     def __getitem__( self, args ):
         """ assumes args are space variables x_0, x_1, ... """

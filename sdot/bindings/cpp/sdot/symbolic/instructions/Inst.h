@@ -14,18 +14,20 @@ namespace sdot {
 /** */
 class Inst {
 public:
-    enum {              type_Value, type_ValueFromVec, type_Symbol, type_Func, type_SymbolicArray, nb_types };
-   
+    enum {              type_Value, type_Symbol, type_Array, type_Add, type_Mul, nb_types };
+    
     virtual            ~Inst          () {}
-         
+    
     virtual auto        constant_value() const -> Opt<BigRational>;
     virtual bool        always_equal  ( const Inst &that ) const;
     bool                operator<     ( const Inst &that ) const;
-    virtual auto        mul_pair      ( const BigRational &coeff ) const -> std::pair<RcPtr<Inst>,BigRational>;
-    virtual auto        pow_pair      ( const BigRational &coeff ) const -> std::pair<RcPtr<Inst>,BigRational>;
-    virtual void        display       ( Displayer &ds ) const = 0;
+    virtual Str         base_info     () const = 0;
+    virtual auto        mul_pair      ( const BigRational &coeff ) const -> std::pair<BigRational,RcPtr<Inst>>;
+    virtual auto        pow_pair      ( const BigRational &coeff ) const -> std::pair<BigRational,RcPtr<Inst>>;
+    virtual void        display       ( Str &res, int prio = 0 ) const;
+    virtual RcPtr<Inst> clone         ( const Vec<RcPtr<Inst>> &new_children ) const;
     virtual int         type          () const = 0;
-    virtual RcPtr<Inst> subs          ( const std::map<Str,RcPtr<Inst>> &map ) const = 0;
+    RcPtr<Inst>         subs          ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map );
       
     virtual void        ct_rt_split   ( CompactReprWriter &cw, Vec<ExprData> &data_map ) const = 0;
     static RcPtr<Inst>  read_from     ( CompactReprReader &cr );

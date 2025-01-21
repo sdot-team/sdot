@@ -25,8 +25,8 @@ construct( Environment, VariantDir, Configure, ARGLIST, "generic_objects", [], [
 
     'build/cpp/sdot/symbolic/instructions/Symbol.cpp',
     'build/cpp/sdot/symbolic/instructions/Value.cpp',
-    'build/cpp/sdot/symbolic/instructions/Func.cpp',
     'build/cpp/sdot/symbolic/instructions/Inst.cpp',
+    'build/cpp/sdot/symbolic/instructions/Add.cpp',
     'build/cpp/sdot/symbolic/Expr.cpp',
 ] )
 
