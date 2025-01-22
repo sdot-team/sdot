@@ -3,6 +3,12 @@
 
 namespace sdot {
 
+bool Symbol::compare( const Symbol &a, const Symbol &b ) {
+    if ( a.name == b.name )
+        return ::compare( &a, &b );
+    return ::compare( a.name, b.name );
+}
+
 RcPtr<Inst> Symbol::from_name( const Str &name ) {
     auto *v = new Symbol;
     v->name = name;

@@ -1,9 +1,15 @@
+#include <limits>
 #include <tl/support/string/to_string.h>
 #include "Value.h"
+#include "sdot/support/BigRational.h"
 
 namespace sdot {
 
 std::map<BigRational,RcPtr<Inst>> value_map;
+
+bool Value::compare( const Value &a, const Value &b ) {
+    return ::compare( a.value, b.value );
+}
 
 RcPtr<Inst> Value::from_value( const BigRational &value ) {
     auto iter = value_map.find( value );
@@ -26,7 +32,7 @@ void Value::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const 
 }
 
 Str Value::base_info() const {
-    return to_string( value );
+    return value.compact_repr();
 }
 
 }

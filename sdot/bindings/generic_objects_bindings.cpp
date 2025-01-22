@@ -72,6 +72,16 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "mul", []( const Expr &a, const Expr &b ) { return a * b; } )
         .def( "div", []( const Expr &a, const Expr &b ) { return a / b; } )
         .def( "pow", []( const Expr &a, const Expr &b ) { return pow( a, b ); } )
+
+        .def( "always_equal", []( const Expr &a, const Expr &b ) { return a.always_equal( b ); } )
+        .def( "equal", []( const Expr &a, const Expr &b ) { return a == b; } )
+        .def( "supeq", []( const Expr &a, const Expr &b ) { return a >= b; } )
+        .def( "infeq", []( const Expr &a, const Expr &b ) { return a <= b; } )
+        .def( "neq", []( const Expr &a, const Expr &b ) { return a != b; } )
+        .def( "sup", []( const Expr &a, const Expr &b ) { return a > b; } )
+        .def( "inf", []( const Expr &a, const Expr &b ) { return a < b; } )
+
+        .def( "neg", []( const Expr &a ) { return - a; } )
         ;
 
     pybind11::class_<ExprData>( m, "ExprData" )

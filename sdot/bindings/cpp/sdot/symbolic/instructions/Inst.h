@@ -14,9 +14,10 @@ namespace sdot {
 /** */
 class Inst {
 public:
-    enum {              type_Value, type_Symbol, type_Array, type_Add, type_Mul, nb_types };
+    enum {              type_Value, type_Symbol, type_Array, type_Add, type_Mul, type_Cmp, nb_types };
+    enum {              prio_Cmp, prio_Add, prio_Mul, prio_Pow };
     
-    virtual            ~Inst          () {}
+    virtual            ~Inst          ();
     
     virtual auto        constant_value() const -> Opt<BigRational>;
     virtual bool        always_equal  ( const Inst &that ) const;
@@ -25,6 +26,7 @@ public:
     virtual auto        mul_pair      ( const BigRational &coeff ) const -> std::pair<BigRational,RcPtr<Inst>>;
     virtual auto        pow_pair      ( const BigRational &coeff ) const -> std::pair<BigRational,RcPtr<Inst>>;
     virtual void        display       ( Str &res, int prio = 0 ) const;
+    virtual void        display       ( Displayer &ds ) const;
     virtual RcPtr<Inst> clone         ( const Vec<RcPtr<Inst>> &new_children ) const;
     virtual int         type          () const = 0;
     RcPtr<Inst>         subs          ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map );

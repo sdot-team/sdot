@@ -1,5 +1,6 @@
 // #include <boost/multiprecision/detail/default_ops.hpp>
 // #include <boost/multiprecision/detail/integer_ops.hpp>
+#include <limits>
 #include <tl/support/string/CompactReprReader.h>
 #include <tl/support/string/CompactReprWriter.h>
 #include <tl/support/ASSERT.h>
@@ -136,6 +137,13 @@ BigRational &BigRational::operator=( BigRational &&that ) {
 }
 
 void BigRational::display( Displayer &ds ) const {
+    if ( is_integer() ) {
+        if ( *this <= std::numeric_limits<SI>::max() && *this >= std::numeric_limits<SI>::lowest() ) {
+            ds << std::to_string( SI( *this ) );
+            return;
+        }
+    }
+
     Str res = num.str();
     if ( den != 1 )
         res += "/" + den.str();
@@ -256,14 +264,18 @@ BigRational pow( const BigRational &a, const BigRational &b ) {
     if ( b.is_integer() ) {
         if ( b > 0 ) {
             BigRational res = a; // OPTIMIZE
-            for( PI i = 0, n = PI( ceil( b ) ); i < n; ++i )
+            if ( b > std::numeric_limits<PI>::max() )
+                TODO;
+            for( PI i = 1, n = PI( b ); i < n; ++i )
                 res *= a;
             return res;
         }
 
         if ( b < 0 ) {
             BigRational res = 1 / a; // OPTIMIZE
-            for( PI i = 0, n = PI( - ceil( b ) ); i < n; ++i )
+            if ( - b > std::numeric_limits<PI>::max() )
+                TODO;
+            for( PI i = 1, n = PI( - b ); i < n; ++i )
                 res *= a;
             return res;
         }
@@ -342,6 +354,20 @@ void BigRational::write_to( CompactReprWriter &cw ) const {
         cw.write_positive_int( std::abs( exp ) );
 
     }
+}
+
+Str BigRational::compact_repr() const {
+    if ( is_integer() ) {
+        if ( *this <= std::numeric_limits<SI>::max() && *this >= std::numeric_limits<SI>::lowest() )
+            return std::to_string( SI( *this ) );
+    }
+
+    Str res = num.str();
+    if ( den != 1 )
+        res += "/" + den.str();
+    if ( exp != 0 )
+        res += "p" + std::to_string( exp );
+    return res;
 }
 
 } // namespace sdot

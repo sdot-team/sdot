@@ -26,6 +26,15 @@ public:
     friend Expr operator/     ( const Expr &a, const Expr &b );
     friend Expr pow           ( const Expr &a, const Expr &b );
 
+    friend Expr operator==    ( const Expr &a, const Expr &b );
+    friend Expr operator>=    ( const Expr &a, const Expr &b );
+    friend Expr operator<=    ( const Expr &a, const Expr &b );
+    friend Expr operator!=    ( const Expr &a, const Expr &b );
+    friend Expr operator>     ( const Expr &a, const Expr &b );
+    friend Expr operator<     ( const Expr &a, const Expr &b );
+
+    friend Expr operator-     ( const Expr &a );
+
     RcPtr<Inst> inst;
 };
 

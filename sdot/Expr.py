@@ -40,15 +40,49 @@ class Expr:
             m[ 'x_0' ] = args
         return self.subs( m )
 
-    # def __eq__( self, other ):
-    #     if not isinstance( other, Expr ):
-    #         return self.__eq__( Expr( other ) )
-    #     return self._expr == other._expr
+    def __eq__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__eq__( Expr( other ) )
+        return self._expr.equal( other._expr )
+
+    def __ge__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__ge__( Expr( other ) )
+        return self._expr.supeq( other._expr )
+
+    def __le__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__le__( Expr( other ) )
+        return self._expr.infeq( other._expr )
+
+    def __ne__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__ne__( Expr( other ) )
+        return self._expr.neq( other._expr )
+
+    def __gt__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__gt__( Expr( other ) )
+        return self._expr.sup( other._expr )
+
+    def __lt__( self, other ):
+        if not isinstance( other, Expr ):
+            return self.__lt__( Expr( other ) )
+        return self._expr.inf( other._expr )
 
     def always_equal( self, that ):
         if not isinstance( that, Expr ):
             return self.always_equal( Expr( that ) )
         return self._expr.always_equal( that._expr )
+
+    @staticmethod
+    def always_equal( a, b ):
+        if not isinstance( a, Expr ):
+            a = Expr( a )
+        if not isinstance( b, Expr ):
+            b = Expr( b )
+        return Expr( a._expr.always_equal( b._expr ) )
+
 
     def constant_value( self ):
         """ if not constant, return None. Else, return the value """
@@ -120,7 +154,15 @@ class Expr:
             that = Expr( that )
         return Expr( self._expr.sub( that._expr ) )
 
+    def __neg__( self ):
+        return Expr( self._expr.neg() )
+
     def __mul__( self, that ):
+        if not isinstance( that, Expr ):
+            that = Expr( that )
+        return Expr( self._expr.mul( that._expr ) )
+
+    def __rmul__( self, that ):
         if not isinstance( that, Expr ):
             that = Expr( that )
         return Expr( self._expr.mul( that._expr ) )
@@ -134,4 +176,9 @@ class Expr:
         if not isinstance( that, Expr ):
             that = Expr( that )
         return Expr( self._expr.pow( that._expr ) )
+    
+    def __equal__( self, that ):
+        if not isinstance( that, Expr ):
+            that = Expr( that )
+        return Expr( self._expr.equal( that._expr ) )
 

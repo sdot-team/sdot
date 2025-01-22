@@ -81,6 +81,8 @@ public:
     static BigRational read_from          ( CompactReprReader &cr );
     void               write_to           ( CompactReprWriter &cw ) const;
 
+    Str                compact_repr       () const;
+
 private:        
     void               normalize_all      ();
     void               normalize_div      ();

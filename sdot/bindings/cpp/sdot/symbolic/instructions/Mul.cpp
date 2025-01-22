@@ -1,115 +1,142 @@
 #include <tl/support/string/to_string.h>
 #include <tl/support/P.h>
 #include <algorithm>
-#include "Func.h"
+#include "Value.h"
+#include "Mul.h"
 
 namespace sdot {
 
-using Key = std::pair<Str,Vec<std::pair<RcPtr<Inst>,BigRational>>>;
+bool Mul::compare( const Mul &a, const Mul &b ) {
+    if ( int c = ::compare( a.children.size(), b.children.size() ) )
+        return c;
+    if ( int c = ::compare( a.additional_coeff, b.additional_coeff ) )
+        return c;
+    for( PI i = 0; i < a.children.size(); ++i ) 
+        if ( int c = ::compare( *a.children[ i ], *b.children[ i ] ) )
+            return c;
+    for( PI i = 0; i < a.coefficients.size(); ++i ) 
+        if ( int c = ::compare( a.coefficients[ i ], b.coefficients[ i ] ) )
+            return c;
+    return 0;
+}
 
-struct CmpKey {
-    bool operator()( const Key &a, const Key &b ) const {
-        if ( int c = compare( a.first, b.first ) )
-            return c < 0;
-        if ( int c = compare( a.second.size(), b.second.size() ) )
-            return c < 0;
-        for( PI i = 0; i < a.second.size(); ++i ) {
-            if ( int c = compare( *a.second[ i ].first, *b.second[ i ].first ) )
-                return c < 0;
-            if ( int c = BigRational::compare( a.second[ i ].second, b.second[ i ].second ) )
-                return c < 0;
-        }
-        return false;
+RcPtr<Inst> Mul::from_operands( const Vec<std::pair<BigRational,RcPtr<Inst>>> &operands, BigRational additional_coeff ) {
+    // split operands
+    Vec<std::pair<BigRational,RcPtr<Inst>>> sub_operands;
+    for( auto &operand : operands ) {
+        if ( auto *mul = dynamic_cast<Mul *>( operand.second.get() ) ) {
+            for( PI n = 0; n < mul->coefficients.size(); ++n )
+                sub_operands << std::pair<BigRational,RcPtr<Inst>>{ operand.first * mul->coefficients[ n ], mul->children[ n ] };
+            additional_coeff *= mul->additional_coeff;
+        } else
+            sub_operands << operand.second->pow_pair( operand.first );
     }
-};
 
-std::map<Key,RcPtr<Inst>,CmpKey> func_map;
-
-RcPtr<Inst> Func::from_operands( const Str &name, Vec<std::pair<RcPtr<Inst>,BigRational>> &&operands ) {
-    std::sort( operands.begin(), operands.end(), []( const std::pair<RcPtr<Inst>,BigRational> &a, const std::pair<RcPtr<Inst>,BigRational> &b ) {
-        if ( int c = a.first->compare( *b.first ) )
+    // sort operands
+    std::sort( sub_operands.begin(), sub_operands.end(), []( const std::pair<BigRational,RcPtr<Inst>> &a, const std::pair<BigRational,RcPtr<Inst>> &b ) {
+        if ( int c = a.second->compare( *b.second ) )
             return c < 0;
-        return a.second < b.second;
+        return a.first < b.first;
     } );
 
-    Key key( name, operands );
-
-    auto iter = func_map.find( key );
-    if ( iter == func_map.end() ) {
-        auto *func = new Func;
-        func->name = name;
-        for( const auto &o : operands ) {
-            func->coefficients << o.second;
-            func->add_child( o.first );
+    // all known ?
+    Vec<std::pair<BigRational,RcPtr<Inst>>> new_operands;
+    for( PI n = 0; n < sub_operands.size(); ++n ) {
+        if ( Opt<BigRational> v = sub_operands[ n ].second->constant_value() ) {
+            additional_coeff *= pow( *v, sub_operands[ n ].first );
+        } else {
+            new_operands << sub_operands[ n ];
+            while ( n + 1 < sub_operands.size() && new_operands.back().second->always_equal( *sub_operands[ n + 1 ].second ) )
+                new_operands.back().first += operands[ ++n ].first;
+            // ... ^ 0
+            if ( new_operands.back().first == 0 )
+                new_operands.pop_back();
         }
-
-        iter = func_map.insert( iter, { key, func } );
     }
-
-    return iter->second;
-}
-
-RcPtr<Inst> Func::from_operands( const Str &name, Vec<RcPtr<Inst>> operands ) {
-    Vec<std::pair<RcPtr<Inst>,BigRational>> foperands;
-    for( PI i = 0; i < operands.size(); ++i )
-        foperands << std::pair<RcPtr<Inst>,BigRational>{ operands[ i ], 1 };
-    return from_operands( name, std::move( foperands ) );
-}
-
-void Func::display( Displayer &ds ) const {
-    std::string res = name;
-    res += '(';
     
-    for( PI i = 0; i < children.size(); ++i ) {
-        res += i ? ", " : " ";
-        
-        if ( name == "add" ) {
-            if ( const auto &ch = children[ i ] ) {
-                if ( coefficients[ i ] != 1 ) {
-                    if ( coefficients[ i ] == -1 )
-                        res += "- ";
-                    else
-                        res += to_string( coefficients[ i ] ) + " * ";
-                }
-                res += to_string( *ch );
-            } else
-                res += to_string( coefficients[ i ] );
-            continue;
-        }
+    // only a constant value
+    if ( new_operands.empty() )
+        return Value::from_value( additional_coeff );
 
-        if ( name == "mul" ) {
-            if ( const auto &ch = children[ i ] ) {
-                res += to_string( *ch );
+    // find the same operations in parents
+    auto is_same = [&]( Inst *parent ) {
+        auto *mul = dynamic_cast<Mul *>( parent );
+        if ( ! mul )
+            return false;
+        if ( mul->children.size() != new_operands.size() )
+            return false;
+        if ( mul->additional_coeff != additional_coeff )
+            return false;
+        for( PI n = 0; n < new_operands.size(); ++n )
+            if ( new_operands[ n ].first != mul->coefficients[ n ] || new_operands[ n ].second != mul->children[ n ] )
+                return false;
+        return true;
+    };
+    for( Inst *parent : new_operands[ 0 ].second->parents )
+        if ( is_same( parent ) )
+            return parent;
 
-                if ( coefficients[ i ] != 1 ) {
-                    res += " ^ " + to_string( coefficients[ i ] );
-                }
-            } else
-                res += to_string( coefficients[ i ] );
-            continue;
-        }
-
-        res += to_string( *children[ i ] );
+    // else
+    auto *res = new Mul;
+    res->additional_coeff = additional_coeff;
+    for( const auto &operand : new_operands ) {
+        res->coefficients << operand.first;
+        res->add_child( operand.second );
     }
-
-    res += " )";
-    ds << res;
+    return res;
 }
 
-void Func::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
-    cw.write_positive_int( type_Func, nb_types );
-    cw << name;
-
-    cw.write_positive_int( children.size() );
-    for( PI i = 0; i < children.size(); ++i ) {
-        cw << coefficients[ i ];
-        children[ i ]->ct_rt_split( cw, data_map );
-    }
+RcPtr<Inst> Mul::from_operands( const BigRational &ca, const RcPtr<Inst> &a, const BigRational &cb, const RcPtr<Inst> &b ) {
+    return from_operands( Vec<std::pair<BigRational,RcPtr<Inst>>>{ { ca, a }, { cb, b } } );
 }
 
-RcPtr<Inst> Func::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
+void Mul::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) const {
     TODO;
-    return {};
+}
+
+void Mul::display( Str &res, int prio ) const {
+    if ( prio > prio_Mul )
+        res += "( ";
+
+    PI o = 0;
+    if ( additional_coeff != 0 ) {
+        res += additional_coeff.compact_repr();
+        o = 1;
+    }
+
+    for( PI i = 0; i < children.size(); ++i, ++o ) {
+        if ( coefficients[ i ] == 1 ) {
+            if ( o )
+                res += " * ";
+            children[ i ]->display( res, prio_Mul );
+        } else if ( coefficients[ i ] == -1 && o ) {
+            res += " / ";
+            children[ i ]->display( res, prio_Mul + 1 );
+        } else {
+            if ( o )
+                res += " * ";
+            children[ i ]->display( res, prio_Pow );
+            res += " ** " + coefficients[ i ].compact_repr();
+        }
+    }
+
+    if ( prio > prio_Mul )
+        res += " )";
+}
+
+RcPtr<Inst> Mul::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+    Vec<std::pair<BigRational,RcPtr<Inst>>> operands;
+    for( const RcPtr<Inst> &ch : new_children )
+        operands << ch->pow_pair( 1 );
+    return from_operands( std::move( operands ), 0 );
+}
+
+Str Mul::base_info() const {
+    return "Mul";
+}
+
+int Mul::type() const {
+    return type_Mul;
 }
 
 }

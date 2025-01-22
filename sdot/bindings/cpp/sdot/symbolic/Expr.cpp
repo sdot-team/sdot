@@ -4,6 +4,8 @@
 #include "instructions/Symbol.h"
 #include "instructions/Value.h"
 #include "instructions/Add.h"
+#include "instructions/Mul.h"
+#include "instructions/Cmp.h"
 
 #include "Expr.h"
 
@@ -131,11 +133,22 @@ Opt<BigRational> Expr::constant_value() const {
     return inst->constant_value();
 }
 
-Expr operator+( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( 1, a.inst, +1, b.inst ) }; }
-Expr operator-( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( 1, a.inst, -1, b.inst ) }; }
-Expr operator*( const Expr &a, const Expr &b ) { TODO; }
-Expr operator/( const Expr &a, const Expr &b ) { TODO; }
+Expr operator==( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::Equal, d.inst ) }; }
+Expr operator<=( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::InfEq, d.inst ) }; }
+Expr operator>=( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::SupEq, d.inst ) }; }
+Expr operator!=( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::Neq, d.inst ) }; }
+Expr operator< ( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::Inf, d.inst ) }; }
+Expr operator> ( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::Sup, d.inst ) }; }
+
+Expr operator+( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( +1, a.inst, +1, b.inst ) }; }
+Expr operator-( const Expr &a, const Expr &b ) { return Expr{ Add::from_operands( +1, a.inst, -1, b.inst ) }; }
+Expr operator*( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( +1, a.inst, +1, b.inst ) };; }
+Expr operator/( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( +1, a.inst, -1, b.inst ) };; }
 Expr pow( const Expr &a, const Expr &b ) { TODO; }
+
+
+Expr operator-( const Expr &a ) { return Expr{ Add::from_operands( { { -1, a.inst } } ) }; }
+
 // Expr operator*( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( 1, a.inst, +1, b.inst ) }; }
 // Expr operator/( const Expr &a, const Expr &b ) { return Expr{ Mul::from_operands( 1, a.inst, -1, b.inst ) }; }
 // Expr pow( const Expr &a, const Expr &b ) { return Expr( expr_pow( a.inst, b.inst ) ); }

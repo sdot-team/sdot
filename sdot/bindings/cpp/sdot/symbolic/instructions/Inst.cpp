@@ -3,8 +3,15 @@
 #include <tl/support/ERROR.h>
 #include "Symbol.h"
 #include "Value.h"
+#include "Add.h"
+#include "Mul.h"
 
 namespace sdot {
+
+Inst::~Inst() {
+    for( PI i = 0; i < children.size(); ++i )
+        children[ i ]->parents.remove_first_unordered( this );
+}
 
 void Inst::display( Str &res, int prio ) const {
     res += base_info();
@@ -16,6 +23,12 @@ void Inst::display( Str &res, int prio ) const {
         }
         res += ")";
     }
+}
+
+void Inst::display( Displayer &ds ) const {
+    Str res;
+    display( res );
+    ds << res;
 }
 
 bool Inst::operator<( const Inst &that ) const {
@@ -49,6 +62,8 @@ bool Inst::always_equal( const Inst &that ) const {
 
 int Inst::compare( const sdot::Inst &b ) const {
     const sdot::Inst &a = *this;
+    if ( &a == &b )
+        return 0;
 
     int ta = a.type();
     int tb = b.type();
@@ -56,27 +71,14 @@ int Inst::compare( const sdot::Inst &b ) const {
     if ( ta != tb )
         return ta - tb;
 
-    if ( ta == sdot::Inst::type_Symbol ) {
-        const auto *sa = static_cast<const sdot::Symbol *>( &a );
-        const auto *sb = static_cast<const sdot::Symbol *>( &b );
-        return ::compare( sa->name, sb->name );
-    }
-
-    if ( ta == sdot::Inst::type_Value ) {
-        const auto *sa = static_cast<const sdot::Value *>( &a );
-        const auto *sb = static_cast<const sdot::Value *>( &b );
-        return ::compare( sa->value, sb->value );
-    }
-
-    // if ( ta == sdot::Inst::type_Func ) {
-    //     const auto *sa = static_cast<const sdot::Func *>( &a );
-    //     const auto *sb = static_cast<const sdot::Func *>( &b );
-    //     if ( int c = ::compare( sa->name, sb->name ) )
-    //         return c;
-    //     if ( int c = ::compare( sa->children, sb->children ) )
-    //         return c;
-    //     return ::compare( sa->coefficients, sa->coefficients );
-    // }
+    if ( ta == Inst::type_Symbol )
+        return Symbol::compare( static_cast<const Symbol &>( a ), static_cast<const Symbol &>( b ) );
+    if ( ta == Inst::type_Value )
+        return Value::compare( static_cast<const Value &>( a ), static_cast<const Value &>( b ) );
+    if ( ta == Inst::type_Add )
+        return Add::compare( static_cast<const Add &>( a ), static_cast<const Add &>( b ) );
+    if ( ta == Inst::type_Mul )
+        return Mul::compare( static_cast<const Mul &>( a ), static_cast<const Mul &>( b ) );
 
     TODO;
     return 0;
