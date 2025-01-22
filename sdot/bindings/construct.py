@@ -100,7 +100,8 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         CXXFLAGS.append( '-march=' + args[ 'arch' ].replace( '_', '-' ) )
 
     for name in used_arg_names:
-        CXXFLAGS.append( f'"-DSDOT_CONFIG_{ name }={ args[ name ] }"' )
+        arg = args[ name ]
+        CXXFLAGS.append( f'"-DSDOT_CONFIG_{ name }={ arg }"' )
 
     # LIBS
     LIBS = [

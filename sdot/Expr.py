@@ -92,19 +92,35 @@ class Expr:
         return None
 
     @staticmethod
-    def array( values, indices ):
+    def array( values, indices, outside_value = 0, periodicity = None ):
         """ symbolic expression from an array
-
+            
+            periodicity can be
+            * None
+            * a scalar value (0 or 1 for instance)
+            * or a list with a scalar value for each dim
         """
         # need to load the module to get the Expr type
         module_for( 'generic_objects' )
         
         array = np.ascontiguousarray( values )
+
+        if periodicity is None:
+            periodicity = 0
+        if isinstance( periodicity, ( float, int, bool ) ):
+            periodicity = [ int( periodicity ) ] * array.ndim
+        assert len( periodicity ) == array.ndim
+
         module = module_for( 'symbolic_array', 
+            periodicity = '_'.join( list( map( lambda x: str( int( x != 0 ) ), periodicity ) ) ),
             scalar_type = type_promote( [ array.dtype ] ), 
             nb_dims = array.ndim
         )
-        return Expr( module.symbolic_array( array, list( map( lambda x: Expr( x )._expr, indices ) ) ) )
+
+        indices = list( map( lambda x: Expr( x )._expr, indices ) )
+        assert len( indices ) == array.ndim
+
+        return Expr( module.symbolic_array( array, indices ) )
 
     @staticmethod
     def list_from_compact_repr( crepr ):

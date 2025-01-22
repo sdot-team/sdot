@@ -12,7 +12,7 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
     static constexpr int nb_dims = SDOT_CONFIG_nb_dims;
     static constexpr int interpolation_order = SDOT_CONFIG_interpolation_order;
     using Array_TF = pybind11::array_t<TF, pybind11::array::c_style>;
-
+    
     // Expr_from_image ---------------------------------------------------------------------------------------------------------------
     m.def( "symbolic_array", []( const Array_TF &array, const std::vector<Expr> &indices ) {
         auto *res = new SymbolicArray<TF,nb_dims>;
