@@ -92,7 +92,7 @@ class Expr:
         return None
 
     @staticmethod
-    def array( values, indices, outside_value = 0, periodicity = None ):
+    def array( values, indices, periodicity = None ):
         """ symbolic expression from an array
             
             periodicity can be

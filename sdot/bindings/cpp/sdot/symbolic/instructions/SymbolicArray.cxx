@@ -36,25 +36,24 @@ DTP void UTP::ct_rt_split( CompactReprWriter &cw, Vec<ExprData> &data_map ) cons
     TODO;
 }
 
+DTP Str UTP::base_info() const {
+    return "SymbolicArray";
+}
 
-DTP RcPtr<Inst> UTP::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
-    Vec<Expr> indices;
-    for( const auto &ch : children )
-        indices << ch->subs( map );
-
-    Vec<Opt<BigRational>> kv_indices;
-    for( const Expr &ind : indices ) {
-        if ( Opt<BigRational> kvi = ind.constant_value() )
-            kv_indices << std::move( kvi );
+DTP RcPtr<Inst> UTP::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+    Vec<BigRational> indices;
+    for( const RcPtr<Inst> &ch : new_children ) {
+        if ( Opt<BigRational> kvi = ch->constant_value() )
+            indices << *kvi;
         else
             break;
     }
 
-    // everything is known
-    if ( kv_indices.size() == indices.size() ) {
+    // if all indices are known
+    if ( indices.size() == children.size() ) {
         PI o = 0, m = 1;
         for( PI d = nb_dims; d--; ) {
-            PI i( *kv_indices[ d ] );
+            PI i( indices[ d ] );
             if ( i >= extents[ d ] )
                 return Value::from_value( 0 );
             o += m * i;
@@ -68,8 +67,8 @@ DTP RcPtr<Inst> UTP::subs( const std::map<Str,RcPtr<Inst>> &map ) const {
     auto *res = new SymbolicArray<TF,nb_dims>;
     res->extents = extents;
     res->values = values;
-    for( const Expr &ind : indices )
-        res->add_child( ind.inst );
+    for( const RcPtr<Inst> &nch : new_children )
+        res->add_child( nch );
     return res;
 }
 

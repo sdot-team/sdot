@@ -23,10 +23,16 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) {
         res->values.resize( res->nb_values() );
         for( PI v = 0, n = res->values.size(); v < n; ++v )
             res->values[ v ] = array.data()[ v ];
-
+        
+        // for( PI r = 0; r < nb_dims; ++r )
+        //     for( PI c = 0; c < nb_dims; ++c )
+        //         res->trinv.linear_transformation[ r ][ c ] = trinv.at( r, c );
+        // for( PI d = 0; d < nb_dims; ++d )
+        //     res->trinv.translation[ d ] = trinv.at( d, nb_dims );
+        
         for( const Expr &ind : indices )
             res->add_child( ind.inst );
-
+        
         return Expr{ res };
     } );
 }

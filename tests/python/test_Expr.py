@@ -23,8 +23,11 @@ b = Expr( "b" )
 # print( Expr( 10 ) == 10 )
 # print( Expr.always_equal( e, f ) )
 
-v = Expr.array( [ [ 10, 20, 30 ], [ 40, 50, 60 ] ], [ a, b ], 5, [ 1, 0 ] )
+v = Expr.array( [ [ 10, 20, 30 ], [ 40, 50, 60 ] ], indices = [ a, b ], periodicity = [ 1, 0 ] )
 print( v.subs( [ ( a, 0 ), ( b, 0 ) ] ) )
+print( v.subs( [ ( a, 1 ), ( b, 0 ) ] ) )
+print( v.subs( [ ( a, 1 ), ( b, 1 ) ] ) )
+print( v.subs( [ ( a, 2 ), ( b, 1 ) ] ) )
 
 # print( v[ 0 ] )
 # print( v[ 10 ] )

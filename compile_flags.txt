@@ -1,5 +1,7 @@
+-I/Users/hugo.leclerc/Code/pysdot/ext/pybind11/include
 -I/home/leclerc/.vfs_build/ext/Catch2/install/include
 -I/usr/lib/python3/dist-packages/numpy/core/include
+-DSDOT_CONFIG_module_name=Yo
 -I/usr/include/python3.12
 -Isdot/ext/pybind11/include
 -Isdot/ext/matplotlib-cpp

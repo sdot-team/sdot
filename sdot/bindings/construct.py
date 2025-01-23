@@ -1,4 +1,4 @@
-from urllib.parse import unquote_plus
+from urllib.parse import unquote_plus, quote_plus
 from pathlib import Path
 from munch import Munch
 import subprocess
@@ -43,6 +43,30 @@ def download_and_unzip( link, ext_directory ):
 #     from git import Repo  # pip install gitpython
 
 #     Repo.clone_from( ,  )
+
+class Generator:
+    def __init__( self, dir_name, func ):
+        self.dir_name = dir_name
+        self.func = func
+
+    def output( self, source_directory, args, used_arg_names ):
+        # output file name
+        lm = {}
+        for an in used_arg_names:
+            lm[ an ] = args[ an ]
+        fname = "_".join( map( lambda x: str( len( x ) ) + '_' + quote_plus( x ), lm.values() ) ) + ".cpp"
+
+        os.makedirs( os.path.join( source_directory, self.dir_name ), exist_ok = True )
+        sname = os.path.join( source_directory, self.dir_name, fname )
+        print( sname )
+        if not os.path.exists( sname ):
+            with open( sname, "w" ) as fout:
+                self.func( fout, **lm )
+
+        return os.path.join( "build", self.dir_name, fname )
+
+def generate( dir_name, func ):
+    return Generator( dir_name, func )
 
 def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names, files, add_srcs_for_windows = [] ):
     # common args
@@ -125,11 +149,15 @@ def construct( Environment, VariantDir, Configure, ARGLIST, name, used_arg_names
         LINKFLAGS += [ "-undefined", "dynamic_lookup" ]
 
     # .cpp files
-    sources = files + [
-    ]
+    sources = []
+    for f in files:
+        if isinstance( f, Generator ):
+            sources.append( f.output( source_directory, args, used_arg_names ) )
+        else:
+            sources.append( str( f ) )
     if os.name == 'nt':
-        sources += add_srcs_for_windows
-    sources = list( map( str, sources ) )
+        for f in add_srcs_for_windows:
+            sources.append( str( f ) )
 
     # repl tl20 by tl20-version if present
     if not os.path.exists( os.path.join( ext_directory, 'tl20' ) ):
