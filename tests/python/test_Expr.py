@@ -13,21 +13,39 @@ def test_simplications():
 
 a = Expr( "a" )
 b = Expr( "b" )
-# e = a + 20
-# f = a + 21
-# print( 21 * ( b + 1 ) * a * ( b + 1 ) )
-# print( a - a )
-# print( a == b )
-# print( a == a )
-# print( a > a )
-# print( Expr( 10 ) == 10 )
-# print( Expr.always_equal( e, f ) )
+c = Expr( "c" )
 
-v = Expr.array( [ [ 10, 20, 30 ], [ 40, 50, 60 ] ], indices = [ a, b ], periodicity = [ 1, 0 ] )
-print( v.subs( [ ( a, 0 ), ( b, 0 ) ] ) )
-print( v.subs( [ ( a, 1 ), ( b, 0 ) ] ) )
-print( v.subs( [ ( a, 1 ), ( b, 1 ) ] ) )
-print( v.subs( [ ( a, 2 ), ( b, 1 ) ] ) )
+# print( Expr.alternative( c, a, b ) )
+# print( Expr.alternative( c, a, b ).subs( [ ( c, 0 ) ] ) )
+# print( Expr.alternative( c, a, b ).subs( [ ( c, 1 ) ] ) )
+
+# # e = a + 20
+# # f = a + 21
+# # print( 21 * ( b + 1 ) * a * ( b + 1 ) )
+# # print( a - a )
+# # print( a == b )
+# # print( a == a )
+# # print( a > a )
+# # print( Expr( 10 ) == 10 )
+# # print( Expr.always_equal( e, f ) )
+
+def ovf( a, x ):
+    i = Expr.ceil( x )
+    f = Expr.frac( x )
+    return a[ i + 0 ] * ( 1 - f ) + a[ i + 1 ] * f
+
+v = Expr.array( [ 10, 20, 30 ] )
+print( v )
+# print( v.natural_args )
+# print( v[ 0 ] )
+# print( v[ 0.2 ] )
+# print( v[ 1 ] )
+
+
+# print( v.subs( [ ( Expr.axis( 0 ), 0 ), ( Expr.axis( 1 ), 0 ) ] ) )
+# print( v.subs( [ ( Expr.axis( 0 ), 1 ), ( Expr.axis( 1 ), 0 ) ] ) )
+# print( v.subs( [ ( Expr.axis( 0 ), 1 ), ( Expr.axis( 1 ), 1 ) ] ) )
+# print( v.subs( [ ( Expr.axis( 0 ), 2 ), ( Expr.axis( 1 ), 1 ) ] ) )
 
 # print( v[ 0 ] )
 # print( v[ 10 ] )

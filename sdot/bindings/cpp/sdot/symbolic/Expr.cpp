@@ -1,8 +1,14 @@
+#include <tl/support/map_vec.h>
 #include <tl/support/ERROR.h>
 #include <tl/support/P.h>
 
+#include "instructions/Alternative.h"
+#include "instructions/LogicalAnd.h"
+#include "instructions/LogicalOr.h"
 #include "instructions/Symbol.h"
 #include "instructions/Value.h"
+#include "instructions/Ceil.h"
+#include "instructions/Frac.h"
 #include "instructions/Add.h"
 #include "instructions/Mul.h"
 #include "instructions/Cmp.h"
@@ -14,7 +20,7 @@ namespace sdot {
 enum { sym, ope, num, paro, parc };
 
 struct ParseItem {
-    void display( Displayer &ds ) const { DS_OBJECT( type, str ); }
+    void display( Displayer &ds ) const { DS_OBJECT( ParseItem, type, str ); }
 
     int type;
     Str str;
@@ -113,12 +119,7 @@ Expr::Expr( int value ) {
 }
 
 void Expr::display( Displayer &ds ) const {
-    Str res;
-    if ( inst )
-        inst->display( res );
-    else
-        res = "NULL";
-    ds << res;
+    ds << inst;
 }
 
 Expr Expr::subs( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map ) const {
@@ -132,6 +133,12 @@ bool Expr::always_equal( const Expr &that ) const {
 Opt<BigRational> Expr::constant_value() const {
     return inst->constant_value();
 }
+
+Expr alternative( const Expr &index, const Vec<Expr> &expr_list ) { return Expr{ Alternative::from_operands( index.inst, map_vec( expr_list, []( const Expr &e ) { return e.inst; } ) ) }; }
+Expr and_boolean( const Expr &a, const Expr &b ) { return Expr{ LogicalAnd::from_operands( a.inst, b.inst ) }; }
+Expr or_boolean( const Expr &a, const Expr &b ) { return Expr{ LogicalOr::from_operands( a.inst, b.inst ) }; }
+Expr ceil( const Expr &a ) { return Expr{ Ceil::from_operands( a.inst ) }; }
+Expr frac( const Expr &a ) { return Expr{ Frac::from_operands( a.inst ) }; }
 
 Expr operator==( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::Equal, d.inst ) }; }
 Expr operator<=( const Expr &a, const Expr &b ) { Expr d = a - b; return Expr{ Cmp::from_operands( Cmp::CmpType::InfEq, d.inst ) }; }

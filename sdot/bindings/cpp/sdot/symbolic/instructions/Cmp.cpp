@@ -3,10 +3,9 @@
 
 namespace sdot {
 
-bool Cmp::compare( const Cmp &a, const Cmp &b ) {
-    if ( int c = ::compare( (int)a.cmp_type, (int)b.cmp_type ) )
-        return c;
-    return ::compare( *a.children[ 0 ], *b.children[ 0 ] );
+int Cmp::compare_same( const Inst &that ) const {
+    const auto &b = static_cast<const Cmp &>( that );
+    return ::compare( (int)cmp_type, (int)b.cmp_type );
 }
 
 RcPtr<Inst> Cmp::from_operands( CmpType cmp_type, const RcPtr<Inst> &a ) {
@@ -44,7 +43,7 @@ void Cmp::display( Str &res, int prio ) const {
         res += " )";
 }
 
-RcPtr<Inst> Cmp::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+RcPtr<Inst> Cmp::clone( Vec<RcPtr<Inst>> &&new_children ) const {
     return from_operands( cmp_type, new_children[ 0 ] );
 }
 

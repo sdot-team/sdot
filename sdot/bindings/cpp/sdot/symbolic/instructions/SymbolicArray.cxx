@@ -6,14 +6,19 @@
 
 #include "SymbolicArray.h"
 #include "../ExprData.h"
-#include "../Expr.h"
 #include "Value.h"
-#include "sdot/support/BigRational.h"
 
 namespace sdot {
 
 #define DTP template<class TF,int nb_dims>
 #define UTP SymbolicArray<TF,nb_dims>
+
+DTP int UTP::compare_same( const Inst &that ) const {
+    const auto &b = static_cast<const UTP &>( that );
+    if ( int c = ::compare( extents, b.extents ) )
+        return c;
+    return ::compare( values, b.values );
+}
 
 DTP void UTP::display( Displayer &ds ) const {
     DS_OBJECT( SymbolicArray, extents, values, children );
@@ -40,7 +45,7 @@ DTP Str UTP::base_info() const {
     return "SymbolicArray";
 }
 
-DTP RcPtr<Inst> UTP::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+DTP RcPtr<Inst> UTP::clone( Vec<RcPtr<Inst>> &&new_children ) const {
     Vec<BigRational> indices;
     for( const RcPtr<Inst> &ch : new_children ) {
         if ( Opt<BigRational> kvi = ch->constant_value() )

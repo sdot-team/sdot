@@ -3,10 +3,9 @@
 
 namespace sdot {
 
-bool Symbol::compare( const Symbol &a, const Symbol &b ) {
-    if ( a.name == b.name )
-        return ::compare( &a, &b );
-    return ::compare( a.name, b.name );
+int Symbol::compare_same( const Inst &that ) const {
+    const auto &b = static_cast<const Symbol &>( that );
+    return ::compare( name, b.name );
 }
 
 RcPtr<Inst> Symbol::from_name( const Str &name ) {
@@ -24,8 +23,8 @@ Str Symbol::base_info() const {
     return name;
 }
 
-RcPtr<Inst> Symbol::clone( const Vec<RcPtr<Inst>> &new_children ) const {
-    ERROR( "cannot be cloned" );
+RcPtr<Inst> Symbol::clone( Vec<RcPtr<Inst>> &&new_children ) const {
+    ERROR( "a symbol cannot be cloned" );
 }
 
 }

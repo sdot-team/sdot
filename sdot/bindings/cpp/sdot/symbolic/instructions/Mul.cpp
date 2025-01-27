@@ -6,18 +6,11 @@
 
 namespace sdot {
 
-bool Mul::compare( const Mul &a, const Mul &b ) {
-    if ( int c = ::compare( a.children.size(), b.children.size() ) )
+int Mul::compare_same( const Inst &that ) const {
+    const auto &b = static_cast<const Mul &>( that );
+    if ( int c = ::compare( additional_coeff, b.additional_coeff ) )
         return c;
-    if ( int c = ::compare( a.additional_coeff, b.additional_coeff ) )
-        return c;
-    for( PI i = 0; i < a.children.size(); ++i ) 
-        if ( int c = ::compare( *a.children[ i ], *b.children[ i ] ) )
-            return c;
-    for( PI i = 0; i < a.coefficients.size(); ++i ) 
-        if ( int c = ::compare( a.coefficients[ i ], b.coefficients[ i ] ) )
-            return c;
-    return 0;
+    return ::compare( coefficients, b.coefficients );
 }
 
 RcPtr<Inst> Mul::from_operands( const Vec<std::pair<BigRational,RcPtr<Inst>>> &operands, BigRational additional_coeff ) {
@@ -99,7 +92,7 @@ void Mul::display( Str &res, int prio ) const {
         res += "( ";
 
     PI o = 0;
-    if ( additional_coeff != 0 ) {
+    if ( additional_coeff != 1 ) {
         res += additional_coeff.compact_repr();
         o = 1;
     }
@@ -124,11 +117,11 @@ void Mul::display( Str &res, int prio ) const {
         res += " )";
 }
 
-RcPtr<Inst> Mul::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+RcPtr<Inst> Mul::clone( Vec<RcPtr<Inst>> &&new_children ) const {
     Vec<std::pair<BigRational,RcPtr<Inst>>> operands;
-    for( const RcPtr<Inst> &ch : new_children )
-        operands << ch->pow_pair( 1 );
-    return from_operands( std::move( operands ), 0 );
+    for( PI i = 0; i < new_children.size(); ++i )
+        operands << new_children[ i ]->pow_pair( coefficients[ i ] );
+    return from_operands( std::move( operands ), additional_coeff );
 }
 
 Str Mul::base_info() const {

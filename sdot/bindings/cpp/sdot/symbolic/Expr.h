@@ -19,7 +19,13 @@ public:
     bool        always_equal  ( const Expr &that ) const;
     void        display       ( Displayer &ds ) const;
     Expr        subs          ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map ) const;
-     
+
+    friend Expr alternative   ( const Expr &index, const Vec<Expr> &expr_list );
+    friend Expr and_boolean   ( const Expr &a, const Expr &b );
+    friend Expr or_boolean    ( const Expr &a, const Expr &b );
+    friend Expr ceil          ( const Expr &a );
+    friend Expr frac          ( const Expr &a );
+    
     friend Expr operator+     ( const Expr &a, const Expr &b );
     friend Expr operator-     ( const Expr &a, const Expr &b );
     friend Expr operator*     ( const Expr &a, const Expr &b );

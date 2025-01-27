@@ -1,7 +1,9 @@
+#include "pybind11/pytypes.h"
 #include <tl/support/string/CompactReprReader.h>
 #include <tl/support/string/to_string.h>
 #include <sdot/support/binding_config.h>
 #include <sdot/support/VtkOutput.h>
+
 #include <sdot/symbolic/ExprData.h>
 #include <sdot/symbolic/Expr.h>
  
@@ -66,7 +68,35 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
                 map[ p.first.inst ] = p.second.inst;
             return expr.subs( map );
         } )
-        
+
+        .def( "apply", []( const Expr &a, const std::vector<std::pair<Str,Expr>> &b ) {
+            try {
+                return Expr( a.inst->apply( map_vec( b, []( const std::pair<Str,Expr> &e ) { return std::pair<Str,RcPtr<Inst>>{ e.first, e.second.inst }; } ) ) );
+            } catch ( Inst::NaturalArgsError e ) {
+                throw pybind11::value_error{ e.msg };
+            }
+        } )
+
+        .def( "natural_args", []( const Expr &expr ) -> std::vector<std::vector<std::pair<Str,Expr>>> {
+            Vec<Vec<std::pair<Str,RcPtr<Inst>>>> nargs;
+            expr.inst->find_natural_args_rec( nargs );
+
+            std::vector<std::vector<std::pair<Str,Expr>>> res;
+            for( auto &narg : nargs ) {
+                std::vector<std::pair<Str,Expr>> loc;
+                for( auto &p : narg )
+                    loc.push_back( std::pair<Str,Expr>{ p.first, p.second } );
+                res.push_back( std::move( loc ) );
+            }
+            return res;
+        } )
+
+        .def( "set_natural_args", []( const Expr &expr, const std::vector<std::pair<Str,Expr>> &args ) {
+            expr.inst->clear_natural_args();
+            for( const auto &arg : args )
+                expr.inst->add_natural_arg( arg.first, arg.second.inst );
+        } )
+
         .def( "add", []( const Expr &a, const Expr &b ) { return a + b; } )
         .def( "sub", []( const Expr &a, const Expr &b ) { return a - b; } )
         .def( "mul", []( const Expr &a, const Expr &b ) { return a * b; } )
@@ -74,9 +104,14 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
         .def( "pow", []( const Expr &a, const Expr &b ) { return pow( a, b ); } )
 
         .def( "always_equal", []( const Expr &a, const Expr &b ) { return a.always_equal( b ); } )
+        .def( "alternative", []( const Expr &cond, const std::vector<Expr> &list ) { return alternative( cond, list ); } )
+        .def( "and_boolean", []( const Expr &a, const Expr &b ) { return and_boolean( a, b ); } )
+        .def( "or_boolean", []( const Expr &a, const Expr &b ) { return or_boolean( a, b ); } )
         .def( "equal", []( const Expr &a, const Expr &b ) { return a == b; } )
         .def( "supeq", []( const Expr &a, const Expr &b ) { return a >= b; } )
         .def( "infeq", []( const Expr &a, const Expr &b ) { return a <= b; } )
+        .def( "ceil", []( const Expr &a ) { return ceil( a ); } )
+        .def( "frac", []( const Expr &a ) { return frac( a ); } )
         .def( "neq", []( const Expr &a, const Expr &b ) { return a != b; } )
         .def( "sup", []( const Expr &a, const Expr &b ) { return a > b; } )
         .def( "inf", []( const Expr &a, const Expr &b ) { return a < b; } )

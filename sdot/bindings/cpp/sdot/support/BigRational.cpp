@@ -168,6 +168,10 @@ BigRational::BI ceil( const BigRational &a ) {
     return ( n - d + 1 ) / d;
 }
 
+BigRational frac( const BigRational &a ) {
+    return a - ceil( a );
+}
+
 BigRational operator+( const BigRational &a, const BigRational &b ) {
     auto miexp = std::min( a.exp, b.exp );
     auto a_num = a.num << ( a.exp - miexp );
@@ -363,10 +367,15 @@ Str BigRational::compact_repr() const {
     }
 
     Str res = num.str();
+
     if ( den != 1 )
         res += "/" + den.str();
-    if ( exp != 0 )
-        res += "p" + std::to_string( exp );
+
+    if ( exp > 0 )
+        res += "*2**" + std::to_string( exp );
+    else if ( exp < 0 )
+        res += "*2**(" + std::to_string( exp ) + ")";
+
     return res;
 }
 

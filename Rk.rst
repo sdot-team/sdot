@@ -38,3 +38,5 @@ Prop de base pour l'intégration : on fournit une fonction pour intégrer sur le
 
 * Prop alternative: on accepte d'étaler tant que la somme est égale à la densité.
   On pourrait trouver une formule fermée en 1D non partiel
+
+Est-ce qu'on fait un argument "entrées naturelles" ? C'est tentant...

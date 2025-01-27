@@ -6,18 +6,11 @@
 
 namespace sdot {
 
-bool Add::compare( const Add &a, const Add &b ) {
-    if ( int c = ::compare( a.children.size(), b.children.size() ) )
+int Add::compare_same( const Inst &that ) const {
+    const auto &b = static_cast<const Add &>( that );
+    if ( int c = ::compare( additional_coeff, b.additional_coeff ) )
         return c;
-    if ( int c = ::compare( a.additional_coeff, b.additional_coeff ) )
-        return c;
-    for( PI i = 0; i < a.children.size(); ++i ) 
-        if ( int c = ::compare( *a.children[ i ], *b.children[ i ] ) )
-            return c;
-    for( PI i = 0; i < a.coefficients.size(); ++i ) 
-        if ( int c = ::compare( a.coefficients[ i ], b.coefficients[ i ] ) )
-            return c;
-    return 0;
+    return ::compare( coefficients, b.coefficients );
 }
 
 RcPtr<Inst> Add::from_operands( const Vec<std::pair<BigRational,RcPtr<Inst>>> &operands, BigRational additional_coeff ) {
@@ -138,11 +131,11 @@ void Add::display( Str &res, int prio ) const {
         res += " )";
 }
 
-RcPtr<Inst> Add::clone( const Vec<RcPtr<Inst>> &new_children ) const {
+RcPtr<Inst> Add::clone( Vec<RcPtr<Inst>> &&new_children ) const {
     Vec<std::pair<BigRational,RcPtr<Inst>>> operands;
-    for( const RcPtr<Inst> &ch : new_children )
-        operands << ch->mul_pair( 1 );
-    return from_operands( std::move( operands ), 0 );
+    for( PI i = 0; i < new_children.size(); ++i )
+        operands << new_children[ i ]->mul_pair( coefficients[ i ] );
+    return from_operands( std::move( operands ), additional_coeff );
 }
 
 Str Add::base_info() const {
