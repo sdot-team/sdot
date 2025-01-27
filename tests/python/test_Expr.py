@@ -29,13 +29,16 @@ c = Expr( "c" )
 # # print( Expr( 10 ) == 10 )
 # # print( Expr.always_equal( e, f ) )
 
-def ovf( a, x ):
-    i = Expr.ceil( x )
-    f = Expr.frac( x )
-    return a[ i + 0 ] * ( 1 - f ) + a[ i + 1 ] * f
+# def ovf( a, x ):
+#     i = Expr.ceil( x )
+#     f = Expr.frac( x )
+#     return a[ i + 0 ] * ( 1 - f ) + a[ i + 1 ] * f
 
-v = Expr.array( [ 10, 20, 30 ] )
+v = Expr.array( [ 10, 20, 30 ], interpolation = "P1" )
 print( v )
+print( v[ 0.0 ] )
+print( v[ 0.5 ] )
+print( v[ 1.0 ] )
 # print( v.natural_args )
 # print( v[ 0 ] )
 # print( v[ 0.2 ] )

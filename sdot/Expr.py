@@ -128,6 +128,10 @@ class Expr:
             * "unchecked"
             * "projected"
             * "periodic"
+
+            Interpolation can be either
+            * None or "P0" for piecewise constant interpolation
+            * "P1" for piecewise affine interpolation
         """
         # array type
         array = np.ascontiguousarray( array )
@@ -141,8 +145,8 @@ class Expr:
             nb_dims = array.ndim
         )
 
-        base_indices = [ Expr( f"bi_{ i }" )._expr for i in range( array.ndim ) ]
-        base_array = Expr( module.symbolic_array( array, base_indices ) )
+        base_indices = [ Expr( f"bi_{ i }" ) for i in range( array.ndim ) ]
+        base_array = Expr( module.symbolic_array( array, [ b._expr for b in base_indices ] ) )
 
         # indices
         if indices is None:
@@ -163,8 +167,8 @@ class Expr:
         if exterior == "zero value":
             cond = Expr( 1 )
             for i in range( array.ndim ):
-                cond = Expr.logical_and( cond, indices[ i ] < array.shape[ i ] )
-                cond = Expr.logical_and( cond, indices[ i ] >= 0 )
+                cond = Expr.logical_and( cond, base_indices[ i ] < array.shape[ i ] )
+                cond = Expr.logical_and( cond, base_indices[ i ] >= 0 )
             base_array = Expr.alternative( cond, 0, base_array )
         elif exterior == "projected":
             TODO()
@@ -173,11 +177,31 @@ class Expr:
         elif exterior != "unchecked":
             raise ValueError( "Unknown exterior type" )
 
-        # final indices
-        indices = list( map( lambda x: Expr( x )._expr, indices ) )
-        assert len( indices ) == array.ndim
+        # interpolation
+        if interpolation is not None:
+            if interpolation == "P1": # piecewise affine
+                loc_inds = [ Expr( f"li_{ i }" )._expr for i in range( array.ndim ) ]
+                r = Expr( 0 )
+                for n in range( 2 ** array.ndim ):
+                    l = [ Expr.ceil( loc_inds[ i ] ) + bool( n & 2**i ) for i in range( array.ndim ) ]
+                    m = base_array.__getitem__( *l )
+                    for i in range( array.ndim ):
+                        f = Expr.frac( loc_inds[ i ] )
+                        if n & 2**i:
+                            m *= f
+                        else:
+                            m *= 1 - f
+                    r += m
 
-        return base_array.subs( zip( base_indices, indices ) )
+                base_array = r.subs( zip( loc_inds, base_indices ) )
+            elif interpolation != "P0":
+                raise ValueError( "Unknown interpolation type" )
+
+        # final indices
+        res = base_array.subs( zip( base_indices, indices ) )
+        if res.natural_args is None:
+            res.set_natural_args( indices )
+        return res
 
     @staticmethod
     def list_from_compact_repr( crepr ):
