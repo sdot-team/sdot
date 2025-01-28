@@ -180,13 +180,13 @@ class Expr:
         # interpolation
         if interpolation is not None:
             if interpolation == "P1": # piecewise affine
-                loc_inds = [ Expr( f"li_{ i }" )._expr for i in range( array.ndim ) ]
+                loc_inds = [ Expr( f"li_{ i }" ) for i in range( array.ndim ) ]
                 r = Expr( 0 )
                 for n in range( 2 ** array.ndim ):
-                    l = [ Expr.ceil( loc_inds[ i ] ) + bool( n & 2**i ) for i in range( array.ndim ) ]
-                    m = base_array.__getitem__( *l )
+                    l = [ Expr.ceil( loc_inds[ i ] - 0.5 ) + bool( n & 2**i ) for i in range( array.ndim ) ]
+                    m = base_array.__getitem__( tuple( l ) )
                     for i in range( array.ndim ):
-                        f = Expr.frac( loc_inds[ i ] )
+                        f = Expr.frac( loc_inds[ i ] - 0.5 )
                         if n & 2**i:
                             m *= f
                         else:
@@ -289,8 +289,18 @@ class Expr:
             that = Expr( that )
         return Expr( self._expr.equal( that._expr ) )
 
-    def __getitem__( self, *largs, **margs ):
-        """ substitute "natural entries" of self with `largs` and `margs` """
+    def __getitem__( self, ind ):
+        """ substitute "natural entries" of self with index / indices """
+        m = []
+        if isinstance( ind, tuple ):
+            for arg in ind:
+                m.append( ( '', Expr( arg )._expr ) )
+        else:
+            m.append( ( '', Expr( ind )._expr ) )
+        return Expr( self._expr.apply( m ) )
+
+    def __call__( self, *largs, **margs ):
+        """ substitute "natural entries" of self with values in largs and margs """
         m = []
         for arg in largs:
             m.append( ( '', Expr( arg )._expr ) )

@@ -20,9 +20,11 @@ void Inst::display( Str &res, int prio ) const {
     if ( children.size() ) {
         res += "(";
         for( PI i = 0; i < children.size(); ++i ) {
-            res += ( i ? "," : "" );
+            res += ( i ? ", " : " " );
             children[ i ]->display( res );
         }
+        if( children.size() )
+            res += " ";
         res += ")";
     }
 }

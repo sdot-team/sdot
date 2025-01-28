@@ -46,7 +46,11 @@ RcPtr<Inst> Mul::from_operands( const Vec<std::pair<BigRational,RcPtr<Inst>>> &o
                 new_operands.pop_back();
         }
     }
-    
+
+    // 0 * ...
+    if ( additional_coeff == 0 )
+        return Value::from_value( additional_coeff );
+
     // only a constant value
     if ( new_operands.empty() )
         return Value::from_value( additional_coeff );

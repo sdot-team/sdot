@@ -14,6 +14,7 @@ public:
     virtual Str         base_info    () const override;
     virtual RcPtr<Inst> clone        ( Vec<RcPtr<Inst>> &&new_children ) const override;
     virtual int         type         () const override;
+    virtual RcPtr<Inst> subs         ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map ) override;
 };
 
 }

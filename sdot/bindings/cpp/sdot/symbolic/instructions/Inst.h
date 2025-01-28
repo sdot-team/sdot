@@ -34,7 +34,7 @@ public:
     virtual int         type                 () const = 0;
     
     RcPtr<Inst>         apply                ( const Vec<std::pair<Str,RcPtr<Inst>>> &arguments ); ///< use natural args
-    RcPtr<Inst>         subs                 ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map );
+    virtual RcPtr<Inst> subs                 ( const std::map<RcPtr<Inst>,RcPtr<Inst>> &map );
              
     virtual void        ct_rt_split          ( CompactReprWriter &cw, Vec<ExprData> &data_map ) const = 0;
     static RcPtr<Inst>  read_from            ( CompactReprReader &cr );
