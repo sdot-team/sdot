@@ -103,9 +103,8 @@ class Expr:
     def axis( n ):
         """ get the default symbol for axis `n`
         """
-        while len( axis_symbols ) <= n:
-            axis_symbols.append( Expr( f'x_{ len( axis_symbols ) }' ) )
-        return axis_symbols[ n ]
+        _module = module_for( 'generic_objects' )
+        return _module.axis( int( n ) )
 
     @staticmethod
     def array( array, indices = None, exterior = "zero value", interpolation = None, overriding_formula = None ):

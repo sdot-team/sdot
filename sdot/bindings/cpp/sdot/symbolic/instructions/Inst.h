@@ -54,7 +54,6 @@ public:
     Vec<Inst*>          parents;
 };
 
-
 }
 
 

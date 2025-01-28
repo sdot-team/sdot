@@ -1,9 +1,9 @@
-#include "pybind11/pytypes.h"
 #include <tl/support/string/CompactReprReader.h>
 #include <tl/support/string/to_string.h>
 #include <sdot/support/binding_config.h>
 #include <sdot/support/VtkOutput.h>
 
+#include <sdot/symbolic/instructions/axis.h>
 #include <sdot/symbolic/ExprData.h>
 #include <sdot/symbolic/Expr.h>
  
@@ -126,4 +126,5 @@ PYBIND11_MODULE( SDOT_CONFIG_module_name, m ) { // py::module_local()
     m.def( "expr_list_from_compact_repr", expr_list_from_compact_repr );
     m.def( "ct_rt_split_of_list", ct_rt_split_of_list );
     m.def( "cell_splits_of_list", cell_splits_of_list );
+    m.def( "axis", [&]( int n ) { return Expr( sdot::axis( n ) ); } );
 }

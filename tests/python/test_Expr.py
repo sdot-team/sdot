@@ -15,3 +15,6 @@ a = Expr( "a" )
 b = Expr( "b" )
 c = Expr( "c" )
 
+# d = Expr( "x ^ 2" )
+# print( Expr.axis( 0 ) )
+# print( Expr.axis( 1 ) )
