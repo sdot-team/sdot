@@ -1,0 +1,38 @@
+# Build artifacts
+build/
+bin/
+lib/
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.out
+
+.cache/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.tox/
+*.egg-info/
+dist/
+wheels/
+
+# C++ / CMake
+CMakeUserPresets.json
+.cmake/
+
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# Project specific
+python/pytorch/*.so
+python/jax/*.so
+sdot_l2_kernels.metal

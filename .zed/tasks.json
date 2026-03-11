@@ -1,0 +1,38 @@
+[
+  {
+    "label": "Build All",
+    "command": "make all",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Run All Tests",
+    "command": "make test",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Test CPU W2",
+    "command": "make test-cpu",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Test PyTorch W2",
+    "command": "make test-pytorch",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Test JAX W2",
+    "command": "make test-jax",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "Clean Build",
+    "command": "make clean",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false
+  }
+]

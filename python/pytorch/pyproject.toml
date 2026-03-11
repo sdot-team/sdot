@@ -1,0 +1,9 @@
+[build-system]
+requires = ["setuptools>=61.0", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sdot_pytorch_cpp"
+version = "0.0.1"
+description = "W2 distance PyTorch extension"
+dependencies = ["torch"]

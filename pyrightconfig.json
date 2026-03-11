@@ -1,0 +1,15 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "python/pytorch",
+    "python/jax",
+    "build"
+  ],
+  "include": [
+    "python",
+    "tests"
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic"
+}

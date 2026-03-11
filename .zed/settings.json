@@ -1,0 +1,25 @@
+{
+  "languages": {
+    "C++": {
+      "language_servers": ["clangd"]
+    },
+    "Python": {
+      "language_servers": ["pyright"]
+    }
+  },
+  "lsp": {
+    "clangd": {
+      "arguments": [
+        "--compile-commands-dir=.",
+        "--header-insertion=never"
+      ]
+    },
+    "pyright": {
+      "settings": {
+        "python.analysis.extraPaths": ["python/pytorch", "python/jax", "build"],
+        "python.pythonPath": ".venv/bin/python3"
+      }
+    }
+  },
+  "autosave": "on_focus_change"
+}
