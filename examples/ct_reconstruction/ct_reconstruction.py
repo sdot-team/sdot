@@ -16,7 +16,7 @@ def loss( dirac_xs ):
 
     return sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys )
 
-dirac_xs = torch.linspace( 0.0, 1.0, 101, requires_grad = True )
+dirac_xs = torch.linspace( 0.0, 1.0, 41, requires_grad = True )
 lbfgs = torch.optim.LBFGS( [ dirac_xs ], history_size=10, max_iter = 4, line_search_fn = "strong_wolfe" )
 
 def closure():
@@ -31,7 +31,6 @@ old_params = dirac_xs.clone().detach()
 tol_param = 1e-5  # Stabilité de la solution
 tol_grad = 1e-4   # Stabilité du gradient (proche du minimum)
 for i in range( 3 ):
-    #history_lbfgs.append(f(x_lbfgs).item())
     lbfgs.step( closure )
 
     # --- CRITÈRES DE CONVERGENCE ---

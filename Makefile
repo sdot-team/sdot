@@ -24,7 +24,7 @@ test: all
 	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
 	@PYTHONPATH=$(CURDIR)/build:$(CURDIR)/python/pytorch:$(CURDIR)/python/jax:$(PYTHONPATH) $(PYTHON) -m pytest -s -q --tb=short tests/
 
-ct_reco:
+ct_reco: all
 	$(PYTHON) examples/ct_reconstruction/ct_reconstruction.py
 
 clean:

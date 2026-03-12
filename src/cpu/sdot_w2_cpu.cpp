@@ -93,6 +93,7 @@ TF get_x_new( TF x0, TF x1, TF y0, TF y1, TF mass_to_take ) {
     const TF a = ( y0 - y1 ) / ( x0 - x1 );
     const TF c = - mass_to_take;
     const TF b = y0;
+
     return x0 + solve_quadratic_2( a, b, c, 0 );
 }
 
@@ -114,6 +115,9 @@ TF partial_moment( TF x0, TF x1, TF y0, TF y1 ) {
     //      + x * x * ( py1 - py0 ) / ( px1 - px0 )
     //  )
     // integral( x * a + x * x * b  )
+    if ( x0 == x1 )
+        return 0;
+
     const TF b = ( y1 - y0 ) / ( x1 - x0 );
     const TF a = ( y0 - b * x0 );
     return ( pow( x1, 2 ) - pow( x0, 2 ) ) * a / 2
@@ -182,7 +186,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
                     remaining_mass = ( px1 - px0 ) * ( py1 + py0 ) / 2;
                 } else {
                     px1 = 1.1 * point_xs[ nb_points - 1 ] - point_xs[ 0 ] * 0.1;
-                    py1 = numeric_limits<TF>::max();
+                    py1 = 1;
 
                     remaining_mass = numeric_limits<TF>::max();
                 }
@@ -221,7 +225,7 @@ void sdot_w2_cpu( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, const TS
             dirac_xs + b * nb_diracs, dirac_ws + b * nb_diracs, nb_diracs,
             point_xs + b * nb_points, point_ys + b * nb_points, nb_points,
             w2_squared ? w2_squared + b : nullptr,
-            w2_barycenters ? (w2_barycenters + b * nb_diracs) : nullptr
+            w2_barycenters ? w2_barycenters + b * nb_diracs : nullptr
         );
     }
 }
@@ -241,6 +245,12 @@ void sdot_w2_backward_cpu_single(
             grad_dirac_xs[ num_dirac ] = grad_distance * 2 * ( dirac_xs[ num_dirac ] - w2_barycenters[ num_dirac ] );
         if ( grad_dirac_ws )
             grad_dirac_ws[ num_dirac ] = 0;
+    }
+    for( PI num_point = 0; num_point < nb_points; ++num_point ) {
+        if ( grad_point_xs )
+            grad_point_xs[ num_point ] = 0;
+        if ( grad_point_ys )
+            grad_point_ys[ num_point ] = 0;
     }
 }
 
