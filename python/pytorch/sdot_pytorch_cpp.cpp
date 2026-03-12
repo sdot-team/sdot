@@ -1,148 +1,125 @@
 #include "../../src/cpu/sdot_w2_cpu.h"
-#include <torch/extension.h>
-#include <vector>
+#include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
+#include <stdexcept>
 
-std::vector<torch::Tensor> sdot_w2_forward(torch::Tensor dirac_xs, torch::Tensor dirac_ws, torch::Tensor point_xs, torch::Tensor point_ys) {
-    int64_t batch_size = 1;
-    int64_t Nf, Mg;
+namespace nb = nanobind;
 
-    if (dirac_xs.dim() == 1) {
-        batch_size = 1;
-        Nf = dirac_xs.size(0);
-    } else {
-        batch_size = dirac_xs.size(0);
-        Nf = dirac_xs.size(1);
-    }
+using ndarray_f32 = nb::ndarray<float, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+using ndarray_f32_2d = nb::ndarray<float, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 
-    if (point_xs.dim() == 1) {
-        Mg = point_xs.size(0);
-        TORCH_CHECK(batch_size == 1, "Xg must have same batch size as Xf");
-    } else {
-        Mg = point_xs.size(1);
-        TORCH_CHECK(point_xs.size(0) == batch_size, "Xg must have same batch size as Xf");
-    }
-
-    // Check Wf and Yg consistency
-    TORCH_CHECK(dirac_ws.sizes() == dirac_xs.sizes(), "Wf and Xf must have same shapes");
-    TORCH_CHECK(point_ys.sizes() == point_xs.sizes(), "Yg and Xg must have same shapes");
-
-    auto result_shape = (dirac_xs.dim() == 1) ? std::vector<int64_t>({1}) : std::vector<int64_t>({batch_size});
-    auto result = torch::empty(result_shape, dirac_xs.options());
-    auto barycenters = torch::empty(dirac_xs.sizes(), dirac_xs.options());
-
-    if (dirac_xs.device().is_cpu()) {
-        sdot_w2_cpu(dirac_xs.data_ptr<float>(), dirac_ws.data_ptr<float>(), Nf,
-                    point_xs.data_ptr<float>(), point_ys.data_ptr<float>(), Mg,
-                    batch_size,
-                    result.data_ptr<float>(), barycenters.data_ptr<float>());
-    } else {
-        auto Xf_cpu = dirac_xs.to(torch::kCPU).contiguous();
-        auto Wf_cpu = dirac_ws.to(torch::kCPU).contiguous();
-        auto Xg_cpu = point_xs.to(torch::kCPU).contiguous();
-        auto Yg_cpu = point_ys.to(torch::kCPU).contiguous();
-
-        std::vector<float> res_vals(batch_size);
-        std::vector<float> bary_vals(batch_size * Nf);
-
-        sdot_w2_cpu(Xf_cpu.data_ptr<float>(), Wf_cpu.data_ptr<float>(), Nf,
-                    Xg_cpu.data_ptr<float>(), Yg_cpu.data_ptr<float>(), Mg,
-                    batch_size,
-                    res_vals.data(), bary_vals.data());
-
-        result.copy_(torch::from_blob(res_vals.data(), result_shape, torch::kFloat32));
-        barycenters.copy_(torch::from_blob(bary_vals.data(), dirac_xs.sizes(), torch::kFloat32));
-    }
-
-    return {result, barycenters};
-}
-
-std::vector<torch::Tensor> sdot_w2_backward(
-    torch::Tensor grad_distance,
-    torch::Tensor grad_barycenters,
-    torch::Tensor w2_barycenters,
-    torch::Tensor dirac_xs, torch::Tensor dirac_ws,
-    torch::Tensor points_xs, torch::Tensor points_ys
+// Forward function that works with both 1D and 2D arrays
+void sdot_w2_forward_impl(
+    nb::ndarray<float> dirac_xs,
+    nb::ndarray<float> dirac_ws,
+    nb::ndarray<float> point_xs,
+    nb::ndarray<float> point_ys,
+    nb::ndarray<float> result,
+    nb::ndarray<float> barycenters
 ) {
-    int64_t batch_size = 1;
-    int64_t Nf, Mg;
+    size_t nb_diracs, nb_points;
+    size_t batch_size = 1;
 
-    if (dirac_xs.dim() == 1) {
+    // Determine dimensions
+    if (dirac_xs.ndim() == 1) {
         batch_size = 1;
-        Nf = dirac_xs.size(0);
+        nb_diracs = dirac_xs.shape(0);
+    } else if (dirac_xs.ndim() == 2) {
+        batch_size = dirac_xs.shape(0);
+        nb_diracs = dirac_xs.shape(1);
     } else {
-        batch_size = dirac_xs.size(0);
-        Nf = dirac_xs.size(1);
+        throw std::invalid_argument("dirac_xs must be 1D or 2D");
     }
 
-    if (points_xs.dim() == 1) {
-        Mg = points_xs.size(0);
+    if (point_xs.ndim() == 1) {
+        nb_points = point_xs.shape(0);
+        if (batch_size != 1) {
+            throw std::invalid_argument("dirac_xs must have same batch size as point_xs");
+        }
+    } else if (point_xs.ndim() == 2) {
+        nb_points = point_xs.shape(1);
+        if (point_xs.shape(0) != batch_size) {
+            throw std::invalid_argument("dirac_xs must have same batch size as point_xs");
+        }
     } else {
-        Mg = points_xs.size(1);
+        throw std::invalid_argument("point_xs must be 1D or 2D");
     }
 
-    auto grad_dirac_xs = torch::empty_like(dirac_xs);
-    auto grad_dirac_ws = torch::empty_like(dirac_ws);
-    auto grad_points_xs = torch::empty_like(points_xs);
-    auto grad_points_ys = torch::empty_like(points_ys);
-
-    if (dirac_xs.device().is_cpu()) {
-        sdot_w2_backward_cpu(
-            grad_distance.contiguous().data_ptr<float>(),
-            grad_barycenters.contiguous().data_ptr<float>(),
-            w2_barycenters.contiguous().data_ptr<float>(),
-            dirac_xs.contiguous().data_ptr<float>(),
-            dirac_ws.contiguous().data_ptr<float>(),
-            Nf,
-            points_xs.contiguous().data_ptr<float>(),
-            points_ys.contiguous().data_ptr<float>(),
-            Mg,
-            batch_size,
-            grad_dirac_xs.data_ptr<float>(),
-            grad_dirac_ws.data_ptr<float>(),
-            grad_points_xs.data_ptr<float>(),
-            grad_points_ys.data_ptr<float>()
-        );
-    } else {
-        auto gdist_cpu = grad_distance.to(torch::kCPU).contiguous();
-        auto gbary_cpu = grad_barycenters.to(torch::kCPU).contiguous();
-        auto wbary_cpu = w2_barycenters.to(torch::kCPU).contiguous();
-        auto dxs_cpu = dirac_xs.to(torch::kCPU).contiguous();
-        auto dws_cpu = dirac_ws.to(torch::kCPU).contiguous();
-        auto pxs_cpu = points_xs.to(torch::kCPU).contiguous();
-        auto pys_cpu = points_ys.to(torch::kCPU).contiguous();
-
-        auto gdxs_cpu = torch::empty_like(dxs_cpu);
-        auto gdws_cpu = torch::empty_like(dws_cpu);
-        auto gpxs_cpu = torch::empty_like(pxs_cpu);
-        auto gpys_cpu = torch::empty_like(pys_cpu);
-
-        sdot_w2_backward_cpu(
-            gdist_cpu.data_ptr<float>(),
-            gbary_cpu.data_ptr<float>(),
-            wbary_cpu.data_ptr<float>(),
-            dxs_cpu.data_ptr<float>(),
-            dws_cpu.data_ptr<float>(),
-            Nf,
-            pxs_cpu.data_ptr<float>(),
-            pys_cpu.data_ptr<float>(),
-            Mg,
-            batch_size,
-            gdxs_cpu.data_ptr<float>(),
-            gdws_cpu.data_ptr<float>(),
-            gpxs_cpu.data_ptr<float>(),
-            gpys_cpu.data_ptr<float>()
-        );
-
-        grad_dirac_xs.copy_(gdxs_cpu);
-        grad_dirac_ws.copy_(gdws_cpu);
-        grad_points_xs.copy_(gpxs_cpu);
-        grad_points_ys.copy_(gpys_cpu);
-    }
-
-    return {grad_dirac_xs, grad_dirac_ws, grad_points_xs, grad_points_ys};
+    // Call CPU kernel
+    sdot_w2_cpu(
+        dirac_xs.data(), dirac_ws.data(), nb_diracs,
+        point_xs.data(), point_ys.data(), nb_points,
+        batch_size,
+        result.data(), barycenters.data()
+    );
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &sdot_w2_forward, "SDOT W2 forward");
-    m.def("backward", &sdot_w2_backward, "SDOT W2 backward");
+void sdot_w2_backward_impl(
+    nb::ndarray<float> grad_distance,
+    nb::ndarray<float> grad_barycenters,
+    nb::ndarray<float> w2_barycenters,
+    nb::ndarray<float> dirac_xs,
+    nb::ndarray<float> dirac_ws,
+    nb::ndarray<float> points_xs,
+    nb::ndarray<float> points_ys,
+    nb::ndarray<float> grad_dirac_xs,
+    nb::ndarray<float> grad_dirac_ws,
+    nb::ndarray<float> grad_points_xs,
+    nb::ndarray<float> grad_points_ys
+) {
+    size_t batch_size = 1;
+    size_t Nf, Mg;
+
+    if (dirac_xs.ndim() == 1) {
+        batch_size = 1;
+        Nf = dirac_xs.shape(0);
+    } else if (dirac_xs.ndim() == 2) {
+        batch_size = dirac_xs.shape(0);
+        Nf = dirac_xs.shape(1);
+    } else {
+        throw std::invalid_argument("dirac_xs must be 1D or 2D");
+    }
+
+    if (points_xs.ndim() == 1) {
+        Mg = points_xs.shape(0);
+    } else if (points_xs.ndim() == 2) {
+        Mg = points_xs.shape(1);
+    } else {
+        throw std::invalid_argument("points_xs must be 1D or 2D");
+    }
+
+    // Call CPU backward kernel
+    sdot_w2_backward_cpu(
+        grad_distance.data(),
+        grad_barycenters.data(),
+        w2_barycenters.data(),
+        dirac_xs.data(),
+        dirac_ws.data(),
+        Nf,
+        points_xs.data(),
+        points_ys.data(),
+        Mg,
+        batch_size,
+        grad_dirac_xs.data(),
+        grad_dirac_ws.data(),
+        grad_points_xs.data(),
+        grad_points_ys.data()
+    );
+}
+
+NB_MODULE(sdot_pytorch_cpp, m) {
+    m.def("forward_impl", &sdot_w2_forward_impl,
+          nb::arg("dirac_xs"), nb::arg("dirac_ws"),
+          nb::arg("point_xs"), nb::arg("point_ys"),
+          nb::arg("result"), nb::arg("barycenters"),
+          "SDOT W2 forward implementation");
+
+    m.def("backward_impl", &sdot_w2_backward_impl,
+          nb::arg("grad_distance"), nb::arg("grad_barycenters"),
+          nb::arg("w2_barycenters"),
+          nb::arg("dirac_xs"), nb::arg("dirac_ws"),
+          nb::arg("points_xs"), nb::arg("points_ys"),
+          nb::arg("grad_dirac_xs"), nb::arg("grad_dirac_ws"),
+          nb::arg("grad_points_xs"), nb::arg("grad_points_ys"),
+          "SDOT W2 backward implementation");
 }

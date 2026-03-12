@@ -1,25 +1,53 @@
 {
   "languages": {
     "C++": {
-      "language_servers": ["clangd"]
+      "language_servers": ["clangd"],
+      "format_on_save": "off",
+      "tab_size": 4
     },
     "Python": {
-      "language_servers": ["pyright"]
+      "language_servers": ["pyright"],
+      "format_on_save": "off",
+      "tab_size": 4
     }
   },
   "lsp": {
     "clangd": {
-      "arguments": [
-        "--compile-commands-dir=build",
-        "--header-insertion=never"
-      ]
+      "binary": {
+        "path": "/opt/homebrew/opt/llvm/bin/clangd",
+        "arguments": [
+          "--compile-commands-dir=.",
+          "--header-insertion=never",
+          "--background-index",
+          "--clang-tidy",
+          "--completion-style=detailed",
+          "--pch-storage=memory",
+          "--log=error"
+        ]
+      }
     },
     "pyright": {
       "settings": {
-        "python.analysis.extraPaths": ["python/pytorch", "python/jax", "build"],
-        "python.pythonPath": ".venv/bin/python3"
+        "python": {
+          "analysis": {
+            "extraPaths": ["python/pytorch", "python/jax", "build"],
+            "typeCheckingMode": "basic",
+            "diagnosticMode": "workspace",
+            "useLibraryCodeForTypes": true,
+            "autoSearchPaths": true
+          },
+          "pythonPath": ".venv/bin/python"
+        }
       }
     }
   },
-  "autosave": "on_focus_change"
+  "autosave": "on_focus_change",
+  "tab_size": 4,
+  "format_on_save": "off",
+  "ensure_final_newline_on_save": true,
+  "remove_trailing_whitespace_on_save": true,
+  "telemetry": {
+    "diagnostics": false,
+    "metrics": false
+  }
 }

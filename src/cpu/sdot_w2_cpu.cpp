@@ -160,7 +160,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
         // stay on the first interval ?
         if ( dirac_mass <= remaining_mass ) {
             const TF pxn = get_x_new( px0, px1, py0, py1, dirac_mass );
-            const TF pyn = py0 + ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 );
+            const TF pyn = py0 + ( ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 ) );
 
             w2_barycenters[ dirac_index ] = partial_moment( px0, pxn, py0, pyn ) / dirac_mass;
             w2 += partial_w2( dirac_x, px0, pxn, py0, pyn );
@@ -185,7 +185,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
 
                     remaining_mass = ( px1 - px0 ) * ( py1 + py0 ) / 2;
                 } else {
-                    px1 = 1.1 * point_xs[ nb_points - 1 ] - point_xs[ 0 ] * 0.1;
+                    px1 = ( 1.1 * point_xs[ nb_points - 1 ] ) - ( point_xs[ 0 ] * 0.1 );
                     py1 = 1;
 
                     remaining_mass = numeric_limits<TF>::max();
@@ -201,7 +201,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
 
             // cut interval
             const TF pxn = get_x_new( px0, px1, py0, py1, mass_to_take );
-            const TF pyn = py0 + ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 );
+            const TF pyn = py0 + ( ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 ) );
 
             moment += partial_moment( px0, pxn, py0, pyn );
             w2 += partial_w2( dirac_x, px0, pxn, py0, pyn );
@@ -219,7 +219,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
 }
 
 void sdot_w2_cpu( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, const TS *point_xs, const TS *point_ys, PI nb_points, PI batch_size, TS *w2_squared, TS *w2_barycenters ) {
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for( PI b = 0; b < batch_size; ++b ) {
         sdot_w2_cpu_single(
             dirac_xs + b * nb_diracs, dirac_ws + b * nb_diracs, nb_diracs,
@@ -263,7 +263,7 @@ void sdot_w2_backward_cpu(
     TS *grad_dirac_xs, TS *grad_dirac_ws,
     TS *grad_point_xs, TS *grad_point_ys
 ) {
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for( PI b = 0; b < batch_size; ++b ) {
         sdot_w2_backward_cpu_single(
             grad_distance[ b ], grad_barycenters + b * nb_diracs, w2_barycenters + b * nb_diracs,

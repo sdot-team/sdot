@@ -1,31 +1,35 @@
-.PHONY: venv all clean test help
+.PHONY: venv setup build all clean test help
 
 VENV = $(CURDIR)/.venv
 PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
+MESON = $(VENV)/bin/meson
 
-all:
-	@mkdir -p build
-	@if [ ! -f build/rules.ninja ]; then \
-		cd build && cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON; \
+setup:
+	@if [ ! -f build/build.ninja ]; then \
+		$(MESON) setup build; \
 	fi
-	@cmake --build build --parallel
+
+build: setup
+	@$(MESON) compile -C build
 	@ln -sf $(CURDIR)/build/sdot_pytorch_cpp.cpython* $(CURDIR)/python/pytorch/
 	@ln -sf $(CURDIR)/build/sdot_jax_cpp.cpython* $(CURDIR)/python/jax/
+
+all: build
 
 venv:
 	@python3 -m venv $(VENV)
 	@$(PIP) install --upgrade pip
-	@$(PIP) install torch jax jaxlib nanobind cmake ninja numpy pytest
+	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest
 
-test: all
-	@echo  "\n>>> Running C++ Tests (ctest) -----------------------------------------------"
-	@cd build && ctest --output-on-failure --test-dir .
+test: build
+	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"
+	@$(MESON) test -C build --print-errorlogs
 	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
-	@PYTHONPATH=$(CURDIR)/build:$(CURDIR)/python/pytorch:$(CURDIR)/python/jax:$(PYTHONPATH) $(PYTHON) -m pytest -s -q --tb=short tests/
+	@PYTHONPATH=$(CURDIR)/python/pytorch:$(CURDIR)/python/jax:$(PYTHONPATH) $(PYTHON) -m pytest -s -q --tb=short tests/
 
-ct_reco: all
-	$(PYTHON) examples/ct_reconstruction/ct_reconstruction.py
+ct_reco: build
+	@PYTHONPATH=$(CURDIR)/python/pytorch:$(CURDIR)/python/jax $(PYTHON) examples/ct_reconstruction/ct_reconstruction.py
 
 clean:
 	@rm -rf build
@@ -34,8 +38,10 @@ clean:
 	@rm -f compile_commands.json
 
 help:
-	@echo "Modern CMake Makefile:"
-	@echo "  make venv   : Create venv and install deps"
-	@echo "  make all    : Build library and extensions via CMake"
-	@echo "  make test   : Build and run all tests (ctest + pytest)"
+	@echo "Meson Makefile:"
+	@echo "  make venv   : Create venv and install deps (including meson)"
+	@echo "  make setup  : Setup Meson build directory"
+	@echo "  make build  : Build library and extensions via Meson"
+	@echo "  make all    : Alias for 'make build'"
+	@echo "  make test   : Build and run all tests (meson test + pytest)"
 	@echo "  make clean  : Cleanup build artifacts"

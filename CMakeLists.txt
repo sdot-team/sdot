@@ -5,14 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Force color output for compilers (Clang/GCC)
-if(NOT MSVC)
-    add_compile_options(-fdiagnostics-color=always)
-endif()
-
-# Catch2 configuration
-set(CATCH_CONFIG_COLOUR_ANSI ON CACHE BOOL "Force ANSI color for Catch2")
-
 # --- Dependencies ---
 if(APPLE)
     # Prioritize torch's libomp if available to avoid loading multiple OpenMP runtimes
@@ -38,7 +30,8 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/.venv")
     set(Python_EXECUTABLE "${CMAKE_SOURCE_DIR}/.venv/bin/python")
 endif()
 
-find_package(OpenMP)
+# Disable OpenMP to avoid runtime conflicts
+# find_package(OpenMP)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 
 # Catch2 v3
@@ -64,7 +57,7 @@ execute_process(COMMAND ${Python_EXECUTABLE} -c "import torch.utils.cpp_extensio
 execute_process(COMMAND ${Python_EXECUTABLE} -c "import torch.utils.cpp_extension; print(torch.utils.cpp_extension.library_paths()[0])" OUTPUT_VARIABLE TORCH_LIB_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 # --- Core Library ---
-add_library(sdot_cpu SHARED
+add_library(sdot_cpu STATIC
     src/cpu/sdot_w2_cpu.cpp
     src/cpu/sdot_l2_cpu.cpp
     src/read_arg_name.cpp
@@ -76,7 +69,7 @@ endif()
 if(APPLE)
     find_library(METAL_LIBRARY Metal REQUIRED)
     find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
-    add_library(sdot_metal SHARED
+    add_library(sdot_metal STATIC
         src/metal/sdot_w2_metal.mm
         src/metal/sdot_l2_metal.mm
     )

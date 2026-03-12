@@ -1,0 +1,26 @@
+CompileFlags:
+  CompilationDatabase: .
+
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    Add:
+      - modernize-*
+      - performance-*
+      # - bugprone-*
+    Remove:
+      - modernize-use-trailing-return-type
+      - readability-magic-numbers
+      - readability-identifier-length
+
+Index:
+  Background: Build
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  ShowAKA: Yes

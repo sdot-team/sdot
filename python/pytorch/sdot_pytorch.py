@@ -1,20 +1,47 @@
 from torch.autograd import Function
 import sdot_pytorch_cpp
 import torch
-import os
-
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" # mandatory
 
 class SDOTW2Function(Function):
     @staticmethod
     def forward(ctx, dirac_xs, dirac_ws, point_xs, point_ys):
-        distance, barycenters = sdot_pytorch_cpp.forward(dirac_xs, dirac_ws, point_xs, point_ys)
+        # Create output tensors
+        if dirac_xs.dim() == 1:
+            result = torch.empty(1, dtype=dirac_xs.dtype, device=dirac_xs.device)
+        else:
+            result = torch.empty(dirac_xs.size(0), dtype=dirac_xs.dtype, device=dirac_xs.device)
+
+        barycenters = torch.empty_like(dirac_xs)
+
+        # Call C++ implementation
+        sdot_pytorch_cpp.forward_impl(
+            dirac_xs.contiguous(), dirac_ws.contiguous(),
+            point_xs.contiguous(), point_ys.contiguous(),
+            result, barycenters
+        )
+
         ctx.save_for_backward(barycenters, dirac_xs, dirac_ws, point_xs, point_ys)
-        return distance, barycenters
+        return result, barycenters
 
     @staticmethod
     def backward(ctx, grad_distance, grad_barycenters):
-        grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys = sdot_pytorch_cpp.backward( grad_distance, grad_barycenters, *ctx.saved_tensors )
+        barycenters, dirac_xs, dirac_ws, point_xs, point_ys = ctx.saved_tensors
+
+        # Create output gradient tensors
+        grad_dirac_xs = torch.empty_like(dirac_xs)
+        grad_dirac_ws = torch.empty_like(dirac_ws)
+        grad_point_xs = torch.empty_like(point_xs)
+        grad_point_ys = torch.empty_like(point_ys)
+
+        # Call C++ backward implementation
+        sdot_pytorch_cpp.backward_impl(
+            grad_distance.contiguous(), grad_barycenters.contiguous(),
+            barycenters.contiguous(),
+            dirac_xs.contiguous(), dirac_ws.contiguous(),
+            point_xs.contiguous(), point_ys.contiguous(),
+            grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
+        )
+
         return grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
 
 def sdot_w2(dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=False):
@@ -22,4 +49,3 @@ def sdot_w2(dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=False):
     if return_barycenters:
         return dist, bary
     return dist
-

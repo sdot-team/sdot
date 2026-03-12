@@ -1,15 +1,36 @@
 {
-  "venvPath": ".",
-  "venv": ".venv",
+  "include": [
+    "python/pytorch",
+    "python/jax",
+    "tests",
+    "examples"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/node_modules",
+    "build",
+    ".venv"
+  ],
   "extraPaths": [
     "python/pytorch",
     "python/jax",
     "build"
   ],
-  "include": [
-    "python",
-    "tests"
-  ],
+  "venvPath": ".",
+  "venv": ".venv",
   "pythonVersion": "3.14",
-  "typeCheckingMode": "basic"
+  "pythonPlatform": "Darwin",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedClass": "warning",
+  "reportUnusedFunction": "warning",
+  "reportUnusedVariable": "warning",
+  "reportDuplicateImport": "warning",
+  "reportOptionalMemberAccess": "none",
+  "reportGeneralTypeIssues": "none",
+  "reportPrivateUsage": "none",
+  "stubPath": ""
 }
