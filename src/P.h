@@ -26,6 +26,6 @@ void __print_with_mutex( std::ostream &os, std::string_view arg_names, const aut
 
 // PRINT in cout
 #define P( ... ) \
-    uot::__print_with_mutex( std::cout, #__VA_ARGS__, __VA_ARGS__ )
+    uot::__print_with_mutex( std::cerr, #__VA_ARGS__, __VA_ARGS__ )
 
 } // namespace uot

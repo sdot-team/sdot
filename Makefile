@@ -10,7 +10,6 @@ all:
 		cd build && cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON; \
 	fi
 	@cmake --build build --parallel
-	# Link extensions so they are importable
 	@ln -sf $(CURDIR)/build/sdot_pytorch_cpp.cpython* $(CURDIR)/python/pytorch/
 	@ln -sf $(CURDIR)/build/sdot_jax_cpp.cpython* $(CURDIR)/python/jax/
 
@@ -20,9 +19,9 @@ venv:
 	@$(PIP) install torch jax jaxlib nanobind cmake ninja numpy pytest
 
 test: all
-	@echo "\n>>> Running C++ Tests (ctest)"
+	@echo  "\n>>> Running C++ Tests (ctest) -----------------------------------------------"
 	@cd build && ctest --output-on-failure --test-dir .
-	@echo "\n>>> Running Python Tests (pytest)"
+	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
 	@PYTHONPATH=$(CURDIR)/build:$(CURDIR)/python/pytorch:$(CURDIR)/python/jax:$(PYTHONPATH) $(PYTHON) -m pytest -q --tb=short tests/
 
 clean:

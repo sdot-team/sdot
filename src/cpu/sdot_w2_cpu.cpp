@@ -3,6 +3,7 @@
 // #include <utility>
 #include "sdot_w2_cpu.h"
 #include <algorithm>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #include <cmath>
@@ -58,7 +59,7 @@ static TF get_points_mass( const TS *point_xs, const TS *point_ys, PI nb_points 
     return res;
 }
 
-TF solve_quadratic( TF a, TF b, TF c, TF default_value ) {
+TF solve_quadratic_2( TF a, TF b, TF c, TF default_value ) {
     const TF scale = std::max( { abs( a ), abs( b ), abs( c ) } );
     if ( scale == 0.0 )
         return 0;
@@ -70,9 +71,9 @@ TF solve_quadratic( TF a, TF b, TF c, TF default_value ) {
         return - c / b;
     }
 
-    TF delta = b * b - 4 * a * c;
+    TF delta = b * b - 2 * a * c;
     if ( delta < eps * eps ) // Proche de zéro
-        return - b / ( 2 * a );
+        return - b / a;
 
     // double q = -0.5 * (b + ( (b >= 0) ? sqrt_delta : -sqrt_delta ));
 
@@ -80,35 +81,33 @@ TF solve_quadratic( TF a, TF b, TF c, TF default_value ) {
     //     double x1 = q / a;
     //     // x2 est déduit par la propriété x1*x2 = c/a -> x2 = c/(a*x1) = c/q
     //     double x2 = c / q;
-    return ( sqrt( max( TF( 0 ), delta ) ) - b ) / ( 2 * a );
+    return ( sqrt( max( TF( 0 ), delta ) ) - b ) / a;
 }
 
-TF get_x_new( TF px0, TF px1, TF py0, TF py1, TF mass_to_take ) {
-    if ( px0 == px1 )
-        return px0;
+TF get_x_new( TF x0, TF x1, TF y0, TF y1, TF mass_to_take ) {
+    if ( x0 == x1 )
+        return x0;
 
-    // integral( py0 + ( py1 - py0 ) * ( x - px0 ) / ( px1 - px0 ), px0, x ) = mass_to_take
-    // ( py0 - ( py1 - py0 ) * px0 / ( px1 - px0 ) ) * ( x - px0 ) + ( py1 - py0 ) * pow( x - px0, 2 ) / 2 - mass_to_take = 0
-    const TF b = py0 - ( py1 - py0 ) * px0 / ( px1 - px0 );
-    const TF a = ( py1 - py0 ) / 2;
+    // integral( y0 + ( y1 - y0 ) * ( x - x0 ) / ( x1 - x0 ), x, x0, v ) = m
+    //  dx ^ 2 * ( y0 - y1 ) / ( x0 - x1 ) / 2 + dx * y0 - m
+    const TF a = ( y0 - y1 ) / ( x0 - x1 );
     const TF c = - mass_to_take;
-    return px0 + solve_quadratic( a, b, c, 0 );
+    const TF b = y0;
+    return x0 + solve_quadratic_2( a, b, c, 0 );
 }
 
-TF partial_w2( TF dirac_x, TF x0, TF x1, TF y0, TF y1 ) {
-    // x = x0 + ( x1 - x0 ) * t
-    // y = y0 + ( y1 - y0 ) * t
-    // integral( ( x - dirac_x )^2 * y, t, 0, 1 )
-    return (
-      - 4 * dirac_x * ( x0 * ( 2 * y0 + y1 ) + x1 * ( y0 + 2 * y1 ) )
-      + 6 * pow( dirac_x, 2 ) * ( y0 + y1 )
-      + pow( x0, 2 ) * ( 3 * y0 + y1 )
-      + pow( x1, 2 ) * ( y0 + 3 * y1 )
-      + 2 * x0 * x1 * ( y0 + y1 )
+TF partial_w2( TF d, TF x0, TF x1, TF y0, TF y1 ) {
+    // integral( ( x - dirac_x )^2 * ( y0 + ( y1 - y0 ) * ( x - x0 ) / ( x1 - x0 ) ), x, x0, x1 )
+    return ( x0 - x1 ) * (
+        + 4 * d * ( x0 * ( 2 * y0 + y1 ) + x1 * ( y0 + 2 * y1 ) )
+        - x0 * x0 * ( 3 * y0 + y1 )
+        - x1 * x1 * ( y0 + 3 * y1 )
+        - 2 * x0 * x1 * ( y0 + y1 )
+        - 6 * d * d * ( y0 + y1 )
     ) / 12;
 }
 
-TF moment( TF x0, TF x1, TF y0, TF y1 ) {
+TF partial_moment( TF x0, TF x1, TF y0, TF y1 ) {
     // integral( x * ( y0 + ( y1 - y0 ) * ( x - x0 ) / ( x1 - x0 ) ), x, x0, x1 )
     // integral(
     //      + x * ( py0 - ( py1 - py0 ) * px0 / ( px1 - px0 ) )
@@ -139,8 +138,8 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
 
     // get values for each dirac
     TF px0 = point_xs[ 0 ];
-    TF py0 = point_ys[ 0 ];
     TF px1 = point_xs[ 1 ];
+    TF py0 = point_ys[ 0 ];
     TF py1 = point_ys[ 1 ];
     PI point_index = 1;
 
@@ -151,25 +150,63 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
         const TF dirac_x = dirac_xs[ i ];
 
         const TF dirac_mass = dirac_scale * dirac_ws[ dirac_index ];
-        TF mass_to_take = dirac_mass;
-        if ( mass_to_take <= 0 )
+        if ( dirac_mass <= 0 )
             throw std::runtime_error( "dirac_mass is not strictly positive" );
 
         // stay on the first interval ?
-        if ( mass_to_take <= remaining_mass ) {
+        if ( dirac_mass <= remaining_mass ) {
+            const TF pxn = get_x_new( px0, px1, py0, py1, dirac_mass );
+            const TF pyn = py0 + ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 );
+
+            w2_barycenters[ dirac_index ] = partial_moment( px0, pxn, py0, pyn ) / dirac_mass;
+            w2 += partial_w2( dirac_x, px0, pxn, py0, pyn );
+
+            remaining_mass -= dirac_mass;
+            px0 = pxn;
+            py0 = pyn;
+        } else {
+            // take the first interval
+            TF moment = partial_moment( px0, px1, py0, py1 );
+            w2 += partial_w2( dirac_x, px0, px1, py0, py1 );
+            TF mass_to_take = dirac_mass - remaining_mass;
+
+            // full intermediate intervals
+            while ( true ) {
+                px0 = px1;
+                py0 = py1;
+
+                if ( ++point_index < nb_points ) {
+                    px1 = point_xs[ point_index ];
+                    py1 = point_ys[ point_index ];
+
+                    remaining_mass = ( px1 - px0 ) * ( py1 + py0 ) / 2;
+                } else {
+                    px1 = 1.1 * point_xs[ nb_points - 1 ] - point_xs[ 0 ] * 0.1;
+                    py1 = numeric_limits<TF>::max();
+
+                    remaining_mass = numeric_limits<TF>::max();
+                }
+
+                if ( mass_to_take <= remaining_mass )
+                    break;
+
+                moment += partial_moment( px0, px1, py0, py1 );
+                w2 += partial_w2( dirac_x, px0, px1, py0, py1 );
+                mass_to_take -= remaining_mass;
+            }
+
+            // cut interval
             const TF pxn = get_x_new( px0, px1, py0, py1, mass_to_take );
             const TF pyn = py0 + ( py1 - py0 ) * ( pxn - px0 ) / ( px1 - px0 );
 
-            P( px0, pxn, py0, pyn, moment( px0, pxn, py0, pyn ) );
-
-            w2_barycenters[ dirac_index ] = moment( px0, pxn, py0, pyn ) / dirac_mass;
+            moment += partial_moment( px0, pxn, py0, pyn );
             w2 += partial_w2( dirac_x, px0, pxn, py0, pyn );
 
             remaining_mass -= mass_to_take;
             px0 = pxn;
             py0 = pyn;
-        } else {
-            throw std::runtime_error( "TODO mass to take" );
+
+            w2_barycenters[ dirac_index ] = moment / dirac_mass;
         }
     }
 

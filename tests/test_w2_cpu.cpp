@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include "../src/cpu/sdot_w2_cpu.h"
+#include "../src/P.h"
 // #include <cmath>
 
 using TS = float;
@@ -37,30 +38,31 @@ static TV full( TS v, PI n ) {
     return TV( n, v );
 }
 
-TEST_CASE("SDOT W2 CPU Single Dirac", "[cpu][w2]") {
-    W2Out wo = compute_w2( { 0 }, { 1 }, { 0, 1 }, { 1, 1 } );
-    CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
-    CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 3.0 } ) );
+TEST_CASE( "SDOT W2 CPU Single Dirac", "[cpu][w2]" ) {
+    SECTION( "1.0 -> 1" ) {
+        W2Out wo = compute_w2( { 0 }, { 1 }, { 0, 1 }, { 1, 1 } );
+        CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
+        CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 3.0 } ) );
+    }
 
-    wo = compute_w2( { 0.5 }, { 1 }, { 0, 1 }, { 1, 1 } );
-    CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
-    CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 12.0 } ) );
+    SECTION( "0.5 -> 1" ) {
+        W2Out wo = compute_w2( { 0.5 }, { 1 }, { 0, 1 }, { 1, 1 } );
+        CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
+        CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 12.0 } ) );
+    }
+
+    SECTION( "0.5 -> x" ) {
+        W2Out wo = compute_w2( { 0.5 }, { 1 }, { 0, 1 }, { 0, 2 } );
+        CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 2.0 / 3.0 } ) );
+        CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 12.0 } ) );
+    }
 }
 
-// TEST_CASE("SDOT W2 CPU Single Dirac", "[cpu][w2]") {
-//     PI n = 10;
-//     W2Out wo = compute_w2( linspace( 0, 1, n ), full( 1, n ), { 0.0f, 1.0f }, { 1.0f, 1.0f } );
-//     CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( linspace( 0.05, 0.95, n ) ) );
-//     CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 0.5f } ) );
-// }
+TEST_CASE( "SDOT W2 CPU Multiple Points", "[cpu][w2]" ) {
+    SECTION( "0.5 -> 1,1,1" ) {
+        W2Out wo = compute_w2( { 0.5 }, { 1 }, { 0.0, 0.5, 0.6, 1.0 }, { 1, 1, 1, 1 } );
+        CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
+        CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 12.0 } ) );
+    }
+}
 
-// TEST_CASE("SDOT W2 CPU Two Diracs", "[cpu][w2]") {
-//     W2Out wo = compute_w2( { 0.25f, 0.75f }, { 0.5f, 0.5f }, { 0.0f, 1.0f }, { 1.0f, 1.0f } );
-//     CHECK_THAT( wo.distances  , Catch::Matchers::Approx<TS>( { 0.0f } ) );
-//     CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.25f, 0.75f } ) );
-// }
-
-// TEST_CASE("SDOT W2 CPU Batch", "[cpu][w2]") {
-//     W2Out wo = compute_w2( { 0.5f, 0.0f }, {1.0f, 1.0f}, { 0.0f, 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, 2 );
-//     CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 0.0f, 1.0 } ) );
-// }
