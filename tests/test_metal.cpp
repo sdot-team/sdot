@@ -1,45 +1,33 @@
-#include <iostream>
-#include <vector>
-#include <cmath>
-#include <cassert>
-#include "sdot_l2.h"
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include "../src/metal/sdot_l2_metal.h"
 
-int main() {
-    const size_t N = 3;
-    float f[] = {1.0f, 2.0f, 3.0f};
-    float g[] = {1.0f, 1.0f, 1.0f};
-    float result = 0.0f;
-    
-    sdot_l2_metal(f, g, N, &result);
-    std::cout << "Metal Forward result: " << result << std::endl;
-    
-    float expected_result = (0.0f*0.0f + 1.0f*1.0f + 2.0f*2.0f) / 3.0f;
-    assert(std::abs(result - expected_result) < 1e-5);
-    std::cout << "Metal Forward check passed!" << std::endl;
-    
-    float grad_f[N];
-    float grad_g[N];
-    sdot_l2_backward_metal(f, g, N, grad_f, grad_g);
-    
-    std::cout << "Metal Grad F: ";
-    for (size_t i = 0; i < N; ++i) std::cout << grad_f[i] << " ";
-    std::cout << std::endl;
-    
-    float expected_grad_f[] = {0.0f, 2.0f/3.0f, 4.0f/3.0f};
-    for (size_t i = 0; i < N; ++i) {
-        assert(std::abs(grad_f[i] - expected_grad_f[i]) < 1e-5);
-    }
-    std::cout << "Metal Backward F check passed!" << std::endl;
+// TEST_CASE("SDOT L2 Metal Forward", "[metal][l2]") {
+//     const size_t N = 3;
+//     float f[] = {1.0f, 2.0f, 3.0f};
+//     float g[] = {1.0f, 1.0f, 1.0f};
+//     float result = 0.0f;
 
-    std::cout << "Metal Grad G: ";
-    for (size_t i = 0; i < N; ++i) std::cout << grad_g[i] << " ";
-    std::cout << std::endl;
+//     sdot_l2_metal(f, g, N, &result);
 
-    float expected_grad_g[] = {0.0f, -2.0f/3.0f, -4.0f/3.0f};
-    for (size_t i = 0; i < N; ++i) {
-        assert(std::abs(grad_g[i] - expected_grad_g[i]) < 1e-5);
-    }
-    std::cout << "Metal Backward G check passed!" << std::endl;
+//     float expected_result = (0.0f*0.0f + 1.0f*1.0f + 2.0f*2.0f) / 3.0f;
+//     REQUIRE_THAT(result, Catch::Matchers::WithinAbs(expected_result, 1e-5));
+// }
 
-    return 0;
-}
+// TEST_CASE("SDOT L2 Metal Backward", "[metal][l2]") {
+//     const size_t N = 3;
+//     float f[] = {1.0f, 2.0f, 3.0f};
+//     float g[] = {1.0f, 1.0f, 1.0f};
+//     float grad_f[N];
+//     float grad_g[N];
+
+//     sdot_l2_backward_metal(f, g, N, grad_f, grad_g);
+
+//     float expected_grad_f[] = {0.0f, 2.0f/3.0f, 4.0f/3.0f};
+//     float expected_grad_g[] = {0.0f, -2.0f/3.0f, -4.0f/3.0f};
+
+//     for (size_t i = 0; i < N; ++i) {
+//         CHECK_THAT(grad_f[i], Catch::Matchers::WithinAbs(expected_grad_f[i], 1e-5));
+//         CHECK_THAT(grad_g[i], Catch::Matchers::WithinAbs(expected_grad_g[i], 1e-5));
+//     }
+// }

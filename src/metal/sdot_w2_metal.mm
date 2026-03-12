@@ -1,4 +1,4 @@
-#include "sdot_w2.h"
+#include "sdot_w2_metal.h"
 
 void sdot_w2_metal(const float* Xf, const float* Wf, size_t Nf,
                    const float* Xg, const float* Yg, size_t Mg,

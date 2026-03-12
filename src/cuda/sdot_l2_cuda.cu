@@ -1,5 +1,5 @@
 #include <cuda_runtime.h>
-#include "sdot_l2.h"
+#include "../cpu/sdot_l2_cpu.h"
 #include <device_launch_parameters.h>
 
 __global__ void sdot_l2_forward_kernel(const float* f, const float* g, size_t N, float* partial_sums) {

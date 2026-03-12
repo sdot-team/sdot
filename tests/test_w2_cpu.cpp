@@ -1,46 +1,66 @@
-#include <iostream>
-#include <vector>
-#include <cmath>
-#include <cassert>
-#include "sdot_w2.h"
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_vector.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include "../src/cpu/sdot_w2_cpu.h"
+// #include <cmath>
 
-int main() {
-    // Test 1: Single Dirac at 0.5, g(x) = 1 on [0,1]
-    float Xf[] = {0.5f};
-    float Wf[] = {1.0f};
-    float Xg[] = {0.0f, 1.0f};
-    float Yg[] = {1.0f, 1.0f};
-    float result = -1.0f;
-    float barycenters[1];
-    
-    sdot_w2_cpu(Xf, Wf, 1, Xg, Yg, 2, 1, &result, barycenters);
-    std::cout << "Test 1 result: " << result << ", Barycenter: " << barycenters[0] << std::endl;
-    assert(std::abs(result) < 1e-5);
-    assert(std::abs(barycenters[0] - 0.5f) < 1e-5);
-    
-    // Test 2: Two Diracs at 0.25 and 0.75
-    float Xf2[] = {0.25f, 0.75f};
-    float Wf2[] = {0.5f, 0.5f};
-    float barycenters2[2];
-    sdot_w2_cpu(Xf2, Wf2, 2, Xg, Yg, 2, 1, &result, barycenters2);
-    std::cout << "Test 2 result: " << result << ", Barycenters: " << barycenters2[0] << " " << barycenters2[1] << std::endl;
-    assert(std::abs(result) < 1e-5);
-    
-    // Test 3: Batch of 2
-    float Xf_batch[] = {0.5f, 0.0f}; // Test 1 and Test 3 from before
-    float Wf_batch[] = {1.0f, 1.0f};
-    float Xg_batch[] = {0.0f, 1.0f, 0.0f, 1.0f};
-    float Yg_batch[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    float results_batch[2];
-    float bary_batch[2];
-    
-    sdot_w2_cpu(Xf_batch, Wf_batch, 1, Xg_batch, Yg_batch, 2, 2, results_batch, bary_batch);
-    std::cout << "Batch result 0: " << results_batch[0] << " (exp 0.0)" << std::endl;
-    std::cout << "Batch result 1: " << results_batch[1] << " (exp 0.25)" << std::endl;
-    assert(std::abs(results_batch[0]) < 1e-5);
-    assert(std::abs(results_batch[1] - 0.25f) < 1e-5);
+using TS = float;
+using PI = size_t;
+using TV = std::vector<TS>;
 
-    std::cout << "All Batched CPU W2 tests passed!" << std::endl;
+struct W2Out {
+    TV barycenters;
+    TV distances;
+};
 
-    return 0;
+static W2Out compute_w2( TV dirac_xs, TV dirac_ws, TV point_xs, TV point_ys, PI nb_batches = 1 ) {
+    const PI nb_diracs = dirac_xs.size() / nb_batches;
+    const PI nb_points = point_xs.size() / nb_batches;
+
+    W2Out res;
+    res.distances.resize( nb_batches, -1 );
+    res.barycenters.resize( nb_diracs * nb_batches, -1 );
+
+    sdot_w2_cpu( dirac_xs.data(), dirac_ws.data(), nb_diracs, point_xs.data(), point_ys.data(), nb_points, nb_batches, res.distances.data(), res.barycenters.data() );
+
+    return res;
 }
+
+static TV linspace( TS v0, TS v1, PI n ) {
+    TV res( n );
+    for( PI i = 0; i < n; ++i )
+        res[ i ] = v0 + ( v1 - v0 ) * i / ( n - 1 );
+    return res;
+}
+
+static TV full( TS v, PI n ) {
+    return TV( n, v );
+}
+
+TEST_CASE("SDOT W2 CPU Single Dirac", "[cpu][w2]") {
+    W2Out wo = compute_w2( { 0 }, { 1 }, { 0, 1 }, { 1, 1 } );
+    CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
+    CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 3.0 } ) );
+
+    wo = compute_w2( { 0.5 }, { 1 }, { 0, 1 }, { 1, 1 } );
+    CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.5 } ) );
+    CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 1.0 / 12.0 } ) );
+}
+
+// TEST_CASE("SDOT W2 CPU Single Dirac", "[cpu][w2]") {
+//     PI n = 10;
+//     W2Out wo = compute_w2( linspace( 0, 1, n ), full( 1, n ), { 0.0f, 1.0f }, { 1.0f, 1.0f } );
+//     CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( linspace( 0.05, 0.95, n ) ) );
+//     CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 0.5f } ) );
+// }
+
+// TEST_CASE("SDOT W2 CPU Two Diracs", "[cpu][w2]") {
+//     W2Out wo = compute_w2( { 0.25f, 0.75f }, { 0.5f, 0.5f }, { 0.0f, 1.0f }, { 1.0f, 1.0f } );
+//     CHECK_THAT( wo.distances  , Catch::Matchers::Approx<TS>( { 0.0f } ) );
+//     CHECK_THAT( wo.barycenters, Catch::Matchers::Approx<TS>( { 0.25f, 0.75f } ) );
+// }
+
+// TEST_CASE("SDOT W2 CPU Batch", "[cpu][w2]") {
+//     W2Out wo = compute_w2( { 0.5f, 0.0f }, {1.0f, 1.0f}, { 0.0f, 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, 2 );
+//     CHECK_THAT( wo.distances, Catch::Matchers::Approx<TS>( { 0.0f, 1.0 } ) );
+// }

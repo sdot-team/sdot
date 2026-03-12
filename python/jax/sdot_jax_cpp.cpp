@@ -1,10 +1,24 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
-#include "sdot_w2.h"
+#include "../../src/cpu/sdot_w2_cpu.h"
+#include "../../src/cpu/sdot_l2_cpu.h"
 #include <vector>
 #include <cstdint>
 
 namespace nb = nanobind;
+
+void sdot_l2_cpu_wrapped(nb::ndarray<float, nb::device::cpu> f, 
+                         nb::ndarray<float, nb::device::cpu> g,
+                         nb::ndarray<float, nb::device::cpu> result) {
+    sdot_l2_cpu(f.data(), g.data(), f.shape(0), result.data());
+}
+
+void sdot_l2_backward_cpu_wrapped(nb::ndarray<float, nb::device::cpu> f, 
+                                  nb::ndarray<float, nb::device::cpu> g,
+                                  nb::ndarray<float, nb::device::cpu> grad_f,
+                                  nb::ndarray<float, nb::device::cpu> grad_g) {
+    sdot_l2_backward_cpu(f.data(), g.data(), f.shape(0), grad_f.data(), grad_g.data());
+}
 
 void sdot_w2_cpu_wrapped(nb::ndarray<float, nb::device::cpu> Xf, 
                          nb::ndarray<float, nb::device::cpu> Wf,
@@ -38,4 +52,6 @@ void sdot_w2_cpu_wrapped(nb::ndarray<float, nb::device::cpu> Xf,
 
 NB_MODULE(sdot_jax_cpp, m) {
     m.def("w2_cpu", &sdot_w2_cpu_wrapped);
+    m.def("l2_cpu", &sdot_l2_cpu_wrapped);
+    m.def("l2_backward_cpu", &sdot_l2_backward_cpu_wrapped);
 }

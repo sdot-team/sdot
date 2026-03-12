@@ -10,7 +10,7 @@
   "lsp": {
     "clangd": {
       "arguments": [
-        "--compile-commands-dir=.",
+        "--compile-commands-dir=build",
         "--header-insertion=never"
       ]
     },

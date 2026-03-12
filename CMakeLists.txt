@@ -1,9 +1,17 @@
 cmake_minimum_required(VERSION 3.15)
 project(sdot_w2 CXX OBJCXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Force color output for compilers (Clang/GCC)
+if(NOT MSVC)
+    add_compile_options(-fdiagnostics-color=always)
+endif()
+
+# Catch2 configuration
+set(CATCH_CONFIG_COLOUR_ANSI ON CACHE BOOL "Force ANSI color for Catch2")
 
 # --- Dependencies ---
 if(APPLE)
@@ -11,6 +19,8 @@ if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/libomp")
     list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/libomp")
 endif()
+
+include(FetchContent)
 
 # Prioritize virtual environment if it exists
 if(EXISTS "${CMAKE_SOURCE_DIR}/.venv")
@@ -20,6 +30,16 @@ endif()
 
 find_package(OpenMP)
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+
+# Catch2 v3
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v3.4.0
+)
+FetchContent_MakeAvailable(Catch2)
+
+enable_testing()
 
 # Determine the extension for Python modules
 # FindPython provides Python_SOABI since 3.17
@@ -34,8 +54,11 @@ execute_process(COMMAND ${Python_EXECUTABLE} -c "import torch.utils.cpp_extensio
 execute_process(COMMAND ${Python_EXECUTABLE} -c "import torch.utils.cpp_extension; print(torch.utils.cpp_extension.library_paths()[0])" OUTPUT_VARIABLE TORCH_LIB_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 # --- Core Library ---
-include_directories(include)
-add_library(sdot_cpu SHARED src/cpu/sdot_w2_cpu.cpp)
+add_library(sdot_cpu SHARED
+    src/cpu/sdot_w2_cpu.cpp
+    src/cpu/sdot_l2_cpu.cpp
+    src/read_arg_name.cpp
+)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(sdot_cpu PUBLIC OpenMP::OpenMP_CXX)
 endif()
@@ -43,19 +66,23 @@ endif()
 if(APPLE)
     find_library(METAL_LIBRARY Metal REQUIRED)
     find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
-    add_library(sdot_metal SHARED src/metal/sdot_w2_metal.mm)
+    add_library(sdot_metal SHARED
+        src/metal/sdot_w2_metal.mm
+        src/metal/sdot_l2_metal.mm
+    )
     set_source_files_properties(src/metal/sdot_w2_metal.mm PROPERTIES LANGUAGE OBJCXX)
-    target_link_libraries(sdot_metal PUBLIC ${METAL_LIBRARY} ${FOUNDATION_LIBRARY})
+    set_source_files_properties(src/metal/sdot_l2_metal.mm PROPERTIES LANGUAGE OBJCXX)
+    target_link_libraries(sdot_metal PUBLIC ${METAL_LIBRARY} ${FOUNDATION_LIBRARY} sdot_cpu)
 endif()
 
 # --- PyTorch Extension ---
 add_library(sdot_pytorch_cpp MODULE python/pytorch/sdot_pytorch_cpp.cpp)
 target_compile_definitions(sdot_pytorch_cpp PRIVATE TORCH_EXTENSION_NAME=sdot_pytorch_cpp)
-target_include_directories(sdot_pytorch_cpp PRIVATE include ${TORCH_INCLUDE_PATHS} ${Python_INCLUDE_DIRS})
+target_include_directories(sdot_pytorch_cpp PRIVATE src/cpu ${TORCH_INCLUDE_PATHS} ${Python_INCLUDE_DIRS})
 target_link_directories(sdot_pytorch_cpp PRIVATE ${TORCH_LIB_PATH})
 target_link_libraries(sdot_pytorch_cpp PRIVATE sdot_cpu torch torch_python torch_cpu c10)
-set_target_properties(sdot_pytorch_cpp PROPERTIES 
-    PREFIX "" 
+set_target_properties(sdot_pytorch_cpp PROPERTIES
+    PREFIX ""
     OUTPUT_NAME "sdot_pytorch_cpp"
     SUFFIX "${Python_MODULE_EXTENSION}"
 )
@@ -70,11 +97,19 @@ find_package(nanobind REQUIRED)
 
 nanobind_add_module(sdot_jax_cpp python/jax/sdot_jax_cpp.cpp)
 target_link_libraries(sdot_jax_cpp PRIVATE sdot_cpu)
-set_target_properties(sdot_jax_cpp PROPERTIES 
-    PREFIX "" 
+set_target_properties(sdot_jax_cpp PROPERTIES
+    PREFIX ""
     SUFFIX "${Python_MODULE_EXTENSION}"
 )
 
 # --- C++ Tests ---
-add_executable(test_w2_cpu tests/test_w2_cpu.cpp)
-target_link_libraries(test_w2_cpu sdot_cpu)
+add_executable(unit_tests
+    tests/test_w2_cpu.cpp
+    tests/test_cpu.cpp
+)
+if(APPLE)
+    target_sources(unit_tests PRIVATE tests/test_metal.cpp)
+    target_link_libraries(unit_tests PRIVATE sdot_metal)
+endif()
+target_link_libraries(unit_tests PRIVATE sdot_cpu Catch2::Catch2WithMain)
+add_test(NAME unit_tests COMMAND unit_tests)

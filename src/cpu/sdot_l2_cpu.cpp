@@ -1,4 +1,4 @@
-#include "sdot_l2.h"
+#include "sdot_l2_cpu.h"
 #include <vector>
 #include <cmath>
 
