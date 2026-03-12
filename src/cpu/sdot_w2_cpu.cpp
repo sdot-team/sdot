@@ -147,7 +147,7 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
     TF w2 = 0;
     for( PI i = 0; i < nb_diracs; ++i ) {
         const PI dirac_index = dirac_indices[ i ];
-        const TF dirac_x = dirac_xs[ i ];
+        const TF dirac_x = dirac_xs[ dirac_index ];
 
         const TF dirac_mass = dirac_scale * dirac_ws[ dirac_index ];
         if ( dirac_mass <= 0 )
@@ -227,21 +227,44 @@ void sdot_w2_cpu( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, const TS
 }
 
 
-void sdot_w2_backward_cpu(
-    const TS *grad_distance, const TS *grad_barycenters,
-    const TS *w2_barycenters,
+void sdot_w2_backward_cpu_single(
+    TS grad_distance, const TS *grad_barycenters, const TS *w2_barycenters,
     const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs,
-    const TS *points_xs, const TS *points_ys, PI nb_points,
-    PI batch_size,
+    const TS *point_xs, const TS *point_ys, PI nb_points,
     TS *grad_dirac_xs,
     TS *grad_dirac_ws,
     TS *grad_point_xs,
     TS *grad_point_ys
 ) {
-    for( PI i = 0; i < nb_points * batch_size; ++i ) {
-        grad_dirac_xs[ i ] = 2 * ( dirac_xs[ i ] - w2_barycenters[ i ] );
-        grad_dirac_ws[ i ] = 0;
-        grad_point_xs[ i ] = 0;
-        grad_point_ys[ i ] = 0;
+    for( PI num_dirac = 0; num_dirac < nb_diracs; ++num_dirac ) {
+        if ( grad_dirac_xs )
+            grad_dirac_xs[ num_dirac ] = grad_distance * 2 * ( dirac_xs[ num_dirac ] - w2_barycenters[ num_dirac ] );
+        if ( grad_dirac_ws )
+            grad_dirac_ws[ num_dirac ] = 0;
+    }
+}
+
+
+void sdot_w2_backward_cpu(
+    const TS *grad_distance, const TS *grad_barycenters, const TS *w2_barycenters,
+    const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs,
+    const TS *point_xs, const TS *point_ys, PI nb_points,
+    PI batch_size,
+    TS *grad_dirac_xs, TS *grad_dirac_ws,
+    TS *grad_point_xs, TS *grad_point_ys
+) {
+    #pragma omp parallel for
+    for( PI b = 0; b < batch_size; ++b ) {
+        sdot_w2_backward_cpu_single(
+            grad_distance[ b ], grad_barycenters + b * nb_diracs, w2_barycenters + b * nb_diracs,
+
+            dirac_xs + b * nb_diracs, dirac_ws + b * nb_diracs, nb_diracs,
+            point_xs + b * nb_points, point_ys + b * nb_points, nb_points,
+
+            grad_dirac_xs ? grad_dirac_xs + b * nb_diracs : nullptr,
+            grad_dirac_ws ? grad_dirac_ws + b * nb_diracs : nullptr,
+            grad_point_xs ? grad_point_xs + b * nb_diracs : nullptr,
+            grad_point_ys ? grad_point_ys + b * nb_diracs : nullptr
+        );
     }
 }

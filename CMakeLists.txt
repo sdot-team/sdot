@@ -15,6 +15,16 @@ set(CATCH_CONFIG_COLOUR_ANSI ON CACHE BOOL "Force ANSI color for Catch2")
 
 # --- Dependencies ---
 if(APPLE)
+    # Prioritize torch's libomp if available to avoid loading multiple OpenMP runtimes
+    execute_process(COMMAND ${Python_EXECUTABLE} -c "import torch; import os; print(os.path.join(os.path.dirname(torch.__file__), 'lib'))" OUTPUT_VARIABLE TORCH_LIB_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(EXISTS "${TORCH_LIB_DIR}/libomp.dylib")
+        set(OpenMP_libomp_LIBRARY "${TORCH_LIB_DIR}/libomp.dylib" CACHE FILEPATH "Path to libomp.dylib")
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "${TORCH_LIB_DIR}/libomp.dylib")
+        list(APPEND CMAKE_PREFIX_PATH "${TORCH_LIB_DIR}")
+        message(STATUS "Using PyTorch's OpenMP: ${TORCH_LIB_DIR}/libomp.dylib")
+    endif()
+
     # Common Homebrew paths for libomp
     list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/libomp")
     list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/libomp")

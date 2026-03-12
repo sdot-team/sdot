@@ -1,43 +1,35 @@
-import pytest
+# import pytest
 import torch
 import sys
 import os
 
 # Add build and python/pytorch to path
-sys.path.append(os.path.join(os.getcwd(), 'python/pytorch'))
-sys.path.append(os.path.join(os.getcwd(), 'build'))
+sys.path.append( os.path.join( os.getcwd(), 'python/pytorch' ) )
+sys.path.append( os.path.join( os.getcwd(), 'build' ) )
 
-# from sdot_pytorch import sdot_l2
+from sdot_pytorch import sdot_w2
 
-def test_pouet():
-    assert 1
+def test_sdot_w2_cpu():
+    dirac_xs = torch.tensor( [ 0.0 ], requires_grad = True )
+    dirac_ws = torch.tensor( [ 1.0 ] )
+    point_xs = torch.tensor( [ 0.0, 1.0 ] )
+    point_ys = torch.tensor( [ 1.0, 1.0 ] )
 
-# def test_sdot_l2_cpu():
-#     f = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-#     g = torch.tensor([1.0, 1.0, 1.0], requires_grad=True)
+    loss = sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys )
+    assert abs( loss.item() - 1 / 3 ) < 1e-6
 
-#     loss = sdot_l2(f, g)
+    loss.backward()
+    assert abs( dirac_xs.grad.item() + 1 ) < 1e-6
 
-#     expected_loss = (0.0**2 + 1.0**2 + 2.0**2) / 3.0
-#     assert abs(loss.item() - expected_loss) < 1e-6
+def test_sdot_w2_cpu_grad_check():
+    def test( dirac_xs, dirac_ws, point_xs, point_ys ):
+        torch.autograd.gradcheck( sdot_w2, (
+            torch.tensor( dirac_xs, requires_grad = True ),
+            torch.tensor( dirac_ws ),
+            torch.tensor( point_xs ),
+            torch.tensor( point_ys )
+        ), eps = 1e-05, atol = 1e-05, rtol = 1e-3 )
 
-#     loss.backward()
+    test( [ 0.0 ], [ 1.0 ], [ 0.0, 1.0 ],  [ 1.0, 1.0 ] )
+    test( [ 0.2 ], [ 1.0 ], [ 0.0, 1.0 ],  [ 1.0, 1.0 ] )
 
-#     expected_grad_f = torch.tensor([0.0, 2/3, 4/3])
-#     expected_grad_g = torch.tensor([0.0, -2/3, -4/3])
-
-#     assert torch.allclose(f.grad, expected_grad_f)
-#     assert torch.allclose(g.grad, expected_grad_g)
-
-# def test_sdot_l2_mps():
-#     if not torch.backends.mps.is_available():
-#         pytest.skip("MPS not available")
-
-#     f = torch.tensor([1.0, 2.0, 3.0], device='mps', requires_grad=True)
-#     g = torch.tensor([1.0, 1.0, 1.0], device='mps', requires_grad=True)
-
-#     loss = sdot_l2(f, g)
-#     loss.backward()
-
-#     assert abs(loss.item() - 1.6666666) < 1e-5
-#     assert torch.allclose(f.grad.cpu(), torch.tensor([0.0, 2/3, 4/3]))
