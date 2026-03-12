@@ -4,20 +4,18 @@ import sdot_pytorch_cpp
 
 class SDOTW2Function(Function):
     @staticmethod
-    def forward(ctx, Xf, Wf, Xg, Yg):
-        dist, barycenters = sdot_pytorch_cpp.forward(Xf, Wf, Xg, Yg)
-        ctx.save_for_backward(Xf, Wf, Xg, Yg, barycenters)
-        return dist, barycenters
+    def forward(ctx, dirac_xs, dirac_ws, point_xs, point_ys):
+        distance, barycenters = sdot_pytorch_cpp.forward(dirac_xs, dirac_ws, point_xs, point_ys)
+        ctx.save_for_backward(dirac_xs, dirac_ws, point_xs, point_ys, barycenters)
+        return distance, barycenters
 
     @staticmethod
-    def backward(ctx, grad_dist, grad_bary):
-        Xf, Wf, Xg, Yg, barycenters = ctx.saved_tensors
-        grad_Xf, grad_Wf, grad_Xg, grad_Yg = sdot_pytorch_cpp.backward(
-            grad_dist, grad_bary, Xf, Wf, Xg, Yg, barycenters)
-        return grad_Xf, grad_Wf, grad_Xg, grad_Yg
+    def backward(ctx, grad_distance, grad_barycenters):
+        # grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
+        return sdot_pytorch_cpp.backward( grad_distance, grad_barycenters, *ctx.saved_tensors )
 
-def sdot_w2(Xf, Wf, Xg, Yg, return_barycenters=False):
-    dist, bary = SDOTW2Function.apply(Xf, Wf, Xg, Yg)
+def sdot_w2(dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=False):
+    dist, bary = SDOTW2Function.apply(dirac_xs, dirac_ws, point_xs, point_ys)
     if return_barycenters:
         return dist, bary
     return dist

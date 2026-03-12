@@ -214,14 +214,34 @@ void sdot_w2_cpu_single( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, c
         *w2_squared = TS( w2 );
 }
 
-void sdot_w2_cpu( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, const TS *points_xs, const TS *points_ys, PI nb_points, PI batch_size, TS *w2_squared, TS *w2_barycenters ) {
+void sdot_w2_cpu( const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs, const TS *point_xs, const TS *point_ys, PI nb_points, PI batch_size, TS *w2_squared, TS *w2_barycenters ) {
     #pragma omp parallel for
     for( PI b = 0; b < batch_size; ++b ) {
         sdot_w2_cpu_single(
             dirac_xs + b * nb_diracs, dirac_ws + b * nb_diracs, nb_diracs,
-            points_xs + b * nb_points, points_ys + b * nb_points, nb_points,
-            w2_squared + b,
+            point_xs + b * nb_points, point_ys + b * nb_points, nb_points,
+            w2_squared ? w2_squared + b : nullptr,
             w2_barycenters ? (w2_barycenters + b * nb_diracs) : nullptr
         );
+    }
+}
+
+
+void sdot_w2_backward_cpu(
+    const TS *grad_distance, const TS *grad_barycenters,
+    const TS *w2_barycenters,
+    const TS *dirac_xs, const TS *dirac_ws, PI nb_diracs,
+    const TS *points_xs, const TS *points_ys, PI nb_points,
+    PI batch_size,
+    TS *grad_dirac_xs,
+    TS *grad_dirac_ws,
+    TS *grad_point_xs,
+    TS *grad_point_ys
+) {
+    for( PI i = 0; i < nb_points * batch_size; ++i ) {
+        grad_dirac_xs[ i ] = 2 * ( dirac_xs[ i ] - w2_barycenters[ i ] );
+        grad_dirac_ws[ i ] = 0;
+        grad_point_xs[ i ] = 0;
+        grad_point_ys[ i ] = 0;
     }
 }

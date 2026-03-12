@@ -2,7 +2,15 @@
 
 #include "read_arg_name.h"
 #include <iostream>
+#include <ostream>
+#include <vector>
 #include <mutex>
+
+template<class T,class A> std::ostream &operator<<( std::ostream &os, const std::vector<T,A> &v ) {
+    for( std::size_t i = 0; i < v.size(); ++i )
+        os << ( i ? ", " : " " ) << v[ i ];
+    return os;
+}
 
 namespace uot {
 
