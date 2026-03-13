@@ -20,7 +20,7 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     const size_t nb_diracs = dirac_xs.size() / nb_batches;
     const size_t nb_points = point_xs.size() / nb_batches;
 
-    Affine1DFunction<const TF,1> functions{ .xs = cview2( point_xs ), .ys = cview2( point_ys ) };
+    Affine1d<const TF,1> functions{ .xs = cview2( point_xs ), .ys = cview2( point_ys ) };
     DiracSet<const TF,1> diracs{ .xs = cview2( dirac_xs ), .ws = cview2( dirac_ws ) };
 
     // forward
@@ -47,9 +47,9 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     res.grad_point_ys.resize( nb_points * nb_batches );
     TV grad_bary( nb_diracs * nb_batches, 0 );
     TV grad_dist( nb_batches, 1 );
-    // T_T void w2_distance_backward( TensorView<const T,1> grad_w2_squared, TensorView<const T,2> grad_w2_barycenters, TensorView<const T,2> w2_barycenters, DiracSet<T,1> diracs, Affine1DFunction<T,1> functions, DiracSet<T,1> grad_diracs, Affine1DFunction<T,1> grad_functions );
+    // T_T void w2_distance_backward( TensorView<const T,1> grad_w2_squared, TensorView<const T,2> grad_w2_barycenters, TensorView<const T,2> w2_barycenters, DiracSet<T,1> diracs, Affine1d<T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions );
 
-    Affine1DFunction<TF,1> grad_functions{ .xs = view2( res.grad_point_xs ), .ys = view2( res.grad_point_ys ) };
+    Affine1d<TF,1> grad_functions{ .xs = view2( res.grad_point_xs ), .ys = view2( res.grad_point_ys ) };
     DiracSet<TF,1> grad_diracs{ .xs = view2( res.grad_dirac_xs ), .ws = view2( res.grad_dirac_ws ) };
 
     w2_distance_backward( cview1( grad_dist ), cview2( grad_bary ), cview2( res.barycenters ), diracs, functions, grad_diracs, grad_functions );

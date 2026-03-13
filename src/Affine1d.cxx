@@ -1,13 +1,12 @@
 #pragma once
 
-#include "support/solve_quadratic.h"
-#include "Affine1DFunction.h"
+#include "Affine1d.h"
 
 namespace sdot {
 
     // --------------------------------------------------- batch dim 0 ---------------------------------------------------
 #define UTP template<class T>
-#define DTP Affine1DFunction<T,0>
+#define DTP Affine1d<T,0>
 
 UTP DTP::Piece DTP::get_first_piece() const {
     if ( nb_points() < 2 )
@@ -90,13 +89,13 @@ UTP DTP::TF DTP::mass() const {
 
 // --------------------------------------------------- batch dim 1 ---------------------------------------------------
 #define UTP template<class T>
-#define DTP Affine1DFunction<T,1>
+#define DTP Affine1d<T,1>
 
 UTP PI DTP::nb_rows() const {
     return xs.size( 0 );
 }
 
-UTP Affine1DFunction<T,0> DTP::row( PI num_batch ) const  {
+UTP Affine1d<T,0> DTP::row( PI num_batch ) const  {
    return { xs.row( num_batch ), ys.row( num_batch ) };
 }
 

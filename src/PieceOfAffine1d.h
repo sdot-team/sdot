@@ -5,8 +5,8 @@
 namespace sdot {
 
 template<class T>
-struct PieceOfAffine1dFunction {
-    auto take_some_mass ( T mass_to_take ) -> PieceOfAffine1dFunction;
+struct PieceOfAffine1d {
+    auto take_some_mass ( T mass_to_take ) -> PieceOfAffine1d;
     T    value_at       ( T x ) const;
 
     T    w2_dist        ( double dirac_pos ) const;
@@ -22,4 +22,4 @@ struct PieceOfAffine1dFunction {
 
 } // namespace sdot
 
-#include "PieceOfAffine1dFunction.cxx"
+#include "PieceOfAffine1d.cxx"

@@ -1,15 +1,15 @@
 #pragma once
 
 #include "support/solve_quadratic.h"
-#include "PieceOfAffine1dFunction.h"
+#include "PieceOfAffine1d.h"
 
 namespace sdot {
 
 #define UTP template<class T>
-#define DTP PieceOfAffine1dFunction<T>
+#define DTP PieceOfAffine1d<T>
 
 UTP DTP DTP::take_some_mass( T mass_to_take ) {
-    PieceOfAffine1dFunction res = *this;
+    PieceOfAffine1d res = *this;
     if ( x0 == x1 )
        return res;
 

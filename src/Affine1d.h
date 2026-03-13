@@ -3,17 +3,17 @@
 #include "support/IntermediateScalarType.h"
 #include "support/TensorView.h"
 
-#include "PieceOfAffine1dFunction.h"
+#include "PieceOfAffine1d.h"
 
 namespace sdot {
 
 template<class T,int batch_dim=0>
-struct Affine1DFunction;
+struct Affine1d;
 
 template<class T>
-struct Affine1DFunction<T,0> {
+struct Affine1d<T,0> {
     using  TF             = IntermediateScalarType<std::decay_t<T>>::type;
-    using  Piece          = PieceOfAffine1dFunction<TF>;
+    using  Piece          = PieceOfAffine1d<TF>;
     using  TT             = TensorView<T,1>;
 
     Piece  get_first_piece() const;
@@ -28,11 +28,11 @@ struct Affine1DFunction<T,0> {
 };
 
 template<class T>
-struct Affine1DFunction<T,1> {
+struct Affine1d<T,1> {
     using  TT             = TensorView<T,2>;
 
     PI     nb_rows        () const;
-    auto   row            ( PI num_batch ) const -> Affine1DFunction<T,0>;
+    auto   row            ( PI num_batch ) const -> Affine1d<T,0>;
 
     TT     xs;            ///<
     TT     ys;            ///<
@@ -40,4 +40,4 @@ struct Affine1DFunction<T,1> {
 
 } // namespace sdot
 
-#include "Affine1DFunction.cxx"
+#include "Affine1d.cxx"

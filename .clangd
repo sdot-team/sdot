@@ -12,7 +12,7 @@ Index:
 
 Diagnostics:
   ClangTidy:
-    Add: [performance-*]
+    Add: []
     Remove: [readability-magic-numbers]
 
 InlayHints:
