@@ -31,6 +31,7 @@ def cost( x, y, a = None, b = None ):
 
 print( " 1 à 0.0 vers 1", cost( dist_dirac( [ 1.0 ] ), np.linspace( 0, 1, n ) ) )
 print( " 1 à 0.5 vers 1", cost( dist_dirac( [ 0.5 ] ), np.linspace( 0, 1, n ) ) )
+print( " 1 à 0.0 vers x", cost( dist_dirac( [ 0.0 ] ), np.linspace( 0, 1, n ), b = np.linspace( 0, 1, n ) ) )
 print( " 1 à 0.5 vers x", cost( dist_dirac( [ 0.5 ] ), np.linspace( 0, 1, n ), b = np.linspace( 0, 1, n ) ) )
 
 dist_10 = np.linspace( 0.05, 0.95, 10 )

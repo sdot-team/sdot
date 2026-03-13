@@ -51,6 +51,7 @@ UTP void DTP::take_some_mass( Piece &current_piece, TF mass_to_take, auto &&on_t
     }
 
     // else, use the current piece, get to the next, ...
+    mass_to_take -= current_piece.mass;
     on_taken_piece( current_piece );
 
     while ( true ) {
@@ -59,6 +60,7 @@ UTP void DTP::take_some_mass( Piece &current_piece, TF mass_to_take, auto &&on_t
            break;
 
         // full interval
+        mass_to_take -= current_piece.mass;
         on_taken_piece( current_piece );
     }
 

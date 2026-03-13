@@ -20,7 +20,7 @@ all: build
 venv:
 	@python3 -m venv $(VENV)
 	@$(PIP) install --upgrade pip
-	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest
+	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing
 
 test: build
 	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"

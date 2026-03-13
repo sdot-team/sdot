@@ -43,8 +43,8 @@ UTP T DTP::w2_dist( double dirac_pos ) const {
 UTP T DTP::moment() const {
     if ( x0 == x1 )
        return 0.0;
-    const double b = (y1 - y0) / (x1 - x0);
-    const double a = (y0 - b * x0);
+    const double b = ( y1 - y0 ) / ( x1 - x0 );
+    const double a = ( y0 - b * x0 );
     // TODO: precision handling
     return ( std::pow( x1, 2 ) - std::pow( x0, 2 ) ) * a / 2
          + ( std::pow( x1, 3 ) - std::pow( x0, 3 ) ) * b / 3;

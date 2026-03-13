@@ -21,7 +21,7 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
     const TF diracs_mass = diracs.mass();
     const TF points_mass = points.mass();
 
-    if ( diracs_mass == 0 ) throw std::runtime_error( "diracs_mass is null" );
+    if ( diracs_mass == 0 ) throw std::runtime_error( "mass of the diracs is null" );
     if ( points_mass == 0 ) throw std::runtime_error( "mass of the points is null" );
     const TF dirac_scale = points_mass / diracs_mass;
 

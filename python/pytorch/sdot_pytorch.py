@@ -40,7 +40,7 @@ class SDOTW2Function(Function):
 
         return grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
 
-def sdot_w2(dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=False):
+def sdot_w2(dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters = False ):
     dist, bary = SDOTW2Function.apply(dirac_xs, dirac_ws, point_xs, point_ys)
     if return_barycenters:
         return dist, bary
