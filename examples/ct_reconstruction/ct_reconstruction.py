@@ -33,15 +33,11 @@ def solve_bfgs( loss, params, on_iter = None ):
             if grad_norm < tol_grad:
                 print( "=> Convergence : Le gradient est quasiment nul." )
                 break
-            if param_diff < tol_param:
-                print( "=> Convergence : La solution est stabilisée." )
-                break
+            # if param_diff < tol_param:
+            #     print( "=> Convergence : La solution est stabilisée." )
+            #     break
 
             old_params.copy_( params )
-
-    # Clean up optimizer state
-    del lbfgs
-    del old_params
 
 
 def loss( dirac_coords ):
@@ -55,42 +51,20 @@ def loss( dirac_coords ):
     return torch.sum( sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys ) )
 
 def display_iter( dirac_coords, num_iter ):
-    # pyplot.plot( dirac_coords[ :, 0 ].detach().numpy(), dirac_coords[ :, 1 ].detach().numpy(), "*" )
-    # pyplot.savefig( f"img_{ 1000 + num_iter }" )
-    pass
+    pyplot.plot( dirac_coords[ :, 0 ].detach().numpy(), dirac_coords[ :, 1 ].detach().numpy(), "*" )
+    pyplot.savefig( f"img_{ 1000 + num_iter }" )
+    pyplot.clf()
 
 
 # solve
-dirac_coords = torch.rand( ( 1000, 2 ), requires_grad = True )
+dirac_coords = torch.rand( ( 100, 2 ), requires_grad = True )
 nb_angles = 100
 
 solve_bfgs( loss, dirac_coords, on_iter = display_iter )
 
-# Detach from computation graph
-dirac_coords.requires_grad = False
-dirac_coords.grad = None
-
-# # affichage
+# affichage
 coords = dirac_coords.detach().numpy()
 print( coords )
 
-# Clean up to avoid PyTorch dispatcher errors on exit
-del dirac_coords
-del coords
-import gc
-gc.collect()
-
-# pyplot.plot( dirac_coords[ :, 0 ], dirac_coords[ :, 1 ], "*" )
-# pyplot.show()
-# * frame #0: 0x000000010072d514 Python`unicodekeys_lookup_unicode + 124
-#   frame #1: 0x000000010072d8e0 Python`_Py_dict_lookup + 332
-#   frame #2: 0x000000010074e340 Python`_PyObject_GenericGetAttrWithDict + 328
-#   frame #3: 0x0000000100748e70 Python`_Py_module_getattro_impl + 56
-#   frame #4: 0x000000010074ed28 Python`_PyObject_GetMethod + 580
-#   frame #5: 0x00000001006df9c4 Python`PyObject_VectorcallMethod + 80
-#   frame #6: 0x000000010087c5ac Python`wait_for_thread_shutdown + 108
-#   frame #7: 0x000000010087bcec Python`_Py_Finalize + 152
-#   frame #8: 0x00000001008b07f0 Python`Py_RunMain + 428
-#   frame #9: 0x00000001008b0dcc Python`pymain_main + 232
-#   frame #10: 0x00000001008b0e68 Python`Py_BytesMain + 40
-#   frame #11: 0x0000000192551d54 dyld`start + 7184
+pyplot.plot( dirac_coords[ :, 0 ].detach().numpy(), dirac_coords[ :, 1 ].detach().numpy(), "*" )
+pyplot.show()

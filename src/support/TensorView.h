@@ -2,6 +2,7 @@
 
 // #include "common_macros.h"
 #include "common_types.h"
+#include <algorithm>
 #include <array>
 
 namespace sdot {

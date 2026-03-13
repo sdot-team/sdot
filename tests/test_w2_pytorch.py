@@ -1,36 +1,20 @@
-import pytest
-import torch
-import os
-import sys
-
-# Add build and python/pytorch to path
-sys.path.append(os.path.join(os.getcwd(), 'python/pytorch'))
-sys.path.append(os.path.join(os.getcwd(), 'build'))
-
 from sdot_pytorch import sdot_w2
+import torch
 
-# def test_w2_pytorch_forward():
-#     Xf = torch.tensor([0.25, 0.75], requires_grad=True)
-#     Wf = torch.tensor([0.5, 0.5], requires_grad=True)
-#     Xg = torch.tensor([0.0, 1.0])
-#     Yg = torch.tensor([1.0, 1.0])
+def test_w2_pytorch():
+    dirac_xs = torch.tensor( [ [ 0 ], [ 1 / 2 ] ], dtype = torch.float, requires_grad = True )
+    dirac_ws = torch.tensor( [ [ 1 ], [ 1 ] ], dtype = torch.float, requires_grad = True )
+    point_xs = torch.tensor( [ [ 0, 1 ], [ 0, 1 ] ], dtype = torch.float )
+    point_ys = torch.tensor( [ [ 1, 1 ], [ 1, 1 ] ], dtype = torch.float )
 
-#     # Test distance only
-#     dist = sdot_w2(Xf, Wf, Xg, Yg)
-#     assert abs(dist.item()) < 1e-5
+    # Test distance
+    dist = sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys )
+    assert torch.allclose( dist, torch.tensor( [ 1 / 3, 1 / 12 ] ) )
 
-#     # Test distance and barycenters
-#     dist, bary = sdot_w2(Xf, Wf, Xg, Yg, return_barycenters=True)
-#     assert torch.allclose(bary, torch.tensor([0.25, 0.75]))
+    # Test barycenters
+    dist, bary = sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=True )
+    assert torch.allclose( bary, torch.tensor( [ 1 / 2, 1 / 2 ] ) )
 
-# def test_w2_pytorch_backward():
-#     Xf = torch.tensor([0.25, 0.75], requires_grad=True)
-#     Wf = torch.tensor([0.5, 0.5], requires_grad=True)
-#     Xg = torch.tensor([0.0, 1.0])
-#     Yg = torch.tensor([1.0, 1.0])
-
-#     dist = sdot_w2(Xf, Wf, Xg, Yg)
-#     dist.backward()
-
-#     # Backward stub returns zeros
-#     assert torch.allclose(Xf.grad, torch.zeros_like(Xf))
+    # gradiens
+    torch.sum( dist ).backward()
+    assert torch.allclose( dirac_xs.grad, torch.tensor( [ [ - 1.0 ], [ 0.0 ] ] ) )

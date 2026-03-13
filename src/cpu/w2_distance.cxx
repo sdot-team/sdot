@@ -35,10 +35,8 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
         if ( dirac_mass <= 0.0 )
             throw std::runtime_error( "dirac_mass must be strictly positive" );
 
-        P( i );
         TF moment = 0;
         points.take_some_mass( current_piece, dirac_mass, [&]( const PieceOfAffine1d<TF> &piece ) {
-            P( piece.x0, piece.x1, piece.mass );
             w2 += piece.w2_dist( dirac_x );
             moment += piece.moment();
         } );
@@ -51,6 +49,13 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
        w2_squared() = static_cast<T>( w2 );
 }
 
+/// Wasserstein 2 distance
+T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> w2_squared, TensorView<T,2> w2_barycenters ) {
+    parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
+        w2_distance( diracs.row( r ), functions.row( r ), w2_squared.row( r ), w2_barycenters.row( r ) );
+    });
+}
+
 T_T void w2_distance_backward( TensorView<const T,0> grad_w2_squared, TensorView<const T,1> grad_w2_barycenters, TensorView<const T,1> w2_barycenters, DiracSet<const T,0> diracs, Affine1d<const T,0> functions, DiracSet<T,0> grad_diracs, Affine1d<T,0> grad_functions ) {
     for( PI num_dirac = 0; num_dirac < diracs.nb_diracs(); ++num_dirac ) {
         grad_diracs.xs[ num_dirac ] = grad_w2_squared[ 0 ] * 2 * ( diracs.xs[ num_dirac ] - w2_barycenters[ num_dirac ] );
@@ -60,13 +65,6 @@ T_T void w2_distance_backward( TensorView<const T,0> grad_w2_squared, TensorView
         grad_functions.xs[ num_point ] = 0;
         grad_functions.ys[ num_point ] = 0;
     }
-}
-
-/// Wasserstein 2 distance
-T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> w2_squared, TensorView<T,2> w2_barycenters ) {
-    parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
-        w2_distance( diracs.row( r ), functions.row( r ), w2_squared.row( r ), w2_barycenters.row( r ) );
-    });
 }
 
 /// Gradients of Wasserstein 2 distance

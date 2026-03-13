@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.join(os.getcwd(), 'python/jax'))
 sys.path.append(os.path.join(os.getcwd(), 'build'))
 
-from sdot_jax import sdot_w2
+# from sdot_jax import sdot_w2
 
 # def test_w2_jax_forward():
 #     Xf = jnp.array([0.25, 0.75])

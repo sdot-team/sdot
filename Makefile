@@ -12,7 +12,7 @@ setup:
 
 build: setup
 	@$(MESON) compile -C build
-	@ln -sf $(CURDIR)/build/sdot_pytorch_cpp.cpython* $(CURDIR)/python/pytorch/
+	@ln -sf $(CURDIR)/build/sdot_pytorch_bindings.cpython* $(CURDIR)/python/pytorch/
 	@ln -sf $(CURDIR)/build/sdot_jax_cpp.cpython* $(CURDIR)/python/jax/
 
 all: build

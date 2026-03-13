@@ -43,14 +43,14 @@ robin_map_include = robin_map_include_cmd.stdout().strip()
 
 # --- PyTorch Extension (nanobind) ---
 # PyTorch extension now uses nanobind for better interoperability
-# sdot_pytorch_cpp = py.extension_module('sdot_pytorch_cpp',
-#   [ 'python/pytorch/sdot_pytorch_cpp.cpp', nanobind_combined_src ],
-#   dependencies: py_dep,
-#   # link_with: sdot_cpu,
-#   include_directories: include_directories( 'src' ),
-#   cpp_args: [ '-fvisibility=hidden', '-I' + nanobind_include, '-I' + robin_map_include ],
-#   install: false
-# )
+sdot_pytorch_bindings = py.extension_module( 'sdot_pytorch_bindings',
+  [ 'python/pytorch/sdot_pytorch_bindings.cpp', nanobind_combined_src ],
+  dependencies: py_dep,
+  # link_with: sdot_cpu,
+  include_directories: include_directories( 'src' ),
+  cpp_args: [ '-fdiagnostics-absolute-paths', '-fvisibility=hidden', '-I' + nanobind_include, '-I' + robin_map_include ],
+  install: false
+)
 
 # --- JAX Extension (nanobind) ---
 # sdot_jax_cpp = py.extension_module( 'sdot_jax_cpp',
@@ -66,8 +66,8 @@ robin_map_include = robin_map_include_cmd.stdout().strip()
 catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', required: false )
 
 if not catch2_dep.found()
-  catch2_proj = subproject('catch2', default_options: ['cpp_std=c++20', 'tests=false'])
-  catch2_dep = catch2_proj.get_variable('catch2_with_main_dep')
+  catch2_proj = subproject( 'catch2', default_options: [ 'cpp_std=c++20', 'tests=false' ] )
+  catch2_dep = catch2_proj.get_variable( 'catch2_with_main_dep' )
 endif
 
 # if host_machine.system() == 'darwin'
