@@ -1,9 +1,10 @@
-#include "read_arg_name.h"
+#pragma once
+
 #include "strip.h"
 
 namespace uot {
 
-std::string_view read_arg_name( std::string_view &arg_names ) {
+inline std::string_view read_arg_name( std::string_view &arg_names ) {
     int nb_open_par = 0;
     for( std::size_t i = 0; i < arg_names.size(); ++i ) {
         // "..."

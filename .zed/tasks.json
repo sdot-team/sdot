@@ -1,14 +1,14 @@
 [
   {
-    "label": "🔧 Setup Meson",
+    "label": "Setup Meson",
     "command": "make setup",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
     "reveal": "always"
   },
   {
-    "label": "🔨 Build All",
-    "command": "make build",
+    "label": "Build",
+    "command": "make test",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
     "reveal": "always"

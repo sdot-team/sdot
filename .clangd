@@ -1,26 +1,22 @@
 CompileFlags:
-  CompilationDatabase: .
-
-Diagnostics:
-  UnusedIncludes: Strict
-  MissingIncludes: Strict
-  ClangTidy:
-    Add:
-      - modernize-*
-      - performance-*
-      # - bugprone-*
-    Remove:
-      - modernize-use-trailing-return-type
-      - readability-magic-numbers
-      - readability-identifier-length
+  Add:
+    - -std=c++23
+    - -fdiagnostics-absolute-paths
+    - -Isrc
+    - -Wall
+    - -Wextra
+  CompilationDatabase: build
 
 Index:
   Background: Build
 
-InlayHints:
-  Enabled: Yes
-  ParameterNames: Yes
-  DeducedTypes: Yes
+Diagnostics:
+  ClangTidy:
+    Add: [performance-*]
+    Remove: [readability-magic-numbers]
 
-Hover:
-  ShowAKA: Yes
+InlayHints:
+  Designators: true
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true

@@ -5,6 +5,10 @@
 
 namespace nb = nanobind;
 
+// Bring C API functions into scope
+using sdot::sdot_w2_cpu;
+using sdot::sdot_w2_backward_cpu;
+
 using ndarray_f32 = nb::ndarray<float, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
 using ndarray_f32_2d = nb::ndarray<float, nb::ndim<2>, nb::c_contig, nb::device::cpu>;
 

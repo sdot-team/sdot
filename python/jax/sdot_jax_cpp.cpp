@@ -7,6 +7,11 @@
 
 namespace nb = nanobind;
 
+// Bring C API functions into scope
+using sdot::sdot_l2_cpu;
+using sdot::sdot_l2_backward_cpu;
+using sdot::sdot_w2_cpu;
+
 void sdot_l2_cpu_wrapped(nb::ndarray<float, nb::device::cpu> f, 
                          nb::ndarray<float, nb::device::cpu> g,
                          nb::ndarray<float, nb::device::cpu> result) {
