@@ -27,7 +27,7 @@ def plot( dirac_coords ):
 
 
 def loss( dirac_coords ):
-    plot( dirac_coords )
+    # plot( dirac_coords )
 
     angle_list = torch.asarray( numpy.linspace( 0, numpy.pi, nb_angles, endpoint = False ), dtype = torch.float )
     proj_mat = torch.row_stack( ( torch.cos( angle_list ), torch.sin( angle_list ) ) )
@@ -43,8 +43,8 @@ def loss( dirac_coords ):
 
 
 # solve
-dirac_coords = torch.rand( ( 5, 2 ), requires_grad = True )
-nb_angles = 50
+dirac_coords = torch.rand( ( 2, 2 ), requires_grad = True )
+nb_angles = 5
 
 sdot.helpers.solve_sgd( loss, dirac_coords )
 

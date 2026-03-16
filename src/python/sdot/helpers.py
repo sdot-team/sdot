@@ -12,7 +12,7 @@ def solve_bfgs( loss, params, on_iter = None ):
     old_params = params.clone().detach()
     tol_param = 1e-7  # Stabilité de la solution
     tol_grad  = 1e-7  # Stabilité du gradient (proche du minimum)
-    for i in range( 50 ):
+    for i in range( 2 ):
         lbfgs.step( closure )
 
         if on_iter:
