@@ -65,10 +65,9 @@ class PyTorchDriver:
                 grad_dirac_ws = self.empty( dirac_ws.shape )
                 grad_point_xs = self.empty( point_xs.shape )
                 grad_point_ys = self.empty( point_ys.shape )
-                print( "grad_distance", grad_distance )
 
                 sdot_bindings_cpu.backward_ot_plan_to_piecewise_affine_1d(
-                    grad_distance, grad_barycenters, dirac_xs, dirac_ws, point_xs, point_ys, barycenters,
+                    grad_distance.contiguous(), grad_barycenters.contiguous(), dirac_xs, dirac_ws, point_xs, point_ys, barycenters,
                     grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
                 )
 

@@ -69,9 +69,7 @@ T_T void w2_distance_backward( TensorView<const T,0> grad_w2_squared, TensorView
 
 /// Gradients of Wasserstein 2 distance
 T_T void w2_distance_backward( TensorView<const T,1> grad_w2_squared, TensorView<const T,2> grad_w2_barycenters, TensorView<const T,2> w2_barycenters, DiracSet<const T,1> diracs, Affine1d<const T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions ) {
-    P( grad_w2_squared.size() );
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
-        P( r, grad_w2_squared[ r ] );
         w2_distance_backward( grad_w2_squared.row( r ), grad_w2_barycenters.row( r ), w2_barycenters.row( r ), diracs.row( r ), functions.row( r ), grad_diracs.row( r ), grad_functions.row( r ) );
     });
 }

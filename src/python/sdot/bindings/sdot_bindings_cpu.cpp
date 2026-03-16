@@ -72,9 +72,6 @@ void backward_ot_plan_to_piecewise_affine_1d(
     CHECK_BATCH_SIZE( grad_point_xs );
     CHECK_BATCH_SIZE( grad_point_ys );
 
-    P( grad_distances.data()[ 0 ] );
-    P( grad_distances.data()[ 1 ] );
-
     // helpers
     const auto cview2 = [&]( const NA &v ) { return TensorView<const TF,2>{ v.data(), { batch_size, v.size() / batch_size } }; };
     const auto cview1 = [&]( const NA &v ) { return TensorView<const TF,1>{ v.data(), batch_size }; };

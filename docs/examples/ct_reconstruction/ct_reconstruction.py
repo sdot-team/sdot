@@ -43,15 +43,15 @@ def loss( dirac_coords ):
 
 
 # solve
-dirac_coords = torch.rand( ( 2, 2 ), requires_grad = True )
-nb_angles = 5
+dirac_coords = torch.rand( ( 500, 2 ), requires_grad = True )
+nb_angles = 500
 
-sdot.helpers.solve_sgd( loss, dirac_coords )
+sdot.helpers.solve_bfgs( loss, dirac_coords )
 
 coords = dirac_coords.detach().numpy()
-print( coords )
 
-# pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
-# pyplot.show()
+pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
+pyplot.axis( 'equal' )
+pyplot.show()
 
 # os.system( "convert build/img_*png build/anim.gif" )
