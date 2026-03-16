@@ -1,8 +1,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include "../src/cpu/w2_distance.h"
-#include "../src/support/P.h"
+#include "../src/cpp/cpu/w2_distance.h"
+#include "../src/cpp/support/P.h"
 
 using namespace sdot;
 using TF = float;

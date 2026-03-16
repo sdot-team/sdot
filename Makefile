@@ -1,4 +1,4 @@
-.PHONY: venv setup build all clean test help
+.PHONY: venv setup build all clean test help docs
 
 VENV = $(CURDIR)/.venv
 PYTHON = $(VENV)/bin/python
@@ -12,15 +12,17 @@ setup:
 
 build: setup
 	@$(MESON) compile -C build
-	@ln -sf $(CURDIR)/build/sdot_pytorch_bindings.cpython* $(CURDIR)/python/pytorch/
-	@ln -sf $(CURDIR)/build/sdot_jax_cpp.cpython* $(CURDIR)/python/jax/
 
 all: build
 
 venv:
 	@python3 -m venv $(VENV)
 	@$(PIP) install --upgrade pip
-	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing
+	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing mkdocs-material mkdocstrings[python] pyyaml
+
+docs:
+	$(VENV)/bin/mkdocs serve --config-file docs/mkdocs.yml
+
 
 test: build
 	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"

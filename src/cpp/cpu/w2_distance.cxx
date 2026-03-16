@@ -25,6 +25,10 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
     if ( points_mass == 0 ) throw std::runtime_error( "mass of the points is null" );
     const TF dirac_scale = points_mass / diracs_mass;
 
+    P( diracs.ws[ 0 ] );
+    P( diracs.ws[ 1 ] );
+    P( diracs.ws[ 2499 ] );
+
     PieceOfAffine1d<TF> current_piece = points.get_first_piece();
     TF w2 = 0;
     for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
@@ -32,6 +36,7 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
 
         const TF dirac_mass = dirac_scale * static_cast<TF>( diracs.ws[ dirac_index ] );
         const TF dirac_x = diracs.xs[ dirac_index ];
+        P( dirac_index, dirac_mass, diracs.nb_diracs() );
         if ( dirac_mass <= 0.0 )
             throw std::runtime_error( "dirac_mass must be strictly positive" );
 
@@ -51,6 +56,7 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
 
 /// Wasserstein 2 distance
 T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> w2_squared, TensorView<T,2> w2_barycenters ) {
+    P( diracs.nb_rows() );
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance( diracs.row( r ), functions.row( r ), w2_squared.row( r ), w2_barycenters.row( r ) );
     });

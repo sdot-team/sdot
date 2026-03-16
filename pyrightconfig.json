@@ -1,7 +1,6 @@
 {
   "include": [
-    "python/pytorch",
-    "python/jax",
+    "src/python",
     "tests",
     "examples"
   ],
@@ -9,13 +8,11 @@
     "**/__pycache__",
     "**/.pytest_cache",
     "**/node_modules",
-    "build",
     ".venv"
   ],
   "extraPaths": [
-    "python/pytorch",
-    "python/jax",
-    "build"
+    "src/python",
+    "build/src/python"
   ],
   "venvPath": ".",
   "venv": ".venv",

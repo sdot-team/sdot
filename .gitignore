@@ -34,7 +34,8 @@ CMakeUserPresets.json
 .idea/
 .DS_Store
 
-# Project specific
-python/pytorch/*.so
-python/jax/*.so
-sdot_l2_kernels.metal
+# Documentation
+docs/gallery/posts/
+docs/assets/examples/
+site/
+.zensical/

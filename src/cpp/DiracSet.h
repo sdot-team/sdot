@@ -37,3 +37,5 @@ struct DiracSet<T,1> {
 };
 
 } // namespace sdot
+
+#include "DiracSet.cxx"

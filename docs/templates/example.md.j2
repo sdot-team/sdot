@@ -1,0 +1,17 @@
+# {{ title }}
+
+{% if image_url %}
+![{{ title }}]({{ image_url }}){ align=center width=600 }
+{% endif %}
+
+**Tags:** {% for tag in tags %}`{{ tag }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+## Description
+
+{{ description }}
+
+## Python Code
+
+```python
+{{ code }}
+```

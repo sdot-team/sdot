@@ -26,28 +26,9 @@
         ]
       }
     },
-    "pyright": {
-      "settings": {
-        "python": {
-          "analysis": {
-            "extraPaths": ["python/pytorch", "python/jax", "build"],
-            "typeCheckingMode": "basic",
-            "diagnosticMode": "workspace",
-            "useLibraryCodeForTypes": true,
-            "autoSearchPaths": true
-          },
-          "pythonPath": ".venv/bin/python"
-        }
-      }
-    }
   },
-  "autosave": "on_focus_change",
   "tab_size": 4,
   "format_on_save": "off",
   "ensure_final_newline_on_save": true,
   "remove_trailing_whitespace_on_save": true,
-  "telemetry": {
-    "diagnostics": false,
-    "metrics": false
-  }
 }

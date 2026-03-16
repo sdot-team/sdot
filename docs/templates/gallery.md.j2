@@ -1,0 +1,14 @@
+# Gallery
+
+<div class="grid cards" markdown>
+
+{% for example in examples %}
+::: [{{ example.title }}]({{ example.md_path }})
+![{{ example.title }}]({{ example.image_url }}){ align=left width=200 }
+
+**Tags:** {% for tag in example.tags %}`{{ tag }}`{% if not loop.last %}, {% endif %}{% endfor %}
+
+{{ example.description }}
+{% endfor %}
+
+</div>

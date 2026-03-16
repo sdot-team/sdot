@@ -37,5 +37,3 @@ private:
 // Helper to get a row from a 2D mdspan since std::submdspan is C++26
 
 } // namespace sdot
-
-#include "DiracSet.cxx"
