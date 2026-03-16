@@ -55,8 +55,8 @@ class Piecewise1dAffineFunction( Distribution ):
     def batch_version( self, batch_size ):
         x = self.xs
         if x is not None:
-            x = x[ None, : ].repeat( [ batch_size, 1 ] )
+            x = driver.repeat( x[ None, : ], [ batch_size, 1 ] )
         y = self.ys
         if y is not None:
-            y = y[ None, : ].repeat( [ batch_size, 1 ] )
+            y = driver.repeat( y[ None, : ], [ batch_size, 1 ] )
         return BatchOfPiecewise1dAffineFunctions( x, y )

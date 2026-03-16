@@ -44,6 +44,9 @@ class PyTorchDriver:
     def empty( self, shape ):
         return torch.ones( shape, dtype = self.dtype, device = self.device )
 
+    def repeat( self, tensor, shape ):
+        return tensor.repeat( shape )
+
     def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewise1dAffineFunctions ) -> BatchOfOtPlans:
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod

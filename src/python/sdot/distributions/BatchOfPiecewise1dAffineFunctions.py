@@ -28,7 +28,7 @@ class BatchOfPiecewise1dAffineFunctions( BatchOfDistributions ):
             ys = self.ys
             if ys is None:
                 return None
-            return driver.linspace( self.x0, self.x1, self.nb_points )[ None, : ].repeat( ( self.batch_size, 1 ) )
+            return driver.repeat( driver.linspace( self.x0, self.x1, self.nb_points )[ None, : ], ( self.batch_size, 1 ) )
         return self._xs
 
     @xs.setter

@@ -47,8 +47,8 @@ class SumOf1dWeightedDiracs( SumOfWeightedDiracs ):
     def batch_version( self, batch_size ):
         p = self.positions
         if p is not None:
-            p = p[ None, : ].repeat( [ batch_size, 1 ] )
+            p = driver.repeat( p[ None, : ], [ batch_size, 1 ] )
         w = self.weights
         if w is not None:
-            w = w[ None, : ].repeat( [ batch_size, 1 ] )
+            w = driver.repeat( w[ None, : ], [ batch_size, 1 ] )
         return BatchOfSumOfWeighted1dDiracs( p, w )

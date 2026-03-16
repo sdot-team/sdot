@@ -9,6 +9,21 @@ def add_buid_path():
 # get path to dylibs in build
 add_buid_path()
 
-#
+# 
 from .drivers.PyTorchDriver import PyTorchDriver
-driver = PyTorchDriver()
+
+class DriverProxy:
+    def __init__( self, d ):
+        self._d = d
+    def __getattr__( self, name ):
+        return getattr( self._d, name )
+
+driver = DriverProxy( PyTorchDriver() )
+
+def use_jax( **kwargs ):
+    from .drivers.JaxDriver import JaxDriver
+    driver._d = JaxDriver( **kwargs )
+
+def use_pytorch( **kwargs ):
+    from .drivers.PyTorchDriver import PyTorchDriver
+    driver._d = PyTorchDriver( **kwargs )
