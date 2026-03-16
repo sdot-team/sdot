@@ -1,6 +1,7 @@
+from .BatchOf1dOtPlans import BatchOf1dOtPlans
 from .OtPlan import OtPlan
 
-class BatchOfOtPlan:
+class BatchOfOtPlans:
     """
     barycenters : Tensor[ batch_index, dirac_index, dim ]
     distances : Tensor[ batch_index ]
@@ -18,3 +19,8 @@ class BatchOfOtPlan:
         assert self.distances.shape[ 0 ] == 1
 
         return OtPlan( self.distances[ 0 ], self.barycenters[ 0, :, : ] )
+
+    def unidimensionnal_version( self ):
+        assert  self.barycenters.shape[ 2 ] == 1
+
+        return BatchOf1dOtPlans( self.distances, self.barycenters[ :, :, 0 ] )

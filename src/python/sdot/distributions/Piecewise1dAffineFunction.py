@@ -15,6 +15,10 @@ class Piecewise1dAffineFunction( Distribution ):
 
         x0 and x1 are used only if xs is not specified
         """
+
+        if ys is None and xs is not None:
+            xs, ys = ys, xs
+
         self._xs = None
         self._ys = None
         self.x0 = x0
@@ -48,11 +52,11 @@ class Piecewise1dAffineFunction( Distribution ):
     def batch_size( self ):
         return self.ys.shape[ 0 ]
 
-    def batch_version(self):
+    def batch_version( self, batch_size ):
         x = self.xs
         if x is not None:
-            x = x[ None, : ]
+            x = x[ None, : ].repeat( [ batch_size, 1 ] )
         y = self.ys
         if y is not None:
-            y = y[ None, : ]
+            y = y[ None, : ].repeat( [ batch_size, 1 ] )
         return BatchOfPiecewise1dAffineFunctions( x, y )

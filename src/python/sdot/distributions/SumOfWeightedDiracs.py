@@ -44,11 +44,11 @@ class SumOfWeightedDiracs( Distribution ):
     def dim( self ):
         return self.positions.shape[ 1 ]
 
-    def batch_version( self ):
+    def batch_version( self, batch_size ):
         p = self.positions
         if p is not None:
-            p = p[ None, :, : ]
+            p = p[ None, :, : ].repeat( [ batch_size, 1, 1 ] )
         w = self.weights
         if w is not None:
-            w = w[ None, : ]
+            w = w[ None, : ].repeat( [ batch_size, 1 ] )
         return BatchOfSumOfWeightedDiracs( p, w )

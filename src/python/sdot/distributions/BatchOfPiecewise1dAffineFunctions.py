@@ -11,6 +11,9 @@ class BatchOfPiecewise1dAffineFunctions( BatchOfDistributions ):
     """
 
     def __init__( self, xs = None, ys = None, x0 = 0, x1 = 1 ):
+        if ys is None and xs is not None:
+            xs, ys = ys, xs
+
         self._xs = None
         self._ys = None
         self.x0 = x0

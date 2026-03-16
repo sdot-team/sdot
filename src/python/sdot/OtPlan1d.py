@@ -11,3 +11,6 @@ class OtPlan1d:
 
         self.barycenters = barycenters
         self.distances = distances
+
+    def unidimensionnal_version( self ):
+        return self

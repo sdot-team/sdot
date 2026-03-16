@@ -1,25 +1,21 @@
-# import sdot
+import torch, sdot
 
+def close( a, b ):
+    return torch.allclose( a, torch.tensor( b, dtype = sdot.driver.dtype ) )
 
-# f = sdot.PiecewiseAffineFunction( [ 0, 1 ], [ 1, 1 ] )
-# g = sdot.SumOfWeightedDiracs( [ [ 0 ], [ 0 ] ] )
-# from sdot_pytorch import sdot_w2
-# import torch
+def test_w2_pytorch_1_dirac_1_1():
+    f = sdot.BatchOfSumOf1dWeightedDiracs( [ [ 0 ], [ 1 / 2 ] ] )
+    g = sdot.Piecewise1dAffineFunction( [ 1, 1 ] )
+    f.positions.requires_grad = True
 
-# def test_w2_pytorch_1_dirac_1_1():
-#     dirac_xs = torch.tensor( [ [ 0 ], [ 1 / 2 ] ], dtype = torch.float, requires_grad = True )
-#     dirac_ws = torch.tensor( [ [ 1 ], [ 1 ] ], dtype = torch.float, requires_grad = True )
-#     point_xs = torch.tensor( [ [ 0, 1 ], [ 0, 1 ] ], dtype = torch.float )
-#     point_ys = torch.tensor( [ [ 1, 1 ], [ 1, 1 ] ], dtype = torch.float )
+    # forward
+    plan = sdot.plan( f, g )
+    assert close( plan.distances, [ 1 / 3, 1 / 12 ] )
+    assert close( plan.barycenters, [ 1 / 2, 1 / 2 ] )
 
-#     # forward
-#     dist, bary = sdot_w2( dirac_xs, dirac_ws, point_xs, point_ys, return_barycenters=True )
-#     assert torch.allclose( dist, torch.tensor( [ 1 / 3, 1 / 12 ] ) )
-#     assert torch.allclose( bary, torch.tensor( [ 1 / 2, 1 / 2 ] ) )
-
-#     # backward
-#     torch.sum( dist ).backward()
-#     assert torch.allclose( dirac_xs.grad, torch.tensor( [ [ - 1.0 ], [ 0.0 ] ] ) )
+    # backward
+    torch.sum( plan.distances ).backward()
+    assert close( f.positions.grad, [ [ - 1 ], [ 0 ] ] )
 
 # def test_w2_pytorch_1_dirac_0_1():
 #     dirac_xs = torch.tensor( [ [ 0 ], [ 1 / 2 ] ], dtype = torch.float, requires_grad = True )

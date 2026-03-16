@@ -1,9 +1,9 @@
 from .BatchOfSumOf1dWeightedDiracs import BatchOfSumOf1dWeightedDiracs
-from .Distribution import Distribution
+from .SumOfWeightedDiracs import SumOfWeightedDiracs
 from ..driver import driver
 
 
-class SumOf1dWeightedDiracs( Distribution ):
+class SumOf1dWeightedDiracs( SumOfWeightedDiracs ):
     """
     positions : tensor[ nb_diracs ]
     weights : tensor[ nb_diracs ]
@@ -44,11 +44,11 @@ class SumOf1dWeightedDiracs( Distribution ):
     def dim( self ):
         return 1
 
-    def batch_version( self ):
+    def batch_version( self, batch_size ):
         p = self.positions
         if p is not None:
-            p = p[ None, : ]
+            p = p[ None, : ].repeat( [ batch_size, 1 ] )
         w = self.weights
         if w is not None:
-            w = w[ None, : ]
+            w = w[ None, : ].repeat( [ batch_size, 1 ] )
         return BatchOfSumOf1dWeightedDiracs( p, w )
