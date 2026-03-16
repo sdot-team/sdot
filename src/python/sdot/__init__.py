@@ -1,6 +1,5 @@
-from sdot.OtPlan1d import OtPlan1d
 from .distributions.BatchOfPiecewise1dAffineFunctions import BatchOfPiecewise1dAffineFunctions
-from .distributions.BatchOfSumOf1dWeightedDiracs import BatchOfSumOf1dWeightedDiracs
+from .distributions.BatchOfSumOfWeighted1dDiracs import BatchOfSumOfWeighted1dDiracs
 from .distributions.BatchOfSumOfWeightedDiracs import BatchOfSumOfWeightedDiracs
 from .distributions.BatchOfDistributions import BatchOfDistributions
 
@@ -64,7 +63,7 @@ def barycenters( f: Distribution | BatchOfDistributions, g: Distribution | Batch
 
 def __():
     """ fake function """
-    BatchOfSumOf1dWeightedDiracs()
+    BatchOfSumOfWeighted1dDiracs()
     Piecewise1dAffineFunction()
     SumOf1dWeightedDiracs()
     SumOfWeightedDiracs()

@@ -4,7 +4,7 @@ def close( a, b ):
     return torch.allclose( a, torch.tensor( b, dtype = sdot.driver.dtype ) )
 
 def test_w2_pytorch_1_dirac_1_1():
-    f = sdot.BatchOfSumOf1dWeightedDiracs( [ [ 0 ], [ 1 / 2 ] ] )
+    f = sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] )
     g = sdot.Piecewise1dAffineFunction( [ 1, 1 ] )
     f.positions.requires_grad = True
 

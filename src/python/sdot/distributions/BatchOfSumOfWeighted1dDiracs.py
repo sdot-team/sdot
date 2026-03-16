@@ -2,7 +2,7 @@ from .BatchOfSumOfWeightedDiracs import BatchOfSumOfWeightedDiracs
 from ..driver import driver
 
 
-class BatchOfSumOf1dWeightedDiracs( BatchOfSumOfWeightedDiracs ):
+class BatchOfSumOfWeighted1dDiracs( BatchOfSumOfWeightedDiracs ):
     """
     positions : tensor[ batch_size, nb_diracs ] (no need to add a rank in 1d)
     weights : tensor[ batch_size, nb_diracs ]

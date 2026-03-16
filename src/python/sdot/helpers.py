@@ -1,7 +1,7 @@
 import torch
 
 def solve_bfgs( loss, params, on_iter = None ):
-    lbfgs = torch.optim.LBFGS( [ params ], history_size = 20, max_iter = 10, line_search_fn = "strong_wolfe" )
+    lbfgs = torch.optim.LBFGS( [ params ], history_size = 5, max_iter = 10 ) # , line_search_fn = "strong_wolfe"
 
     def closure():
         lbfgs.zero_grad()
@@ -34,3 +34,12 @@ def solve_bfgs( loss, params, on_iter = None ):
                 break
 
             old_params.copy_( params )
+
+def solve_sgd( loss, params ):
+    optimizer = torch.optim.SGD( [ params ] )
+    for _ in range( 50 ):
+        l = loss( params )
+        print( l )
+        optimizer.zero_grad()
+        l.backward()
+        optimizer.step()

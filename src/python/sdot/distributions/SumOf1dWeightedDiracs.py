@@ -1,4 +1,4 @@
-from .BatchOfSumOf1dWeightedDiracs import BatchOfSumOf1dWeightedDiracs
+from .BatchOfSumOfWeighted1dDiracs import BatchOfSumOfWeighted1dDiracs
 from .SumOfWeightedDiracs import SumOfWeightedDiracs
 from ..driver import driver
 
@@ -51,4 +51,4 @@ class SumOf1dWeightedDiracs( SumOfWeightedDiracs ):
         w = self.weights
         if w is not None:
             w = w[ None, : ].repeat( [ batch_size, 1 ] )
-        return BatchOfSumOf1dWeightedDiracs( p, w )
+        return BatchOfSumOfWeighted1dDiracs( p, w )
