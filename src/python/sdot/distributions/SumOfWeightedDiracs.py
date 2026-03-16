@@ -1,10 +1,12 @@
+from .BatchOfSumOfWeightedDiracs import BatchOfSumOfWeightedDiracs
 from .Distribution import Distribution
-from .driver import driver
+from ..driver import driver
 
 
 class SumOfWeightedDiracs( Distribution ):
     """
-    positions : tensor[ batch_size, nb_diracs, dim ] (even in 1d, where dim is expected to be equal to 1)
+    positions : tensor[ nb_diracs, dim ] (even in 1d, where dim is expected to be equal to 1)
+    weights : tensor[ nb_diracs ]
     """
     def __init__( self, positions = None, weights = None ):
         self._positions = None
@@ -27,8 +29,7 @@ class SumOfWeightedDiracs( Distribution ):
             positions = self.positions
             if positions is None:
                 return None
-            print( positions.shape[ : -1 ] )
-            return driver.ones( positions.shape[ : -1 ] )
+            return driver.ones( positions.shape[ 0 : 1 ] )
         return self._weights
 
     @weights.setter
@@ -36,9 +37,18 @@ class SumOfWeightedDiracs( Distribution ):
         self._weights = driver.t1( value )
 
     @property
-    def batch_size( self ):
+    def nb_diracs( self ):
         return self.positions.shape[ 0 ]
 
     @property
-    def nb_diracs( self ):
-        return self.positions.shape[ 0 ]
+    def dim( self ):
+        return self.positions.shape[ 1 ]
+
+    def batch_version( self ):
+        p = self.positions
+        if p is not None:
+            p = p[ None, :, : ]
+        w = self.weights
+        if w is not None:
+            w = w[ None, : ]
+        return BatchOfSumOfWeightedDiracs( p, w )

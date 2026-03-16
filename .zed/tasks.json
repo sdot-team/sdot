@@ -1,14 +1,7 @@
 [
   {
-    "label": "Setup Meson",
-    "command": "make setup",
-    "use_new_terminal": false,
-    "allow_concurrent_runs": false,
-    "reveal": "always"
-  },
-  {
     "label": "Build",
-    "command": "make test",
+    "command": "make -f .test.mk",
     "use_new_terminal": false,
     "allow_concurrent_runs": false,
     "reveal": "always"

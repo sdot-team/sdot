@@ -29,7 +29,6 @@ void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA p
     const auto view2 = [&]( NA &v ) { return TensorView<TF,2>{ v.data(), { batch_size, v.size() / batch_size } }; };
     const auto view1 = [&]( NA &v ) { return TensorView<TF,1>{ v.data(), batch_size }; };
 
-    P( point_ys.size(), batch_size );
     Affine1d<const TF,1> functions{ .xs = cview2( point_xs ), .ys = cview2( point_ys ) };
     DiracSet<const TF,1> diracs{ .xs = cview2( dirac_xs ), .ws = cview2( dirac_ws ) };
     w2_distance( diracs, functions, view1( distance ), view2( barycenters ) );

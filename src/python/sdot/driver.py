@@ -1,4 +1,4 @@
-from .PyTorchDriver import PyTorchDriver
+from .drivers.PyTorchDriver import PyTorchDriver
 
 def add_buid_path():
     from pathlib import Path

@@ -1,8 +1,15 @@
+from .BatchOfPiecewise1dAffineFunctions import BatchOfPiecewise1dAffineFunctions
 from .Distribution import Distribution
-from .driver import driver
+from ..driver import driver
 
 
-class PiecewiseAffineFunction( Distribution ):
+class Piecewise1dAffineFunction( Distribution ):
+    """
+    xs : tensor[ nb_points ]
+    ys : tensor[ nb_points ]
+
+    if ys is not defined, one uses linspace( self.x0, self.x1, xs.size )
+    """
     def __init__( self, xs = None, ys = None, x0 = 0, x1 = 1 ):
         """
 
@@ -40,3 +47,12 @@ class PiecewiseAffineFunction( Distribution ):
     @property
     def batch_size( self ):
         return self.ys.shape[ 0 ]
+
+    def batch_version(self):
+        x = self.xs
+        if x is not None:
+            x = x[ None, : ]
+        y = self.ys
+        if y is not None:
+            y = y[ None, : ]
+        return BatchOfPiecewise1dAffineFunctions( x, y )
