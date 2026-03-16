@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Affine1d.h"
+#include <stdexcept>
+#include <utility>
 
 namespace sdot {
 
@@ -21,11 +23,11 @@ UTP DTP::Piece DTP::get_first_piece() const {
 
     return {
         .index = 1,
+        .mass  = mass,
         .x0    = x0,
         .x1    = x1,
         .y0    = y0,
         .y1    = y1,
-        .mass  = mass
     };
 }
 

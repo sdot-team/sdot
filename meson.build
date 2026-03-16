@@ -1,4 +1,6 @@
-project('sdot', [ 'cpp', 'objcpp' ], version: '0.1.0', default_options: ['cpp_std=c++20'] )
+project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++20'] )
+# project.languages += [ 'objcpp' ]
+
 
 # Python module import and find installation
 py_mod = import( 'python' )
@@ -25,6 +27,7 @@ nanobind_dep = declare_dependency(
 
 # --- Common Project Settings ---
 common_cpp_args = [ '-fdiagnostics-absolute-paths' ]
+# common_cpp_args = [ '-g3' ]
 
 # --- Python extension modules ---
 subdir('src/python/sdot/bindings')

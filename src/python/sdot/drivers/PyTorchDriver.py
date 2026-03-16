@@ -1,7 +1,6 @@
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..bindings import sdot_bindings_cpu
 import torch
-import sdot
 
 class PyTorchDriver:
     """
@@ -47,7 +46,7 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
-    def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewise1dAffineFunctions ) -> BatchOfOtPlans:
+    def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f, g ) -> BatchOfOtPlans:
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor ]:
@@ -66,6 +65,7 @@ class PyTorchDriver:
                 grad_dirac_ws = self.empty( dirac_ws.shape )
                 grad_point_xs = self.empty( point_xs.shape )
                 grad_point_ys = self.empty( point_ys.shape )
+                print( "grad_distance", grad_distance )
 
                 sdot_bindings_cpu.backward_ot_plan_to_piecewise_affine_1d(
                     grad_distance, grad_barycenters, dirac_xs, dirac_ws, point_xs, point_ys, barycenters,

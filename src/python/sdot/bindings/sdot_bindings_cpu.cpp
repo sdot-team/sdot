@@ -42,6 +42,22 @@ void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA p
 void backward_ot_plan_to_piecewise_affine_1d(
     NA grad_distances, NA grad_barycenters, NA dirac_xs, NA dirac_ws, NA point_xs, NA point_ys, NA barycenters,
     NA grad_dirac_xs, NA grad_dirac_ws, NA grad_point_xs, NA grad_point_ys ) {
+
+    // rank
+    CHECK_RANK( grad_barycenters, 3, "[ batch_index, dirac_index, dim ]" );
+    CHECK_RANK( grad_distances, 1, "[ batch_index ]" );
+
+    CHECK_RANK( barycenters, 3, "[ batch_index, dirac_index, dim ]" );
+    CHECK_RANK( dirac_xs, 3, "[ batch_index, dirac_index, dim ]" );
+    CHECK_RANK( dirac_ws, 2, "[ batch_index, dirac_index ]" );
+    CHECK_RANK( point_xs, 2, "[ batch_index, point_index ]" );
+    CHECK_RANK( point_ys, 2, "[ batch_index, point_index ]" );
+
+    CHECK_RANK( grad_dirac_xs, 3, "[ batch_index, dirac_index, dim ]" );
+    CHECK_RANK( grad_dirac_ws, 2, "[ batch_index, dirac_index ]" );
+    CHECK_RANK( grad_point_xs, 2, "[ batch_index, point_index ]" );
+    CHECK_RANK( grad_point_ys, 2, "[ batch_index, point_index ]" );
+
     // batch_size...
     const PI batch_size = dirac_xs.shape( 0 );
     CHECK_BATCH_SIZE( grad_barycenters );
@@ -55,6 +71,9 @@ void backward_ot_plan_to_piecewise_affine_1d(
     CHECK_BATCH_SIZE( grad_dirac_ws );
     CHECK_BATCH_SIZE( grad_point_xs );
     CHECK_BATCH_SIZE( grad_point_ys );
+
+    P( grad_distances.data()[ 0 ] );
+    P( grad_distances.data()[ 1 ] );
 
     // helpers
     const auto cview2 = [&]( const NA &v ) { return TensorView<const TF,2>{ v.data(), { batch_size, v.size() / batch_size } }; };
