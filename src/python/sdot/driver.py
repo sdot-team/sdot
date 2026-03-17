@@ -1,4 +1,7 @@
 def add_buid_path():
+    """
+    Helper to add path to `build` directory content. Can be used when files are in the base repository (not installed e.g. via `pip -e`)
+    """
     from pathlib import Path
     import sdot
 
@@ -6,24 +9,38 @@ def add_buid_path():
     if _build_path.exists() and str( _build_path ) not in sdot.__path__:
         sdot.__path__.append( str( _build_path ) )
 
-# get path to dylibs in build
-add_buid_path()
+def make_driver_instance( framework, device, dtype ):
+    if str.lower( framework ) == "pytorch":
+        from .drivers.PyTorchDriver import PyTorchDriver
+        return PyTorchDriver( dtype = dtype, device = device )
 
-# 
-from .drivers.PyTorchDriver import PyTorchDriver
+    if str.lower( framework ) == "jax":
+        from .drivers.JaxDriver import JaxDriver
+        return JaxDriver( dtype = dtype, device = device )
+
+    raise RuntimeError( f"{ framework } is not a registered framework name (for now, one can use 'pytorch' or 'jax')" )
 
 class DriverProxy:
-    def __init__( self, d ):
-        self._d = d
+    """
+
+    `dtype` is actually a "default" dtype (the user can use what he/she wants). same thing for `device`.
+    """
+
+    def __init__( self, framework = "pytorch", dtype = "float32", device = "cpu" ):
+        self.framework = framework
+        self.device = device
+        self.dtype = dtype
+
+        self._instance = None
+
     def __getattr__( self, name ):
-        return getattr( self._d, name )
+        if self._instance is None:
+            driver._instance = make_driver_instance( self.framework, self.device, self.dtype )
 
-driver = DriverProxy( PyTorchDriver() )
+        return getattr( self._instance, name )
 
-def use_jax( **kwargs ):
-    from .drivers.JaxDriver import JaxDriver
-    driver._d = JaxDriver( **kwargs )
+# add path to dylibs in `build` (needed by the drivers)
+add_buid_path()
 
-def use_pytorch( **kwargs ):
-    from .drivers.PyTorchDriver import PyTorchDriver
-    driver._d = PyTorchDriver( **kwargs )
+# start with an unknown driver instance
+driver = DriverProxy()

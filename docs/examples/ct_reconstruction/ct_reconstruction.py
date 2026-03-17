@@ -6,8 +6,6 @@ Description: This example demonstrates how to reconstruct a 2D density from its 
 """
 
 from matplotlib import pyplot
-import sdot.helpers
-import numpy
 import torch
 import sdot
 pyplot.style.use( 'dark_background' )
@@ -27,15 +25,14 @@ def plot( dirac_coords ):
 
 
 def loss( dirac_coords ):
-    # plot( dirac_coords )
-
-    angle_list = torch.asarray( numpy.linspace( 0, numpy.pi, nb_angles, endpoint = False ), dtype = torch.float )
+    angle_list = torch.linspace( 0, torch.pi, nb_angles + 1, dtype = torch.float )[ : -1 ]
     proj_mat = torch.row_stack( ( torch.cos( angle_list ), torch.sin( angle_list ) ) )
     dirac_xs = proj_mat.T @ dirac_coords.T
 
     xs = torch.linspace( -1, 1, 30 ).repeat( ( nb_angles, 1 ) )
     ys = torch.sqrt( 1 - xs ** 2 )
 
+    # plot( dirac_coords )
 
     f = sdot.BatchOfPiecewise1dAffineFunctions( xs, ys )
     g = sdot.BatchOfSumOfWeighted1dDiracs( dirac_xs )
@@ -46,7 +43,7 @@ def loss( dirac_coords ):
 dirac_coords = torch.rand( ( 500, 2 ), requires_grad = True )
 nb_angles = 500
 
-sdot.helpers.solve_bfgs( loss, dirac_coords )
+sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
 
 coords = dirac_coords.detach().numpy()
 

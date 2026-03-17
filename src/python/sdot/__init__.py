@@ -13,8 +13,7 @@ from .BatchOfOtPlans import BatchOfOtPlans
 from .OtPlan1d import OtPlan1d
 from .OtPlan import OtPlan
 
-from .driver import driver, use_jax, use_pytorch
-
+from .driver import driver
 
 def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions, _check_1d = True ) -> OtPlan | OtPlan1d | BatchOfOtPlans | BatchOf1dOtPlans:
     # ensure batch
