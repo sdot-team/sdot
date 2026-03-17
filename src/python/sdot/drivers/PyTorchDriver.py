@@ -55,11 +55,19 @@ class PyTorchDriver:
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor, torch.tensor ]:
+                dirac_xs = dirac_xs.contiguous()
+                dirac_ws = dirac_ws.contiguous()
+                point_xs = point_xs.contiguous()
+                point_ys = point_ys.contiguous()
+
                 distances = self.empty( dirac_xs.shape[ 0 : 1 ] )
                 barycenters = self.empty( dirac_xs.shape )
                 potentials = self.empty( dirac_ws.shape )
 
-                sdot_bindings_cpu.ot_plan_to_piecewise_affine_1d( dirac_xs, dirac_ws, point_xs, point_ys, distances, barycenters, potentials )
+                sdot_bindings_cpu.ot_plan_to_piecewise_affine_1d(
+                    dirac_xs, dirac_ws, point_xs, point_ys,
+                    distances, barycenters, potentials
+                )
 
                 ctx.save_for_backward( dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials )
                 return distances, barycenters, potentials
@@ -73,7 +81,10 @@ class PyTorchDriver:
                 grad_point_ys = self.empty( point_ys.shape )
 
                 sdot_bindings_cpu.backward_ot_plan_to_piecewise_affine_1d(
-                    grad_distance, grad_barycenters, dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials,
+                    grad_distance.contiguous(),
+                    grad_barycenters.contiguous(),
+                    dirac_xs, dirac_ws, point_xs, point_ys,
+                    barycenters, potentials,
                     grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
                 )
 
@@ -120,7 +131,7 @@ class PyTorchDriver:
 
     def optimize_using_sgd( self, loss, params ):
         optimizer = torch.optim.SGD( [ params ] )
-        for _ in range( 50 ):
+        for _ in range( 20 ):
             l = loss( params )
             print( l )
             optimizer.zero_grad()

@@ -26,8 +26,12 @@ nanobind_dep = declare_dependency(
 )
 
 # --- Common Project Settings ---
-common_cpp_args = [ '-fdiagnostics-absolute-paths' ]
-# common_cpp_args = [ '-g3' ]
+host_system = host_machine.system()
+if host_system == 'darwin'
+    common_cpp_args = [ '-fdiagnostics-absolute-paths' ]
+else
+    common_cpp_args = [ '-g3' ]
+endif
 
 # --- Python extension modules ---
 subdir('src/python/sdot/bindings')
