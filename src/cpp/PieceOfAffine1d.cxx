@@ -50,6 +50,41 @@ UTP T DTP::moment() const {
          + ( std::pow( x1, 3 ) - std::pow( x0, 3 ) ) * b / 3;
 }
 
+UTP void DTP::integrate_w2_shape_functions( double dirac_pos, T potential, T original_x0, T original_x1, T &res_left, T &res_right ) const {
+    if ( x0 == x1 || original_x0 == original_x1 )
+        return;
+
+    const T inv_len = 1.0 / ( original_x1 - original_x0 );
+    const T dx0 = x0 - dirac_pos;
+    const T dx1 = x1 - dirac_pos;
+    const T dx0_2 = dx0 * dx0;
+    const T dx1_2 = dx1 * dx1;
+    const T dx0_3 = dx0_2 * dx0;
+    const T dx1_3 = dx1_2 * dx1;
+    const T dx0_4 = dx0_3 * dx0;
+    const T dx1_4 = dx1_3 * dx1;
+
+    // Integral of ((dirac_pos - t)^2 - potential) * (A*t + B) = [ A/4 * (t-x)^4 + (Ax+B)/3 * (t-x)^3 - potential * (A/2 * (t-x)^2 + (Ax+B)*(t-x)) ]_a^b
+    
+    // Left shape function: A = -inv_len, Ax+B = (original_x1 - dirac_pos) * inv_len
+    {
+        const T A = -inv_len;
+        const T AxB = ( original_x1 - dirac_pos ) * inv_len;
+        const T I_w2 = ( A / 4.0 ) * ( dx1_4 - dx0_4 ) + ( AxB / 3.0 ) * ( dx1_3 - dx0_3 );
+        const T I_psi = ( A / 2.0 ) * ( dx1_2 - dx0_2 ) + ( AxB ) * ( dx1 - dx0 );
+        res_left += I_w2 - potential * I_psi;
+    }
+
+    // Right shape function: A = inv_len, Ax+B = (dirac_pos - original_x0) * inv_len
+    {
+        const T A = inv_len;
+        const T AxB = ( dirac_pos - original_x0 ) * inv_len;
+        const T I_w2 = ( A / 4.0 ) * ( dx1_4 - dx0_4 ) + ( AxB / 3.0 ) * ( dx1_3 - dx0_3 );
+        const T I_psi = ( A / 2.0 ) * ( dx1_2 - dx0_2 ) + ( AxB ) * ( dx1 - dx0 );
+        res_right += I_w2 - potential * I_psi;
+    }
+}
+
 #undef UTP
 #undef DTP
 

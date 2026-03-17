@@ -9,7 +9,7 @@ using TF = float;
 using TV = std::vector<TF>;
 
 struct W2Out {
-    TV barycenters, distances, grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys;
+    TV barycenters, potentials, distances, grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys;
 };
 
 static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point_xs, const TV &point_ys, PI batch_size = 1 ) {
@@ -28,19 +28,9 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     // forward
     W2Out res;
     res.barycenters.resize( nb_diracs * batch_size );
+    res.potentials.resize( nb_diracs * batch_size );
     res.distances.resize( batch_size );
-    w2_distance( diracs, functions, view1( res.distances ), view2( res.barycenters ) );
-
-    // Numeric diff for validation
-    // const TF eps = 1e-4;
-    // TV grad_num(dirac_xs.size());
-    // for (size_t i = 0; i < dirac_xs.size(); ++i) {
-    //     TV dxs_eps = dirac_xs;
-    //     dxs_eps[i] += eps;
-    //     TV d_eps(nb_batches), b_eps(nb_diracs * nb_batches);
-    //     run_fwd(dxs_eps, d_eps, b_eps);
-    //     grad_num[i] = (d_eps[0] - res.distances[0]) / eps;
-    // }
+    w2_distance( diracs, functions, view1( res.distances ), view2( res.barycenters ), view2( res.potentials ) );
 
     // Backward
     res.grad_dirac_xs.resize( nb_diracs * batch_size );
@@ -49,15 +39,11 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     res.grad_point_ys.resize( nb_points * batch_size );
     TV grad_bary( nb_diracs * batch_size, 0 );
     TV grad_dist( batch_size, 1 );
-    // T_T void w2_distance_backward( TensorView<const T,1> grad_w2_squared, TensorView<const T,2> grad_w2_barycenters, TensorView<const T,2> w2_barycenters, DiracSet<T,1> diracs, Affine1d<T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions );
 
     Affine1d<TF,1> grad_functions{ .xs = view2( res.grad_point_xs ), .ys = view2( res.grad_point_ys ) };
     DiracSet<TF,1> grad_diracs{ .xs = view2( res.grad_dirac_xs ), .ws = view2( res.grad_dirac_ws ) };
 
-    w2_distance_backward( cview1( grad_dist ), cview2( grad_bary ), cview2( res.barycenters ), diracs, functions, grad_diracs, grad_functions );
-
-    // for (size_t i = 0; i < res.grad_dirac_xs.size(); ++i)
-    //     CHECK_THAT(res.grad_dirac_xs[i], Catch::Matchers::WithinAbs(grad_num[i], 1e-3));
+    w2_distance_backward( cview1( grad_dist ), cview2( grad_bary ), cview2( res.potentials ), cview2( res.barycenters ), diracs, functions, grad_diracs, grad_functions );
 
     return res;
 }

@@ -18,7 +18,7 @@ from .driver import driver
 def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions, _check_1d = True ) -> OtPlan | OtPlan1d | BatchOfOtPlans | BatchOf1dOtPlans:
     # ensure batch
     if isinstance( f, Distribution ) and isinstance( g, Distribution ):
-        return plan( f.batch_version(), g.batch_version() ).unbatch()
+        return plan( f.batch_version( 1 ), g.batch_version( 1 ) ).unbatch()
     if isinstance( f, Distribution ):
         return plan( f.batch_version( g.batch_size ), g )
     if isinstance( g, Distribution ):

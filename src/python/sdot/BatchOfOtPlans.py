@@ -5,14 +5,16 @@ class BatchOfOtPlans:
     """
     barycenters : Tensor[ batch_index, dirac_index, dim ]
     distances : Tensor[ batch_index ]
+    potentials : Tensor[ batch_index, dirac_index ]
     """
 
-    def __init__( self, distances, barycenters ):
+    def __init__( self, distances, barycenters, potentials = None ):
         assert barycenters.ndim == 3
         assert distances.ndim == 1
 
         self.barycenters = barycenters
         self.distances = distances
+        self.potentials = potentials
 
     def unbatch( self ):
         assert self.barycenters.shape[ 0 ] == 1

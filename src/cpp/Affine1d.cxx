@@ -44,12 +44,12 @@ UTP void DTP::get_next_piece( Piece &piece ) const {
     piece.mass = std::numeric_limits<TF>::max();
 }
 
-UTP void DTP::take_some_mass( Piece &current_piece, TF mass_to_take, auto &&on_taken_piece ) const {
+UTP DTP::TF DTP::take_some_mass( Piece &current_piece, TF mass_to_take, auto &&on_taken_piece ) const {
     // enough mass in the current piece ?
     if ( mass_to_take <= current_piece.mass ) {
         Piece np = current_piece.take_some_mass( mass_to_take );
         on_taken_piece( np );
-        return;
+        return np.x1;
     }
 
     // else, use the current piece, get to the next, ...
@@ -68,6 +68,7 @@ UTP void DTP::take_some_mass( Piece &current_piece, TF mass_to_take, auto &&on_t
 
     Piece np = current_piece.take_some_mass( mass_to_take );
     on_taken_piece( np );
+    return np.x1;
 }
 
 UTP PI DTP::nb_points() const {

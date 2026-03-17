@@ -17,7 +17,7 @@ struct Affine1d<T,0> {
     using  TT             = TensorView<T,1>;
 
     Piece  get_first_piece() const;
-    void   take_some_mass ( Piece &current_piece, TF mass_to_take, auto &&on_taken_piece ) const;
+    TF     take_some_mass ( Piece &current_piece, TF mass_to_take, auto &&on_taken_piece ) const; ///< return right position
     void   get_next_piece ( Piece &piece ) const;
 
     PI     nb_points      () const;

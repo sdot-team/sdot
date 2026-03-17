@@ -9,14 +9,14 @@ def add_buid_path():
     if _build_path.exists() and str( _build_path ) not in sdot.__path__:
         sdot.__path__.append( str( _build_path ) )
 
-def make_driver_instance( framework, device, dtype ):
+def make_driver_instance( framework, scalar_type, device ):
     if str.lower( framework ) == "pytorch":
         from .drivers.PyTorchDriver import PyTorchDriver
-        return PyTorchDriver( dtype = dtype, device = device )
+        return PyTorchDriver( dtype = scalar_type, device = device )
 
     if str.lower( framework ) == "jax":
         from .drivers.JaxDriver import JaxDriver
-        return JaxDriver( dtype = dtype, device = device )
+        return JaxDriver( dtype = scalar_type, device = device )
 
     raise RuntimeError( f"{ framework } is not a registered framework name (for now, one can use 'pytorch' or 'jax')" )
 
@@ -26,16 +26,19 @@ class DriverProxy:
     `dtype` is actually a "default" dtype (the user can use what he/she wants). same thing for `device`.
     """
 
-    def __init__( self, framework = "pytorch", dtype = "float32", device = "cpu" ):
-        self.framework = framework
-        self.device = device
-        self.dtype = dtype
-
+    def __init__( self, framework = "pytorch", scalar_type = "float32", device = "cpu" ):
+        self._current_parameters = None
         self._instance = None
 
+        self.framework = framework
+        self.scalar_type = scalar_type
+        self.device = device
+
     def __getattr__( self, name ):
-        if self._instance is None:
-            driver._instance = make_driver_instance( self.framework, self.device, self.dtype )
+        parameters = ( self.framework, self.scalar_type, self.device )
+        if self._current_parameters != parameters:
+            self._instance = make_driver_instance( *parameters )
+            self._current_parameters = parameters
 
         return getattr( self._instance, name )
 
