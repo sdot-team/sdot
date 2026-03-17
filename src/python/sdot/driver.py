@@ -23,15 +23,16 @@ def make_driver_instance( framework, scalar_type, device ):
 class DriverProxy:
     """
 
-    `dtype` is actually a "default" dtype (the user can use what he/she wants). same thing for `device`.
+    `scalar_type` is actually a "default" dtype (the user can use what he/she wants).
+    Same thing for `device`.
     """
 
     def __init__( self, framework = "pytorch", scalar_type = "float32", device = "cpu" ):
         self._current_parameters = None
         self._instance = None
 
-        self.framework = framework
         self.scalar_type = scalar_type
+        self.framework = framework
         self.device = device
 
     def __getattr__( self, name ):
