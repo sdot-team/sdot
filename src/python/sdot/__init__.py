@@ -8,14 +8,35 @@ from .distributions.SumOf1dWeightedDiracs import SumOf1dWeightedDiracs
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
 from .distributions.Distribution import Distribution
 
-from .BatchOf1dOtPlans import BatchOf1dOtPlans
-from .BatchOfOtPlans import BatchOfOtPlans
-from .OtPlan1d import OtPlan1d
-from .OtPlan import OtPlan
+from .BatchOf1dOtPlans import BatchOf1dOtPlans as BatchOf1dOtPlans
+from .BatchOfOtPlans import BatchOfOtPlans as BatchOfOtPlans
+from .OtPlan1d import OtPlan1d as OtPlan1d
+from .OtPlan import OtPlan as OtPlan
 
 from .driver import driver
 
+__all__ = [
+    "BatchOfPiecewise1dAffineFunctions",
+    "BatchOfSumOfWeighted1dDiracs",
+    "BatchOfSumOfWeightedDiracs",
+    "Piecewise1dAffineFunction",
+    "SumOf1dWeightedDiracs",
+    "BatchOfDistributions",
+    "SumOfWeightedDiracs",
+    "BatchOf1dOtPlans",
+    "BatchOfOtPlans",
+    "Distribution",
+    "barycenters",
+    "distances",
+    "distance",
+    "OtPlan1d",
+    "OtPlan",
+    "driver",
+    "plan",
+]
+
 def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions, _check_1d = True ) -> OtPlan | OtPlan1d | BatchOfOtPlans | BatchOf1dOtPlans:
+
     # ensure batch
     if isinstance( f, Distribution ) and isinstance( g, Distribution ):
         return plan( f.batch_version( 1 ), g.batch_version( 1 ) ).unbatch()

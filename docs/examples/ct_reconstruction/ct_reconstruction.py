@@ -56,8 +56,8 @@ sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
 sinogram.add_disk( [ 0.2, 0.0 ], 0.10, + 1.0 )
 
 dirac_coords = torch.rand( ( 1000, 2 ), requires_grad = True )
-# sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
-sdot.driver.optimize_using_sgd( loss, dirac_coords )
+sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
+# sdot.driver.optimize_using_sgd( loss, dirac_coords )
 
 coords = dirac_coords.detach().numpy()
 

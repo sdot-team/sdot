@@ -54,27 +54,32 @@ class PyTorchDriver:
     def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewise1dAffineFunctions ) -> BatchOfOtPlans:
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
-            def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor, torch.tensor ]:
+            def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor, torch.tensor, torch.tensor ]:
                 dirac_xs = dirac_xs.contiguous()
                 dirac_ws = dirac_ws.contiguous()
                 point_xs = point_xs.contiguous()
                 point_ys = point_ys.contiguous()
 
-                distances = self.empty( dirac_xs.shape[ 0 : 1 ] )
-                barycenters = self.empty( dirac_xs.shape )
-                potentials = self.empty( dirac_ws.shape )
+                batch_size = dirac_xs.shape[ 0 ]
+                nb_diracs = dirac_xs.shape[ 1 ]
+                dim = dirac_xs.shape[ 2 ]
+
+                barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
+                potentials = self.empty( [ batch_size, nb_diracs ] )
+                distances = self.empty( [ batch_size ] )
+                cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
 
                 sdot_bindings_cpu.ot_plan_to_piecewise_affine_1d(
                     dirac_xs, dirac_ws, point_xs, point_ys,
-                    distances, barycenters, potentials
+                    distances, barycenters, potentials, cuts
                 )
 
-                ctx.save_for_backward( dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials )
-                return distances, barycenters, potentials
+                ctx.save_for_backward( dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials, cuts )
+                return distances, barycenters, potentials, cuts
 
             @staticmethod
-            def backward( ctx, grad_distance, grad_barycenters, grad_potentials ):
-                dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials = ctx.saved_tensors
+            def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
+                dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials, cuts = ctx.saved_tensors
                 grad_dirac_xs = self.empty( dirac_xs.shape )
                 grad_dirac_ws = self.empty( dirac_ws.shape )
                 grad_point_xs = self.empty( point_xs.shape )
@@ -84,14 +89,14 @@ class PyTorchDriver:
                     grad_distance.contiguous(),
                     grad_barycenters.contiguous(),
                     dirac_xs, dirac_ws, point_xs, point_ys,
-                    barycenters, potentials,
+                    barycenters, potentials, cuts,
                     grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
                 )
 
                 return grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
 
-        distances, barycenters, potentials = SDOTFunction.apply( f._nd_positions(), f.weights, g.xs, g.ys )
-        return BatchOfOtPlans( distances, barycenters, potentials )
+        distances, barycenters, potentials, cuts = SDOTFunction.apply( f._nd_positions(), f.weights, g.xs, g.ys )
+        return BatchOfOtPlans( distances, barycenters, potentials, cuts )
 
     def optimize_using_lbfgs( self, loss, params, on_iter = None ):
         """ small helper to optimize `loss` wrt `params` using lbfgs """

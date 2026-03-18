@@ -28,7 +28,7 @@ nanobind_dep = declare_dependency(
 # --- Common Project Settings ---
 host_system = host_machine.system()
 if host_system == 'darwin'
-    common_cpp_args = [ '-fdiagnostics-absolute-paths' ]
+    common_cpp_args = [ '-fdiagnostics-absolute-paths', '-g3' ]
 else
     common_cpp_args = [ '-g3' ]
 endif

@@ -9,7 +9,7 @@ using TF = float;
 using TV = std::vector<TF>;
 
 struct W2Out {
-    TV barycenters, potentials, distances, grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys;
+    TV barycenters, potentials, distances, cuts, grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys;
 };
 
 static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point_xs, const TV &point_ys, PI batch_size = 1 ) {
@@ -30,7 +30,8 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     res.barycenters.resize( nb_diracs * batch_size );
     res.potentials.resize( nb_diracs * batch_size );
     res.distances.resize( batch_size );
-    w2_distance( diracs, functions, view1( res.distances ), view2( res.barycenters ), view2( res.potentials ) );
+    res.cuts.resize( batch_size * nb_diracs * 2 );
+    w2_distance( diracs, functions, view1( res.distances ), view2( res.barycenters ), view2( res.potentials ), view2( res.cuts ) );
 
     // Backward
     res.grad_dirac_xs.resize( nb_diracs * batch_size );
@@ -43,7 +44,7 @@ static W2Out compute_w2( const TV &dirac_xs, const TV &dirac_ws, const TV &point
     Affine1d<TF,1> grad_functions{ .xs = view2( res.grad_point_xs ), .ys = view2( res.grad_point_ys ) };
     DiracSet<TF,1> grad_diracs{ .xs = view2( res.grad_dirac_xs ), .ws = view2( res.grad_dirac_ws ) };
 
-    w2_distance_backward( cview1( grad_dist ), cview2( grad_bary ), cview2( res.potentials ), cview2( res.barycenters ), diracs, functions, grad_diracs, grad_functions );
+    w2_distance_backward( cview1( grad_dist ), cview2( grad_bary ), cview2( res.potentials ), cview2( res.barycenters ), cview2( res.cuts ), diracs, functions, grad_diracs, grad_functions );
 
     return res;
 }

@@ -13,11 +13,12 @@ using TF = float;
 using NA = nb::ndarray<TF>;
 
 // Forward function that works with both 1D and 2D arrays
-void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA point_ys, NA distance, NA barycenters, NA potentials ) {
+void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA point_ys, NA distance, NA barycenters, NA potentials, NA cuts ) {
     // ranks
     CHECK_RANK( barycenters, 3, "[ batch_index, dirac_index, dim ]" );
     CHECK_RANK( potentials, 2, "[ batch_index, dirac_index ]" );
     CHECK_RANK( distance, 1, "[ batch_index ]" );
+    CHECK_RANK( cuts, 3, "[ batch_index, cut_index, bound_index ]" );
 
     CHECK_RANK( dirac_xs, 3, "[ batch_index, dirac_index, dim ]" );
     CHECK_RANK( dirac_ws, 2, "[ batch_index, dirac_index ]" );
@@ -32,6 +33,7 @@ void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA p
     CHECK_BATCH_SIZE( dirac_ws );
     CHECK_BATCH_SIZE( point_xs );
     CHECK_BATCH_SIZE( point_ys );
+    CHECK_BATCH_SIZE( cuts );
 
     // space dim
     CHECK_DIM_1( dirac_xs );
@@ -43,11 +45,11 @@ void ot_plan_to_piecewise_affine_1d( NA dirac_xs, NA dirac_ws, NA point_xs, NA p
 
     Affine1d<const TF,1> functions{ .xs = cview2( point_xs ), .ys = cview2( point_ys ) };
     DiracSet<const TF,1> diracs{ .xs = cview2( dirac_xs ), .ws = cview2( dirac_ws ) };
-    w2_distance( diracs, functions, view1( distance ), view2( barycenters ), view2( potentials ) );
+    w2_distance( diracs, functions, view1( distance ), view2( barycenters ), view2( potentials ), view2( cuts ) );
 }
 
 void backward_ot_plan_to_piecewise_affine_1d(
-    NA grad_distances, NA grad_barycenters, NA dirac_xs, NA dirac_ws, NA point_xs, NA point_ys, NA barycenters, NA potentials,
+    NA grad_distances, NA grad_barycenters, NA dirac_xs, NA dirac_ws, NA point_xs, NA point_ys, NA barycenters, NA potentials, NA cuts,
     NA grad_dirac_xs, NA grad_dirac_ws, NA grad_point_xs, NA grad_point_ys ) {
 
     // rank
@@ -56,6 +58,9 @@ void backward_ot_plan_to_piecewise_affine_1d(
     CHECK_RANK( grad_distances, 1, "[ batch_index ]" );
 
     CHECK_RANK( barycenters, 3, "[ batch_index, dirac_index, dim ]" );
+    CHECK_RANK( potentials, 2, "[ batch_index, dirac_index ]" );
+    CHECK_RANK( cuts, 3, "[ batch_index, cut_index, bound_index ]" );
+
     CHECK_RANK( dirac_xs, 3, "[ batch_index, dirac_index, dim ]" );
     CHECK_RANK( dirac_ws, 2, "[ batch_index, dirac_index ]" );
     CHECK_RANK( point_xs, 2, "[ batch_index, point_index ]" );
@@ -75,6 +80,7 @@ void backward_ot_plan_to_piecewise_affine_1d(
     CHECK_BATCH_SIZE( dirac_ws );
     CHECK_BATCH_SIZE( point_xs );
     CHECK_BATCH_SIZE( point_ys );
+    CHECK_BATCH_SIZE( cuts );
 
     CHECK_BATCH_SIZE( grad_dirac_xs );
     CHECK_BATCH_SIZE( grad_dirac_ws );
@@ -90,24 +96,21 @@ void backward_ot_plan_to_piecewise_affine_1d(
     DiracSet<TF,1> grad_diracs{ .xs = view2( grad_dirac_xs ), .ws = view2( grad_dirac_ws ) };
     Affine1d<const TF,1> functions{ .xs = cview2( point_xs ), .ys = cview2( point_ys ) };
     DiracSet<const TF,1> diracs{ .xs = cview2( dirac_xs ), .ws = cview2( dirac_ws ) };
-    w2_distance_backward( cview1( grad_distances ), cview2( grad_barycenters ), cview2( barycenters ), cview2( potentials ), diracs, functions, grad_diracs, grad_functions );
+    w2_distance_backward( cview1( grad_distances ), cview2( grad_barycenters ), cview2( barycenters ), cview2( potentials ), cview2( cuts ), diracs, functions, grad_diracs, grad_functions );
 }
 
 NB_MODULE( sdot_bindings_cpu, m ) {
     m.def( "ot_plan_to_piecewise_affine_1d", &ot_plan_to_piecewise_affine_1d,
-          nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ),
-          nb::arg( "point_xs" ), nb::arg( "point_ys" ),
-          nb::arg( "distance" ), nb::arg( "barycenters" ), nb::arg( "potentials" ),
+          nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "point_xs" ), nb::arg( "point_ys" ),
+          nb::arg( "distance" ), nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
           "SDOT plan to get distance and barycenters with f = sum of diracs (1D), g = piecewise affine function"
     );
 
     m.def( "backward_ot_plan_to_piecewise_affine_1d", &backward_ot_plan_to_piecewise_affine_1d,
           nb::arg( "grad_distance" ), nb::arg( "grad_barycenters" ),
-          nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ),
-          nb::arg( "points_xs" ), nb::arg( "points_ys" ),
-          nb::arg( "barycenters" ), nb::arg( "potentials" ),
-          nb::arg( "grad_dirac_xs" ), nb::arg( "grad_dirac_ws" ),
-          nb::arg( "grad_points_xs" ), nb::arg("grad_points_ys"),
+          nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "points_xs" ), nb::arg( "points_ys" ),
+          nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
+          nb::arg( "grad_dirac_xs" ), nb::arg( "grad_dirac_ws" ), nb::arg( "grad_points_xs" ), nb::arg("grad_points_ys"),
           "SDOT W2 backward implementation"
     );
 }

@@ -65,7 +65,7 @@ UTP void DTP::integrate_w2_shape_functions( double dirac_pos, T potential, T ori
     const T dx1_4 = dx1_3 * dx1;
 
     // Integral of ((dirac_pos - t)^2 - potential) * (A*t + B) = [ A/4 * (t-x)^4 + (Ax+B)/3 * (t-x)^3 - potential * (A/2 * (t-x)^2 + (Ax+B)*(t-x)) ]_a^b
-    
+
     // Left shape function: A = -inv_len, Ax+B = (original_x1 - dirac_pos) * inv_len
     {
         const T A = -inv_len;
