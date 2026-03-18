@@ -46,7 +46,7 @@ class PyTorchDriver:
         return torch.linspace( a, b, n, dtype = self.dtype, device = self.device )
 
     def empty( self, shape ):
-        return torch.ones( shape, dtype = self.dtype, device = self.device )
+        return torch.zeros( shape, dtype = self.dtype, device = self.device )
 
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )

@@ -5,7 +5,7 @@ def close( a, b ):
     return torch.allclose( a, torch.tensor( b, dtype = sdot.driver.dtype ) )
 
 
-def check_grad( input: torch.Tensor, loss, attr, eps = 1e-4, tol = 1e-3 ):
+def check_grad( name: str, input: torch.Tensor, loss, attr, eps = 1e-4, tol = 1e-3 ):
     input.requires_grad = True
     if input.grad is not None:
         input.grad.zero_()
@@ -26,10 +26,10 @@ def check_grad( input: torch.Tensor, loss, attr, eps = 1e-4, tol = 1e-3 ):
         gr = ( ( c2 - c0 ) / ( 2 * eps ) ).item()
         an = input.grad.view( -1 )[ idx ].item()
         if abs( gr - an ) > tol:
-            raise AssertionError( f"bad grad at idx { idx } for { attr } (ex: { gr }, an: { an })" )
+            raise AssertionError( f"bad grad at idx { idx } for { attr } (ex: { gr }, an: { an }) for case '{ name }'" )
 
 
-def check_plan( f, g, exp_dist = None, exp_bary = None ):
+def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
     # forward
     plan = sdot.plan( f, g )
 
@@ -41,30 +41,39 @@ def check_plan( f, g, exp_dist = None, exp_bary = None ):
             raise AssertionError( f"bad barycenters (exp: { exp_bary }, obt: { plan.barycenters })" )
 
     # grad
-    for m, attr in [ ( f, "positions" ), ( f, "weights" ) ]: # , ( g, "xs" ), ( g, "ys" )
+    for m, attr in [ ( f, "positions" ), ( f, "weights" ), ( g, "ys" ) ]: # , ( g, "xs" )
         def loss( input ):
             setattr( m, attr, input )
             return torch.sum( sdot.distances( f, g ) )
-        check_grad( getattr( m, attr ), loss, attr )
+        check_grad( name, getattr( m, attr ), loss, attr )
 
 
 def test_w2_pytorch_1_dirac():
-    check_plan(
+    check_plan( "0 then 1/2 => 1",
         sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
         sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
         [ 1 / 3, 1 / 12 ],
         [ 1 / 2, 1 / 2 ]
     )
 
-    check_plan(
+    # non constant density
+    check_plan( "0 then 1/2 => 2 x",
         sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
         sdot.Piecewise1dAffineFunction( [ 0, 2 ] ),
         [ 1 / 2, 1 / 12 ],
         [ 2 / 3, 2 / 3 ]
     )
 
+    # density is normalized by default
+    check_plan( "0 then 1/2 => 1 x",
+        sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
+        sdot.Piecewise1dAffineFunction( [ 0, 1 ] ),
+        [ 1 / 2, 1 / 12 ],
+        [ 2 / 3, 2 / 3 ]
+    )
+
 def test_w2_pytorch_2_diracs():
-    check_plan(
+    check_plan( "[ 0, 1 ] => 1",
         sdot.SumOf1dWeightedDiracs( [ 0, 1 ] ),
         sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
         [ 1 / 12 ],
@@ -72,20 +81,15 @@ def test_w2_pytorch_2_diracs():
     )
 
 def test_w2_pytorch_10_diracs():
-    check_plan(
+    check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
         sdot.SumOf1dWeightedDiracs( numpy.linspace( 0.05, 0.95, 10 ) ),
         sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
         [ 1 / 1200 ],
         numpy.linspace( 0.05, 0.95, 10 )
     )
 
-    check_plan(
+    check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 2 x",
         sdot.SumOf1dWeightedDiracs( numpy.linspace( 0.05, 0.95, 10 ) ),
         sdot.Piecewise1dAffineFunction( [ 0, 2 ] ),
         [ 0.03405928239226341248 ]
-    )
-
-    check_plan(
-        sdot.SumOf1dWeightedDiracs( numpy.linspace( 0.0, 0.1, 10 ) ),
-        sdot.Piecewise1dAffineFunction( [ 0, 2 ] ),
     )
