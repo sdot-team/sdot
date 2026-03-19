@@ -6,15 +6,16 @@ using namespace sdot;
 using TF = double;
 
 TEST_CASE("2D power diagram", "[PD]") {
-    Cell<TF,1> p1( 1, 1.0 );
-    Cell<TF,2> p2( 2, 1.0 );
-    Cell<TF,3> p3( 3, 1.0 );
-    P( p1 );
-    P( p2 );
+    // Cell<TF,2> p2( 2, 10.0 );
+    // P( p2 );
+
+    Cell<TF,3> p3( 3, 10.0 );
+    P( p3 );
+
+    p3.cut( p3.pf( 1, 0, 0 ), 1, 17 );
     P( p3 );
 
     VtkOutput vo;
-    p2.display_vtk( vo );
     p3.display_vtk( vo );
     vo.save( "build/out.vtk" );
 }

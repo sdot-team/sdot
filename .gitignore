@@ -24,6 +24,7 @@ __pycache__/
 *.egg-info/
 dist/
 wheels/
+subprojects/
 
 # C++ / CMake
 CMakeUserPresets.json

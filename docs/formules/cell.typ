@@ -17,3 +17,10 @@ Si une coupe ne change rien, on vérifie que refaire toutes les coupes avec un v
 
 Prop: on fait une zone tampon, on fera des wrappers sur les vecteurs pour utiliser ces zones tampon.
 
+                 2
+
+           c1          c0
+
+       0        c2         1
+
+       

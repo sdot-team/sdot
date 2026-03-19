@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MapOfUniqueSortedIndices.h"
 #include "PointFactory.h"
 #include "VtkOutput.h"
 
@@ -9,15 +10,17 @@ namespace sdot {
 template<class TF,int _dim=-1>
 class Cell {
 public:  
+    using       EdgeMap                 = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1)>;
+    using       FaceMap                 = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1)>;
     using       PF                      = PointFactory<TF,_dim>;
     using       IF                      = PointFactory<PI,_dim>;
-    using       VI                      = std::array<PI,2>;
-    using       LK                      = std::vector<PI>;
-    using       PT                      = Point<TF,_dim>;
-    using       IT                      = Point<PI,_dim>;
+    using       VF                      = std::vector<TF>;
+    using       Pt                      = Point<TF,_dim>;
+    using       It                      = Point<PI,_dim>;
                       
-    struct      Vertex                  { PT pos; IT cut_indices; LK links; };
-    struct      Cut                     { PT dir; TF sp; PI id; bool ext; };
+    struct      EdgeLink                { PI vertex_index; PI num_cut_to_remove; };
+    struct      Vertex                  { Pt pos; It cut_indices; std::vector<EdgeLink> edge_links; TF s; PI op_id = 0; };
+    struct      Cut                     { Pt dir; TF sp; PI id; bool ext; };
                     
     using       Vertices                = std::vector<Vertex>;
     using       Cuts                    = std::vector<Cut>;
@@ -27,13 +30,17 @@ public:
     void        display_vtk             ( VtkOutput &vo ) const;
     PI          dim                     () const { return pf.dim(); }
 
+    void        cut                     ( const Pt &dir, TF sp, PI id );
+
     static void for_each_2_comb_excepted( PI size, PI excepted, auto &&func );
     void        init_with_simplex       ( TF start_radius );
-   
-    Vertices    vertices;
-    Cuts        cuts;
-    PF          pf;
-    PI          id;
+
+    PI          curr_op_id;             ///<
+    Vertices    vertices;               ///<
+    Cuts        cuts;                   ///<
+    VF          sps;                    ///< scalar product
+    PF          pf;                     ///< point factory
+    PI          id;                     ///< index factory
 };
 
 //

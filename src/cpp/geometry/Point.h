@@ -9,7 +9,7 @@
 
 namespace sdot {
 
-//
+// dim >= 0
 template<class T,int dim=-1>
 class Point {
 public:
@@ -22,9 +22,14 @@ public:
 
     const T& operator[]              ( PI index ) const { return data[ index ]; }
     T&       operator[]              ( PI index ) { return data[ index ]; }
-              
+
+    bool     operator<               ( const Point &that ) const { return data < that.data; }
+
+    auto     with_pushed_value       ( T value ) const { Point<T,dim+1> res( dim + 1 ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; res[ size() ] = value; return res; }
+    auto     without_index           ( PI ind_to_remove ) const { Point<T,dim-1> res( dim-1 ); for( PI i = 0; i < ind_to_remove; ++i ) res[ i ] = data[ i ]; for( PI i = ind_to_remove + 1; i < size(); ++i ) res[ i - 1 ] = data[ i ]; return res; }
     PI       size                    () const;
-   
+
+
     Data     data;
 };
 
@@ -41,7 +46,11 @@ public:
 
     const T& operator[]              ( PI index ) const { return data[ index ]; }
     T&       operator[]              ( PI index ) { return data[ index ]; }
-              
+
+    bool     operator<               ( const Point &that ) const { return data < that.data; }
+
+    auto     with_pushed_value       ( T value ) const { Point<T,-1> res( size() + 1 ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; res[ size() ] = value; return res; }
+    auto     without_index           ( PI ind_to_remove ) const { Point<T,-1> res( size() - 1 ); for( PI i = 0; i < ind_to_remove; ++i ) res[ i ] = data[ i ]; for( PI i = ind_to_remove + 1; i < size(); ++i ) res[ i - 1 ] = data[ i ]; return res; }
     PI       size                    () const;
 
     Data     data;
