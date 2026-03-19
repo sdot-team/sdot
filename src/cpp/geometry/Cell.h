@@ -10,16 +10,17 @@ namespace sdot {
 template<class TF,int _dim=-1>
 class Cell {
 public:  
-    using       EdgeMap                 = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1)>;
-    using       FaceMap                 = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1)>;
+    using       EdgeMap                 = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1),PI,PI>;
+    using       FaceMap                 = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1),PI,PI>;
     using       PF                      = PointFactory<TF,_dim>;
     using       IF                      = PointFactory<PI,_dim>;
     using       VF                      = std::vector<TF>;
+    using       VI                      = std::vector<PI>;
     using       Pt                      = Point<TF,_dim>;
     using       It                      = Point<PI,_dim>;
                       
     struct      EdgeLink                { PI vertex_index; PI num_cut_to_remove; };
-    struct      Vertex                  { Pt pos; It cut_indices; std::vector<EdgeLink> edge_links; TF s; PI op_id = 0; };
+    struct      Vertex                  { Pt pos; It cut_indices; std::vector<EdgeLink> edge_links; };
     struct      Cut                     { Pt dir; TF sp; PI id; bool ext; };
                     
     using       Vertices                = std::vector<Vertex>;
@@ -35,7 +36,9 @@ public:
     static void for_each_2_comb_excepted( PI size, PI excepted, auto &&func );
     void        init_with_simplex       ( TF start_radius );
 
+
     PI          curr_op_id;             ///<
+    VI          vertex_corr;              ///<
     Vertices    vertices;               ///<
     Cuts        cuts;                   ///<
     VF          sps;                    ///< scalar product

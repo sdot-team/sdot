@@ -1,0 +1,39 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E201",  # whitespace after '(' — autorisé pour le style f( a, b )
+    "E202",  # whitespace before ')' — autorisé pour le style f( a, b )
+    "E203",  # whitespace before ':'
+    "E501",  # line too long (géré par line-length)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sdot"]
+
+[tool.ruff.format]
+# Style standard PEP8 pour Python (pas d'espaces dans les parenthèses,
+# contrairement au style C++ de ce projet)
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
