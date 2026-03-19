@@ -1,13 +1,20 @@
-#include <catch2/matchers/catch_matchers_floating_point.hpp>
-#include <catch2/matchers/catch_matchers_vector.hpp>
-#include <catch2/catch_test_macros.hpp>
-
-#include "../src/cpp/geometry/PowerDiagram.h"
+#include "../src/cpp/geometry/Cell.h"
 #include "../src/cpp/support/P.h"
+#include "catch_main.h"
 
 using namespace sdot;
 using TF = double;
-using TV = std::vector<TF>;
 
 TEST_CASE("2D power diagram", "[PD]") {
+    Cell<TF,1> p1( 1, 1.0 );
+    Cell<TF,2> p2( 2, 1.0 );
+    Cell<TF,3> p3( 3, 1.0 );
+    P( p1 );
+    P( p2 );
+    P( p3 );
+
+    VtkOutput vo;
+    p2.display_vtk( vo );
+    p3.display_vtk( vo );
+    vo.save( "build/out.vtk" );
 }
