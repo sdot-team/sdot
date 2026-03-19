@@ -1,19 +1,59 @@
-from ..BatchOfOtPlans import BatchOfOtPlans
-from ..bindings import sdot_bindings_cpu
+# import sdot
 import torch
-import sdot
+
+map_of_plan_methods = {}
+
 
 class PyTorchDriver:
     """
 
     """
-    def __init__( self, dtype = torch.float32, device = None ):
-        if type( dtype ) == str:
-            dtype = getattr( torch, dtype )
-            assert isinstance( dtype, torch.dtype )
+    def __init__( self, normalized_dtype: str, normalized_device: str ):
+        self.device = PyTorchDriver.find_device( normalized_device )
+        self.dtype = PyTorchDriver.find_dtype( normalized_dtype )
 
-        self.device = device or torch.get_default_device()
-        self.dtype = dtype
+        self.map_of_plan_methods = map_of_plan_methods
+
+    @staticmethod
+    def default_dtype( normalized_device: str | None ):
+        """ normalized_device can be "gpu:...", "cpu", "metal" or None
+            return appropriate type (metal => float, cuda => dep)
+        """
+        if normalized_device == "metal":
+            return "FP32"
+        return "FP64"
+
+    @staticmethod
+    def default_device( normalized_dtype ):
+        """
+        normalized_dtype can be None, "FP32" or "FP64"
+        """
+        if torch.cuda.is_available():
+            return "cuda:0"
+        # Metal (MPS) only supports FP32
+        if torch.backends.mps.is_available() and normalized_dtype != "FP64":
+            return "metal"
+        return "cpu"
+
+    @staticmethod
+    def find_device( normalized_device: str ):
+        """ find the torch device from a normalized name like cpu, cuda:1, metal """
+        if normalized_device.startswith( "cpu" ):
+            return torch.device( "cpu" )
+        if normalized_device.startswith( "cuda" ):
+            idx = normalized_device.split( ":" )[ 1 ] if ":" in normalized_device else "0"
+            return torch.device( f"cuda:{ idx }" )
+        if normalized_device.startswith( "metal" ):
+            return torch.device( "mps" )
+        raise RuntimeError( f"Unknown type { normalized_device }" )
+
+    @staticmethod
+    def find_dtype( normalized_dtype: str ):
+        if normalized_dtype == "FP32":
+            return torch.float32
+        if normalized_dtype == "FP64":
+            return torch.float64
+        raise RuntimeError( f"Unknown type { normalized_dtype }" )
 
     def t3( self, tensor ):
         """ make a rank 3 tensor """
@@ -51,53 +91,6 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
-    def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewise1dAffineFunctions ) -> BatchOfOtPlans:
-        class SDOTFunction( torch.autograd.Function ):
-            @staticmethod
-            def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor, torch.tensor, torch.tensor ]:
-                dirac_xs = dirac_xs.contiguous()
-                dirac_ws = dirac_ws.contiguous()
-                point_xs = point_xs.contiguous()
-                point_ys = point_ys.contiguous()
-
-                batch_size = dirac_xs.shape[ 0 ]
-                nb_diracs = dirac_xs.shape[ 1 ]
-                dim = dirac_xs.shape[ 2 ]
-
-                barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
-                potentials = self.empty( [ batch_size, nb_diracs ] )
-                distances = self.empty( [ batch_size ] )
-                cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
-
-                sdot_bindings_cpu.ot_plan_to_piecewise_affine_1d(
-                    dirac_xs, dirac_ws, point_xs, point_ys,
-                    distances, barycenters, potentials, cuts
-                )
-
-                ctx.save_for_backward( dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials, cuts )
-                return distances, barycenters, potentials, cuts
-
-            @staticmethod
-            def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
-                dirac_xs, dirac_ws, point_xs, point_ys, barycenters, potentials, cuts = ctx.saved_tensors
-                grad_dirac_xs = self.empty( dirac_xs.shape )
-                grad_dirac_ws = self.empty( dirac_ws.shape )
-                grad_point_xs = self.empty( point_xs.shape )
-                grad_point_ys = self.empty( point_ys.shape )
-
-                sdot_bindings_cpu.backward_ot_plan_to_piecewise_affine_1d(
-                    grad_distance.contiguous(),
-                    grad_barycenters.contiguous(),
-                    dirac_xs, dirac_ws, point_xs, point_ys,
-                    barycenters, potentials, cuts,
-                    grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
-                )
-
-                return grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys
-
-        distances, barycenters, potentials, cuts = SDOTFunction.apply( f._nd_positions(), f.weights, g.xs, g.ys )
-        return BatchOfOtPlans( distances, barycenters, potentials, cuts )
-
     def optimize_using_lbfgs( self, loss, params, on_iter = None ):
         """ small helper to optimize `loss` wrt `params` using lbfgs """
         lbfgs = torch.optim.LBFGS( [ params ], history_size = 15, max_iter = 10 ) # , line_search_fn = "strong_wolfe"
@@ -122,7 +115,7 @@ class PyTorchDriver:
                 grad_norm = torch.norm( params.grad )
                 param_diff = torch.norm( params - old_params )
 
-                print(f"Itération {i:02d} | Grad Norm: {grad_norm:.2e} | Param Diff: {param_diff:.2e}")
+                print(f"Itération {i:02d} | Grad Norm: {grad_norm.item():.2e} | Param Diff: {param_diff.item():.2e}")
 
                 # Test de sortie
                 if grad_norm < tol_grad:
@@ -142,3 +135,6 @@ class PyTorchDriver:
             optimizer.zero_grad()
             l.backward()
             optimizer.step()
+
+
+from .pytorch_functions import ot_plan_for_Piecewise1dAffineFunctions

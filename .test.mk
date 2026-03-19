@@ -6,7 +6,8 @@ all:
 	make build
 	# PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python .venv/bin/python tests/test_vanilla.py
 	# PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python .venv/bin/python docs/examples/ct_reconstruction/ct_reconstruction.py
-	${PYDIRS} ${PYTEST} tests/test_pytorch.py
+	# ${PYDIRS} ${PYTEST} tests/test_pytorch.py
+	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 
 ct:
 	make build

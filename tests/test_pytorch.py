@@ -1,5 +1,6 @@
 import torch, numpy, sdot
 
+sdot.driver.scalar_type = "float64"
 
 def close( a, b ):
     return torch.allclose( a, torch.tensor( b, dtype = sdot.driver.dtype ) )
@@ -41,11 +42,12 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
             raise AssertionError( f"bad barycenters (exp: { exp_bary }, obt: { plan.barycenters })" )
 
     # grad
-    for m, attr in [ ( f, "positions" ), ( f, "weights" ), ( g, "ys" ) ]: # , ( g, "xs" )
-        def loss( input ):
-            setattr( m, attr, input )
-            return torch.sum( sdot.distances( f, g ) )
-        check_grad( name, getattr( m, attr ), loss, attr )
+    for proc in [ sdot.distances, sdot.barycenters ]:
+        for m, attr in [ ( f, "positions" ), ( f, "weights" ), ( g, "ys" ), ( g, "xs" ) ]: #
+            def loss( input ):
+                setattr( m, attr, input )
+                return torch.sum( proc( f, g ) )
+            check_grad( name, getattr( m, attr ), loss, attr )
 
 
 def test_w2_pytorch_1_dirac():

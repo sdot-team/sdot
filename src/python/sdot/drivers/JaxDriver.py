@@ -78,7 +78,7 @@ class JaxDriver:
         return jnp.tile( tensor, shape )
 
     def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewise1dAffineFunctions ) -> BatchOfOtPlans:
-        
+
         @jax.custom_vjp
         def sdot_op( dirac_xs, dirac_ws, point_xs, point_ys ):
             def forward_callback( d_xs, d_ws, p_xs, p_ys ):

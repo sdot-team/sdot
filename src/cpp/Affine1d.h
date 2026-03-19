@@ -16,10 +16,13 @@ struct Affine1d<T,0> {
     using  Piece          = PieceOfAffine1d<TF>;
     using  TT             = TensorView<T,1>;
 
-    Piece  get_first_piece( TF point_scale ) const;
-    TF     take_some_mass ( Piece &current_piece, TF point_scale, TF mass_to_take, auto &&on_taken_piece ) const; ///< return right position
-    void   get_next_piece ( Piece &piece, TF point_scale ) const;
-    void   get_grad_ys    ( T ratio, auto grad_y ) const;
+    Piece  get_first_piece         ( TF point_scale ) const;
+    TF     take_some_mass          ( Piece &current_piece, TF point_scale, TF mass_to_take, auto &&on_taken_piece ) const; ///< return right position
+    void   get_next_piece          ( Piece &piece, TF point_scale ) const;
+    void   get_grad_ys             ( T ratio, auto grad_y ) const;
+
+    void   accumulate_w2_grad_ys   ( const Piece &piece, TF dirac_pos, TF potential, TF g_scale, auto grad_ys ) const; ///< backward of w2 += piece.w2_dist(dirac_pos): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
+    void   accumulate_linear_grad_ys( const Piece &piece, TF slope, TF offset, TF scale, auto grad_ys ) const;          ///< backward of moment += piece.moment() with dual variable (slope*t + offset): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
 
     PI     nb_points      () const;
     TF     mass           () const;

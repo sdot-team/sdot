@@ -47,7 +47,6 @@ def loss( dirac_coords ):
 
     f = sdot.BatchOfPiecewise1dAffineFunctions( sinogram.xs, sinogram.ys )
     g = sdot.BatchOfSumOfWeighted1dDiracs( dirac_xs )
-    print( torch.sum( sdot.distances( f, g ) ) )
     return torch.sum( sdot.distances( f, g ) )
 
 sinogram = Sinogram( 1000, 1000 )
@@ -67,6 +66,6 @@ pyplot.axis( 'equal' )
 pyplot.show()
 
 
-# import os
-# os.system( "rm build/img_*png" )
-# os.system( "convert -delay 5 build/img_*png build/anim.gif" )
+# # import os
+# # os.system( "rm build/img_*png" )
+# # os.system( "convert -delay 5 build/img_*png build/anim.gif" )

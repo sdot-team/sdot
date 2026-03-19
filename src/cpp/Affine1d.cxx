@@ -98,6 +98,22 @@ UTP void DTP::get_grad_ys( T ratio, auto grad_y ) const {
     }
 }
 
+UTP void DTP::accumulate_w2_grad_ys( const Piece &piece, TF dirac_pos, TF potential, TF g_scale, auto grad_ys ) const {
+    TF gl = 0, gr = 0;
+    piece.integrate_w2_shape_functions( dirac_pos, potential,
+        static_cast<TF>( xs[ piece.index - 1 ] ), static_cast<TF>( xs[ piece.index ] ), gl, gr );
+    grad_ys[ piece.index - 1 ] += static_cast<T>( g_scale * gl );
+    grad_ys[ piece.index ]     += static_cast<T>( g_scale * gr );
+}
+
+UTP void DTP::accumulate_linear_grad_ys( const Piece &piece, TF slope, TF offset, TF scale, auto grad_ys ) const {
+    TF gl = 0, gr = 0;
+    piece.integrate_linear_shape_functions( slope, offset,
+        static_cast<TF>( xs[ piece.index - 1 ] ), static_cast<TF>( xs[ piece.index ] ), gl, gr );
+    grad_ys[ piece.index - 1 ] += static_cast<T>( scale * gl );
+    grad_ys[ piece.index ]     += static_cast<T>( scale * gr );
+}
+
 #undef UTP
 #undef DTP
 

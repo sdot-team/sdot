@@ -39,3 +39,5 @@ docs/gallery/posts/
 docs/assets/examples/
 site/
 .zensical/
+.claude/
+CLAUDE.md

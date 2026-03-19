@@ -56,12 +56,12 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
         raise RuntimeError( "TODO: handle cases where f and g are both _not_ SumOfWeightedDiracs" )
 
     # case BatchOfPiecewise1dAffineFunctions
-    if isinstance( g, BatchOfPiecewise1dAffineFunctions ):
-        assert f.dim == 1
-        return driver.batch_of_ot_plan_for_Piecewise1dAffineFunctions( f, g )
+    try:
+        method = driver.map_of_plan_methods[ type( g ).__name__ ]
+    except KeyError:
+        raise RuntimeError( f"TODO: SumOfWeightedDiracs -> { type( g ) }" )
 
-    # unhandled case
-    raise RuntimeError( f"TODO: SumOfWeightedDiracs -> { type( g ) }" )
+    return method( f, g )
 
 
 def distances( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
