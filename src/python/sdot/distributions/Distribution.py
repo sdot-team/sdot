@@ -7,6 +7,10 @@ class Distribution:
     always_1d, and one property per TensorField axis name.
     """
 
+    @staticmethod
+    def batch_class():
+        raise RuntimeError( "To be redefined" )
+
     def batch_version( self, batch_size: int ):
         raise RuntimeError( f"To be redefined for { type( self ) }" )
 

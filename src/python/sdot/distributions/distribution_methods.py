@@ -169,13 +169,19 @@ def _setup_distribution_class( cls, stop_classes, is_batch = False ):
     batch_class_name = 'BatchOf' + cls.__name__
     cls_module       = cls.__module__
 
-    def batch_version( self, batch_size, _cls = cls, _bcn = batch_class_name, _mod = cls_module ):
+    def _get_batch_class( _cls = cls, _bcn = batch_class_name, _mod = cls_module ):
         BatchCls = _cls._batch_type
         if BatchCls is None:
             import importlib
             pkg      = '.'.join( _mod.split( '.' )[ :-1 ] )
             BatchCls = getattr( importlib.import_module( '.' + _bcn, package = pkg ), _bcn )
             _cls._batch_type = BatchCls
+        return BatchCls
+
+    cls.batch_class = staticmethod( _get_batch_class )
+
+    def batch_version( self, batch_size ):
+        BatchCls = type( self ).batch_class()
         kw = {}
         for name, field in all_fields.items():
             v = self.__dict__.get( f'_{ name }' )
