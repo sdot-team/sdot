@@ -47,6 +47,19 @@ SpaceBeforeAssignmentOperators: true
 AlignAfterOpenBracket: Align
 ContinuationIndentWidth: 4
 
+# Alignement des noms de variables/attributs sur les lignes consécutives
+# Résultat : FaceMap  face_map;  /  PI       curr_op_id;  /  Vertices vertices;
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: false
+
+# Alignement des = consécutifs (utile pour les blocs using/typedef)
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: false
+
 # Constructeurs/initialiseurs
 BreakConstructorInitializers: BeforeComma
 PackConstructorInitializers: Never

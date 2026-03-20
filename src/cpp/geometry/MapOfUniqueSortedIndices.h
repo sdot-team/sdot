@@ -6,7 +6,7 @@
 // #include "VecForCapa.h"
 #include "Point.h"
 #include <map>
- 
+
 namespace sdot {
 /**
  * map[ Vec<PII>(...) ] => ... where items in Vec<PII>(...) are strictly increasing
@@ -18,7 +18,7 @@ class MapOfUniqueSortedIndices {
 public:
     void  prepare_for( PII /*max_PI_value*/ ) { values.clear(); }
 
-    PIO&  operator[] ( const Point<PII,s> &a ) { auto iter = values.find( a ); if ( iter == values.end() ) iter = values.insert( iter, { a, 0 } ); return iter->second; }
+    PIO&  operator[] ( const Point<PII,s> &a ) { auto iter = values.find( a ); if ( iter == values.end() ) iter = values.insert( iter, { a, {} } ); return iter->second; }
     PIO&  operator() ( const Point<PII,s+1> &a, PI ind_to_remove ) { return operator[]( a.without_index( ind_to_remove ) ); }
 
 private:
@@ -61,7 +61,7 @@ private:
 //     void   display                 ( Displayer &ds ) const { ds << values; }
 
 //     PIO&   at_without_index        ( const Vec<PII,3> &a, auto index ) {
-//          const auto a0 = a[ 0 + ( index <= 0 ) ], a1 = a[ 1 + ( index <= 1 ) ]; 
+//          const auto a0 = a[ 0 + ( index <= 0 ) ], a1 = a[ 1 + ( index <= 1 ) ];
 //          return values[ ( a1 - 1 ) * a1 / 2 + a0 ];
 //     }
 

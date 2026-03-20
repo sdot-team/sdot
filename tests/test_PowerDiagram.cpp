@@ -6,7 +6,8 @@ using namespace sdot;
 using TF = double;
 
 TEST_CASE("2D power diagram", "[PD]") {
-    Cell<TF,2> p2( 2, 10.0 );
+    Cell<TF,2> p2( 2 );
+    p2.init_with_axis_aligned_simplex( 2.0 );
     P( p2 );
 
     p2.cut( p2.pf( 1, 0 ), 1, 17 );

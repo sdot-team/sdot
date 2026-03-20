@@ -10,10 +10,7 @@ namespace sdot {
 #define UTP template< class TF, int _dim >
 #define DTP Cell< TF, _dim >
 
-UTP DTP::Cell( int actual_dim, TF start_radius )
-    : curr_op_id( 0 )
-    , pf( actual_dim ) {
-    init_with_simplex( start_radius );
+UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), pf( actual_dim ), df( actual_dim ) {
 }
 
 UTP void DTP::display_vtk( VtkOutput& vo ) const {
@@ -28,47 +25,76 @@ UTP void DTP::display_vtk( VtkOutput& vo ) const {
     }
 }
 
-UTP void DTP::init_with_simplex( TF start_radius ) {
-    const PI nb_vertices = dim() + 1;
+UTP void DTP::init_with_simplex( std::span<Pt> points ) {
+    const PI nb_vertices = points.size();
     const PI dim = this->dim();
 
+    // vertices
+    vertices.clear();
     vertices.reserve( nb_vertices );
-    cuts.reserve( nb_vertices );
-
-    // vertices pos
-    vertices.push_back( Vertex{ .pos = pf.value_at( 0, start_radius ), .cut_indices = { dim } } );
-    for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex ) {
-        for ( PI d = 0; d < num_vertex; ++d )
-            vertices[ d ].pos[ num_vertex - 1 ] = -start_radius / num_vertex;
-        vertices.push_back( Vertex{ .pos = pf.value_at( num_vertex - 1, start_radius ), .cut_indices = { dim } } );
+    for( PI i = 0; i < nb_vertices; ++i ) {
+        vertices.push_back( Vertex{
+            .pos = points[ i ],
+            .cut_indices = df.with_func( [&]( PI d ) { return d + ( d >= i ); } )
+        } );
     }
 
-    // cut indices
-    for ( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex )
-        for ( PI d = 0; d < dim; ++d )
-            vertices[ num_vertex ].cut_indices[ d ] = d + ( d >= num_vertex );
+    P( points.size(), vertices.size() );
 
     // edges
-    for ( PI a = 0; a < nb_vertices; ++a ) {
-        for ( PI b = 0; b < nb_vertices; ++b ) {
-            if ( a != b ) {
+    for ( PI a = 0; a < nb_vertices; ++a )
+        for ( PI b = 0; b < nb_vertices; ++b )
+            if ( a != b )
                 vertices[ a ].edge_links.push_back( EdgeLink{ .num_cut_to_remove = b - ( b > a ), .vertex_index = b } );
-            }
-        }
-    }
 
     // cuts
-    for ( PI num_cut = 0; num_cut <= dim; ++num_cut ) {
-        PI num_oth = ( num_cut + 1 ) % ( dim + 1 );
-        Pt ori = vertices[ num_cut ].pos;
-        Pt tgt = vertices[ num_oth ].pos;
-        Pt dir = tgt - ori;
-        for_each_2_comb_excepted( nb_vertices, num_cut, [ & ]( PI a, PI b ) {
+    cuts.clear();
+    cuts.reserve( nb_vertices );
+    for ( PI n0 = 0; n0 <= dim; ++n0 ) {
+        const PI n1 = ( n0 + 1 ) % ( dim + 1 ); // a "random" point that is not n0
+        const Pt p0 = vertices[ n0 ].pos;
+        const Pt p1 = vertices[ n1 ].pos;
+
+        // orthogonalization of p1 - p0 wrt the facing face
+        Pt dir = p1 - p0;
+        for_each_2_comb_excepted( nb_vertices, n0, [ & ]( PI a, PI b ) {
             Pt cor = vertices[ a ].pos - vertices[ b ].pos;
             dir -= sp( cor, dir ) / sp( cor, cor ) * cor;
         } );
-        cuts.push_back( Cut{ .dir = dir, .sp = sp( dir, tgt ), .id = 0, .ext = 1 } );
+
+        //
+        cuts.push_back( Cut{
+            .dir = dir,
+            .sp = sp( dir, p1 ),
+            .id = 0,
+            .ext = 1
+        } );
     }
+}
+
+UTP void DTP::init_with_axis_aligned_simplex( TF length ) {
+    const PI nb_vertices = dim() + 1;
+
+    std::vector<Pt> points( nb_vertices );
+    points[ 0 ] = pf.zeros();
+    for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex )
+        points[ num_vertex ] = pf.value_at( num_vertex - 1, length );
+
+    init_with_simplex( points );
+}
+
+UTP void DTP::init_with_englobing_simplex( TF radius ) {
+    const PI nb_vertices = dim() + 1;
+
+    std::vector<Pt> points( nb_vertices );
+    points.push_back( pf.value_at( 0, radius ) );
+    for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex ) {
+        for ( PI d = 0; d < num_vertex; ++d )
+            points[ d ].pos[ num_vertex - 1 ] = -radius / num_vertex;
+        points.push_back( pf.value_at( num_vertex - 1, radius ) );
+    }
+
+    init_with_simplex( points );
 }
 
 UTP void DTP::for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
@@ -89,87 +115,118 @@ UTP void DTP::for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
 //     if ( d < dim )
 // }
 
-UTP void DTP::cut( const Pt& dir, TF sp, PI id ) {
-    //
+UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
+    // get the scalar product for each node
+    const PI old_vertices_size = vertices.size();
+    sps.clear();
+    sps.resize( vertices.size() );
+    PI nb_out = 0;
+    for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
+        TF sp = sdot::sp( dir_cut, vertices[ n0 ].pos ) - sp_cut;
+        nb_out += ( sp > 0 );
+        sps[ n0 ] = sp;
+    }
+
+    // no change
+    if ( nb_out == 0 )
+        return;
+
+    // void
+    if ( nb_out == old_vertices_size ) {
+        vertices.clear();
+        cuts.clear();
+    }
+
+    // preparation of a face => curr_op_id + num_new_vertex map (needed to make the new edges)
+    face_map.prepare_for( cuts.size() );
     ++curr_op_id;
 
-    sps.resize( 0 );
-    sps.resize( vertices.size() );
-
-    FaceMap face_map;
-    face_map.prepare_for( cuts.size() );
-
-    const PI old_vertices_size = vertices.size();
-    const PI new_cut_index = cuts.size();
-    bool used_cut = false;
+    // old_vertex_index => new_vertex_index
+    int vertex_count = 0;
     vertex_corr.clear();
-    int nc = 0;
+
+    // update vertex_corr + face_map + cut edges
     for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
-        Vertex& v = vertices[ n0 ];
-        const Pt p0 = v.pos;
+        const TF s0 = sps[ n0 ];
 
-        const TF s0 = sdot::sp( dir, p0 ) - sp;
-        sps[ n0 ] = s0;
+        // interior or exterior ?
+        if ( s0 <= 0 ) { // interior
+            // register vertex
+            vertex_corr.push_back( vertex_count++ );
 
-        // if int vertex
-        if ( s0 <= 0 ) {
-            vertex_corr.push_back( nc++ );
+            // cut int ext edges
+            for( EdgeLink &e0 : vertices[ n0 ].edge_links ) {
+                const TF s1 = sps[ e0.vertex_index ];
+                if ( s1 > 0 )
+                    _cut_int_ext_edge( n0, e0, s0, s1 );
+            }
+        } else { // exterior
+            // delete vertex
+            vertex_corr.push_back( -1 );
+        }
+    }
+
+    // we keep the new vertices :)
+    for ( PI n = old_vertices_size; n < vertices.size(); ++n )
+        vertex_corr.push_back( vertex_count++ );
+
+    // compaction of the vertices
+    for ( int n = 0; n < vertex_corr.size(); ++n )
+        if ( vertex_corr[ n ] != n && vertex_corr[ n ] >= 0 )
+            vertices[ vertex_corr[ n ] ] = std::move( vertices[ n ] );
+    vertices.resize( vertex_count );
+
+    // correction of the vertex references
+    for( Vertex &v : vertices )
+        for ( EdgeLink& e : v.edge_links )
+            e.vertex_index = vertex_corr[ e.vertex_index ];
+
+    // append the new cut
+    cuts.push_back( Cut{ .dir = dir_cut, .sp = sp_cut, .id = id, .ext = 0 } );
+}
+
+UTP void DTP::_cut_int_ext_edge( PI n0, EdgeLink &e0, TF s0, TF s1 ) {
+    const auto cut_indices_edge = vertices[ n0 ].cut_indices.without_index( e0.num_cut_to_remove );
+    const PI n1 = e0.vertex_index;
+    const Pt p0 = vertices[ n0 ].pos;
+    const Pt p1 = vertices[ n1 ].pos;
+
+    // "cut" the edge (point to the new vertex)
+    const PI new_vertex_index = vertices.size();
+    e0.vertex_index = new_vertex_index;
+
+    // add the new vertex
+    vertices.push_back( Vertex{
+        .pos         = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 ),
+        .cut_indices = cut_indices_edge.with_pushed_value( cuts.size() ),
+        .edge_links  = { EdgeLink{ .vertex_index = n0, .num_cut_to_remove = dim() - 1 } }
+    } );
+
+    // for each face,
+    //   if the vertex is new for this face, register it
+    //   else, make a new edge with the other node
+    for ( PI i = 0; i < cut_indices_edge.size(); ++i ) {
+        const auto cut_indices_face = cut_indices_edge.without_index( i );
+        FaceCorr &fc = face_map[ cut_indices_face ];
+        if ( fc.vertex_index_plus_curr_op_id < curr_op_id ) {
+            fc.vertex_index_plus_curr_op_id = curr_op_id + new_vertex_index;
+            fc.cut_ind_to_remove = i;
             continue;
         }
 
-        // ext vertex
-        vertex_corr.push_back( -1 );
+        // -> make the new edges
+        const PI n_dst = fc.vertex_index_plus_curr_op_id - curr_op_id;
+        const PI n_ori = new_vertex_index;
 
-        // for each edge to an interior vertex
-        auto vertex_ci = v.cut_indices;
-        for ( EdgeLink& edge_link : v.edge_links ) {
-            const TF s1 = sps[ edge_link.vertex_index ];
-            if ( s1 <= 0 ) {
-                auto edge_ci = vertex_ci.without_index( edge_link.num_cut_to_remove );
+        vertices[ n_ori ].edge_links.push_back( EdgeLink{
+            .num_cut_to_remove = i,
+            .vertex_index = n_dst
+        } );
 
-                // add a new vertex
-                const Pt p1 = vertices[ edge_link.vertex_index ].pos;
-                const PI new_vertex_index = vertices.size();
-                vertices.push_back(
-                    Vertex{ .pos = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 ),
-                            .cut_indices = edge_ci.with_pushed_value( new_cut_index ),
-                            .edge_links = { EdgeLink{ .vertex_index = n0, .num_cut_to_remove = dim() } } } );
-                used_cut = true;
-
-                //
-                edge_link.vertex_index = new_vertex_index;
-
-                //
-                for ( PI i = 0; i < edge_ci.size(); ++i ) {
-                    auto& id = face_map( edge_ci, i );
-                    if ( id ) {
-                        P( id - 1, new_vertex_index );
-                    } else {
-                        id = new_vertex_index + 1;
-                    }
-                }
-            }
-        }
-    }
-
-    if ( nc < vertices.size() ) {
-        for ( PI n = old_vertices_size; n < vertices.size(); ++n )
-            vertex_corr.push_back( nc++ );
-
-        for ( PI n = 0; n < nc; ++n ) {
-            if ( vertex_corr[ n ] == n )
-                continue;
-            Vertex& v = vertices[ vertex_corr[ n ] ];
-            v = std::move( vertices[ n ] );
-            for ( EdgeLink& e : v.edge_links )
-                e.vertex_index = vertex_corr[ e.vertex_index ];
-        }
-
-        vertices.resize( nc );
-    }
-
-    if ( used_cut ) {
-        cuts.push_back( Cut{ .dir = dir, .sp = sp, .id = id, .ext = 0 } );
+        vertices[ n_dst ].edge_links.push_back( EdgeLink{
+            .num_cut_to_remove = fc.cut_ind_to_remove,
+            .vertex_index = n_ori
+        } );
     }
 }
 

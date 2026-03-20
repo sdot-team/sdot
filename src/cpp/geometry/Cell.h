@@ -7,43 +7,63 @@
 namespace sdot {
 
 //
-template<class TF,int _dim=-1>
+template< class TF, int _dim = -1 >
 class Cell {
-public:  
-    using       EdgeMap                 = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1),PI,PI>;
-    using       FaceMap                 = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1),PI,PI>;
-    using       PF                      = PointFactory<TF,_dim>;
-    using       IF                      = PointFactory<PI,_dim>;
-    using       VF                      = std::vector<TF>;
-    using       VI                      = std::vector<PI>;
-    using       Pt                      = Point<TF,_dim>;
-    using       It                      = Point<PI,_dim>;
-                      
-    struct      EdgeLink                { PI vertex_index; PI num_cut_to_remove; };
-    struct      Vertex                  { Pt pos; It cut_indices; std::vector<EdgeLink> edge_links; };
-    struct      Cut                     { Pt dir; TF sp; PI id; bool ext; };
-                    
-    using       Vertices                = std::vector<Vertex>;
-    using       Cuts                    = std::vector<Cut>;
-                      
-    /**/        Cell                    ( int actual_dim, TF start_radius = 1 );
+public:
+    struct      FaceCorr { PI vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
 
-    void        display_vtk             ( VtkOutput &vo ) const;
-    PI          dim                     () const { return pf.dim(); }
+    using       FaceMap  = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1),PI,FaceCorr>;
+    using       EdgeMap  = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1),PI,PI>;
+    using       PF       = PointFactory<TF,_dim>;
+    using       DF       = PointFactory<PI,_dim>;
+    using       VF       = std::vector<TF>;
+    using       VI       = std::vector<int>;
+    using       Pt       = Point<TF,_dim>;
+    using       It       = Point<PI,_dim>;
 
-    void        cut                     ( const Pt &dir, TF sp, PI id );
+    struct EdgeLink {
+        PI vertex_index;
+        PI num_cut_to_remove;
+    };
+    struct Vertex {
+        using     EdgeLinks = std::vector<EdgeLink>;
 
-    static void for_each_2_comb_excepted( PI size, PI excepted, auto &&func );
-    void        init_with_simplex       ( TF start_radius );
+        Pt        pos;
+        It        cut_indices;
+        EdgeLinks edge_links;
+    };
+    struct Cut {
+        Pt   dir;
+        TF   sp;
+        PI   id;
+        bool ext;
+    };
 
+    using       Vertices                      = std::vector<Vertex>;
+    using       Cuts                          = std::vector<Cut>;
 
-    PI          curr_op_id;             ///<
-    VI          vertex_corr;              ///<
-    Vertices    vertices;               ///<
-    Cuts        cuts;                   ///<
-    VF          sps;                    ///< scalar product
-    PF          pf;                     ///< point factory
-    PI          id;                     ///< index factory
+    /**/        Cell                          ( int actual_dim );
+
+    void        display_vtk                   ( VtkOutput &vo ) const;
+    PI          dim                           () const { return pf.dim(); }
+
+    void        cut                           ( const Pt &dir, TF sp, PI id );
+
+    void        init_with_axis_aligned_simplex( TF length );
+    void        init_with_englobing_simplex   ( TF radius );
+    void        init_with_simplex             ( std::span<Pt> points );
+
+    static void for_each_2_comb_excepted      ( PI size, PI excepted, auto&& func );
+    void        _cut_int_ext_edge             ( PI n0, EdgeLink &e0, TF s0, TF s1 );
+
+    VI          vertex_corr;                  ///<
+    PI64        curr_op_id;                   ///<
+    FaceMap     face_map;                     ///<
+    Vertices    vertices;                     ///<
+    Cuts        cuts;                         ///<
+    VF          sps;                          ///< scalar product
+    PF          pf;                           ///< point factory
+    DF          df;                           ///< index factory
 };
 
 //
@@ -55,6 +75,6 @@ public:
 
 } // namespace sdot
 
-T_Td std::ostream &operator<<( std::ostream &os, const sdot::Cell<T,d> &p );
+T_Td std::ostream& operator<<( std::ostream& os, const sdot::Cell< T, d >& p );
 
 #include "Cell.cxx"
