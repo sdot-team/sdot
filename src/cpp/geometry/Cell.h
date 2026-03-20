@@ -58,6 +58,7 @@ public:
 
     VI          vertex_corr;                  ///<
     PI64        curr_op_id;                   ///<
+    VI          cut_corr;                     ///<
     FaceMap     face_map;                     ///<
     Vertices    vertices;                     ///<
     Cuts        cuts;                         ///<

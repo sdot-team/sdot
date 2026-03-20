@@ -14,7 +14,7 @@ template<class T,int dim=-1>
 class Point {
 public:
     using    Data                    = std::array<T,dim>;
-               
+
     /**/     Point                   ( PI /*size*/ = dim ) { for( auto &v : data ) v = 0; }
 
     T_p      operator std::array<T,p>() const { std::array<T,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = data[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
@@ -29,6 +29,10 @@ public:
     auto     without_index           ( PI ind_to_remove ) const { Point<T,dim-1> res( dim-1 ); for( PI i = 0; i < ind_to_remove; ++i ) res[ i ] = data[ i ]; for( PI i = ind_to_remove + 1; i < size(); ++i ) res[ i - 1 ] = data[ i ]; return res; }
     PI       size                    () const;
 
+    auto     begin                   () const { return data.begin(); }
+    auto     begin                   () { return data.begin(); }
+    auto     end                     () const { return data.end(); }
+    auto     end                     () { return data.end(); }
 
     Data     data;
 };
@@ -38,7 +42,7 @@ template<class T>
 class Point<T,-1> {
 public:
     using    Data                    = std::vector<T>;
-        
+
     /**/     Point                   ( PI size ) : data( size, 0 ) {}
 
     T_p      operator std::array<T,p>() const { std::array<T,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = data[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }

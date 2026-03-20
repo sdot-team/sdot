@@ -181,8 +181,33 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
         for ( EdgeLink& e : v.edge_links )
             e.vertex_index = vertex_corr[ e.vertex_index ];
 
+    // find unused cuts
+    cut_corr.clear();
+    cut_corr.resize( cuts.size(), -1 );
+    for( Vertex &v : vertices )
+        for( PI cut_index : v.cut_indices )
+            cut_corr[ cut_index ] = 0;
+
+    // make the cut indices corrections
+    int cut_count = 0;
+    for( auto &cc : cut_corr )
+        if ( cc == 0 )
+            cc = cut_count++;
+
+    // remove unused cuts
+    for ( int n = 0; n < cut_corr.size(); ++n )
+        if ( cut_corr[ n ] != n && cut_corr[ n ] >= 0 )
+            cuts[ cut_corr[ n ] ] = std::move( cuts[ n ] );
+    cuts.resize( cut_count );
+
     // append the new cut
     cuts.push_back( Cut{ .dir = dir_cut, .sp = sp_cut, .id = id, .ext = 0 } );
+    cut_corr.push_back( cut_count++ );
+
+    // correction of the cut references
+    for( Vertex &v : vertices )
+        for ( auto &cut_index : v.cut_indices )
+            cut_index = cut_corr[ cut_index ];
 }
 
 UTP void DTP::_cut_int_ext_edge( PI n0, EdgeLink &e0, TF s0, TF s1 ) {
