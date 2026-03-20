@@ -7,19 +7,19 @@
 namespace sdot {
 
 //
-template< class TF, int _dim = -1 >
+template< class TF, int ct_dim = -1 >
 class Cell {
 public:
     struct      FaceCorr { PI vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
 
-    using       FaceMap  = MapOfUniqueSortedIndices<(_dim>1?_dim-2:-1),PI,FaceCorr>;
-    using       EdgeMap  = MapOfUniqueSortedIndices<(_dim>0?_dim-1:-1),PI,PI>;
-    using       PF       = PointFactory<TF,_dim>;
-    using       DF       = PointFactory<PI,_dim>;
+    using       FaceMap  = MapOfUniqueSortedIndices<(ct_dim>1?ct_dim-2:-1),PI,FaceCorr>;
+    using       EdgeMap  = MapOfUniqueSortedIndices<(ct_dim>0?ct_dim-1:-1),PI,PI>;
+    using       PF       = PointFactory<TF,ct_dim>;
+    using       DF       = PointFactory<PI,ct_dim>;
     using       VF       = std::vector<TF>;
     using       VI       = std::vector<int>;
-    using       Pt       = Point<TF,_dim>;
-    using       It       = Point<PI,_dim>;
+    using       Pt       = Point<TF,ct_dim>;
+    using       It       = Point<PI,ct_dim>;
 
     struct EdgeLink {
         PI vertex_index;
@@ -54,6 +54,8 @@ public:
     void        init_with_simplex             ( std::span<Pt> points );
 
     static void for_each_2_comb_excepted      ( PI size, PI excepted, auto&& func );
+    void        check_consistency             ( TF eps = 1e-6 ) const;
+
     void        _cut_int_ext_edge             ( PI n0, EdgeLink &e0, TF s0, TF s1 );
 
     VI          vertex_corr;                  ///<

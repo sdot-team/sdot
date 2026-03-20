@@ -7,6 +7,7 @@ PYTEST = .venv/bin/pytest
 # PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python .venv/bin/python docs/examples/ct_reconstruction/ct_reconstruction.py
 # ${PYDIRS} ${PYTEST} tests/test_pytorch.py
 # 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+# 	micromamba run -n vfs vfs_build run tests/test_SimpleSquareMatrix.cpp
 
 all:
 	micromamba run -n vfs vfs_build run tests/test_PowerDiagram.cpp

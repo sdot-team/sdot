@@ -1,14 +1,15 @@
 #pragma once
 
 #include "MapOfUniqueSortedIndices.h"
+#include "SimpleSquareMatrix.h"
 #include "../support/ASSERT.h"
 #include "../support/P.h"
 #include "Cell.h"
 
 namespace sdot {
 
-#define UTP template< class TF, int _dim >
-#define DTP Cell< TF, _dim >
+#define UTP template< class TF, int ct_dim >
+#define DTP Cell< TF, ct_dim >
 
 UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), pf( actual_dim ), df( actual_dim ) {
 }
@@ -252,6 +253,42 @@ UTP void DTP::_cut_int_ext_edge( PI n0, EdgeLink &e0, TF s0, TF s1 ) {
             .num_cut_to_remove = fc.cut_ind_to_remove,
             .vertex_index = n_ori
         } );
+    }
+}
+
+UTP void DTP::check_consistency( TF eps ) const {
+    using namespace std;
+    for( const Vertex &v : vertices ) {
+        // base integer stuff
+        ASSERT( v.cut_indices.size() == dim() );
+        ASSERT( v.pos.size() == dim() );
+        for( PI cut_index : v.cut_indices )
+            ASSERT( cut_index < cuts.size() );
+        for( const EdgeLink &e : v.edge_links ) {
+            ASSERT( e.num_cut_to_remove < v.cut_indices.size() );
+            ASSERT( e.vertex_index < vertices.size() );
+        }
+
+        // check pos
+        SimpleSquareMatrix<TF,ct_dim> m( dim() );
+        Point<TF,ct_dim> x = pf();
+        for( PI r = 0; r < dim(); ++r ) {
+            for( PI c = 0; c < dim(); ++c )
+                m( r, c ) = cuts[ v.cut_indices[ r ] ].dir[ c ];
+            x[ r ] = cuts[ v.cut_indices[ r ] ].sp;
+        }
+
+        auto y = m.solve( x );
+        for( PI r = 0; r < dim(); ++r )
+            ASSERT( abs( v.pos[ r ] - y[ r ] ) <= eps );
+
+        // check that the other points in the edge are on the edge cut
+        for( const EdgeLink &e : v.edge_links ) {
+            const Pt p1 = vertices[ e.vertex_index ].pos;
+            for( PI num_cut : v.cut_indices.without_index( e.num_cut_to_remove ) )
+                ASSERT( abs( sp( p1, cuts[ num_cut ].dir ) - cuts[ num_cut ].sp ) <= eps );
+        }
+
     }
 }
 

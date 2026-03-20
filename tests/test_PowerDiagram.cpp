@@ -16,7 +16,7 @@ TEST_CASE("2D power diagram", "[PD]") {
     p2.cut( p2.pf( -1, 0 ), -0.5, 17 );
     P( p2 );
 
-    // p2.check_cuts();
+    p2.check_consistency();
     // Cell<TF,3> p3( 3, 10.0 );
     // P( p3 );
 
