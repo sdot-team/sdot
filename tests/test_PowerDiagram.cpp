@@ -9,12 +9,15 @@ TEST_CASE("2D power diagram", "[PD]") {
     Cell<TF,2> p2( 2 );
     p2.init_with_axis_aligned_simplex( 2.0 );
     P( p2 );
+    P( p2.measure() );
 
     p2.cut( p2.pf( 1, 0 ), 1.0, 17 );
     P( p2 );
+    P( p2.measure() );
 
     p2.cut( p2.pf( -1, 0 ), -0.5, 17 );
     P( p2 );
+    P( p2.measure() );
 
     p2.check_consistency();
     // Cell<TF,3> p3( 3, 10.0 );

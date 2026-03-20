@@ -1,17 +1,17 @@
 #pragma once
 
-#include "MapOfUniqueSortedIndices.h"
-#include "SimpleSquareMatrix.h"
 #include "../support/ASSERT.h"
 #include "../support/P.h"
 #include "Cell.h"
 
 namespace sdot {
 
-#define UTP template< class TF, int ct_dim >
-#define DTP Cell< TF, ct_dim >
+#define UTP template<class TF,int ct_dim>
+#define DTP Cell<TF,ct_dim>
 
-UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), pf( actual_dim ), df( actual_dim ) {
+UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), item_map( actual_dim + 1 ), pf( actual_dim ), df( actual_dim ) {
+    if ( ct_dim >= 0 )
+        ASSERT( actual_dim == ct_dim );
 }
 
 UTP void DTP::display_vtk( VtkOutput& vo ) const {
@@ -58,7 +58,7 @@ UTP void DTP::init_with_simplex( std::span<Pt> points ) {
 
         // orthogonalization of p1 - p0 wrt the facing face
         Pt dir = p1 - p0;
-        for_each_2_comb_excepted( nb_vertices, n0, [ & ]( PI a, PI b ) {
+        _for_each_2_comb_excepted( nb_vertices, n0, [ & ]( PI a, PI b ) {
             Pt cor = vertices[ a ].pos - vertices[ b ].pos;
             dir -= sp( cor, dir ) / sp( cor, cor ) * cor;
         } );
@@ -98,7 +98,7 @@ UTP void DTP::init_with_englobing_simplex( TF radius ) {
     init_with_simplex( points );
 }
 
-UTP void DTP::for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
+UTP void DTP::_for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
     for ( PI a = 1; a < size; ++a ) {
         if ( a == excepted )
             continue;
@@ -209,6 +209,54 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     for( Vertex &v : vertices )
         for ( auto &cut_index : v.cut_indices )
             cut_index = cut_corr[ cut_index ];
+}
+
+UTP void DTP::_add_measure_rec( TF &res, SimpleSquareMatrix<TF,ct_dim> &M, const auto &cut_indices, PI prev_vertex_index ) const {
+    using namespace std;
+
+    if ( cut_indices.size() == 0 ) {
+        res += abs( M.determinant() );
+        return;
+    }
+
+    PI c = cut_indices.size();
+    for( PI ind_to_remove = 0; ind_to_remove < c; ++ind_to_remove ) {
+        auto new_cut_indices = cut_indices.without_index( ind_to_remove );
+        ItemCorr &ic = item_map[ new_cut_indices ];
+        if ( ic.vertex_index_plus_curr_op_id < curr_op_id ) {
+            ic.vertex_index_plus_curr_op_id = curr_op_id + prev_vertex_index;
+            continue;
+        }
+
+        const PI next_vertex_index = ic.vertex_index_plus_curr_op_id - curr_op_id;
+        if ( next_vertex_index == prev_vertex_index )
+            return;
+
+        // fill the corresponding column
+        for( int d = 0; d < dim(); ++d )
+            M( d, c - 1 ) = vertices[ next_vertex_index ].pos[ d ] - vertices[ prev_vertex_index ].pos[ d ];
+
+        // recursion
+        _add_measure_rec( res, M, new_cut_indices, next_vertex_index );
+    }
+}
+
+UTP TF DTP::measure() const {
+    //
+    item_map.prepare_for( cuts.size() );
+    ++curr_op_id;
+
+    SimpleSquareMatrix<TF,ct_dim> M( dim() );
+    TF res = 0;
+
+    for( PI vertex_index = 0; vertex_index < vertices.size(); ++vertex_index )
+        _add_measure_rec( res, M, vertices[ vertex_index ].cut_indices, vertex_index );
+
+    TF coeff = 1;
+    for( int d = 2; d <= dim(); ++d )
+        coeff *= d;
+
+    return res / coeff;
 }
 
 UTP void DTP::_cut_int_ext_edge( PI n0, EdgeLink &e0, TF s0, TF s1 ) {

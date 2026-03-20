@@ -22,10 +22,12 @@ public:
 
     T_p      operator std::array<T,p>() const { std::array<T,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = data[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
     /**/     operator std::vector<T> () const { std::vector<T> res( size() ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; return res; }
+    /**/     operator std::span<T>   () const { return std::span<T>( const_cast<T *>( data.data() ), data.size() ); }
 
     const T& operator[]              ( PI index ) const { return data[ index ]; }
     T&       operator[]              ( PI index ) { return data[ index ]; }
 
+    bool     operator<               ( const std::span<T> &that ) const { return data < that.data; }
     bool     operator<               ( const Point &that ) const { return data < that.data; }
 
     auto     with_pushed_value       ( T value ) const { Point<T,dim+1> res( dim + 1 ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; res[ size() ] = value; return res; }
@@ -47,15 +49,17 @@ public:
     using    Data                    = std::vector<T>;
 
     /**/     Point                   ( std::initializer_list<T> values ) : data( values ) {}
-    /**/     Point                   ( std::span<T> values ) : data( values ) {}
+    /**/     Point                   ( std::span<T> values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( PI size ) : data( size, 0 ) {}
 
     T_p      operator std::array<T,p>() const { std::array<T,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = data[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
     /**/     operator std::vector<T> () const { std::vector<T> res( size() ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; return res; }
+    /**/     operator std::span<T>   () const { return std::span<T>( const_cast<T *>( data.data() ), data.size() ); }
 
     const T& operator[]              ( PI index ) const { return data[ index ]; }
     T&       operator[]              ( PI index ) { return data[ index ]; }
 
+    bool     operator<               ( const std::span<T> &that ) const { return data < that.data; }
     bool     operator<               ( const Point &that ) const { return data < that.data; }
 
     auto     with_pushed_value       ( T value ) const { Point<T,-1> res( size() + 1 ); for( PI i = 0; i < size(); ++i ) res[ i ] = data[ i ]; res[ size() ] = value; return res; }
