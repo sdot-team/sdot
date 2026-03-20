@@ -24,6 +24,8 @@ void test_sum_area_hypercube( PI dim = ct_dim ) {
             n0.cut( n0.pf.value_at( d, +1 ), 0, d );
             n1.cut( n1.pf.value_at( d, -1 ), 0, d );
 
+            ASSERT( abs( n0.measure() - pow( 0.5, d + 1 ) ) < 1e-5 );
+            ASSERT( abs( n1.measure() - pow( 0.5, d + 1 ) ) < 1e-5 );
             tot_measure += n0.measure();
             tot_measure += n1.measure();
 
@@ -32,6 +34,7 @@ void test_sum_area_hypercube( PI dim = ct_dim ) {
         }
 
         ASSERT( abs( tot_measure - 1 ) < 1e-5 );
+        cells = std::move( new_cells );
     }
 
     VtkOutput vo;

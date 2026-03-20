@@ -1,62 +1,39 @@
-from .BatchOfPiecewise1dAffineFunctions import BatchOfPiecewise1dAffineFunctions
 from .Distribution import Distribution
+from sdot.distributions.distribution_methods import TensorField
 from ..driver import driver
 
 
 class Piecewise1dAffineFunction( Distribution ):
     """
-    xs : tensor[ nb_points ]
+    xs : tensor[ nb_points ]   — optionnel : linspace( x0, x1, nb_points ) si absent
     ys : tensor[ nb_points ]
 
-    if ys is not defined, one uses linspace( self.x0, self.x1, xs.size )
+    x0, x1 : bornes de l'intervalle (utilisées uniquement si xs n'est pas fourni)
     """
+
+    x0 = 0
+    x1 = 1
+
+    xs = TensorField( 1, default = lambda self:
+        driver.linspace( self.x0, self.x1, self.ys.shape[ -1 ] ) if self.ys is not None else None
+    )
+    ys = TensorField( 1 )
+
     def __init__( self, xs = None, ys = None, x0 = 0, x1 = 1 ):
-        """
-
-        x0 and x1 are used only if xs is not specified
-        """
-
+        # Commodité : un seul argument positionnel → traité comme ys
         if ys is None and xs is not None:
             xs, ys = ys, xs
-
-        self._xs = None
-        self._ys = None
         self.x0 = x0
         self.x1 = x1
-
         self.xs = xs
         self.ys = ys
 
     @property
-    def xs( self ):
-        if self._xs is None:
-            ys = self.ys
-            if ys is None:
-                return None
-            return driver.linspace( self.x0, self.x1, ys.shape[ -1 ] )
-        return self._xs
-
-    @xs.setter
-    def xs( self, value ):
-        self._xs = driver.t1( value )
+    def dim( self ):
+        return 1
 
     @property
-    def ys( self ):
-        return self._ys
+    def always_1d( self ):
+        return True
 
-    @ys.setter
-    def ys( self, value ):
-        self._ys = driver.t1( value )
-
-    @property
-    def batch_size( self ):
-        return self.ys.shape[ 0 ]
-
-    def batch_version( self, batch_size ):
-        x = self.xs
-        if x is not None:
-            x = driver.repeat( x[ None, : ], [ batch_size, 1 ] )
-        y = self.ys
-        if y is not None:
-            y = driver.repeat( y[ None, : ], [ batch_size, 1 ] )
-        return BatchOfPiecewise1dAffineFunctions( x, y )
+    # batch_version → généré : BatchOfPiecewise1dAffineFunction

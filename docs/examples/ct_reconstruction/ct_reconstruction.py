@@ -45,27 +45,31 @@ def plot( dirac_coords, max_num = 10000 ):
 def loss( dirac_coords ):
     dirac_xs = sinogram.projection( dirac_coords )
 
-    f = sdot.BatchOfPiecewise1dAffineFunctions( sinogram.xs, sinogram.ys )
-    g = sdot.BatchOfSumOfWeighted1dDiracs( dirac_xs )
+    f = sdot.BatchOfPiecewiseAffineFunction1d( sinogram.xs, sinogram.ys )
+    g = sdot.BatchOfSumOfWeightedDiracs1d( dirac_xs )
+    # torch.tensor( g. )
     return torch.sum( sdot.distances( f, g ) )
 
-sinogram = Sinogram( 1000, 1000 )
-sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )
-sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
-sinogram.add_disk( [ 0.2, 0.0 ], 0.10, + 1.0 )
+# sinogram = Sinogram( 1000, 1000 )
+# sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )
+# sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
+# sinogram.add_disk( [ 0.2, 0.0 ], 0.10, + 1.0 )
 
-dirac_coords = torch.rand( ( 1000, 2 ), requires_grad = True )
-sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
-# sdot.driver.optimize_using_sgd( loss, dirac_coords )
+# dirac_coords = torch.rand( ( 1000, 2 ), requires_grad = True )
+# sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
+# # sdot.driver.optimize_using_sgd( loss, dirac_coords )
 
-coords = dirac_coords.detach().numpy()
+# coords = dirac_coords.detach().numpy()
 
-# pyplot.style.use( 'dark_background' )
-pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
-pyplot.axis( 'equal' )
-pyplot.show()
+# # pyplot.style.use( 'dark_background' )
+# pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
+# pyplot.axis( 'equal' )
+# pyplot.show()
 
 
 # # import os
 # # os.system( "rm build/img_*png" )
 # # os.system( "convert -delay 5 build/img_*png build/anim.gif" )
+# print( issubclass( sdot.BatchOfSumOfWeightedDiracs1d, sdot.BatchOfSumOfWeightedDiracs ) )
+f = sdot.BatchOfPiecewiseAffineFunction1d( ys = [[ 10, 2, 3 ]] )
+print( f.xs )

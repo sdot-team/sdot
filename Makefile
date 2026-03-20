@@ -31,7 +31,7 @@ test: build
 	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) -m pytest -s -q --tb=short tests/
 
 ct_reco: build
-	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) examples/ct_reconstruction/ct_reconstruction.py
+	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) docs/examples/ct_reconstruction/ct_reconstruction.py
 
 clean:
 	@rm -rf build

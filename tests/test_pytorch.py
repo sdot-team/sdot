@@ -52,46 +52,46 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
 
 def test_w2_pytorch_1_dirac():
     check_plan( "0 then 1/2 => 1",
-        sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
+        sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
         [ 1 / 3, 1 / 12 ],
         [ 1 / 2, 1 / 2 ]
     )
 
     # non constant density
     check_plan( "0 then 1/2 => 2 x",
-        sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.Piecewise1dAffineFunction( [ 0, 2 ] ),
+        sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+        sdot.PiecewiseAffineFunction1d( [ 0, 2 ] ),
         [ 1 / 2, 1 / 12 ],
         [ 2 / 3, 2 / 3 ]
     )
 
     # density is normalized by default
     check_plan( "0 then 1/2 => 1 x",
-        sdot.BatchOfSumOfWeighted1dDiracs( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.Piecewise1dAffineFunction( [ 0, 1 ] ),
+        sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+        sdot.PiecewiseAffineFunction1d( [ 0, 1 ] ),
         [ 1 / 2, 1 / 12 ],
         [ 2 / 3, 2 / 3 ]
     )
 
 def test_w2_pytorch_2_diracs():
     check_plan( "[ 0, 1 ] => 1",
-        sdot.SumOf1dWeightedDiracs( [ 0, 1 ] ),
-        sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
+        sdot.SumOfWeightedDiracs1d( [ 0, 1 ] ),
+        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
         [ 1 / 12 ],
         [ 1 / 4, 3 / 4 ]
     )
 
 def test_w2_pytorch_10_diracs():
     check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
-        sdot.SumOf1dWeightedDiracs( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.Piecewise1dAffineFunction( [ 1, 1 ] ),
+        sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
+        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
         [ 1 / 1200 ],
         numpy.linspace( 0.05, 0.95, 10 )
     )
 
     check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 2 x",
-        sdot.SumOf1dWeightedDiracs( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.Piecewise1dAffineFunction( [ 0, 2 ] ),
+        sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
+        sdot.PiecewiseAffineFunction1d( [ 0, 2 ] ),
         [ 0.03405928239226341248 ]
     )
