@@ -17,6 +17,8 @@ public:
     using    Data                    = std::array<T,dim>;
 
     /**/     Point                   ( std::initializer_list<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) data[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) data[ i ] = 0; }
+    // T_d   Point                   ( const Point<T,d> &values ) : data( values.begin(), values.end() ) {}
+    // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) data[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) data[ i ] = 0; }
     /**/     Point                   ( PI /*size*/ = dim ) { for( auto &v : data ) v = 0; }
 
@@ -49,6 +51,8 @@ public:
     using    Data                    = std::vector<T>;
 
     /**/     Point                   ( std::initializer_list<T> values ) : data( values ) {}
+    // T_d   Point                   ( const Point<T,d> &values ) : data( values.begin(), values.end() ) {}
+    // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( std::span<T> values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( PI size ) : data( size, 0 ) {}
 

@@ -44,11 +44,12 @@ public:
     using           Vertices                      = std::vector<Vertex>;
     using           Cuts                          = std::vector<Cut>;
 
-    /**/            Cell                          ( int actual_dim );
+    /**/            Cell                          ( int dim );
 
-    void            init_with_axis_aligned_simplex( TF length );
-    void            init_with_englobing_simplex   ( TF radius );
-    void            init_with_simplex             ( std::span<Pt> points );
+    static Cell     axis_aligned_hypercube        ( int dim, TF length );
+    static Cell     axis_aligned_simplex          ( int dim, TF length );
+    static Cell     englobing_simplex             ( int dim, TF radius );
+    static Cell     simplex                       ( int dim, std::span<Pt> points );
 
     void            check_consistency             ( TF eps = 1e-6 ) const;
     void            display_vtk                   ( VtkOutput &vo ) const;

@@ -26,76 +26,88 @@ UTP void DTP::display_vtk( VtkOutput& vo ) const {
     }
 }
 
-UTP void DTP::init_with_simplex( std::span<Pt> points ) {
+UTP DTP DTP::axis_aligned_hypercube( int dim, TF length ) {
+    Cell res = englobing_simplex( dim, 10 * length );
+    for( PI d = 0; d < dim; ++d ) {
+        res.cut( res.pf.value_at( d, +1 ), length / 2, 2 * d + 0 );
+        res.cut( res.pf.value_at( d, -1 ), length / 2, 2 * d + 0 );
+    }
+    return res;
+}
+
+UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
     const PI nb_vertices = points.size();
-    const PI dim = this->dim();
+    Cell res( dim );
 
     // vertices
-    vertices.clear();
-    vertices.reserve( nb_vertices );
+    res.vertices.clear();
+    res.vertices.reserve( nb_vertices );
     for( PI i = 0; i < nb_vertices; ++i ) {
-        vertices.push_back( Vertex{
+        res.vertices.push_back( Vertex{
             .pos = points[ i ],
-            .cut_indices = df.with_func( [&]( PI d ) { return d + ( d >= i ); } )
+            .cut_indices = res.df.with_func( [&]( PI d ) { return d + ( d >= i ); } )
         } );
     }
-
-    P( points.size(), vertices.size() );
 
     // edges
     for ( PI a = 0; a < nb_vertices; ++a )
         for ( PI b = 0; b < nb_vertices; ++b )
             if ( a != b )
-                vertices[ a ].edge_links.push_back( EdgeLink{ .num_cut_to_remove = b - ( b > a ), .vertex_index = b } );
+                res.vertices[ a ].edge_links.push_back( EdgeLink{ .num_cut_to_remove = b - ( b > a ), .vertex_index = b } );
 
     // cuts
-    cuts.clear();
-    cuts.reserve( nb_vertices );
+    res.cuts.clear();
+    res.cuts.reserve( nb_vertices );
     for ( PI n0 = 0; n0 <= dim; ++n0 ) {
         const PI n1 = ( n0 + 1 ) % ( dim + 1 ); // a "random" point that is not n0
-        const Pt p0 = vertices[ n0 ].pos;
-        const Pt p1 = vertices[ n1 ].pos;
+        const Pt p0 = res.vertices[ n0 ].pos;
+        const Pt p1 = res.vertices[ n1 ].pos;
 
         // orthogonalization of p1 - p0 wrt the facing face
         Pt dir = p1 - p0;
         _for_each_2_comb_excepted( nb_vertices, n0, [ & ]( PI a, PI b ) {
-            Pt cor = vertices[ a ].pos - vertices[ b ].pos;
+            Pt cor = res.vertices[ a ].pos - res.vertices[ b ].pos;
             dir -= sp( cor, dir ) / sp( cor, cor ) * cor;
         } );
 
         //
-        cuts.push_back( Cut{
+        res.cuts.push_back( Cut{
             .dir = dir,
             .sp = sp( dir, p1 ),
             .id = 0,
             .ext = 1
         } );
     }
+    return res;
 }
 
-UTP void DTP::init_with_axis_aligned_simplex( TF length ) {
-    const PI nb_vertices = dim() + 1;
+UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
+    const PI nb_vertices = dim + 1;
+    PF pf( dim );
 
-    std::vector<Pt> points( nb_vertices );
-    points[ 0 ] = pf.zeros();
+    std::vector<Pt> points;
+    points.reserve( nb_vertices );
+    points.push_back( pf.zeros() );
     for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex )
-        points[ num_vertex ] = pf.value_at( num_vertex - 1, length );
+        points.push_back( pf.value_at( num_vertex - 1, length ) );
 
-    init_with_simplex( points );
+    return simplex( points );
 }
 
-UTP void DTP::init_with_englobing_simplex( TF radius ) {
-    const PI nb_vertices = dim() + 1;
+UTP DTP DTP::englobing_simplex( int dim, TF radius ) {
+    const PI nb_vertices = dim + 1;
+    PF pf( dim );
 
-    std::vector<Pt> points( nb_vertices );
+    std::vector<Pt> points;
+    points.reserve( nb_vertices );
     points.push_back( pf.value_at( 0, radius ) );
     for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex ) {
         for ( PI d = 0; d < num_vertex; ++d )
-            points[ d ].pos[ num_vertex - 1 ] = -radius / num_vertex;
+            points[ d ][ num_vertex - 1 ] = -radius / num_vertex;
         points.push_back( pf.value_at( num_vertex - 1, radius ) );
     }
 
-    init_with_simplex( points );
+    return simplex( dim, points );
 }
 
 UTP void DTP::_for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
@@ -175,7 +187,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     for ( int n = 0; n < vertex_corr.size(); ++n )
         if ( vertex_corr[ n ] != n && vertex_corr[ n ] >= 0 )
             vertices[ vertex_corr[ n ] ] = std::move( vertices[ n ] );
-    vertices.resize( vertex_count );
+    vertices.resize( vertex_count, Vertex{ .pos = pf.zeros() } );
 
     // correction of the vertex references
     for( Vertex &v : vertices )
@@ -199,7 +211,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     for ( int n = 0; n < cut_corr.size(); ++n )
         if ( cut_corr[ n ] != n && cut_corr[ n ] >= 0 )
             cuts[ cut_corr[ n ] ] = std::move( cuts[ n ] );
-    cuts.resize( cut_count );
+    cuts.resize( cut_count, Cut{ .dir = pf.zeros() } );
 
     // append the new cut
     cuts.push_back( Cut{ .dir = dir_cut, .sp = sp_cut, .id = id, .ext = 0 } );
