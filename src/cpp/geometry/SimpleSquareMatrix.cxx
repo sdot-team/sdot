@@ -46,7 +46,8 @@ UTP DTP::Vec DTP::solve( const Vec &vec ) const {
 
 } // namespace sdot
 
-template<class T,int dim>
+
+template<class T, int dim>
 std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,dim> &p ) {
     for( sdot::PI r = 0; r < p.size(); ++r ) {
         os << "\n  ";

@@ -16,7 +16,7 @@ public:
     /* */  TensorView( T *data, Extent extent ) : extent( extent ), ptr( data ) {}
     /* */  TensorView( T *data, PI size ) : extent{ size }, ptr( data ) {}
 
-    T&     operator()( PI i0, PI i1 ) const { return ptr[ i0 * extent[ 0 ] + i1 ]; }
+    T&     operator()( PI i0, PI i1 ) const { return ptr[ i0 * extent[ 1 ] + i1 ]; }
     T&     operator()( PI i0 ) const { return ptr[ i0 ]; }
     T&     operator()() const { return ptr[ 0 ]; }
 

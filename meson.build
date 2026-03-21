@@ -1,4 +1,4 @@
-project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++20'] )
+project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++23'] )
 # project.languages += [ 'objcpp' ]
 
 
@@ -25,13 +25,11 @@ nanobind_dep = declare_dependency(
   sources: [ nanobind_combined_src ]
 )
 
+# --- zpp::bits (serialisation binaire, header-only, C++20) ---
+zpp_bits_dep = dependency( 'zpp_bits', fallback: [ 'zpp_bits', 'zpp_bits_dep' ] )
+
 # --- Common Project Settings ---
-host_system = host_machine.system()
-if host_system == 'darwin'
-    common_cpp_args = [ '-fdiagnostics-absolute-paths', '-g3' ]
-else
-    common_cpp_args = [ '-g3' ]
-endif
+common_cpp_args = [ '-g3' ]
 
 # --- Python extension modules ---
 subdir('src/python/sdot/bindings')
@@ -43,11 +41,6 @@ unit_tests = executable('unit_tests',
   [ 'tests/test_w2_cpu.cpp', ],
   dependencies: catch2_dep,
   include_directories: include_directories('src'),
-  # Force absolute paths for clickable errors in Zed, and disable hardening
-  # cpp_args: common_cpp_args + [
-  #   '-U_LIBCPP_HARDENING_MODE',
-  #   '-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE'
-  # ]
 )
 
 test( 'C++ Unit Tests', unit_tests )

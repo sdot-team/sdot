@@ -9,27 +9,27 @@ namespace sdot {
 template<class T,int ct_size=-1>
 class SimpleSquareMatrix {
 public:
-    using    Data                    = Point<T,(ct_size>=0?ct_size*ct_size:-1)>;
-    using    Vec                     = Point<T,ct_size>;
+    using       Data                    = Point<T,(ct_size>=0?ct_size*ct_size:-1)>;
+    using       Vec                     = Point<T,ct_size>;
 
-    /**/     SimpleSquareMatrix      ( PI size ) : _size( size ), data( size * size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/        SimpleSquareMatrix      ( PI size ) : _size( size ), data( size * size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
 
-    const T& operator()              ( PI r, PI c ) const { return data[ r * size() + c ]; }
-    T&       operator()              ( PI r, PI c ) { return data[ r * size() + c ]; }
+    const T&    operator()              ( PI r, PI c ) const { return data[ r * size() + c ]; }
+    T&          operator()              ( PI r, PI c ) { return data[ r * size() + c ]; }
 
-    auto     without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)>;
-    auto     with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
-    T        determinant             () const;
-    Vec      solve                   ( const Vec &vec ) const;
-    PI       size                    () const { return ct_size >= 0 ? ct_size : _size; }
+    auto        without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)>;
+    auto        with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
+    T           determinant             () const;
+    Vec         solve                   ( const Vec &vec ) const;
+    PI          size                    () const { return ct_size >= 0 ? ct_size : _size; }
 
-    auto     begin                   () const { return data.begin(); }
-    auto     begin                   () { return data.begin(); }
-    auto     end                     () const { return data.end(); }
-    auto     end                     () { return data.end(); }
+    auto        begin                   () const { return data.begin(); }
+    auto        begin                   () { return data.begin(); }
+    auto        end                     () const { return data.end(); }
+    auto        end                     () { return data.end(); }
 
-    PI       _size;
-    Data     data;
+    PI          _size;
+    Data        data;
 };
 
 /* T_Td void operator+=( SimpleSquareMatrix<T,d> &a, const SimpleSquareMatrix<T,d> &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] += b[ i ]; }
