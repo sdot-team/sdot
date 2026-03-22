@@ -67,13 +67,13 @@ UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
         Pt dir = p1 - p0;
         _for_each_2_comb_excepted( nb_vertices, n0, [ & ]( PI a, PI b ) {
             Pt cor = res.vertices[ a ].pos - res.vertices[ b ].pos;
-            dir -= sp( cor, dir ) / sp( cor, cor ) * cor;
+            dir -= dot( cor, dir ) / dot( cor, cor ) * cor;
         } );
 
         //
         res.cuts.push_back( Cut{
             .dir = dir,
-            .sp = sp( dir, p1 ),
+            .sp = dot( dir, p1 ),
             .id = 0,
             .ext = 1
         } );
@@ -135,7 +135,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     sps.resize( vertices.size() );
     PI nb_out = 0;
     for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
-        TF sp = sdot::sp( dir_cut, vertices[ n0 ].pos ) - sp_cut;
+        TF sp = sdot::dot( dir_cut, vertices[ n0 ].pos ) - sp_cut;
         nb_out += ( sp > 0 );
         sps[ n0 ] = sp;
     }
@@ -346,7 +346,7 @@ UTP void DTP::check_consistency( TF eps ) const {
         for( const EdgeLink &e : v.edge_links ) {
             const Pt p1 = vertices[ e.vertex_index ].pos;
             for( PI num_cut : v.cut_indices.without_index( e.num_cut_to_remove ) )
-                ASSERT( abs( sp( p1, cuts[ num_cut ].dir ) - cuts[ num_cut ].sp ) <= eps );
+                ASSERT( abs( dot( p1, cuts[ num_cut ].dir ) - cuts[ num_cut ].sp ) <= eps );
         }
 
     }

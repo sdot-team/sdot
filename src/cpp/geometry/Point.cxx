@@ -8,7 +8,7 @@ namespace sdot {
 #define DTP Point<T,dim>
 
 UTP PI DTP::size() const {
-    return data.size();
+    return content.size();
 }
 
 #undef UTP
@@ -19,7 +19,7 @@ UTP PI DTP::size() const {
 #define DTP Point<T,-1>
 
 UTP PI DTP::size() const {
-    return data.size();
+    return content.size();
 }
 
 #undef UTP
