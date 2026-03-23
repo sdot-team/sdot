@@ -76,12 +76,15 @@ def base_splits( points, max_points_per_bsp = 1e8, min_split = 1 ):
     return splits, numpy.array( all_the_paths )
 
 points = da.random.random( ( 150, 2 ), chunks = ( 10, 2 ) ).astype( "float64" ) * da.array( [ 2, 1 ] )
+minmax = da.stack( [ da.min( points, axis = 0 ), da.max( points, axis = 0 ) ] ).compute()
 splits, all_the_paths = base_splits( points, max_points_per_bsp = 50 )
 
 Bsp = sdot_bsp_bindings.Bsp_FP64
-bsps = [ dask.delayed( Bsp )( all_the_paths, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ), 20 ) for split in splits ]
+bsps = [ dask.delayed( Bsp )( all_the_paths, minmax, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ), 20 ) for split in splits ]
 
 # for bsp in bsps:
 #     print( bsp.compute() )
-print( bsps[ 0 ].compute() )
+bsp = bsps[ 0 ].compute()
+bsp.write_vtk( "build/out.vtk" )
+print( bsp )
 

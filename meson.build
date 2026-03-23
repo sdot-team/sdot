@@ -38,6 +38,7 @@ common_cpp_args = [ '-g3' ] + cpp.get_supported_arguments( '-fdiagnostics-absolu
 # --- sdot C++ geometry library (Eigen-dependent .cpp compiled once) ---
 sdot_geometry_lib = static_library( 'sdot_geometry',
   [ 'src/cpp/geometry/SimpleSquareMatrix_eigen.cpp' ],
+  [ 'src/cpp/geometry/VtkOutput.cpp' ],
   dependencies: [ eigen_dep, zpp_bits_dep ],
   cpp_args: common_cpp_args,
   include_directories: include_directories( 'src' ),

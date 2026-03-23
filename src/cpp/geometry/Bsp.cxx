@@ -7,13 +7,15 @@ namespace sdot {
 #define UTP template<class AdditionalPtData,class TF,int ct_dim>
 #define DTP Bsp<AdditionalPtData,TF,ct_dim>
 
-UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path, PI max_points_per_cell ) : nb_points( points.size( 0 ) ), dim( points.size( 1 ) ) {
+UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const TF,2> min_max,
+              TensorView<const PI,1> local_indices, TensorView<const TF,2> local_points,
+              TensorView<const TF,2> path, PI max_points_per_cell ) : nb_points( local_points.size( 0 ) ), dim( local_points.size( 1 ) ), pf( dim ) {
     // copy point data
-    pt_data.resize( points.size( 0 ) );
-    for( PI i = 0; i < points.size( 0 ); ++i ) {
+    pt_data.resize( local_points.size( 0 ) );
+    for( PI i = 0; i < local_points.size( 0 ); ++i ) {
         for( PI d = 0; d < dim; ++d )
-            pt_data[ i ].position[ d ] = points( i, d );
-        pt_data[ i ].index = indices[ i ];
+            pt_data[ i ].position[ d ] = local_points( i, d );
+        pt_data[ i ].index = local_indices[ i ];
     }
 
     // root node
@@ -29,8 +31,38 @@ UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indic
         node_index = nodes[ node_index ].child_indices[ path( r, dim + 1 ) ];
     fill_node( node_index, 0, pt_data.size(), max_points_per_cell );
 
-    // get the node cells
+    // make the node cells
+    std::vector<Pt> simplex_nodes( dim + 1, dim );
+    for( PI d = 0; d < dim; ++d ) {
+        simplex_nodes[ 0 ][ d ] = min_max( 0, d );
+        for( PI i = 0; i < dim; ++i )
+            simplex_nodes[ i + 1 ][ d ] = min_max( ( i == d ), d );
+    }
 
+    nodes[ 0 ].cell = Ce::simplex( dim, simplex_nodes );
+    make_node_cells( 0 );
+}
+
+UTP void DTP::display_vtk( VtkOutput &vo ) const {
+    for( const Node &node : nodes ) {
+        node.cell.display_vtk( vo );
+    }
+}
+
+UTP void DTP::make_node_cells( PI node_index ) {
+    Node &node = nodes[ node_index ];
+    if ( node.final() )
+        return;
+
+    Ce &c0 = nodes[ node.child_indices[ 0 ] ].cell;
+    Ce &c1 = nodes[ node.child_indices[ 1 ] ].cell;
+    c0 = node.cell;
+    c1 = node.cell;
+    c0.cut( + node.split_dir, + node.split_dot, node_index );
+    c1.cut( - node.split_dir, - node.split_dot, node_index );
+
+    make_node_cells( node.child_indices[ 0 ] );
+    make_node_cells( node.child_indices[ 1 ] );
 }
 
 UTP void DTP::fill_node( PI node_index, PI beg_pt_data, PI end_pt_data, PI max_points_per_cell ) {

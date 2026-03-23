@@ -12,6 +12,7 @@ class Bsp {
 public:
     using Cm = Point<TF,(ct_dim>=0?ct_dim*(ct_dim+1)/2:-1)>; ///< covariance matrix
     using Pd = Point<TF,(ct_dim>=0?ct_dim+1:-1)>; ///< point + 1 item
+    using Pf = PointFactory<TF,ct_dim>; ///<
     using Pt = Point<TF,ct_dim>; ///< point
     using Ad = AdditionalPtData; ///<
     using Ci = std::array<PI,2>; ///< child indices
@@ -48,10 +49,13 @@ public:
         PI len;
     };
 
-    /**/                Bsp            ( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path, PI max_points_per_cell );
+    /**/                Bsp            ( TensorView<const TF,3> all_the_paths, TensorView<const TF,2> min_max, TensorView<const PI,1> local_indices, TensorView<const TF,2> local_points,
+                                         TensorView<const TF,2> local_path, PI max_points_per_cell );
 
     bool                is_in_charge_of( const Pt &pos ) const;
+    void                display_vtk    ( VtkOutput &vo ) const;
 
+    void                make_node_cells( PI node_index );
     auto                split_hst_for  ( TensorView<const TF,2> points, const Pt &split_dir, TF split_beg, TF split_end, PI nb_bins ) const -> std::vector<TF>;
     auto                sum_pos_for    ( TensorView<const TF,2> points ) const -> Pt; ///< [ sum of xs, ..., sum of zs, sum of 1 ]
     auto                sum_cov_for    ( TensorView<const TF,2> points, const Pt &avg ) const -> SimpleSquareMatrix<TF>;
@@ -64,6 +68,7 @@ public:
     std::vector<PtData> pt_data;
     std::vector<Node>   nodes;
     PI                  dim;
+    Pf                  pf;
 };
 
         // split_hst_for_each_chunk = [ dask.delayed( bsp.value.split_hst_for )( chunk.value, split_dir,  ) for chunk in delayed_chunks ]

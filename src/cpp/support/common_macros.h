@@ -1,5 +1,6 @@
 #pragma once
 
+#define T_Up template<class U,std::size_t p>
 #define T_Td template<class T,int d>
 #define T_T  template<class T>
 #define T_U  template<class U>

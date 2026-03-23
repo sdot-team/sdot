@@ -24,8 +24,8 @@ public:
     /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     /**/     Point                   ( PI /*size*/ = dim ) { for( auto &v : content ) v = 0; }
 
-    T_p      operator std::array<T,p>() const { std::array<T,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = content[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
-    /**/     operator std::vector<T> () const { std::vector<T> res( size() ); for( PI i = 0; i < size(); ++i ) res[ i ] = content[ i ]; return res; }
+    T_Up     operator std::array<U,p>() const { std::array<U,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = content[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
+    T_U      operator std::vector<U> () const { std::vector<U> res( size() ); for( PI i = 0; i < size(); ++i ) res[ i ] = content[ i ]; return res; }
     /**/     operator std::span<T>   () const { return std::span<T>( const_cast<T *>( content.data() ), content.size() ); }
 
     const T& operator[]              ( PI index ) const { return content[ index ]; }
@@ -111,6 +111,7 @@ T_Td Point<T,d> operator-( const Point<T,d> &a, const Point<T,d> &b ) { Point<T,
 T_Td Point<T,d> operator*( const T &a, const Point<T,d> &b ) { Point<T,d> res( b.size() ); for( PI i = 0; i < b.size(); ++i ) res[ i ] = a * b[ i ]; return res; }
 T_Td Point<T,d> operator/( const Point<T,d> &a, const T &b ) { Point<T,d> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] / b; return res; }
 
+T_Td Point<T,d> operator+( const Point<T,d> &a ) { Point<T,d> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = + a[ i ]; return res; }
 T_Td Point<T,d> operator-( const Point<T,d> &a ) { Point<T,d> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = - a[ i ]; return res; }
 
 } // namespace sdot

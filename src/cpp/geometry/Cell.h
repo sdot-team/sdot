@@ -11,8 +11,8 @@ namespace sdot {
 template< class TF, int ct_dim = -1 >
 class Cell {
 public:
-    struct      FaceCorr { PI vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
-    struct      ItemCorr { PI vertex_index_plus_curr_op_id = 0; };
+    struct      FaceCorr { PI64 vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
+    struct      ItemCorr { PI64 vertex_index_plus_curr_op_id = 0; };
 
     using       FaceMap  = MapOfUniqueSortedIndices<(ct_dim>1?ct_dim-2:-1),PI,FaceCorr>;
     using       ItemMap  = RecursiveMapOfUniqueSortedIndices<ct_dim,PI,ItemCorr>;
@@ -24,8 +24,8 @@ public:
     using       It       = Point<PI,ct_dim>;
 
     struct EdgeLink {
-        PI vertex_index;
         PI num_cut_to_remove;
+        PI vertex_index;
     };
     struct Vertex {
         using     EdgeLinks = std::vector<EdgeLink>;

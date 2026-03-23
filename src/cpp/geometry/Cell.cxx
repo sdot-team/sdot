@@ -19,7 +19,7 @@ UTP void DTP::display_vtk( VtkOutput& vo ) const {
         for ( const auto& edge : vertices[ n0 ].edge_links ) {
             const PI n1 = edge.vertex_index;
             if ( n0 < n1 ) {
-                std::array< VtkOutput::Pt, 2 > edge{ vertices[ n0 ].pos, vertices[ n1 ].pos };
+                std::array<VtkOutput::Pt,2> edge{ VtkOutput::Pt( vertices[ n0 ].pos ), VtkOutput::Pt( vertices[ n1 ].pos ) };
                 vo.add_edge( edge );
             }
         }
@@ -58,7 +58,7 @@ UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
     // cuts
     res.cuts.clear();
     res.cuts.reserve( nb_vertices );
-    for ( PI n0 = 0; n0 <= dim; ++n0 ) {
+    for ( int n0 = 0; n0 <= dim; ++n0 ) {
         const PI n1 = ( n0 + 1 ) % ( dim + 1 ); // a "random" point that is not n0
         const Pt p0 = res.vertices[ n0 ].pos;
         const Pt p1 = res.vertices[ n1 ].pos;
@@ -184,7 +184,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
         vertex_corr.push_back( vertex_count++ );
 
     // compaction of the vertices
-    for ( int n = 0; n < vertex_corr.size(); ++n )
+    for ( int n = 0; n < int( vertex_corr.size() ); ++n )
         if ( vertex_corr[ n ] != n && vertex_corr[ n ] >= 0 )
             vertices[ vertex_corr[ n ] ] = std::move( vertices[ n ] );
     vertices.resize( vertex_count, Vertex{ .pos = pf.zeros() } );
@@ -197,9 +197,16 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     // find unused cuts
     cut_corr.clear();
     cut_corr.resize( cuts.size(), -1 );
+
+    // P( cuts.size() );
+    // for( Vertex &v : vertices )
+    //     for( PI cut_index : v.cut_indices )
+    //         P( cut_index );
+
     for( Vertex &v : vertices )
         for( PI cut_index : v.cut_indices )
-            cut_corr[ cut_index ] = 0;
+            if  ( cut_index < cut_corr.size() )
+                cut_corr[ cut_index ] = 0;
 
     // make the cut indices corrections
     int cut_count = 0;
@@ -208,7 +215,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
             cc = cut_count++;
 
     // remove unused cuts
-    for ( int n = 0; n < cut_corr.size(); ++n )
+    for ( int n = 0; n < int( cut_corr.size() ); ++n )
         if ( cut_corr[ n ] != n && cut_corr[ n ] >= 0 )
             cuts[ cut_corr[ n ] ] = std::move( cuts[ n ] );
     cuts.resize( cut_count, Cut{ .dir = pf.zeros() } );
@@ -285,7 +292,7 @@ UTP void DTP::_cut_int_ext_edge( PI n0, EdgeLink &e0, TF s0, TF s1 ) {
     vertices.push_back( Vertex{
         .pos         = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 ),
         .cut_indices = cut_indices_edge.with_pushed_value( cuts.size() ),
-        .edge_links  = { EdgeLink{ .vertex_index = n0, .num_cut_to_remove = dim() - 1 } }
+        .edge_links  = { EdgeLink{ .num_cut_to_remove = dim() - 1, .vertex_index = n0 } }
     } );
 
     // for each face,
