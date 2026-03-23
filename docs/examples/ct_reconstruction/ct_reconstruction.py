@@ -50,12 +50,13 @@ def loss( dirac_coords ):
     # torch.tensor( g. )
     return torch.sum( sdot.distances( f, g ) )
 
-sinogram = Sinogram( 1000, 1000 )
+n = 100
+sinogram = Sinogram( n, n )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
 sinogram.add_disk( [ 0.2, 0.0 ], 0.10, + 1.0 )
 
-dirac_coords = torch.rand( ( 1000, 2 ), requires_grad = True )
+dirac_coords = torch.rand( ( n, 2 ), requires_grad = True )
 sdot.driver.optimize_using_lbfgs( loss, dirac_coords )
 # sdot.driver.optimize_using_sgd( loss, dirac_coords )
 

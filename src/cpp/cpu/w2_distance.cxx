@@ -6,7 +6,7 @@
 
 namespace sdot {
 
-T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, TensorView<T,0> distance, TensorView<T,1> barycenters, TensorView<T,1> potentials, TensorView<T,1> cuts ) {
+T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, TensorView<T,0> distance, TensorView<T,1> barycenters, TensorView<T,1> potentials, TensorView<T,2> cuts ) {
     using TF = typename IntermediateScalarType<T>::type;
 
     const std::vector<PI> dirac_indices = diracs.arg_sort();
@@ -48,8 +48,8 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
             barycenters[ dirac_index ] = static_cast<T>( moment / normalized_dirac_mass );
 
         if ( ! cuts.empty() ) {
-            cuts[ 2 * dirac_index + 0 ] = prev_cut_position;
-            cuts[ 2 * dirac_index + 1 ] = cut_position;
+            cuts( dirac_index, 0 ) = prev_cut_position;
+            cuts( dirac_index, 1 ) = cut_position;
         }
 
         prev_cut_position = cut_position;
@@ -61,13 +61,13 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
 }
 
 /// Wasserstein 2 distance
-T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> distance, TensorView<T,2> barycenters, TensorView<T,2> potentials, TensorView<T,2> cuts ) {
+T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> distance, TensorView<T,2> barycenters, TensorView<T,2> potentials, TensorView<T,3> cuts ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance( diracs.row( r ), functions.row( r ), distance.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ) );
     });
 }
 
-T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<const T,1> grad_barycenters, TensorView<const T,1> barycenters, TensorView<const T,1> potentials, TensorView<const T,1> cuts, DiracSet<const T,0> diracs, Affine1d<const T,0> points, DiracSet<T,0> grad_diracs, Affine1d<T,0> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<const T,1> grad_barycenters, TensorView<const T,1> barycenters, TensorView<const T,1> potentials, TensorView<const T,2> cuts, DiracSet<const T,0> diracs, Affine1d<const T,0> points, DiracSet<T,0> grad_diracs, Affine1d<T,0> grad_functions ) {
     using TF = typename IntermediateScalarType<T>::type;
     using namespace std;
 
@@ -77,7 +77,7 @@ T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<c
     const TF dirac_scale = 1.0 / diracs_mass;
     const TF point_scale = 1.0 / points_mass;
 
-    const TF g_dist = grad_distance.empty() ? 0 : static_cast<TF>( grad_distance[ 0 ] );
+    const TF g_dist = grad_distance.empty() ? 0 : static_cast<TF>( grad_distance() );
 
     // Mirror forward state variables
     PieceOfAffine1d<TF> current_piece = points.get_first_piece( point_scale );
@@ -240,7 +240,7 @@ T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<c
 }
 
 /// Gradients of Wasserstein 2 distance
-T_T void w2_distance_backward( TensorView<const T,1> grad_distance, TensorView<const T,2> grad_barycenters, TensorView<const T,2> barycenters, TensorView<const T,2> potentials, TensorView<const T,2> cuts, DiracSet<const T,1> diracs, Affine1d<const T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,1> grad_distance, TensorView<const T,2> grad_barycenters, TensorView<const T,2> barycenters, TensorView<const T,2> potentials, TensorView<const T,3> cuts, DiracSet<const T,1> diracs, Affine1d<const T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance_backward( grad_distance.row( r ), grad_barycenters.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ), diracs.row( r ), functions.row( r ), grad_diracs.row( r ), grad_functions.row( r ) );
     });

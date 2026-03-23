@@ -10,10 +10,10 @@ import torch
 class SDOTFunction( torch.autograd.Function ):
     @staticmethod
     def forward( ctx, dirac_xs, dirac_ws, point_xs, point_ys ) -> tuple[ torch.tensor, torch.tensor, torch.tensor, torch.tensor ]:
-        dirac_xs = dirac_xs.contiguous()
-        dirac_ws = dirac_ws.contiguous()
-        point_xs = point_xs.contiguous()
-        point_ys = point_ys.contiguous()
+        dirac_xs = dirac_xs
+        dirac_ws = dirac_ws
+        point_xs = point_xs
+        point_ys = point_ys
 
         batch_size = dirac_xs.shape[ 0 ]
         nb_diracs = dirac_xs.shape[ 1 ]
@@ -41,14 +41,14 @@ class SDOTFunction( torch.autograd.Function ):
         grad_point_ys = driver.empty( point_ys.shape )
 
         getattr( sdot_bindings_cpu, "backward_ot_plan_to_piecewise_affine_1d_" + driver.normalized_dtype )(
-            grad_distance.contiguous(),
-            grad_barycenters.contiguous(),
+            grad_distance,
+            grad_barycenters,
             dirac_xs, dirac_ws, point_xs, point_ys,
             barycenters, potentials, cuts,
-            grad_dirac_xs.contiguous(), 
-            grad_dirac_ws.contiguous(), 
-            grad_point_xs.contiguous(), 
-            grad_point_ys.contiguous()
+            grad_dirac_xs,
+            grad_dirac_ws,
+            grad_point_xs,
+            grad_point_ys
         )
 
         return grad_dirac_xs, grad_dirac_ws, grad_point_xs, grad_point_ys

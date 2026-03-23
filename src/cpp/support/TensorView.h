@@ -13,9 +13,9 @@ namespace sdot {
 template<class T,int ct_rank>
 class TensorView {
 public:
+    using  Strides   = std::array<SI,ct_rank>;  ///< byte strides
     using  Extent    = std::array<PI,ct_rank>;
-    using  Strides   = std::array<PI,ct_rank>;  ///< byte strides
-    using  RawPtr    = std::conditional_t<std::is_const_v<T>, const std::byte*, std::byte*>;
+    using  RawPtr    = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
 
     /* */  TensorView( T *data, Extent ext, Strides str ) : extent( ext ), strides( str ), ptr( reinterpret_cast<RawPtr>( data ) ) {}
     /* */  TensorView( T *data, Extent ext ) : extent( ext ), strides( contiguous_strides( ext ) ), ptr( reinterpret_cast<RawPtr>( data ) ) {}
@@ -34,9 +34,23 @@ public:
     PI     size      () const { ASSERT( rank() == 1 ); return size( 0 ); }
     PI     rank      () const { return ct_rank; }
 
+    auto   squeeze   ( PI axis ) const -> TensorView<T,ct_rank-1> {
+        std::array<SI,ct_rank-1> nstrides;
+        std::array<PI,ct_rank-1> nextent;
+        for( PI i = 0; i < ct_rank-1; ++i ) {
+            nstrides[ i ] = strides[ i + ( i >= axis ) ];
+            nextent[ i ] = extent[ i + ( i >= axis ) ];
+        }
+        return { reinterpret_cast<T *>( ptr ), nextent, nstrides };
+    }
+
     auto   row       ( PI index ) const -> TensorView<T,ct_rank-1> {
-        std::array<PI,ct_rank-1> nextent, nstrides;
-        for( PI i = 1; i < ct_rank; ++i ) { nextent[ i-1 ] = extent[ i ]; nstrides[ i-1 ] = strides[ i ]; }
+        std::array<SI,ct_rank-1> nstrides;
+        std::array<PI,ct_rank-1> nextent;
+        for( PI i = 1; i < ct_rank; ++i ) {
+            nstrides[ i - 1 ] = strides[ i ];
+            nextent[ i - 1 ] = extent[ i ];
+        }
         return { reinterpret_cast<T *>( ptr + index * strides[ 0 ] ), nextent, nstrides };
     }
 

@@ -1,6 +1,10 @@
 from .distributions.BatchOfDistributions import BatchOfDistributions
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
 from .distributions.Distribution import Distribution
+from .BatchOf1dOtPlans import BatchOf1dOtPlans
+from .BatchOfOtPlans import BatchOfOtPlans
+from .OtPlan1d import OtPlan1d
+from .OtPlan import OtPlan
 from .driver import driver
 
 

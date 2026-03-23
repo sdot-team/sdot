@@ -11,6 +11,7 @@ using FP32 = float;
 using PI32 = std::int32_t;
 using PI64 = std::int64_t;
 
+using SI = std::ptrdiff_t;
 using PI = std::size_t;
 
 template<class T> struct CtType {};
