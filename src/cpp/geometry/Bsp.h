@@ -18,9 +18,10 @@ public:
     using Ce = Cell<TF,ct_dim>;  ///< cell
 
     struct Node {
-        /**/ Node ( PI dim ) : child_indices{ 0, 0 }, beg_pt_data( 0 ), end_pt_data( 0 ), split_dir( dim ), cell( dim ) {}
+        /**/ Node     ( PI dim ) : child_indices{ 0, 0 }, beg_pt_data( 0 ), end_pt_data( 0 ), split_dir( dim ), cell( dim ) {}
 
-        bool final() const { return child_indices[ 0 ] == 0; /* only the root can have index 0 */ }
+        PI   nb_points() const { return end_pt_data - beg_pt_data; }
+        bool final    () const { return child_indices[ 0 ] == 0; /* only the root can have index 0 */ }
 
         Ci   child_indices;
         PI   beg_pt_data;
@@ -34,6 +35,7 @@ public:
     struct PtData {
         Ad   additional_data;
         Pt   position;
+        PI   index;
     };
 
     struct AvgData {
@@ -46,7 +48,7 @@ public:
         PI len;
     };
 
-    /**/                Bsp            ( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path );
+    /**/                Bsp            ( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path, PI max_points_per_cell );
 
     bool                is_in_charge_of( const Pt &pos ) const;
 
@@ -55,6 +57,7 @@ public:
     auto                sum_cov_for    ( TensorView<const TF,2> points, const Pt &avg ) const -> SimpleSquareMatrix<TF>;
     PI                  cell_number    ( Pt pos ) const;
     void                display_rec    ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
+    void                fill_node      ( PI node_index, PI beg_pt_data, PI end_pt_data, PI max_points_per_cell );
     void                add_path       ( TensorView<const TF,2> path, PI num_bsp );
 
     PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)

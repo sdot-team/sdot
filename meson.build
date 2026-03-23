@@ -29,8 +29,23 @@ nanobind_dep = declare_dependency(
 # --- zpp::bits (serialisation binaire, header-only, C++20) ---
 zpp_bits_dep = dependency( 'zpp_bits', fallback: [ 'zpp_bits', 'zpp_bits_dep' ] )
 
+# --- Eigen3 (header-only, algèbre linéaire) ---
+eigen_dep = dependency( 'eigen3', fallback: [ 'eigen3', 'eigen3_dep' ] )
+
 # --- Common Project Settings ---
 common_cpp_args = [ '-g3' ] + cpp.get_supported_arguments( '-fdiagnostics-absolute-paths' )
+
+# --- sdot C++ geometry library (Eigen-dependent .cpp compiled once) ---
+sdot_geometry_lib = static_library( 'sdot_geometry',
+  [ 'src/cpp/geometry/SimpleSquareMatrix_eigen.cpp' ],
+  dependencies: [ eigen_dep, zpp_bits_dep ],
+  cpp_args: common_cpp_args,
+  include_directories: include_directories( 'src' ),
+)
+sdot_geometry_dep = declare_dependency(
+  link_with: sdot_geometry_lib,
+  include_directories: include_directories( 'src' ),
+)
 
 # --- Python extension modules ---
 subdir('src/python/sdot/bindings')
@@ -41,8 +56,7 @@ catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', fallback: ['cat
 unit_tests = executable('unit_tests',
   [ 'tests/test_w2_cpu.cpp', ],
   cpp_args: common_cpp_args,
-  dependencies: catch2_dep,
-  include_directories: include_directories('src'),
+  dependencies: [ catch2_dep, sdot_geometry_dep ],
 )
 
 test( 'C++ Unit Tests', unit_tests )

@@ -18,7 +18,7 @@ all: build
 venv:
 	@python3 -m venv $(VENV)
 	@$(PIP) install --upgrade pip
-	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing mkdocs-material mkdocstrings[python] pyyaml matplotlib
+	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing mkdocs-material mkdocstrings[python] pyyaml matplotlib dask
 
 docs:
 	$(VENV)/bin/mkdocs serve --config-file docs/mkdocs.yml

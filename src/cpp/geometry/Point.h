@@ -103,6 +103,7 @@ T_Td Point<T,d> normalized( const Point<T,d> &a ) { return a / norm_2( a ); }
 //
 T_Td void operator+=( Point<T,d> &a, const Point<T,d> &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] += b[ i ]; }
 T_Td void operator-=( Point<T,d> &a, const Point<T,d> &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] -= b[ i ]; }
+T_Td void operator/=( Point<T,d> &a, const auto &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] /= b; }
 
 T_Td Point<T,d> operator+( const Point<T,d> &a, const Point<T,d> &b ) { Point<T,d> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] + b[ i ]; return res; }
 T_Td Point<T,d> operator-( const Point<T,d> &a, const Point<T,d> &b ) { Point<T,d> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] - b[ i ]; return res; }

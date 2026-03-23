@@ -24,4 +24,5 @@ vg:
 
 vg_loc:
 	make build
-	${PYDIRS} valgrind ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+# 	${PYDIRS} valgrind ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+	${PYDIRS} valgrind ${PYTHON} tests/test_dask.py

@@ -18,8 +18,14 @@ public:
     const T&    operator()              ( PI r, PI c ) const { return content[ r * size() + c ]; }
     T&          operator()              ( PI r, PI c ) { return content[ r * size() + c ]; }
 
+    struct EigenSystem {
+        Point<T,ct_size>              values;   ///< eigenvalues, ascending order
+        SimpleSquareMatrix<T,ct_size> vectors;  ///< row i = eigenvector i
+    };
+
     auto        without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)>;
     auto        with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
+    EigenSystem eigen_system            () const;
     T           determinant             () const;
     Vec         solve                   ( const Vec &vec ) const;
     PI          size                    ( PI ) const { return size(); }

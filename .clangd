@@ -4,6 +4,7 @@ CompileFlags:
     - -fdiagnostics-absolute-paths
     - -Isrc
     - -Isubprojects/zpp_bits
+    - -Isubprojects/eigen3
     - -Wall
     - -Wextra
   CompilationDatabase: build
