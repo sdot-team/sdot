@@ -36,13 +36,13 @@ common_cpp_args = [ '-g3' ] + cpp.get_supported_arguments( '-fdiagnostics-absolu
 subdir('src/python/sdot/bindings')
 
 # --- Tests with Catch2 ---
-# catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', fallback: ['catch2', 'catch2_with_main_dep'] )
+catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', fallback: ['catch2', 'catch2_with_main_dep'] )
 
-# unit_tests = executable('unit_tests',
-#   [ 'tests/test_w2_cpu.cpp', ],
-#   cpp_args: common_cpp_args,
-#   dependencies: catch2_dep,
-#   include_directories: include_directories('src'),
-# )
+unit_tests = executable('unit_tests',
+  [ 'tests/test_w2_cpu.cpp', ],
+  cpp_args: common_cpp_args,
+  dependencies: catch2_dep,
+  include_directories: include_directories('src'),
+)
 
-# test( 'C++ Unit Tests', unit_tests )
+test( 'C++ Unit Tests', unit_tests )

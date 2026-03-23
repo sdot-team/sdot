@@ -12,15 +12,29 @@ UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indic
     nodes.push_back( dim );
 
     // construction of the base nodes using all_the_paths
-    P( all_the_paths.size( 0 ) );
-    P( all_the_paths.size( 1 ) );
-    P( all_the_paths );
     for( PI i = 0; i < all_the_paths.size( 0 ); ++i )
-        add_path( all_the_paths.row( i ) );
+        add_path( all_the_paths.row( i ), i );
 }
 
-UTP void DTP::add_path( TensorView<const TF,2> path ) {
-    P( path );
+UTP void DTP::add_path( TensorView<const TF,2> path, PI num_bsp ) {
+    Node *node = &nodes[ 0 ];
+    for( PI r = 0; r < path.size( 0 ); ++r ) {
+        // if we already have the child, go to it
+        const PI side = path( r, dim + 1 );
+        if ( PI child_index = node->child_indices[ side ] ) {
+            node = &nodes[ child_index ];
+            continue;
+        }
+
+        // else, add the new node
+        for( PI d = 0; d < dim; ++d )
+            node->split_dir[ d ] = path( r, d );
+        node->split_dot = path( r, dim );
+        node->num_bsp = num_bsp;
+
+        node->child_indices[ side ] = nodes.size();
+        node = &nodes.emplace_back( dim );
+    }
 }
 
 UTP PI DTP::cell_number( Pt pos ) const {
@@ -96,6 +110,19 @@ UTP auto DTP::split_hst_for( TensorView<const TF,2> points, const Pt &split_dir,
     return res;
 }
 
+UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix ) const {
+    const Node &node = nodes[ node_index ];
+    if ( node.final() ) {
+        os << prefix << "final";
+        return;
+    }
+
+    os << prefix << "dir: " << node.split_dir << " dot: " << node.split_dot;
+    for( PI num_split = 0; num_split < 2; ++num_split )
+        if ( node.child_indices[ num_split ] > node_index )
+            display_rec( os << "\n", node.child_indices[ num_split ], prefix + "  " );
+}
+
 #undef UTP
 #undef DTP
 
@@ -103,5 +130,6 @@ UTP auto DTP::split_hst_for( TensorView<const TF,2> points, const Pt &split_dir,
 
 template<class AdditionalPtData,class TF,int dim>
 std::ostream &operator<<( std::ostream &os, const sdot::Bsp<AdditionalPtData,TF,dim> &p ) {
-    return os << "pouet";
+    p.display_rec( os, 0 );
+    return os;
 }

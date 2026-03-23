@@ -19,4 +19,7 @@ template<class T> struct CtType {};
 inline static const char *type_name( CtType<FP64> ) { return "FP64"; }
 inline static const char *type_name( CtType<FP32> ) { return "FP32"; }
 
+// ctor args
+struct Extent {};
+
 }

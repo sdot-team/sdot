@@ -73,7 +73,6 @@ def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
                 "path": new_path
             } )
 
-    print( all_the_paths )
     return splits, numpy.array( all_the_paths )
 
 points = da.random.random( ( 30, 2 ), chunks = ( 10, 2 ) ).astype( "float64" ) * da.array( [ 2, 1 ] )

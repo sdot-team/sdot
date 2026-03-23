@@ -18,7 +18,7 @@ public:
     using Ce = Cell<TF,ct_dim>;  ///< cell
 
     struct Node {
-        /**/ Node ( PI dim ) : child_indices{ 0, 0 }, split_dir( dim ), cell( dim ) {}
+        /**/ Node ( PI dim ) : child_indices{ 0, 0 }, beg_pt_data( 0 ), end_pt_data( 0 ), split_dir( dim ), cell( dim ) {}
 
         bool final() const { return child_indices[ 0 ] == 0; /* only the root can have index 0 */ }
 
@@ -27,6 +27,7 @@ public:
         PI   end_pt_data;
         Pt   split_dir;
         TF   split_dot;
+        PI   num_bsp;
         Ce   cell;
     };
 
@@ -53,7 +54,8 @@ public:
     auto                sum_pos_for    ( TensorView<const TF,2> points ) const -> Pt; ///< [ sum of xs, ..., sum of zs, sum of 1 ]
     auto                sum_cov_for    ( TensorView<const TF,2> points, const Pt &avg ) const -> SimpleSquareMatrix<TF>;
     PI                  cell_number    ( Pt pos ) const;
-    void                add_path       ( TensorView<const TF,2> path );
+    void                display_rec    ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
+    void                add_path       ( TensorView<const TF,2> path, PI num_bsp );
 
     PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)
     std::vector<PtData> pt_data;

@@ -54,7 +54,6 @@ public:
         return { reinterpret_cast<T *>( ptr + index * strides[ 0 ] ), nextent, nstrides };
     }
 
-private:
     static Strides contiguous_strides( const Extent &ext ) {
         Strides s;
         s[ ct_rank - 1 ] = sizeof( T );
@@ -63,6 +62,7 @@ private:
         return s;
     }
 
+private:
     Extent  extent;   ///<
     Strides strides;  ///< byte strides
     RawPtr  ptr;      ///<

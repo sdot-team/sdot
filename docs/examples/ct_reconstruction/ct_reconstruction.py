@@ -47,7 +47,6 @@ def loss( dirac_coords ):
 
     f = sdot.BatchOfPiecewiseAffineFunction1d( sinogram.xs, sinogram.ys )
     g = sdot.BatchOfSumOfWeightedDiracs1d( dirac_xs )
-    # torch.tensor( g. )
     return torch.sum( sdot.distances( f, g ) )
 
 n = 100
