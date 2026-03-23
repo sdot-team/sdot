@@ -1,60 +1,90 @@
 from sdot.bindings import sdot_bsp_bindings
+# from matplotlib import pyplot
 import dask.array as da  # type: ignore[import-untyped]
+# import dask
 import numpy
-import dask
 
-class ShapedObject:
-    def __init__( self, shape : list, value ):
-        self.shape = shape
-        self.value = value
+def avg_and_cov( points, nb_points ):
+    avg = da.average( points, axis=0 )
+    nrm = points - avg[ None, : ]
+    cov = da.dot( nrm.T, nrm ) # TODO: remove the symetric part
+    cov /= nb_points
+    return da.compute( avg, cov )
 
-def tree_reduce( list, func ):
-    while len( list ) > 1:
-        next_level = []
-        for i in range( 0, len( list ), 2 ):
-            if i + 1 < len( list ):
-                next_level.append( func( list[ i ], list[ i + 1 ] ) )
-            else:
-                next_level.append( list[ i ] )
-        list = next_level
-    return list[ 0 ]
+def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
+    """
+    split points until it fits into the hardware
+    """
+    too_large_splits = [ {
+        "nb_points": points.shape[ 0 ],
+        "indices": da.arange( 0, points.shape[ 0 ], chunks = points.chunks[ 0 ] ),
+        "points": points,
+        "path": []
+    } ]
 
-def make_bsp_set( delayed_chunks : ShapedObject, min_bsp_count = 2, max_bsp_size = 1e6 ):
-    nb_points = sum( chunk.shape[ 0 ] for chunk in delayed_chunks )
-    Bsp = sdot_bsp_bindings.Bsp_FP64
-    dim = 2
+    splits = []
+    while len( too_large_splits ):
+        split = too_large_splits.pop()
 
-    # start with a 1 node BSP
-    too_large_bsps = [ ShapedObject( [ nb_points, dim ], dask.delayed( Bsp )( nb_points, dim ) ) ]
-    bsps = []
-
-    # while too_large_bsps
-    while len( too_large_bsps ):
-        bsp = too_large_bsps.pop()
-        print( bsp.shape[ 0 ], max_bsp_size )
-        if bsp.shape[ 0 ] <= max_bsp_size:
-            bsps.append( bsp )
+        split_nb_points = split[ "nb_points" ]
+        split_indices = split[ "indices" ]
+        split_points = split[ "points" ]
+        split_path = split[ "path" ]
+        if split_nb_points <= max_points_per_bsp:
+            splits.append( split )
             continue
 
-        # find how to cut the bsp
-        avg_data_for_each_chunk = [ dask.delayed( bsp.value.avg_data_for )( chunk.value ) for chunk in delayed_chunks ]
-        avg_data = tree_reduce( avg_data_for_each_chunk, dask.delayed( Bsp.avg_reduction ) )
+        # split_dir
+        avg, cov = avg_and_cov( split_points, split_nb_points )
+        eig_system = numpy.linalg.eig( cov )
+        num_eigval = numpy.argmax( eig_system.eigenvalues )
+        eigval = eig_system.eigenvalues[ num_eigval ]
+        if eigval == 0:
+            raise RuntimeError( "TODO: all the points in the same place" )
 
-        cov_data_for_each_chunk = [ dask.delayed( bsp.value.cov_data_for )( chunk.value, avg_data ) for chunk in delayed_chunks ]
-        cov_data = tree_reduce( cov_data_for_each_chunk, dask.delayed( Bsp.cov_reduction ) )
+        split_dir = eig_system.eigenvectors[ num_eigval ]
+        proj = split_points @ split_dir.T
 
-        split_dir = Bsp.split_dir( cov_data.compute() )
+        # 1D histogram
+        avg_proj = numpy.dot( split_dir, avg )
+        split_beg = avg_proj - 5 * eigval
+        split_end = avg_proj + 5 * eigval
+        hist, bins = da.compute( *da.histogram( proj, 256, range = ( split_beg, split_end ) ) )
 
+        # split_dot
+        cut_index = numpy.searchsorted( numpy.cumsum( hist ), hist.sum() / 2 )
+        new_nb_points_list = [ hist[ : cut_index ].sum(), hist[ cut_index : ].sum() ]
+        # if abs( new_nb_points_list[ 0 ] - new_nb_points_list[ 1 ] ) / hist.sum() >= 0.2:
+        #     raise RuntimeError( "TODO: loop to find the cut for bad distributions" )
+        split_dot = bins[ cut_index ]
 
-        print( split_dir )
-        pouet()
+        # filter
+        new_paths = [ split_path + [ numpy.array( [ *split_dir, split_dot, inv ] ) ] for inv in range( 2 ) ]
+        filter = ( split_points @ split_dir ) > split_dot
 
+        #
+        for f, new_path, new_nb_points in zip( [ filter, da.logical_not( filter ) ], new_paths, new_nb_points_list ):
+            too_large_splits.append( {
+                "nb_points": new_nb_points,
+                "indices": split_indices[ f ],
+                "points": split_points[ f ],
+                "path": new_path
+            } )
 
+    return splits
 
-points = da.random.random( ( 30, 2 ), chunks = ( 10, 2 ) ).astype( "float64" )
-bspset = make_bsp_set(
-    [ ShapedObject( ( 10, 2 ), blk[ 0 ] ) for blk in points.to_delayed() ],
-    max_bsp_size = 15
-)
+points = da.random.random( ( 30, 2 ), chunks = ( 10, 2 ) ).astype( "float64" ) * da.array( [ 2, 1 ] )
+splits = base_splits( points )
+for split in splits:
+    print( list( split[ "path" ] ), split[ "indices" ].compute() )
 
-print( bspset )
+Bsp = sdot_bsp_bindings.Bsp_64
+bsps = [ Bsp( split[ "indices" ], split[ "points" ], split[ "path" ] ) for split in splits ]
+
+print( bsps )
+# bspset = make_bsp_set(
+#     [ ShapedObject( ( 10, 2 ), blk[ 0 ] ) for blk in points.to_delayed() ],
+#     max_bsp_size = 15
+# )
+
+# print( bspset )

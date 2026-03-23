@@ -7,9 +7,9 @@
 namespace nb = nanobind;
 using namespace sdot;
 
-static std::span<const std::byte> as_view( nb::bytes b ) {
-    return { reinterpret_cast<const std::byte *>( b.data() ), b.size() };
-}
+// static std::span<const std::byte> as_view( nb::bytes b ) {
+//     return { reinterpret_cast<const std::byte *>( b.data() ), b.size() };
+// }
 
 template<class TF>
 static auto tensor_view_2( const nb::ndarray<TF> &v ) {
@@ -25,25 +25,38 @@ static auto to_ndarray_1d( Vec &&vec ) {
     return nb::ndarray<nb::numpy, typename T::value_type>( ptr->data(), { ptr->size() }, owner );
 }
 
-static nb::bytes serialize( const auto &obj ) {
-    std::vector<std::byte> buf;
-    zpp::bits::out out{ buf };
-    out( obj ).or_throw();
-    return nb::bytes( reinterpret_cast<const char *>( buf.data() ), buf.size() );
+template<class Mat>
+static auto to_ndarray_2d( Mat &&vec ) {
+    using T = std::decay_t<Mat>;
+    auto *ptr = new T( std::move( vec ) );
+    nb::capsule owner( ptr, []( void *p ) noexcept { delete static_cast<T *>( p ); } );
+    return nb::ndarray<nb::numpy, typename T::value_type>( ptr->data(), { ptr->size( 0 ), ptr->size( 1 ) }, owner );
 }
 
-template<class T>
-static T deserialize( const nb::bytes &bytes ) {
-    T res{};
-    zpp::bits::in in{ as_view( bytes ) };
-    in( res ).or_throw();
-    return res;
-}
+// static nb::bytes serialize( const auto &obj ) {
+//     std::vector<std::byte> buf;
+//     zpp::bits::out out{ buf };
+//     out( obj ).or_throw();
+//     return nb::bytes( reinterpret_cast<const char *>( buf.data() ), buf.size() );
+// }
+
+// template<class T>
+// static T deserialize( const nb::bytes &bytes ) {
+//     T res{};
+//     zpp::bits::in in{ as_view( bytes ) };
+//     in( res ).or_throw();
+//     return res;
+// }
 
 template<class TF,int ct_dim = -1>
 struct LocBspBindings {
     using BspType = Bsp<PI,TF,2>;
     using NA = nb::ndarray<TF>;
+    using Pt = BspType::Pt;
+
+    static Pt to_Pt( const auto &na ) {
+        return std::span<TF>( na.data(), na.size() );
+    }
 
     static void add_mod( auto &m ) {
         static std::string m0 = std::string( "Bsp_" ) + type_name( CtType<TF>() );
@@ -60,30 +73,20 @@ struct LocBspBindings {
             .def( "nb_points", []( const BspType &b ) {
                 return b.nb_points;
             } )
-            .def( "avg_data_for", []( BspType &b, const NA &positions ) -> nb::bytes {
-                return serialize( b.avg_data_for( tensor_view_2( positions ) ) );
+            .def( "avg_data_for", []( BspType &b, const NA &positions ) {
+                return to_ndarray_1d( b.sum_pos_for( tensor_view_2( positions ) ) );
             } )
-            .def( "cov_data_for", []( BspType &b, const NA &positions, const nb::bytes &avg ) -> nb::bytes {
-                return serialize( b.cov_data_for(
+            .def( "cov_data_for", []( BspType &b, const NA &positions, const NA &avg ) {
+                return to_ndarray_2d( b.sum_cov_for( tensor_view_2( positions ), to_Pt( avg ) ) );
+            } )
+            .def( "split_hst_for", []( BspType &b, const NA &positions, const NA &split_dir, TF split_beg, TF split_end, PI nb_bins ) {
+                return to_ndarray_1d( b.split_hst_for(
                     tensor_view_2( positions ),
-                    deserialize<std::vector<typename BspType::AvgData>>( avg )
-                ) );
-            } )
-            .def( "avg_reduction", []( const nb::bytes &a, const nb::bytes &b ) -> nb::bytes {
-                return serialize( BspType::avg_reduction(
-                    deserialize<std::vector<typename BspType::AvgData>>( a ),
-                    deserialize<std::vector<typename BspType::AvgData>>( b )
-                ) );
-            } )
-            .def( "cov_reduction", []( const nb::bytes &a, const nb::bytes &b ) -> nb::bytes {
-                return serialize( BspType::cov_reduction(
-                    deserialize<std::vector<typename BspType::CovData>>( a ),
-                    deserialize<std::vector<typename BspType::CovData>>( b )
-                ) );
-            } )
-            .def( "split_dir", []( nb::bytes cov ) {
-                auto dir = BspType::split_dir( deserialize<std::vector<typename BspType::CovData>>( cov ) );
-                return to_ndarray_1d( dir );
+                    to_Pt( split_dir ),
+                    split_beg,
+                    split_end,
+                    nb_bins
+                 ) );
             } )
         ;
 

@@ -56,7 +56,7 @@ class Point<T,-1> {
 public:
     using       value_type              = T;
     using       serialize               = zpp::bits::members<1>;
-    using       Content                    = std::vector<T>;
+    using       Content                 = std::vector<T>;
 
     /**/        Point                   ( std::initializer_list<T> values ) : content( values ) {}
     // T_d      Point                   ( const Point<T,d> &values ) : data( values.begin(), values.end() ) {}
