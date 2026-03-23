@@ -1,5 +1,6 @@
 project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++23'] )
 # project.languages += [ 'objcpp' ]
+cpp = meson.get_compiler( 'cpp' )
 
 
 # Python module import and find installation
@@ -29,7 +30,7 @@ nanobind_dep = declare_dependency(
 zpp_bits_dep = dependency( 'zpp_bits', fallback: [ 'zpp_bits', 'zpp_bits_dep' ] )
 
 # --- Common Project Settings ---
-common_cpp_args = [ '-g3' ]
+common_cpp_args = [ '-g3' ] + cpp.get_supported_arguments( '-fdiagnostics-absolute-paths' )
 
 # --- Python extension modules ---
 subdir('src/python/sdot/bindings')

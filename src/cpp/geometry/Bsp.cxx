@@ -7,8 +7,20 @@ namespace sdot {
 #define UTP template<class AdditionalPtData,class TF,int ct_dim>
 #define DTP Bsp<AdditionalPtData,TF,ct_dim>
 
-UTP DTP::Bsp( PI nb_points, PI dim ) : nb_points( nb_points ), dim( dim ) {
+UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path ) : nb_points( points.size( 0 ) ), dim( points.size( 1 ) ) {
+    // root node
     nodes.push_back( dim );
+
+    // construction of the base nodes using all_the_paths
+    P( all_the_paths.size( 0 ) );
+    P( all_the_paths.size( 1 ) );
+    P( all_the_paths );
+    for( PI i = 0; i < all_the_paths.size( 0 ); ++i )
+        add_path( all_the_paths.row( i ) );
+}
+
+UTP void DTP::add_path( TensorView<const TF,2> path ) {
+    P( path );
 }
 
 UTP PI DTP::cell_number( Pt pos ) const {

@@ -45,7 +45,7 @@ public:
         PI len;
     };
 
-    /**/                Bsp            ( PI nb_points, PI dim );
+    /**/                Bsp            ( TensorView<const TF,3> all_the_paths, TensorView<const PI,1> indices, TensorView<const TF,2> points, TensorView<const TF,2> path );
 
     bool                is_in_charge_of( const Pt &pos ) const;
 
@@ -53,6 +53,7 @@ public:
     auto                sum_pos_for    ( TensorView<const TF,2> points ) const -> Pt; ///< [ sum of xs, ..., sum of zs, sum of 1 ]
     auto                sum_cov_for    ( TensorView<const TF,2> points, const Pt &avg ) const -> SimpleSquareMatrix<TF>;
     PI                  cell_number    ( Pt pos ) const;
+    void                add_path       ( TensorView<const TF,2> path );
 
     PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)
     std::vector<PtData> pt_data;

@@ -1,7 +1,7 @@
 from sdot.bindings import sdot_bsp_bindings
 # from matplotlib import pyplot
 import dask.array as da  # type: ignore[import-untyped]
-# import dask
+import dask
 import numpy
 
 def avg_and_cov( points, nb_points ):
@@ -22,6 +22,7 @@ def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
         "path": []
     } ]
 
+    all_the_paths = []
     splits = []
     while len( too_large_splits ):
         split = too_large_splits.pop()
@@ -31,6 +32,7 @@ def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
         split_points = split[ "points" ]
         split_path = split[ "path" ]
         if split_nb_points <= max_points_per_bsp:
+            all_the_paths.append( split_path )
             splits.append( split )
             continue
 
@@ -59,7 +61,7 @@ def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
         split_dot = bins[ cut_index ]
 
         # filter
-        new_paths = [ split_path + [ numpy.array( [ *split_dir, split_dot, inv ] ) ] for inv in range( 2 ) ]
+        new_paths = [ split_path + [ [ *split_dir, split_dot, inv ] ] for inv in range( 2 ) ]
         filter = ( split_points @ split_dir ) > split_dot
 
         #
@@ -71,20 +73,15 @@ def base_splits( points, max_points_per_bsp = 10, min_split = 1 ):
                 "path": new_path
             } )
 
-    return splits
+    print( all_the_paths )
+    return splits, numpy.array( all_the_paths )
 
 points = da.random.random( ( 30, 2 ), chunks = ( 10, 2 ) ).astype( "float64" ) * da.array( [ 2, 1 ] )
-splits = base_splits( points )
-for split in splits:
-    print( list( split[ "path" ] ), split[ "indices" ].compute() )
+splits, all_the_paths = base_splits( points )
 
-Bsp = sdot_bsp_bindings.Bsp_64
-bsps = [ Bsp( split[ "indices" ], split[ "points" ], split[ "path" ] ) for split in splits ]
+Bsp = sdot_bsp_bindings.Bsp_FP64
+bsps = [ dask.delayed( Bsp )( all_the_paths, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ) ) for split in splits ]
 
-print( bsps )
-# bspset = make_bsp_set(
-#     [ ShapedObject( ( 10, 2 ), blk[ 0 ] ) for blk in points.to_delayed() ],
-#     max_bsp_size = 15
-# )
+for bsp in bsps:
+    print( bsp.compute() )
 
-# print( bspset )
