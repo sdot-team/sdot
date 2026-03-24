@@ -7,17 +7,26 @@ class DriverProxy:
         * `user_dtype`: the string that was specified by the user
         * `dtype`: type used by the frawework, for instance `torch.float32`
 
+        User can write sdot.driver.dtype = ... with any format ("float32", "FP32", torch.float32, ...)
+
     Device attributs:
         * `normalized_device`: a string like "gpu:0"
         * `user_device`: the string that was specified by the user
         * `device`: instance used by the frawework
 
-    Framework if not specified by the user:
+    Framework attributes:
+        * `normalized_framework`: a string like "jax", "torch", ...
+        * `user_framework`: the string that was specified by the user
+        * `framework`: same thing than normalized_framework
+
+    To find the default framework:
         * look what is imported in sys.modules
-        * else, try is possible to import pytorch then jax
+        * else, try if possible to import a module in self.prefered_frameworks ([ 'jax', 'torch' ] by default)
     """
 
     def __init__( self ):
+        self.prefered_frameworks = [ 'jax', 'torch' ]
+
         self._user_framework = None
         self._user_device = None
         self._user_dtype = None
@@ -26,40 +35,78 @@ class DriverProxy:
 
     # ---------------------------------- framework ----------------------------------
     @property
-    def framework( self ):
+    def normalized_framework( self ) -> str:
+        # specified by the user ?
+        if isinstance( self._user_framework, str ):
+            return self._normalized_framework_for( self._user_framework )
+
+        # else, look in imported modules
+        for name in self.prefered_frameworks:
+            if name in sys.modules:
+                return name
+
+        # try to import jax
+        for name in self.prefered_frameworks:
+            try:
+                __import__( name )
+                return name
+            except ImportError:
+                pass
+
+        # argh
+        raise RuntimeError( "Unable to find a driver (tested torch and jax)" )
+
+    @property
+    def user_framework( self ) -> str | None:
         return self._user_framework
+
+    @property
+    def framework( self ) -> str:
+        return self.normalized_framework
+
+    @user_framework.setter
+    def user_framework( self, value: str ):
+        self._user_framework = value
+
+        # need an _instance update ?
+        if value is None or ( self._instance is not None and self._instance.name != self._normalized_framework_for( value ) ):
+            self._instance = None
 
     @framework.setter
     def framework( self, value: str ):
-        if self._user_framework == value:
-            return
-        self._user_framework = value
-        self._instance = self._make_driver_instance()
+        self.user_framework = value
 
     # ---------------------------------- dtype ----------------------------------
     @property
     def normalized_dtype( self ) -> str:
-        return str( self._normalized_dtype_for( self.user_dtype ) )
+        # specified by the user ?
+        if isinstance( self.user_dtype, str ):
+            return str( self._normalized_dtype_for( self.user_dtype ) )
+
+        # metal => FP32
+        if self.normalized_framework == "metal":
+            return "FP32"
+
+        return "FP64"
 
     @property
     def user_dtype( self ):
-        if self._user_dtype is None:
-            self._make_driver_instance()
-        assert self._user_dtype is not None
         return self._user_dtype
 
     @property
     def dtype( self ):
+        # we need an instance to get the correct dtype object
         if self._instance is None:
             self._make_driver_instance()
         return self._instance.dtype
 
     @user_dtype.setter
     def user_dtype( self, value ):
-        old_normalized_dtype = self._normalized_dtype_for( self._user_dtype )
         self._user_dtype = value
-        if old_normalized_dtype != self._normalized_dtype_for( value ):
-            self._make_driver_instance()
+
+        # need an _instance update ?
+        if value is None or ( self._instance is not None and self._normalized_dtype_for( self._instance.dtype ) != self._normalized_dtype_for( value ) ):
+            self._instance = None
 
     @dtype.setter
     def dtype( self, value ):
@@ -68,12 +115,20 @@ class DriverProxy:
     # ---------------------------------- device ----------------------------------
     @property
     def normalized_device( self ) -> str:
-        return str( self._normalized_device_for( self.user_device ) )
+        # specified by the user ?
+        if isinstance( self._user_device, str ):
+            return self._normalized_device_for( self._user_device )
+
+        # numpy => cpu
+        if self._user_framework is not None and self._normalized_framework_for( self._user_framework ) == "numpy":
+            return "cpu"
+
+        # get a driver class in order to get a default device
+        Driver = DriverProxy._driver_class( self.normalized_framework )
+        return Driver.default_normalized_device_for( self._normalized_dtype_for( self._user_dtype ) if self._user_dtype else None )
 
     @property
     def user_device( self ):
-        if self._user_device is None:
-            self._make_driver_instance()
         return self._user_device
 
     @property
@@ -84,10 +139,11 @@ class DriverProxy:
 
     @user_device.setter
     def user_device( self, value ):
-        old_normalized_device = self._normalized_device_for( self._user_device )
         self._user_device = value
-        if old_normalized_device != self._normalized_device_for( value ):
-            self._make_driver_instance()
+
+        # need an _instance update ?
+        if value is None or ( self._instance is not None and self._normalized_device_for( self._instance.device ) != self._normalized_device_for( value ) ):
+            self._instance = None
 
     @device.setter
     def device( self, value ):
@@ -100,83 +156,70 @@ class DriverProxy:
         return getattr( self._instance, name )
 
     # ---------------------------------- helpers ----------------------------------
-    def _normalized_dtype_for( self, name ) -> str | None:
-        if name is None:
-            return None
-        
+    def _normalized_framework_for( self, name ) -> str:
+        # ensure lowercase str
+        if not isinstance( name, str ):
+            return self._normalized_framework_for( str( name ) )
+        name = name.lower()
+
+        if name in [ "torch", "pytorch" ]:
+            return "torch"
+
+        if name in [ "jax" ]:
+            return "jax"
+
+        raise RuntimeError( f"Unknown framework type '{ name }'" )
+
+    def _normalized_dtype_for( self, name ) -> str:
+        # ensure lowercase str
         if not isinstance( name, str ):
             return self._normalized_dtype_for( str( name ) )
+        name = name.lower()
 
-        if str.lower( name ) in [ "float32", "fp32" ]:
+        if ( "float32" in name ) or ( "fp32" in name ):
             return "FP32"
-        if str.lower( name ) in [ "float64", "fp64" ]:
+
+        if ( "float64" in name ) or ( "fp64" in name ):
             return "FP64"
 
-        raise RuntimeError( f"TODO { name }" )
+        raise RuntimeError( f"TODO: find normalized dtype for { name }" )
 
-    def _normalized_device_for( self, name ) -> str | None:
-        if name is None:
-            return None
-        
+    def _normalized_device_for( self, name ) -> str:
+        # ensure lowercase str
         if not isinstance( name, str ):
             return self._normalized_device_for( str( name ) )
+        name = name.lower()
 
-        if name == "cpu":
-            return "cpu"
+        if name.startswith( "cuda" ) or name.startswith( "gpu" ):
+            if ":" in name:
+                raise RuntimeError( "TODO: other gpus" )
+            return "gpu:0"
 
         if name in [ "mps", "metal" ]:
+            if ":" in name:
+                raise RuntimeError( "TODO: other gpus" )
             return "metal"
+
+        if name.startswith( "cpu" ):
+            return "cpu"
 
         raise RuntimeError( f"TODO { name }" )
 
-    def _make_driver_instance( self ):
-        if self._user_framework is None:
-            self._user_framework = self._find_framework()
-
-        if str.lower( self._user_framework ) in [ "pytorch", "torch" ]:
+    @staticmethod
+    def _driver_class( normalized_framework ):
+        if normalized_framework == "torch":
             from .drivers.PyTorchDriver import PyTorchDriver
-            self._instance = self._call_driver_instance( PyTorchDriver )
-            return 
+            return PyTorchDriver
 
-        if str.lower( self._user_framework ) == "jax":
+        if normalized_framework == "jax":
             from .drivers.JaxDriver import JaxDriver
-            self._instance = self._call_driver_instance( JaxDriver )
-            return 
+            return JaxDriver
 
-        raise RuntimeError( f"{ self._user_framework } is not a registered framework name (for now, one can use 'pytorch' or 'jax')" )
+        raise RuntimeError( f"{ normalized_framework } is not a registered framework name (for now, one can use 'torch' or 'jax')" )
 
-    def _call_driver_instance( self, Class ):
-        # we start by getting the type
-        if self._user_dtype is None:
-            self._user_dtype = self._normalized_dtype_for( Class.default_dtype( self._normalized_device_for( self._user_device ) ) )
-
-        # and then we find a hardware able to handle this type
-        if self._user_device is None:
-            self._user_device = self._normalized_device_for( Class.default_device( self._normalized_dtype_for( self._user_dtype ) ) )
-
-        return Class( normalized_dtype = self._normalized_dtype_for( self._user_dtype ), normalized_device = self._normalized_device_for( self._user_device ) )
-
-    def _find_framework( self ) -> str:
-        # try imported modules
-        for name in [ 'jax', 'torch' ]:
-            if name in sys.modules:
-                return name
-
-        # # already imported
-        # try:
-        #     import torch
-        #     return "pytorch"
-        # except ImportError:
-        #     pass
-
-        # try:
-        #     import jax
-        #     return "jax"
-        # except ImportError:
-        #     pass
-
-        raise RuntimeError( "Unable to find a driver (tested torch and jax)" )
-
+    def _make_driver_instance( self ):
+        Driver = DriverProxy._driver_class( self.normalized_framework )
+        self._instance = Driver( self.normalized_dtype, self.normalized_device )
 
 def add_buid_path():
     """

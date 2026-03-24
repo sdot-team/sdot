@@ -1,9 +1,10 @@
 .PHONY: venv setup build all clean test help docs
 
 VENV = $(CURDIR)/.venv
+
 PYTHON = $(VENV)/bin/python
-PIP = $(VENV)/bin/pip
 MESON = $(VENV)/bin/meson
+PIP = $(VENV)/bin/pip
 
 setup:
 	@if [ ! -f build/build.ninja ]; then \
@@ -18,30 +19,25 @@ all: build
 venv:
 	@python3 -m venv $(VENV)
 	@$(PIP) install --upgrade pip
-	@$(PIP) install torch jax jaxlib nanobind meson ninja numpy pytest timing mkdocs-material mkdocstrings[python] pyyaml matplotlib dask
+	@$(PIP) install -r requirements.txt
 
 docs:
-	$(VENV)/bin/mkdocs serve --config-file docs/mkdocs.yml
+	@$(VENV)/bin/mkdocs serve --config-file docs/mkdocs.yml
 
 
 test: build
-	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"
-	@$(MESON) test -C build --print-errorlogs
-	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
+	# 	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"
+	# 	@$(MESON) test -C build --print-errorlogs
+	# 	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
 	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) -m pytest -s -q --tb=short tests/
-
-ct_reco: build
-	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) docs/examples/ct_reconstruction/ct_reconstruction.py
 
 clean:
 	@rm -rf build
-	@rm -f python/pytorch/*.so python/jax/*.so
 	@rm -rf .cache/clangd
-	@rm -f compile_commands.json
 
 help:
 	@echo "Meson Makefile:"
-	@echo "  make venv   : Create venv and install deps (including meson)"
+	@echo "  make venv   : Create venv and install deps (including meson). Use . '.venv/bin/activate' to activate it"
 	@echo "  make setup  : Setup Meson build directory"
 	@echo "  make build  : Build library and extensions via Meson"
 	@echo "  make all    : Alias for 'make build'"

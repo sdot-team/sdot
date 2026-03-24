@@ -13,3 +13,16 @@ On est obligé de fonctionner comme ça, au moins jusqu'à ce que les points log
   -> on pourrait imaginer que la structure du BSP soit partagée par tout le monde, ou alors qu'on ait une partie commune pour chacun
   -> à ce moment là, on peut stocker dans
 
+
+Faire un docker pour les exemples
+Pas fait le code Cuda
+requirement.txt
+  -> et mettre les dépendances dans le pyproject.toml
+
+Faire des paquets conda
+
+Ajouter des nouveaux exemples
+
+
+Prop pour le driver
+- user_xyz correspond exactement à ce que l'user donne. Quand on le set, ça

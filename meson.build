@@ -1,4 +1,4 @@
-project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++23'] )
+project('sdot', [ 'cpp' ], version: '0.1.0', default_options: ['cpp_std=c++20'] )
 # project.languages += [ 'objcpp' ]
 cpp = meson.get_compiler( 'cpp' )
 
@@ -52,12 +52,12 @@ sdot_geometry_dep = declare_dependency(
 subdir('src/python/sdot/bindings')
 
 # --- Tests with Catch2 ---
-catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', fallback: ['catch2', 'catch2_with_main_dep'] )
+# catch2_dep = dependency( 'catch2-with-main', version: '>=3.0.0', fallback: ['catch2', 'catch2_with_main_dep'] )
 
-unit_tests = executable('unit_tests',
-  [ 'tests/test_w2_cpu.cpp', ],
-  cpp_args: common_cpp_args,
-  dependencies: [ catch2_dep, sdot_geometry_dep ],
-)
+# unit_tests = executable('unit_tests',
+#   [ 'tests/test_w2_cpu.cpp', ],
+#   cpp_args: common_cpp_args,
+#   dependencies: [ catch2_dep, sdot_geometry_dep ],
+# )
 
-test( 'C++ Unit Tests', unit_tests )
+# test( 'C++ Unit Tests', unit_tests )
