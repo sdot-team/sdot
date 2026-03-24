@@ -1,8 +1,6 @@
-# import sdot
 import torch
 
 map_of_plan_methods = {}
-
 
 class PyTorchDriver:
     """
@@ -14,26 +12,19 @@ class PyTorchDriver:
 
         self.map_of_plan_methods = map_of_plan_methods
 
-    @staticmethod
-    def default_dtype( normalized_device: str | None ):
-        """ normalized_device can be "gpu:...", "cpu", "metal" or None
-            return appropriate type (metal => float, cuda => dep)
-        """
-        if normalized_device == "metal":
-            return "FP32"
-        return "FP64"
+    @property
+    def name( self ) -> str:
+        return "torch"
 
     @staticmethod
-    def default_device( normalized_dtype ):
-        """
-        normalized_dtype can be None, "FP32" or "FP64"
-        """
+    def default_normalized_device_for( user_normalized_dtype ):
         if torch.cuda.is_available():
             return "cuda:0"
         # Metal (MPS) only supports FP32
-        if torch.backends.mps.is_available() and normalized_dtype != "FP64":
+        if torch.backends.mps.is_available() and user_normalized_dtype == "FP32":
             return "metal"
         return "cpu"
+
 
     @staticmethod
     def find_device( normalized_device: str ):

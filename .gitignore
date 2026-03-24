@@ -24,7 +24,11 @@ __pycache__/
 *.egg-info/
 dist/
 wheels/
-subprojects/
+
+# Meson subprojects (téléchargés automatiquement, ne pas tracker)
+subprojects/zpp_bits/
+subprojects/catch2/
+subprojects/eigen3/
 
 # C++ / CMake
 CMakeUserPresets.json

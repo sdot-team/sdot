@@ -9,10 +9,11 @@ PYTEST = .venv/bin/pytest
 # 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 # 	micromamba run -n vfs vfs_build run tests/test_SimpleSquareMatrix.cpp
 # 	micromamba run -n vfs vfs_build run tests/test_PowerDiagram.cpp
+# 	${PYDIRS} ${PYTHON} tests/test_dask.py
+# 	${PYDIRS} ${PYTHON} tests/python/test_OtPlan.py
 
 all:
-	make build
-	${PYDIRS} ${PYTHON} tests/test_dask.py
+	make test
 
 ct:
 	make build

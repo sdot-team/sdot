@@ -1,0 +1,8 @@
+[wrap-git]
+url = https://gitlab.com/libeigen/eigen.git
+revision = 3.4.0
+depth = 1
+patch_directory = eigen3
+
+[provide]
+dependency_names = eigen3

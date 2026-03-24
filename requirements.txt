@@ -1,0 +1,23 @@
+# Core — nécessaire pour build et runtime
+numpy
+nanobind
+meson
+ninja
+
+# Backends
+torch
+jax
+jaxlib
+
+# Intégrations
+dask[array]
+matplotlib
+
+# Tests
+pytest
+timing
+
+# Docs
+mkdocs-material
+mkdocstrings[python]
+pyyaml
