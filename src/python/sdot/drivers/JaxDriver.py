@@ -1,4 +1,7 @@
+from ..BatchOfOtPlans import BatchOfOtPlans
+from ..driver import driver
 import jax.numpy as jnp
+import numpy as np
 import jax
 
 map_of_plan_methods = {}
@@ -10,6 +13,8 @@ class JaxDriver:
     def __init__( self, normalized_dtype : str, normalized_device: str ):
         self.device = JaxDriver.find_device( normalized_device )
         self.dtype = JaxDriver.find_dtype( normalized_dtype )
+        if normalized_dtype == "FP64":
+            jax.config.update( "jax_enable_x64", True )
 
         self.map_of_plan_methods = map_of_plan_methods
 
@@ -84,7 +89,65 @@ class JaxDriver:
         return jnp.tile( tensor, shape )
 
     def plan( self, f, g ):
-        todo()
+        bindings = driver.bindings_for( f, g )
+        np_dtype = np.dtype( self.dtype )
+
+        input_tensors = f.tensor_list() + g.tensor_list()
+        dirac_xs = input_tensors[ 0 ]
+
+        batch_size = dirac_xs.shape[ 0 ]
+        nb_diracs  = dirac_xs.shape[ 1 ]
+        dim        = dirac_xs.shape[ 2 ]
+
+        fwd_shapes = (
+            jax.ShapeDtypeStruct( ( batch_size, ),                self.dtype ),
+            jax.ShapeDtypeStruct( ( batch_size, nb_diracs, dim ), self.dtype ),
+            jax.ShapeDtypeStruct( ( batch_size, nb_diracs ),      self.dtype ),
+            jax.ShapeDtypeStruct( ( batch_size, nb_diracs, 2 ),   self.dtype ),
+        )
+        bwd_shapes = tuple(
+            jax.ShapeDtypeStruct( t.shape, t.dtype ) for t in input_tensors
+        )
+
+        @jax.custom_vjp
+        def sdot_op( *inputs ):
+            def fwd_cb( *np_inputs ):
+                distances   = np.empty( ( batch_size, ),                dtype = np_dtype )
+                barycenters = np.empty( ( batch_size, nb_diracs, dim ), dtype = np_dtype )
+                potentials  = np.empty( ( batch_size, nb_diracs ),      dtype = np_dtype )
+                cuts        = np.empty( ( batch_size, nb_diracs, 2 ),   dtype = np_dtype )
+                bindings.forward( *np_inputs, distances, barycenters, potentials, cuts )
+                return distances, barycenters, potentials, cuts
+            return jax.pure_callback( fwd_cb, fwd_shapes, *inputs )
+
+        def sdot_op_fwd( *inputs ):
+            outputs = sdot_op( *inputs )
+            residuals = ( outputs[ 1 ], outputs[ 2 ], outputs[ 3 ], *inputs )
+            return outputs, residuals
+
+        def sdot_op_bwd( residuals, grads ):
+            n = len( input_tensors )
+            barycenters, potentials, cuts = residuals[ 0 ], residuals[ 1 ], residuals[ 2 ]
+            saved_inputs = residuals[ 3: ]
+            grad_distances, grad_barycenters, grad_potentials, grad_cuts = grads
+
+            def bwd_cb( *np_args ):
+                np_bary, np_pot, np_cuts = np_args[ 0 ], np_args[ 1 ], np_args[ 2 ]
+                np_inputs  = np_args[ 3 : 3 + n ]
+                np_grad_in = np_args[ 3 + n : ]
+                out_grads = tuple( np.empty( t.shape, dtype = np_dtype ) for t in input_tensors )
+                bindings.backward( np_bary, np_pot, np_cuts, *np_inputs, *np_grad_in, *out_grads )
+                return out_grads
+
+            return jax.pure_callback(
+                bwd_cb, bwd_shapes,
+                barycenters, potentials, cuts, *saved_inputs,
+                grad_distances, grad_barycenters, grad_potentials, grad_cuts
+            )
+
+        sdot_op.defvjp( sdot_op_fwd, sdot_op_bwd )
+
+        return BatchOfOtPlans( *sdot_op( *input_tensors ) )
 
     # def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewiseAffineFunction1d ) -> BatchOfOtPlans:
 

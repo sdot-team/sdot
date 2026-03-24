@@ -50,7 +50,7 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
                 check_grad( name, getattr( m, attr ), loss, attr )
 
 def for_each_driver_comb( cb ):
-    for framework in [ "torch" ]: #, "jax"
+    for framework in [ "torch", "jax" ]: #
         for dtype in [ "FP32", "FP64" ]:
             for device in [ "cpu" ]:
                 sdot.driver.framework = framework

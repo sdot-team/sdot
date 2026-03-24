@@ -256,7 +256,7 @@ class DriverProxy:
                 raise RuntimeError( "TODO: other gpus" )
             return "metal"
 
-        if name.startswith( "cpu" ):
+        if "cpu" in name:
             return "cpu"
 
         raise RuntimeError( f"TODO { name }" )
