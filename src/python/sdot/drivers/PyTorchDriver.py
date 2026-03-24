@@ -31,8 +31,8 @@ class PyTorchDriver:
         if normalized_device.startswith( "cpu" ):
             return torch.device( "cpu" )
         if normalized_device.startswith( "cuda" ):
-            idx = normalized_device.split( ":" )[ 1 ] if ":" in normalized_device else "0"
-            return torch.device( f"cuda:{ idx }" )
+            # idx = normalized_device.split( ":" )[ 1 ] if ":" in normalized_device else "0"
+            return torch.device( "cuda" ) # :{ idx }
         if normalized_device.startswith( "metal" ):
             return torch.device( "mps" )
         raise RuntimeError( f"Unknown type { normalized_device }" )

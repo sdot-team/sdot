@@ -10,7 +10,7 @@ class DriverProxy:
         User can write sdot.driver.dtype = ... with any format ("float32", "FP32", torch.float32, ...)
 
     Device attributs:
-        * `normalized_device`: a string like "gpu:0"
+        * `normalized_device`: a string like "cuda:0"
         * `user_device`: the string that was specified by the user
         * `device`: instance used by the frawework
 
@@ -167,6 +167,8 @@ class DriverProxy:
         ct_dim = f.dim if f.dim <= 4 else -1
         dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
+        dylib_name = dylib_name.replace( ":", "_" )
+
         import importlib
         full_name = "sdot.bindings." + dylib_name
         try:
@@ -249,7 +251,7 @@ class DriverProxy:
         if name.startswith( "cuda" ) or name.startswith( "gpu" ):
             if ":" in name:
                 raise RuntimeError( "TODO: other gpus" )
-            return "gpu:0"
+            return "cuda:0"
 
         if name in [ "mps", "metal" ]:
             if ":" in name:

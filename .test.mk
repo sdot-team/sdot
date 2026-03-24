@@ -11,6 +11,9 @@ PYTEST = .venv/bin/pytest
 # 	micromamba run -n vfs vfs_build run tests/test_PowerDiagram.cpp
 # 	${PYDIRS} ${PYTHON} tests/test_dask.py
 # 	${PYDIRS} ${PYTHON} tests/python/test_OtPlan.py
+# 	make build
+# 	${PYDIRS} valgrind ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+# 	${PYDIRS} valgrind ${PYTHON} tests/test_dask.py
 
 all:
 	make test
@@ -23,6 +26,4 @@ vg:
 	ssh lmo "make -C ~/sdot_with_interfaces -f .test.mk vg_loc"
 
 vg_loc:
-	make build
-# 	${PYDIRS} valgrind ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
-	${PYDIRS} valgrind ${PYTHON} tests/test_dask.py
+	make test

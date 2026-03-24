@@ -10,21 +10,21 @@ namespace sdot {
 // to sdot type
 // nanobind strides are in elements (DLPack convention), not bytes — multiply by sizeof(TF)
 template<class TF>
-static auto tensor_view_1( const nanobind::ndarray<TF> &v ) {
+static auto tensor_view_1( const nanobind::ndarray<TF,nanobind::device::cpu> &v ) {
     std::array<SI,1> strides{ v.stride( 0 ) * SI( sizeof( TF ) ) };
     std::array<PI,1> extent { v.shape( 0 ) };
     return TensorView<TF,1>( v.data(), extent, strides );
 }
 
 template<class TF>
-static auto tensor_view_2( const nanobind::ndarray<TF> &v ) {
+static auto tensor_view_2( const nanobind::ndarray<TF,nanobind::device::cpu> &v ) {
     std::array<SI,2> strides{ v.stride( 0 ) * SI( sizeof( TF ) ), v.stride( 1 ) * SI( sizeof( TF ) ) };
     std::array<PI,2> extent { v.shape( 0 ), v.shape( 1 ) };
     return TensorView<TF,2>( v.data(), extent, strides );
 }
 
 template<class TF>
-static auto tensor_view_3( const nanobind::ndarray<TF> &v ) {
+static auto tensor_view_3( const nanobind::ndarray<TF,nanobind::device::cpu> &v ) {
     std::array<SI,3> strides{ v.stride( 0 ) * SI( sizeof( TF ) ), v.stride( 1 ) * SI( sizeof( TF ) ), v.stride( 2 ) * SI( sizeof( TF ) ) };
     std::array<PI,3> extent { v.shape( 0 ), v.shape( 1 ), v.shape( 2 ) };
     return TensorView<TF,3>( v.data(), extent, strides );

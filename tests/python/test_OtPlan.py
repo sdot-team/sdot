@@ -52,7 +52,7 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
 def for_each_driver_comb( cb ):
     for framework in [ "torch", "jax" ]: #
         for dtype in [ "FP32", "FP64" ]:
-            for device in [ "cpu" ]:
+            for device in [ "cpu" ]: #, "cuda"
                 sdot.driver.framework = framework
                 sdot.driver.device = device
                 sdot.driver.dtype = dtype

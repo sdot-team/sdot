@@ -9,11 +9,14 @@ using namespace sdot;
 namespace nb = nanobind;
 
 using TF = SDOT_SCALAR_TYPE;
+
+using NF = nb::ndarray<const TF,nb::device::cpu>;
+using MF = nb::ndarray<TF,nb::device::cpu>;
 // using TF = SDOT_CT_DIM;
 
 
 // Forward function that works with both 1D and 2D arrays
-static void forward( nb::ndarray<const TF> dirac_xs, nb::ndarray<const TF> dirac_ws, nb::ndarray<const TF> point_xs, nb::ndarray<const TF> point_ys, nb::ndarray<TF> distance, nb::ndarray<TF> barycenters, nb::ndarray<TF> potentials, nb::ndarray<TF> cuts ) {
+static void forward( NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys, MF distance, MF barycenters, MF potentials, MF cuts ) {
     // ranks
     CHECK_RANK( barycenters, 3, "[ batch_index, dirac_index, dim ]" );
     CHECK_RANK( potentials, 2, "[ batch_index, dirac_index ]" );
@@ -44,10 +47,10 @@ static void forward( nb::ndarray<const TF> dirac_xs, nb::ndarray<const TF> dirac
 }
 
 static void backward(
-    nb::ndarray<const TF> barycenters, nb::ndarray<const TF> potentials, nb::ndarray<const TF> cuts,
-    nb::ndarray<const TF> dirac_xs, nb::ndarray<const TF> dirac_ws, nb::ndarray<const TF> point_xs, nb::ndarray<const TF> point_ys,
-    nb::ndarray<const TF> grad_distances, nb::ndarray<const TF> grad_barycenters, nb::ndarray<const TF> grad_potentials, nb::ndarray<const TF> grad_cuts,
-    nb::ndarray<TF> grad_dirac_xs, nb::ndarray<TF> grad_dirac_ws, nb::ndarray<TF> grad_point_xs, nb::ndarray<TF> grad_point_ys
+    NF barycenters, NF potentials, NF cuts,
+    NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys,
+    NF grad_distances, NF grad_barycenters, NF grad_potentials, NF grad_cuts,
+    MF grad_dirac_xs, MF grad_dirac_ws, MF grad_point_xs, MF grad_point_ys
  ) {
     // rank
     CHECK_RANK( grad_barycenters, 3, "[ batch_index, dirac_index, dim ]" );
