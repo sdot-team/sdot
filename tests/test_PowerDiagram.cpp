@@ -40,12 +40,60 @@ void test_sum_area_hypercube( PI dim = ct_dim ) {
     VtkOutput vo;
     base_cell.display_vtk( vo );
     vo.save( "build/out.vtk" );
-
 }
 
 TEST_CASE("2D power diagram", "[PD]") {
-    test_sum_area_hypercube( 3 );
-    // Cell<TF,2> p2( 2 );
+    // test_sum_area_hypercube( 3 );
+    // SECTION( "1" ) {
+    //     Cell<TF,2> p2( 2 );
+    //     P( p2 );
+
+    //     p2.cut( { 1, 0 }, 0.7, 17 );
+    //     P( p2 );
+    // }
+
+    // SECTION( "2" ) {
+    //     Cell<TF,2> p2( 2 );
+    //     P( p2 );
+
+    //     p2.cut( { 0, 1 }, 0.7, 17 );
+    //     P( p2 );
+    // }
+
+    // SECTION( "3" ) {
+    //     Cell<TF,2> p2( 2 );
+    //     P( p2 );
+
+    //     p2.cut( { -1, -1 }, -0.3, 17 );
+    //     P( p2 );
+    // }
+
+    // SECTION( "square" ) {
+    //     Cell<TF,2> p2 = Cell<TF,2>::axis_aligned_hypercube( { -1, -1 }, { +1, +1 } );
+    //     P( p2 );
+
+    //     p2.cut( { 1, 0 }, 0.5, 17 );
+    //     P( p2 );
+    // }
+
+    SECTION( "circle" ) {
+        for( PI nb = 5, cpt = 0; nb < 360; nb += 15, ++cpt ) {
+            Cell<TF,2> p2 = Cell<TF,2>::axis_aligned_hypercube( { -10, -10 }, { +10, +10 } );
+
+            for( PI na = 0; na < 360; na += 20 ) {
+                const TF a = M_PI * na / 180;
+                p2.cut( { cos( a ), sin( a ) }, 1, 17 );
+            }
+
+            const TF b = M_PI * nb / 180;
+            p2.cut( { cos( b ), sin( b ) }, 0.3, 17 );
+
+            VtkOutput vo;
+            p2.display_vtk( vo );
+            vo.save( "build/out_" + std::to_string( cpt ) + ".vtk" );
+        }
+    }
+
     // p2.init_with_axis_aligned_simplex( 2.0 );
     // P( p2 );
     // P( p2.measure() );

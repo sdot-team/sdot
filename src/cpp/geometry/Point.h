@@ -1,9 +1,7 @@
 #pragma once
 
-#include "../support/common_macros.h"
-#include "../support/common_types.h"
+#include "../support/TensorView.h"
 #include <zpp_bits.h>
-#include <ostream>
 #include <vector>
 #include <array>
 #include <span>
@@ -19,6 +17,7 @@ public:
     using    Content                 = std::array<T,dim>;
 
     /**/     Point                   ( std::initializer_list<T> values ) { auto iter = values.begin(); for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = *( iter++ ); for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
+    T_U      Point                   ( TensorView<U,1> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     // T_d   Point                   ( const Point<T,d> &values ) : data( values.begin(), values.end() ) {}
     // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }

@@ -3,6 +3,7 @@
 #include "common_macros.h"
 #include "common_types.h"
 #include "ASSERT.h"
+
 #include <algorithm>
 #include <ostream>
 #include <array>

@@ -30,6 +30,7 @@ public:
         Pt   split_dir;
         TF   split_dot;
         PI   num_bsp;
+        bool local;
         Ce   cell;
     };
 
@@ -55,13 +56,13 @@ public:
     bool                is_in_charge_of( const Pt &pos ) const;
     void                display_vtk    ( VtkOutput &vo ) const;
 
-    void                make_node_cells( PI node_index );
+    void                make_node_cells( PI node_index, TensorView<const TF,2> min_max );
     auto                split_hst_for  ( TensorView<const TF,2> points, const Pt &split_dir, TF split_beg, TF split_end, PI nb_bins ) const -> std::vector<TF>;
     auto                sum_pos_for    ( TensorView<const TF,2> points ) const -> Pt; ///< [ sum of xs, ..., sum of zs, sum of 1 ]
     auto                sum_cov_for    ( TensorView<const TF,2> points, const Pt &avg ) const -> SimpleSquareMatrix<TF>;
-    PI                  cell_number    ( Pt pos ) const;
     void                display_rec    ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
-    void                fill_node      ( PI node_index, PI beg_pt_data, PI end_pt_data, PI max_points_per_cell );
+    PI                  cell_number    ( Pt pos ) const;
+    void                fill_node      ( PI node_index, const PI beg_pt_data, const PI end_pt_data, PI max_points_per_cell );
     void                add_path       ( TensorView<const TF,2> path, PI num_bsp );
 
     PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)

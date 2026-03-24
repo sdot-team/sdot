@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../support/ASSERT.h"
-#include "../support/P.h"
 #include "Cell.h"
 
 namespace sdot {
@@ -94,18 +93,41 @@ UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
     return simplex( points );
 }
 
-UTP DTP DTP::englobing_simplex( int dim, TF radius ) {
-    const PI nb_vertices = dim + 1;
+UTP DTP DTP::englobing_simplex( Pt center, TF radius ) {
+    const PI dim = center.size();
     PF pf( dim );
 
-    std::vector<Pt> points;
-    points.reserve( nb_vertices );
-    points.push_back( pf.value_at( 0, radius ) );
-    for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex ) {
-        for ( PI d = 0; d < num_vertex; ++d )
-            points[ d ][ num_vertex - 1 ] = -radius / num_vertex;
-        points.push_back( pf.value_at( num_vertex - 1, radius ) );
+    // For a regular simplex: circumradius R = dim * insphere_radius
+    const TF R = radius * dim;
+
+    // Compute off-diagonal values a[k] and diagonal values b[k] such that:
+    //   v_0        = (b[0], 0,    ..., 0)
+    //   v_k (k<n)  = (a[0], ..., a[k-1], b[k], 0, ..., 0)
+    //   v_n        = (a[0], ..., a[n-1])
+    // All vertices have norm R and pairwise dot product -R²/dim (regular simplex centered at origin).
+    Pt a( dim ), b( dim );
+    TF s = 0; // s = sum_{j<k} a[j]^2
+    for ( PI k = 0; k < dim; ++k ) {
+        b[ k ] = std::sqrt( R * R - s );
+        a[ k ] = ( -R * R / dim - s ) / b[ k ];
+        s += a[ k ] * a[ k ];
     }
+
+    // Build vertices
+    std::vector<Pt> points;
+    points.reserve( dim + 1 );
+
+    points.push_back( center + pf.value_at( 0, b[ 0 ] ) );
+
+    for ( PI k = 1; k < dim; ++k ) {
+        Pt v = pf.zeros();
+        for ( PI j = 0; j < k; ++j )
+            v[ j ] = a[ j ];
+        v[ k ] = b[ k ];
+        points.push_back( center + v );
+    }
+
+    points.push_back( center + a );
 
     return simplex( dim, points );
 }
@@ -148,6 +170,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     if ( nb_out == old_vertices_size ) {
         vertices.clear();
         cuts.clear();
+        return;
     }
 
     // preparation of a face => curr_op_id + num_new_vertex map (needed to make the new edges)

@@ -82,9 +82,8 @@ splits, all_the_paths = base_splits( points, max_points_per_bsp = 50 )
 Bsp = sdot_bsp_bindings.Bsp_FP64
 bsps = [ dask.delayed( Bsp )( all_the_paths, minmax, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ), 20 ) for split in splits ]
 
-# for bsp in bsps:
-#     print( bsp.compute() )
-bsp = bsps[ 0 ].compute()
-bsp.write_vtk( "build/out.vtk" )
-print( bsp )
+for i, bsp in enumerate( bsps ):
+    bsp = bsp.compute()
+    bsp.write_vtk( f"build/out_{ i }.vtk" )
+    print( bsp )
 

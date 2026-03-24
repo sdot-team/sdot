@@ -48,7 +48,7 @@ public:
 
     static Cell     axis_aligned_hypercube        ( int dim, TF length );
     static Cell     axis_aligned_simplex          ( int dim, TF length );
-    static Cell     englobing_simplex             ( int dim, TF radius );
+    static Cell     englobing_simplex             ( Pt center, TF radius );
     static Cell     simplex                       ( int dim, std::span<Pt> points );
 
     void            check_consistency             ( TF eps = 1e-6 ) const;
@@ -74,15 +74,10 @@ public:
     DF              df;                           ///< index factory
 };
 
-//
-// template<class T>
-// class Cell<T,2> {
-// public:
-
-// };
-
 } // namespace sdot
 
 T_Td std::ostream& operator<<( std::ostream& os, const sdot::Cell< T, d >& p );
 
 #include "Cell.cxx"
+
+#include "Cell_2D.h" // IWYU pragma: export

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../support/P.h"
 #include "Bsp.h"
 
 namespace sdot {
@@ -32,45 +33,79 @@ UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const TF,2> min_m
     fill_node( node_index, 0, pt_data.size(), max_points_per_cell );
 
     // make the node cells
-    std::vector<Pt> simplex_nodes( dim + 1, dim );
-    for( PI d = 0; d < dim; ++d ) {
-        simplex_nodes[ 0 ][ d ] = min_max( 0, d );
-        for( PI i = 0; i < dim; ++i )
-            simplex_nodes[ i + 1 ][ d ] = min_max( ( i == d ), d );
-    }
+    // std::vector<Pt> simplex_nodes( dim + 1, dim );
+    // for( PI d = 0; d < dim; ++d ) {
+    //     simplex_nodes[ 0 ][ d ] = min_max( 0, d );
+    //     for( PI i = 0; i < dim; ++i )
+    //         simplex_nodes[ i + 1 ][ d ] = min_max( ( i == d ), d );
+    // }
 
-    nodes[ 0 ].cell = Ce::simplex( dim, simplex_nodes );
-    make_node_cells( 0 );
+    // nodes[ 0 ].cell = Ce::axis_aligned_hypercube(
+    //     TF( 0.5 ) * ( Pt( min_max.row( 0 ) ) + Pt( min_max.row( 1 ) ) ),
+    //     norm_2( Pt( min_max.row( 1 ) ) - Pt( min_max.row( 0 ) ) ) / 2
+    // );
+    nodes[ 0 ].cell = Ce::axis_aligned_hypercube( min_max.row( 0 ), min_max.row( 1 ) );
+    make_node_cells( 0, min_max );
 }
 
 UTP void DTP::display_vtk( VtkOutput &vo ) const {
     for( const Node &node : nodes ) {
-        node.cell.display_vtk( vo );
+        if ( node.final() && node.local ) {
+            node.cell.display_vtk( vo );
+            for( PI i = node.beg_pt_data; i < node.end_pt_data; ++i )
+                vo.add_point( pt_data[ i ].position );
+        }
     }
 }
 
-UTP void DTP::make_node_cells( PI node_index ) {
+UTP void DTP::make_node_cells( PI node_index, TensorView<const TF,2> min_max ) {
+    using namespace std;
+
+    //
     Node &node = nodes[ node_index ];
     if ( node.final() )
         return;
 
-    Ce &c0 = nodes[ node.child_indices[ 0 ] ].cell;
-    Ce &c1 = nodes[ node.child_indices[ 1 ] ].cell;
-    c0 = node.cell;
-    c1 = node.cell;
-    c0.cut( + node.split_dir, + node.split_dot, node_index );
-    c1.cut( - node.split_dir, - node.split_dot, node_index );
+    //
+    for( PI num_child = 0; num_child < 2; ++num_child ) {
+        Node &child_node = nodes[ node.child_indices[ num_child ] ];
+        Ce &child_cell = child_node.cell;
+        child_cell = node.cell;
 
-    make_node_cells( node.child_indices[ 0 ] );
-    make_node_cells( node.child_indices[ 1 ] );
+        std::vector<Pt> cut_dirs;
+        std::vector<TF> cut_dots;
+        std::vector<PI> cut_inds;
+        node.cell.for_each_cut( [&]( const Pt &cut_dir, TF /* cut_dot */, PI cut_id ) {
+            cut_dots.push_back( std::numeric_limits<TF>::lowest() );
+            cut_dirs.push_back( cut_dir );
+            cut_inds.push_back( cut_id );
+        } );
+
+        cut_dirs.push_back( num_child ? - node.split_dir : + node.split_dir );
+        cut_dots.push_back( std::numeric_limits<TF>::lowest() );
+        cut_inds.push_back( 0 );
+
+        for( PI i = child_node.beg_pt_data; i < child_node.end_pt_data; ++i ) {
+            for( PI num_cut = 0; num_cut < cut_dots.size(); ++num_cut ) {
+                TF &d = cut_dots[ num_cut ];
+                d = max( d, dot( pt_data[ i ].position, cut_dirs[ num_cut ] ) );
+            }
+        }
+
+        for( PI num_cut = 0; num_cut < cut_dirs.size(); ++num_cut )
+            child_cell.cut( cut_dirs[ num_cut ], cut_dots[ num_cut ], cut_inds[ num_cut ] );
+
+        make_node_cells( node.child_indices[ num_child ], min_max );
+    }
 }
 
-UTP void DTP::fill_node( PI node_index, PI beg_pt_data, PI end_pt_data, PI max_points_per_cell ) {
+UTP void DTP::fill_node( PI node_index, const PI beg_pt_data, const PI end_pt_data, PI max_points_per_cell ) {
     using namespace std;
 
     Node &node = nodes[ node_index ];
     node.beg_pt_data = beg_pt_data;
     node.end_pt_data = end_pt_data;
+    node.local = true;
 
     const PI nb_points = end_pt_data - beg_pt_data;
     if ( nb_points <= max_points_per_cell )
@@ -162,12 +197,18 @@ UTP void DTP::add_path( TensorView<const TF,2> path, PI num_bsp ) {
         for( PI d = 0; d < dim; ++d )
             node->split_dir[ d ] = path( r, d );
         node->split_dot = path( r, dim );
+
+        node->end_pt_data = pt_data.size();
+        node->beg_pt_data = 0;
         node->num_bsp = num_bsp;
+        node->local = false;
 
         node->child_indices[ side ] = nodes.size();
         node = &nodes.emplace_back( dim );
     }
 
+    node->end_pt_data = pt_data.size();
+    node->beg_pt_data = 0;
     node->num_bsp = num_bsp;
 }
 
@@ -247,14 +288,16 @@ UTP auto DTP::split_hst_for( TensorView<const TF,2> points, const Pt &split_dir,
 UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix ) const {
     const Node &node = nodes[ node_index ];
     if ( node.final() ) {
-        if ( PI nb_points = node.nb_points() )
-            os << prefix << "nb_points: " << nb_points;
+        if ( node.local )
+            os << prefix << "beg: " << node.beg_pt_data << " end: " << node.end_pt_data;
         else
             os << prefix << "num_bsp: " << node.num_bsp;
         return;
     }
 
     os << prefix << "dir: " << node.split_dir << " dot: " << node.split_dot;
+    if ( node.local )
+        os << " beg: " << node.beg_pt_data << " end: " << node.end_pt_data;
     for( PI num_split = 0; num_split < 2; ++num_split )
         if ( node.child_indices[ num_split ] > node_index )
             display_rec( os << "\n", node.child_indices[ num_split ], prefix + "  " );
