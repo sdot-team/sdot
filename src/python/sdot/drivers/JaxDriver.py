@@ -1,7 +1,4 @@
-# from ..BatchOfOtPlans import BatchOfOtPlans
 import jax.numpy as jnp
-# import numpy as np
-# import sdot
 import jax
 
 map_of_plan_methods = {}
@@ -85,6 +82,9 @@ class JaxDriver:
 
     def repeat( self, tensor, shape ):
         return jnp.tile( tensor, shape )
+
+    def plan( self, f, g ):
+        todo()
 
     # def batch_of_ot_plan_for_Piecewise1dAffineFunctions( self, f: sdot.BatchOfSumOfWeightedDiracs, g: sdot.BatchOfPiecewiseAffineFunction1d ) -> BatchOfOtPlans:
 

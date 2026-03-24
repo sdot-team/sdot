@@ -25,7 +25,7 @@ docs:
 	@$(VENV)/bin/mkdocs serve --config-file docs/mkdocs.yml
 
 
-test: build
+test: # build
 	# 	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"
 	# 	@$(MESON) test -C build --print-errorlogs
 	# 	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"

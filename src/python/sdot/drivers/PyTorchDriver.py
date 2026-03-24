@@ -1,6 +1,7 @@
+from ..distributions.BatchOfDistributions import BatchOfDistributions
+from ..BatchOfOtPlans import BatchOfOtPlans
+from ..driver import driver
 import torch
-
-map_of_plan_methods = {}
 
 class PyTorchDriver:
     """
@@ -9,8 +10,6 @@ class PyTorchDriver:
     def __init__( self, normalized_dtype: str, normalized_device: str ):
         self.device = PyTorchDriver.find_device( normalized_device )
         self.dtype = PyTorchDriver.find_dtype( normalized_dtype )
-
-        self.map_of_plan_methods = map_of_plan_methods
 
     @property
     def name( self ) -> str:
@@ -82,6 +81,42 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
+    def plan( self, f: BatchOfDistributions, g: BatchOfDistributions ):
+        bindings = driver.bindings_for( f, g )
+
+        class SDOTFunction( torch.autograd.Function ):
+            @staticmethod
+            def forward( ctx, dirac_xs, *args ):
+                batch_size = dirac_xs.shape[ 0 ]
+                nb_diracs = dirac_xs.shape[ 1 ]
+                dim = dirac_xs.shape[ 2 ]
+
+                barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
+                potentials = self.empty( [ batch_size, nb_diracs ] )
+                distances = self.empty( [ batch_size ] )
+                cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
+
+                bindings.forward( dirac_xs, *args, distances, barycenters, potentials, cuts )
+
+                ctx.save_for_backward( barycenters, potentials, cuts, dirac_xs, *args )
+
+                return distances, barycenters, potentials, cuts
+
+            @staticmethod
+            def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
+                grads = []
+                for arg in ctx.saved_tensors[ 3: ]:
+                    grads.append( self.empty( arg.shape ) )
+
+                bindings.backward( *ctx.saved_tensors, grad_distance, grad_barycenters, grad_potentials, grad_cuts, *grads )
+
+                return tuple( grads )
+
+        input_tensors = f.tensor_list() + g.tensor_list()
+        outputs = SDOTFunction.apply( *input_tensors )
+        assert isinstance( outputs, tuple )
+        return BatchOfOtPlans( *outputs )
+
     def optimize_using_lbfgs( self, loss, params, on_iter = None ):
         """ small helper to optimize `loss` wrt `params` using lbfgs """
         lbfgs = torch.optim.LBFGS( [ params ], history_size = 15, max_iter = 10 ) # , line_search_fn = "strong_wolfe"
@@ -126,6 +161,3 @@ class PyTorchDriver:
             optimizer.zero_grad()
             l.backward()
             optimizer.step()
-
-
-from .pytorch_functions import ot_plan_for_Piecewise1dAffineFunctions

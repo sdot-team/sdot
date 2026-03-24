@@ -22,6 +22,9 @@ class Distribution:
     def dim( self ) -> int:
         raise RuntimeError( f"To be redefined for { type( self ) }" )
 
+    def tensor_list( self ) -> list:
+        raise RuntimeError( f"To be redefined for { type( self ) }" )
+
     # def __getattr__( self, name: str ) -> int:
     #     # Never actually called for attributes that exist; signals to static
     #     # type checkers (PyLance, mypy) that dynamically generated axis-name

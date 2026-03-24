@@ -16,7 +16,6 @@ all:
 	make test
 
 ct:
-	make build
 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 
 vg:

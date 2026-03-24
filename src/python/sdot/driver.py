@@ -114,6 +114,11 @@ class DriverProxy:
 
     # ---------------------------------- device ----------------------------------
     @property
+    def normalized_device_type( self ) -> str:
+        """ without :x """
+        return self.normalized_device
+
+    @property
     def normalized_device( self ) -> str:
         # specified by the user ?
         if isinstance( self._user_device, str ):
@@ -154,6 +159,57 @@ class DriverProxy:
         if self._instance is None:
             self._make_driver_instance()
         return getattr( self._instance, name )
+
+    # ---------------------------------- helpers ----------------------------------
+    def bindings_for( self, f, g ):
+        f_name = f.__class__.__name__
+        g_name = g.__class__.__name__
+        ct_dim = f.dim if f.dim <= 4 else -1
+        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+
+        import importlib
+        full_name = "sdot.bindings." + dylib_name
+        try:
+            mod = importlib.import_module( full_name )
+        except ImportError:
+            self.compile_binding_for( f, g, dylib_name )
+            mod = importlib.import_module( full_name )
+
+        return mod
+
+    def compile_binding_for( self, f, g, dylib_name ):
+        from pathlib import Path
+        import subprocess
+        import shutil
+        import sys
+        import os
+
+        project_root = Path( __file__ ).absolute().parents[ 3 ]
+        bindings_src = Path( __file__ ).parent / "bindings"
+
+        # find the cxmake utility
+        xmake = shutil.which( "xmake" )
+        if xmake is None:
+            raise RuntimeError( "xmake introuvable dans PATH — installez-le (https://xmake.io)" )
+
+        geo_dir = project_root / "src" / "cpp" / "geometry"
+        src_files = ",".join( [
+            str( bindings_src / "sdot_bindings_cpu.cpp" ),
+            str( geo_dir / "SimpleSquareMatrix_eigen.cpp" ),
+            str( geo_dir / "VtkOutput.cpp" ),
+        ] )
+
+        env = {
+            **os.environ,
+            "SDOT_BINDING_NAME" : dylib_name,
+            "SDOT_SCALAR_TYPE"  : driver.normalized_dtype,
+            "SDOT_SRC_INCLUDE"  : str( project_root / "src" ),
+            "SDOT_OUTPUT_DIR"   : str( bindings_src ),
+            "SDOT_SRC_FILES"    : src_files,
+            "PATH"              : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
+        }
+        subprocess.run( [ xmake, "f", "-y" ], cwd = bindings_src, env=env, check=True )
+        subprocess.run( [ xmake,           ], cwd = bindings_src, env=env, check=True )
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:

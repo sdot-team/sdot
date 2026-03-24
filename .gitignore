@@ -46,3 +46,5 @@ site/
 .zensical/
 .claude/
 CLAUDE.md
+
+.xmake/

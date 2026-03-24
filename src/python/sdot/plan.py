@@ -27,13 +27,8 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
             return plan( g, f )
         raise RuntimeError( "TODO: handle cases where f and g are both _not_ SumOfWeightedDiracs" )
 
-    # dispatch on type of g
-    try:
-        method = driver.map_of_plan_methods[ type( g ).__name__ ]
-    except KeyError:
-        raise RuntimeError( f"TODO: SumOfWeightedDiracs -> { type( g ) }" )
-
-    return method( f, g )
+    # dispatch
+    return driver.plan( f, g )
 
 
 def distances( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
