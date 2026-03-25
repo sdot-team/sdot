@@ -49,6 +49,10 @@ def loss( dirac_coords ):
     g = sdot.BatchOfSumOfWeightedDiracs1d( dirac_xs )
     return torch.sum( sdot.distances( f, g ) )
 
+
+import faulthandler
+faulthandler.enable()
+
 n = 100
 sinogram = Sinogram( n, n )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )

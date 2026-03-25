@@ -40,10 +40,12 @@ public:
 
     bool   empty     () const { return ct_rank == 0 ? false : std::none_of( extent.begin(), extent.end(), []( auto a ) { return a != 0; } ); }
 
+    //autp   strides   () const { return strides[ d ]; }
+    SI     stride    ( PI d ) const { return strides[ d ]; }
+
     PI     size      ( PI d ) const { return extent[ d ]; }
     PI     size      () const { ASSERT( rank() == 1 ); return size( 0 ); }
     PI     rank      () const { return ct_rank; }
-    SI     stride    ( PI d ) const { return strides[ d ]; }
 
     T*     data      () const { return reinterpret_cast<T *>( ptr ); }
 
@@ -115,16 +117,12 @@ public:
     }
 
 private:
-    Extent  extent;   ///<
     Strides strides;  ///< byte strides
+    Extent  extent;   ///<
     RawPtr  ptr;      ///<
 };
 
 } // namespace sdot
-
-// helper for the CUDA operator<<: namespace-scope so it can be captured by device lambdas
-template<int N>
-struct TensorViewExtStr { sdot::PI ext[ N ]; sdot::SI str[ N ]; };
 
 template<class T,int ct_rank>
 std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cpu> &p ) {
@@ -147,7 +145,7 @@ std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdo
     using NT = std::remove_const_t<T>;
 
     // plain C arrays so that device lambda indexing uses built-in [] (not std::array::operator[])
-    TensorViewExtStr<ct_rank> es;
+    struct { sdot::PI ext[ ct_rank ]; sdot::SI str[ ct_rank ]; } es;
     sdot::PI size = 1;
     std::array<sdot::PI,ct_rank> ext;
     for( int d = 0; d < ct_rank; ++d ) {

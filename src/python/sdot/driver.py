@@ -254,6 +254,9 @@ class DriverProxy:
             }
         """
 
+        bnd_text = bnd_text.replace( "SDOT_NANOBIND_ARCH", self.normalized_device_type )
+        bnd_text = bnd_text.replace( "SDOT_SCALAR_TYPE", self.normalized_dtype )
+
         ext = "cpp"
         if self.normalized_device_type == "cuda":
             ext = ".cu"

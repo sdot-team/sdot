@@ -5,8 +5,8 @@
             namespace nb = nanobind;
             using namespace sdot;
 
-            using NA = nanobind::device::SDOT_NANOBIND_ARCH;
-            using TF = SDOT_SCALAR_TYPE;
+            using NA = nanobind::device::cuda;
+            using TF = FP32;
 
             using Arch = ArchFor<NA>::type;
             using NF = nb::ndarray<const TF,NA>;
