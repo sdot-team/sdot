@@ -48,7 +48,7 @@ UTP DiracSet<T,Arch> DTP::row( PI num_batch ) const  {
 }
 
 UTP auto DTP::masses() const -> Tensor<TF,1,Arch> {
-    return ws.template sum_axis_0<TF>();
+    return ws.template sum_along_axis_1<TF>();
 }
 
 #undef UTP

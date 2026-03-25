@@ -5,8 +5,8 @@
             namespace nb = nanobind;
             using namespace sdot;
 
-            using NA = nanobind::device::cuda;
-            using TF = FP32;
+            using NA = nanobind::device::cpu;
+            using TF = FP64;
 
             using Arch = ArchFor<NA>::type;
             using NF = nb::ndarray<const TF,NA>;

@@ -307,8 +307,8 @@ class DriverProxy:
             "SDOT_ARCH"         : self.normalized_device_type,
             "PATH"              : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
         }
-        subprocess.run( [ xmake, "f", "-y" ], cwd = bindings_src, env = env, check = True, shell = True )
-        subprocess.run( [ xmake ], cwd = bindings_src, env=env, check = True, shell = True )
+        subprocess.run( [ xmake, "f", "-y" ], cwd = bindings_src, env = env, check = True )
+        subprocess.run( [ xmake ], cwd = bindings_src, env=env, check = True )
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:

@@ -18,12 +18,12 @@ PYTEST = .venv/bin/pytest
 # 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 # 	rm -rf src/python/sdot/bindings/*.so
 # 	SDOT_DEVICE=cpu ${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
-
+# SDOT_DEVICE=cuda SDOT_DTYPE=FP32 
 all: loc
 
 loc:
 	rm -rf src/python/sdot/bindings/generated
-	SDOT_DEVICE=cuda SDOT_DTYPE=FP32 ${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 
 ct:
 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py

@@ -13,12 +13,12 @@ public:
     using       TV        = TensorView<T,ct_rank,Arch>;
     using       Storage   = Arch::template Vector<T>::type;
     using       Strides   = typename TV::Strides;
-    using       Extent    = typename TV::Extent;
+    using       Extent    = typename TV::Shape;
     using       Byte      = std::byte;
 
-    T_U         Tensor    ( std::initializer_list<std::initializer_list<U>> m ) : Tensor( sdot::Extent(), { m.size(), m.begin()->size() } ) { PI e = 0; for( const auto &l : m ) { PI c = 0; for( const auto &v : l ) operator()( e, c++ ) = v; ++e; } }
-    T_U         Tensor    ( std::initializer_list<U> l ) : Tensor( sdot::Extent(), { l.size() } ) { PI cpt = 0; for( const auto &v : l ) operator()( cpt++ ) = v; }
-    /* */       Tensor    ( sdot::Extent, Extent ext ) : extent( ext ), strides( TV::contiguous_strides( ext ) ), storage( total_size( ext ) ) {}
+    T_U         Tensor    ( std::initializer_list<std::initializer_list<U>> m ) : Tensor( sdot::Shape(), { m.size(), m.begin()->size() } ) { PI e = 0; for( const auto &l : m ) { PI c = 0; for( const auto &v : l ) operator()( e, c++ ) = v; ++e; } }
+    T_U         Tensor    ( std::initializer_list<U> l ) : Tensor( sdot::Shape(), { l.size() } ) { PI cpt = 0; for( const auto &v : l ) operator()( cpt++ ) = v; }
+    /* */       Tensor    ( sdot::Shape, Extent ext ) : extent( ext ), strides( TV::contiguous_strides( ext ) ), storage( total_size( ext ) ) {}
     /* */       Tensor    () { for( PI i = 0; i < ct_rank; ++i ) { strides[ i ] = 0; extent[ i ] = 0; } }
 
     CTV         view      () const { return { Arch::raw_ptr( storage ), extent, strides }; }
