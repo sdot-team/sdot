@@ -1,3 +1,5 @@
+from pathlib import Path
+import importlib
 import sys
 
 class DriverProxy:
@@ -162,56 +164,61 @@ class DriverProxy:
 
     # ---------------------------------- helpers ----------------------------------
     def bindings_for( self, f, g ):
+        geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "geometry"
+        bindings_dir = Path( __file__ ).parent / "bindings"
+        device = driver.normalized_device_type.replace( ":", "_" )
+        ct_dim = f.dim if f.dim <= 4 else -1
         f_name = f.__class__.__name__
         g_name = g.__class__.__name__
-        ct_dim = f.dim if f.dim <= 4 else -1
-        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
-        dylib_name = dylib_name.replace( ":", "_" )
+        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ device }"
 
-        import importlib
         full_name = "sdot.bindings." + dylib_name
         try:
             mod = importlib.import_module( full_name )
         except ImportError:
-            self.compile_binding_for( f, g, dylib_name )
+            self.compile_binding_for( dylib_name, [
+                bindings_dir / f"ot_plan_1d_{ device }.cpp", # TODO: rule to find the .cpp
+                geometry_dir / "SimpleSquareMatrix_eigen.cpp",
+                geometry_dir / "VtkOutput.cpp",
+            ] )
             mod = importlib.import_module( full_name )
 
         return mod
 
-    def compile_binding_for( self, f, g, dylib_name ):
-        from pathlib import Path
+    def compile_binding_for( self, dylib_name: str, src_paths: list[ Path ] ):
         import subprocess
         import shutil
         import sys
         import os
+        import re
 
         project_root = Path( __file__ ).absolute().parents[ 3 ]
         bindings_src = Path( __file__ ).parent / "bindings"
 
-        # find the cxmake utility
+        # find the xmake utility
         xmake = shutil.which( "xmake" )
         if xmake is None:
             raise RuntimeError( "xmake introuvable dans PATH — installez-le (https://xmake.io)" )
 
-        geo_dir = project_root / "src" / "cpp" / "geometry"
-        src_files = ",".join( [
-            str( bindings_src / "sdot_bindings_cpu.cpp" ),
-            str( geo_dir / "SimpleSquareMatrix_eigen.cpp" ),
-            str( geo_dir / "VtkOutput.cpp" ),
-        ] )
+        # check xmake version
+        xmake_version = subprocess.run( [ xmake, "--version" ], capture_output = True, env = { "NO_COLOR": "1" } )
+        xmake_number = re.search( r"(\d+.\d+.\d+)", xmake_version.stdout.decode() ).group( 1 )
+        if tuple( map( int, xmake_number.split( "." ) ) ) < ( 3, 0, 8 ):
+            raise RuntimeError( f"we need xmake to be at least version 3.0.8 (found version '{ xmake_number }'). Consider making a xmake update (-> will probably instal it in ~/.local/bin)" )
 
+        #
         env = {
             **os.environ,
             "SDOT_BINDING_NAME" : dylib_name,
             "SDOT_SCALAR_TYPE"  : driver.normalized_dtype,
             "SDOT_SRC_INCLUDE"  : str( project_root / "src" ),
             "SDOT_OUTPUT_DIR"   : str( bindings_src ),
-            "SDOT_SRC_FILES"    : src_files,
+            "SDOT_SRC_FILES"    : str.join( ",", map( str, src_paths ) ),
             "PATH"              : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
         }
         subprocess.run( [ xmake, "f", "-y" ], cwd = bindings_src, env=env, check=True )
-        subprocess.run( [ xmake,           ], cwd = bindings_src, env=env, check=True )
+        subprocess.run( [ xmake ], cwd = bindings_src, env=env, check=True )
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:

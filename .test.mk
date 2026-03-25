@@ -16,7 +16,8 @@ PYTEST = .venv/bin/pytest
 # 	${PYDIRS} valgrind ${PYTHON} tests/test_dask.py
 
 all:
-	make test
+	rm -rf src/python/sdot/bindings/*.so
+	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 
 ct:
 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py

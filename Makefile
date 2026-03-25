@@ -29,7 +29,6 @@ test: # build
 	# 	@echo  "\n>>> Running C++ Tests (meson test) ------------------------------------------"
 	# 	@$(MESON) test -C build --print-errorlogs
 	# 	@echo "\n>>> Running Python Tests (pytest) --------------------------------------------"
-	rm -rf src/python/sdot/bindings/*.so
 	@PYTHONPATH=$(CURDIR)/src/python:$(CURDIR)/build/src/python $(PYTHON) -m pytest -s -q --tb=short tests/
 
 clean:
