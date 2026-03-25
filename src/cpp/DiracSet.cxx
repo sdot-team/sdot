@@ -1,12 +1,13 @@
 #pragma once
 
+#include "support/TODO.h"
 #include "DiracSet.h"
 #include <algorithm>
 
 namespace sdot {
 
-#define UTP template<class T>
-#define DTP DiracSet<T>
+#define UTP template<class T,class Arch>
+#define DTP DiracSet<T,Arch>
 
 UTP PI DTP::nb_diracs() const {
     return xs.size();
@@ -35,15 +36,19 @@ UTP auto DTP::arg_sort() -> std::vector<PI> const {
 #undef UTP
 #undef DTP
 
-#define UTP template<class T>
-#define DTP BatchOfDiracSet<T>
+#define UTP template<class T,class Arch>
+#define DTP BatchOfDiracSet<T,Arch>
 
 UTP PI DTP::nb_rows() const {
     return xs.size( 0 );
 }
 
-UTP DiracSet<T> DTP::row( PI num_batch ) const  {
+UTP DiracSet<T,Arch> DTP::row( PI num_batch ) const  {
    return { xs.row( num_batch ), ws.row( num_batch ) };
+}
+
+UTP auto DTP::masses() const -> Tensor<TF,1,Arch> {
+    return ws.template sum_axis_0<TF>();
 }
 
 #undef UTP

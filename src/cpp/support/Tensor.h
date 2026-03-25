@@ -1,19 +1,19 @@
 #pragma once
 
+#include "../support/common_macros.h"
 #include "TensorView.h"
-#include <vector>
 
 namespace sdot {
 
 /// owning tensor — contiguous row-major by construction, strides stored (no recomputation on access)
-template<class T,int ct_rank>
+template<class T,int ct_rank,class Arch>
 class Tensor {
 public:
-    using       CTV       = TensorView<const T,ct_rank>;
-    using       TV        = TensorView<T,ct_rank>;
+    using       CTV       = TensorView<const T,ct_rank,Arch>;
+    using       TV        = TensorView<T,ct_rank,Arch>;
+    using       Storage   = Arch::template Vector<T>::type;
     using       Strides   = typename TV::Strides;
     using       Extent    = typename TV::Extent;
-    using       Storage   = std::vector<T>;
     using       Byte      = std::byte;
 
     T_U         Tensor    ( std::initializer_list<std::initializer_list<U>> m ) : Tensor( sdot::Extent(), { m.size(), m.begin()->size() } ) { PI e = 0; for( const auto &l : m ) { PI c = 0; for( const auto &v : l ) operator()( e, c++ ) = v; ++e; } }
@@ -21,8 +21,8 @@ public:
     /* */       Tensor    ( sdot::Extent, Extent ext ) : extent( ext ), strides( TV::contiguous_strides( ext ) ), storage( total_size( ext ) ) {}
     /* */       Tensor    () { for( PI i = 0; i < ct_rank; ++i ) { strides[ i ] = 0; extent[ i ] = 0; } }
 
-    CTV         view      () const { return { storage.data(), extent, strides }; }
-    TV          view      () { return { storage.data(), extent, strides }; }
+    CTV         view      () const { return { Arch::raw_ptr( storage ), extent, strides }; }
+    TV          view      () { return { Arch::raw_ptr( storage ), extent, strides }; }
 
     operator    CTV       () const { return view(); }
     operator    TV        () { return view(); }
@@ -50,14 +50,14 @@ public:
     PI          size      ( PI d ) const { return extent[ d ]; }
     PI          size      () const { static_assert( ct_rank == 1 ); return size( 0 ); }
 
-    const T*    data      () const { return storage.data(); }
-    T*          data      () { return storage.data(); }
+    const T*    data      () const { return Arch::raw_ptr( storage ); }
+    T*          data      () { return Arch::raw_ptr( storage ); }
 
 private:
     static PI   total_size( const Extent &ext ) { PI s = 1; for( auto e : ext ) s *= e; return s; }
 
-    const auto* bytes     () const { return reinterpret_cast<const std::byte *>( storage.data() ); }
-    auto*       bytes     (){ return reinterpret_cast<std::byte *>( storage.data() ); }
+    const auto* bytes     () const { return reinterpret_cast<const std::byte *>( data() ); }
+    auto*       bytes     (){ return reinterpret_cast<std::byte *>( data() ); }
 
     Extent      extent;
     Strides     strides;
@@ -66,6 +66,7 @@ private:
 
 } // namespace sdot
 
-T_Td std::ostream &operator<<( std::ostream &os, const sdot::Tensor<T,d> &t ) {
-    return os << sdot::TensorView<const T,d>( t );
+template<class T,int ct_rank,class Arch>
+std::ostream &operator<<( std::ostream &os, const sdot::Tensor<T,ct_rank,Arch> &t ) {
+    return os << sdot::TensorView<const T,ct_rank,Arch>( t );
 }

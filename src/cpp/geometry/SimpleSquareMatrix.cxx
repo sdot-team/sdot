@@ -4,11 +4,11 @@
 
 namespace sdot {
 
-#define UTP template<class T,int ct_size>
-#define DTP SimpleSquareMatrix<T,ct_size>
+#define UTP template<class T,int ct_size,class Arch>
+#define DTP SimpleSquareMatrix<T,ct_size,Arch>
 
-UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)> DTP::without_row_and_col( PI wr, PI wc ) const {
-    SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)> res( size() - 1 );
+UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> DTP::without_row_and_col( PI wr, PI wc ) const {
+    SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> res( size() - 1 );
     for( PI r = 0; r < res.size(); ++r )
         for( PI c = 0; c < res.size(); ++c )
             res( r, c ) = operator()( r + ( r >= wr ), c + ( c >= wc ) );
@@ -47,8 +47,8 @@ UTP DTP::Vec DTP::solve( const Vec &vec ) const {
 } // namespace sdot
 
 
-template<class T, int dim>
-std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,dim> &p ) {
+template<class T,int dim,class Arch>
+std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,dim,Arch> &p ) {
     for( sdot::PI r = 0; r < p.size(); ++r ) {
         os << "\n  ";
         for( sdot::PI c = 0; c < p.size(); ++c )

@@ -1,17 +1,26 @@
 #pragma once
 
-#include "common_macros.h"
 #include "common_types.h"
 #include "ASSERT.h"
+#include "TODO.h"
+#include "Arch.h"
+
+#ifdef __CUDACC__
+#include <cub/cub.cuh>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/transform_iterator.h>
+#endif
 
 #include <algorithm>
 #include <ostream>
 #include <array>
 
 namespace sdot {
+template<class T,int ct_rank,class Arch>
+class Tensor;
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
-template<class T,int ct_rank>
+template<class T,int ct_rank,class Arch>
 class TensorView {
 public:
     using  Strides   = std::array<SI,ct_rank>;  ///< byte strides
@@ -35,7 +44,7 @@ public:
     PI     size      () const { ASSERT( rank() == 1 ); return size( 0 ); }
     PI     rank      () const { return ct_rank; }
 
-    auto   squeeze   ( PI axis ) const -> TensorView<T,ct_rank-1> {
+    auto   squeeze   ( PI axis ) const -> TensorView<T,ct_rank-1,Arch> {
         std::array<SI,ct_rank-1> nstrides;
         std::array<PI,ct_rank-1> nextent;
         for( PI i = 0; i < ct_rank-1; ++i ) {
@@ -45,7 +54,7 @@ public:
         return { reinterpret_cast<T *>( ptr ), nextent, nstrides };
     }
 
-    auto   row       ( PI index ) const -> TensorView<T,ct_rank-1> {
+    auto   row       ( PI index ) const -> TensorView<T,ct_rank-1,Arch> {
         std::array<SI,ct_rank-1> nstrides;
         std::array<PI,ct_rank-1> nextent;
         for( PI i = 1; i < ct_rank; ++i ) {
@@ -63,6 +72,50 @@ public:
         return s;
     }
 
+    template<class TF>
+    Tensor<TF,1,Arch> sum_axis_0() const {
+        Tensor<TF,1,Arch> res( sdot::Extent(), { extent[ 0 ] } );
+
+        // cuda
+        #ifdef __CUDACC__
+        if constexpr ( std::is_same_v<Arch,Cuda> ) {
+            static_assert( ct_rank == 2, "CUDA sum_axis_0 only supports rank-2 for now" );
+
+            const int nrows = (int)extent[ 0 ];
+            const int ncols = (int)extent[ 1 ];
+            const int pitch = (int)( strides[ 0 ] / sizeof( T ) );  // row stride in elements (>= ncols if padding)
+
+            // cast input elements T → TF without extra allocation
+            auto d_in = thrust::make_transform_iterator(
+                reinterpret_cast<const T *>( ptr ),
+                [] __device__( T x ) { return static_cast<TF>( x ); } );
+
+            // segment [r] = [ r*pitch, r*pitch + ncols ) — no offset array allocation
+            auto row_idx = thrust::counting_iterator<int>( 0 );
+            auto off_b   = thrust::make_transform_iterator( row_idx,
+                [pitch]        __device__( int r ) { return r * pitch; } );
+            auto off_e   = thrust::make_transform_iterator( row_idx,
+                [pitch, ncols] __device__( int r ) { return r * pitch + ncols; } );
+
+            TF *d_out = res.data();
+
+            // two-pass CUB API: first call measures workspace, second runs the reduction
+            size_t tmp_sz = 0;
+            cub::DeviceSegmentedReduce::Sum( nullptr, tmp_sz, d_in, d_out, nrows, off_b, off_e );
+            thrust::device_vector<std::byte> tmp( tmp_sz );
+            cub::DeviceSegmentedReduce::Sum(
+                thrust::raw_pointer_cast( tmp.data() ), tmp_sz,
+                d_in, d_out, nrows, off_b, off_e );
+
+            return res;
+        }
+        #endif
+
+        // cpu
+        TODO;
+        return res;
+    }
+
 private:
     Extent  extent;   ///<
     Strides strides;  ///< byte strides
@@ -71,10 +124,11 @@ private:
 
 } // namespace sdot
 
-T_Td std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,d> &p ) {
-    if constexpr( d == 0 )
+template<class T,int ct_rank,class Arch>
+std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,Arch> &p ) {
+    if constexpr( ct_rank == 0 )
         return os << p();
-    else if constexpr ( d == 1 ) {
+    else if constexpr ( ct_rank == 1 ) {
         for( sdot::PI i = 0; i < p.size(); ++i )
             os << ( i ? ", " : "" ) << p[ i ];
         return os;
