@@ -26,3 +26,8 @@ Ajouter des nouveaux exemples
 
 Prop pour le driver
 - user_xyz correspond exactement à ce que l'user donne. Quand on le set, ça
+
+
+
+Proposition pour les bindings
+  -> on pourrait faire un nommage

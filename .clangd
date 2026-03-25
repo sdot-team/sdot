@@ -3,11 +3,10 @@ CompileFlags:
     - -std=c++23
     - -fdiagnostics-absolute-paths
     - -Isrc
-    - -Isubprojects/zpp_bits
+    - -I/Users/hugo.leclerc/.xmake/packages/z/zpp_bits/v4.6/f3139335543f4e64a5f21de0ee253a99/include
     - -Isubprojects/eigen3
     - -Wall
     - -Wextra
-  CompilationDatabase: build
 
 Index:
   Background: Build

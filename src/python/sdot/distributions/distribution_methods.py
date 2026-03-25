@@ -1,56 +1,8 @@
-from typing import Any, Callable, TypeVar, overload
+from typing import Callable, TypeVar
+from .TensorField import TensorField
 from ..driver import driver
 
 _T = TypeVar( '_T' )
-
-
-
-class TensorField:
-    """
-    Descriptor for a tensor field in a Distribution or BatchOfDistributions.
-
-    axis_names : names of each axis (e.g. "nb_diracs", "dim").
-                 The tensor rank equals len(axis_names).
-
-    If the field value is None and the host class defines a method
-    ``default_<name>(self)``, that method is called to supply the value.
-
-    @generate_distribution_methods auto-generates a property for each axis
-    name that returns the corresponding dimension of the first non-None field
-    that carries that axis name.
-    """
-
-    def __init__( self, *axis_names ):
-        self.axis_names = axis_names
-        self.rank       = len( axis_names )
-        self.name       = None  # filled by __set_name__
-
-    def __set_name__( self, owner, name ):
-        self.name = name
-
-    @overload
-    def __get__( self, obj: None, objtype: type ) -> 'TensorField': ...
-    @overload
-    def __get__( self, obj: object, objtype: type ) -> Any: ...
-    def __get__( self, obj, objtype = None ):
-        if obj is None:
-            return self
-        val = obj.__dict__.get( f'_{ self.name }' )
-        if val is None:
-            default_method = getattr( type( obj ), f'default_{ self.name }', None )
-            if default_method is not None:
-                return default_method( obj )
-        return val
-
-    def __set__( self, obj, value ):
-        obj.__dict__[ f'_{ self.name }' ] = getattr( driver, f't{ self.rank }' )( value ) if value is not None else None
-
-    def expand_for_batch( self, value, batch_size ):
-        """ Add a leading batch dimension and repeat. """
-        idx = ( None, ) + ( slice( None ), ) * self.rank
-        rpt = [ batch_size ] + [ 1 ] * self.rank
-        return driver.repeat( value[ idx ], rpt )
-
 
 # ---------------------------------------------------------------------------
 # Helpers used by @generate_distribution_methods
@@ -93,6 +45,7 @@ def _setup_distribution_class( cls, stop_classes, is_batch = False ):
       - always_1d = True (idem, mainly for batch classes)
       - _nd_positions    (when a TensorField 'positions' is (re)defined in cls)
       - batch_version    (only for Distribution subclasses, not BatchOfDistributions)
+      - tensor_list      (summary of all the tensors in TensorField)
     """
 
     all_fields = _collect_fields( cls, stop_classes )
@@ -161,6 +114,29 @@ def _setup_distribution_class( cls, stop_classes, is_batch = False ):
                 return self.positions
         cls._nd_positions = _nd_positions
 
+    # --- tensor_list -----------
+    if 'tensor_list':
+        def tensor_list( self ):
+            res = []
+            name_indices = {}
+            for klass in reversed( type( self ).__mro__ ):
+                if klass in { object }:
+                    continue
+                for name, val in vars( klass ).items():
+                    if isinstance( val, TensorField ):
+                        # print( " ----------------from_a_dim_reduction", self, name, val.from_a_dim_reduction )
+                        tensor = getattr( self, name )
+                        if val.from_a_dim_reduction:
+                            tensor = tensor[ :, :, None ]
+                        if name in name_indices:
+                            res[ name_indices[ name ] ] = tensor
+                        else:
+                            name_indices[ name ] = len( res )
+                            res.append( tensor )
+            return res
+
+        cls.tensor_list = tensor_list
+
     # --- batch_version (only for non-batch Distribution subclasses) ---------
     if is_batch or 'batch_version' in vars( cls ):
         return
@@ -223,7 +199,10 @@ def generate_batch_of_distribution_methods( source_cls: type ) -> 'Callable[[typ
         for field_name, field in src_fields.items():
             if field_name not in vars( cls ):
                 batch_field      = TensorField( "batch_size", *field.axis_names )
+
+                batch_field.from_a_dim_reduction = field.from_a_dim_reduction
                 batch_field.name = field_name
+
                 setattr( cls, field_name, batch_field )
 
         # Copy scalar params (e.g. x0, x1) not already defined in cls
@@ -314,9 +293,12 @@ def generate_1d_version_of( source_cls: type[ _T ] ) -> type:
     namespace  = {}
     for field_name, field in src_fields.items():
         if 'dim' in field.axis_names:
-            new_axes       = tuple( a for a in field.axis_names if a != 'dim' )
-            new_field      = TensorField( *new_axes )
+            new_axes = tuple( a for a in field.axis_names if a != 'dim' )
+            new_field = TensorField( *new_axes )
+
+            new_field.from_a_dim_reduction = True
             new_field.name = field_name
+
             namespace[ field_name ] = new_field
 
     cls = type( source_cls.__name__ + '1d', ( source_cls, ), namespace )

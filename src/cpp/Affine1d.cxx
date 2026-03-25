@@ -8,7 +8,7 @@ namespace sdot {
 
     // --------------------------------------------------- batch dim 0 ---------------------------------------------------
 #define UTP template<class T>
-#define DTP Affine1d<T,0>
+#define DTP Affine1d<T>
 
 UTP DTP::Piece DTP::get_first_piece( TF point_scale ) const {
     if ( nb_points() < 2 )
@@ -119,13 +119,13 @@ UTP void DTP::accumulate_linear_grad_ys( const Piece &piece, TF slope, TF offset
 
 // --------------------------------------------------- batch dim 1 ---------------------------------------------------
 #define UTP template<class T>
-#define DTP Affine1d<T,1>
+#define DTP BatchOfAffine1d<T>
 
 UTP PI DTP::nb_rows() const {
     return xs.size( 0 );
 }
 
-UTP Affine1d<T,0> DTP::row( PI num_batch ) const  {
+UTP Affine1d<T> DTP::row( PI num_batch ) const  {
    return { xs.row( num_batch ), ys.row( num_batch ) };
 }
 

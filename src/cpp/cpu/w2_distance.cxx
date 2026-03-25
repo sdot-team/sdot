@@ -6,7 +6,7 @@
 
 namespace sdot {
 
-T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, TensorView<T,0> distance, TensorView<T,1> barycenters, TensorView<T,1> potentials, TensorView<T,2> cuts ) {
+T_T void w2_distance( DiracSet<const T> diracs, Affine1d<const T> points, TensorView<T,0> distance, TensorView<T,1> barycenters, TensorView<T,1> potentials, TensorView<T,2> cuts ) {
     using TF = typename IntermediateScalarType<T>::type;
 
     const std::vector<PI> dirac_indices = diracs.arg_sort();
@@ -61,13 +61,13 @@ T_T void w2_distance( DiracSet<const T,0> diracs, Affine1d<const T,0> points, Te
 }
 
 /// Wasserstein 2 distance
-T_T void w2_distance( DiracSet<const T,1> diracs, Affine1d<const T,1> functions, TensorView<T,1> distance, TensorView<T,2> barycenters, TensorView<T,2> potentials, TensorView<T,3> cuts ) {
+T_T void w2_distance( BatchOfDiracSet<const T> diracs, BatchOfAffine1d<const T> functions, TensorView<T,1> distance, TensorView<T,2> barycenters, TensorView<T,2> potentials, TensorView<T,3> cuts ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance( diracs.row( r ), functions.row( r ), distance.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ) );
     });
 }
 
-T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<const T,1> grad_barycenters, TensorView<const T,1> barycenters, TensorView<const T,1> potentials, TensorView<const T,2> cuts, DiracSet<const T,0> diracs, Affine1d<const T,0> points, DiracSet<T,0> grad_diracs, Affine1d<T,0> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<const T,1> grad_barycenters, TensorView<const T,1> barycenters, TensorView<const T,1> potentials, TensorView<const T,2> cuts, DiracSet<const T> diracs, Affine1d<const T> points, DiracSet<T> grad_diracs, Affine1d<T> grad_functions ) {
     using TF = typename IntermediateScalarType<T>::type;
     using namespace std;
 
@@ -240,7 +240,7 @@ T_T void w2_distance_backward( TensorView<const T,0> grad_distance, TensorView<c
 }
 
 /// Gradients of Wasserstein 2 distance
-T_T void w2_distance_backward( TensorView<const T,1> grad_distance, TensorView<const T,2> grad_barycenters, TensorView<const T,2> barycenters, TensorView<const T,2> potentials, TensorView<const T,3> cuts, DiracSet<const T,1> diracs, Affine1d<const T,1> functions, DiracSet<T,1> grad_diracs, Affine1d<T,1> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,1> grad_distance, TensorView<const T,2> grad_barycenters, TensorView<const T,2> barycenters, TensorView<const T,2> potentials, TensorView<const T,3> cuts, BatchOfDiracSet<const T> diracs, BatchOfAffine1d<const T> functions, BatchOfDiracSet<T> grad_diracs, BatchOfAffine1d<T> grad_functions ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance_backward( grad_distance.row( r ), grad_barycenters.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ), diracs.row( r ), functions.row( r ), grad_diracs.row( r ), grad_functions.row( r ) );
     });

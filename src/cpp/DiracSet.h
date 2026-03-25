@@ -6,13 +6,9 @@
 
 namespace sdot {
 
-///
-template<class T,int batch_dim=0>
-struct DiracSet;
-
 //
 template<class T>
-struct DiracSet<T,0> {
+struct DiracSet {
     using TF        = IntermediateScalarType<std::decay_t<T>>::type;
     using TT        = TensorView<T,1>;
 
@@ -26,11 +22,11 @@ struct DiracSet<T,0> {
 
 //
 template<class T>
-struct DiracSet<T,1> {
+struct BatchOfDiracSet {
     using TT        = TensorView<T,2>;
 
     PI    nb_rows   () const;
-    auto  row       ( PI num_batch ) const -> DiracSet<T,0>;
+    auto  row       ( PI num_batch ) const -> DiracSet<T>;
 
     TT    xs;       ///< positions
     TT    ws;       ///< weights

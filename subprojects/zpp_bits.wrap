@@ -1,9 +1,0 @@
-[wrap-git]
-url = https://github.com/eyalz800/zpp_bits.git
-revision = v4.4.20
-depth = 1
-patch_directory = zpp_bits
-diff_files = zpp_bits_clang17.patch
-
-[provide]
-dependency_names = zpp_bits
