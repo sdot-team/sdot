@@ -1,6 +1,7 @@
 from pathlib import Path
 import importlib
 import sys
+import os
 
 class DriverProxy:
     """
@@ -24,6 +25,11 @@ class DriverProxy:
     To find the default framework:
         * look what is imported in sys.modules
         * else, try if possible to import a module in self.prefered_frameworks ([ 'jax', 'torch' ] by default)
+
+    Env variables that are taken into account
+        * SDOT_FRAMEWORK
+        * SDOT_DEVICE
+        * SDOT_DTYPE
     """
 
     def __init__( self ):
@@ -34,6 +40,13 @@ class DriverProxy:
         self._user_dtype = None
 
         self._instance = None
+
+        if d := os.getenv( "SDOT_FRAMEWORK" ):
+            self.framework = d
+        if d := os.getenv( "SDOT_DEVICE" ):
+            self.device = d
+        if d := os.getenv( "SDOT_DTYPE" ):
+            self.dtype = d
 
     # ---------------------------------- framework ----------------------------------
     @property
@@ -118,7 +131,7 @@ class DriverProxy:
     @property
     def normalized_device_type( self ) -> str:
         """ without :x """
-        return self.normalized_device
+        return self.normalized_device.split( ":" )[ 0 ]
 
     @property
     def normalized_device( self ) -> str:
@@ -166,19 +179,18 @@ class DriverProxy:
     def bindings_for( self, f, g ):
         geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "geometry"
         bindings_dir = Path( __file__ ).parent / "bindings"
-        device = driver.normalized_device_type.replace( ":", "_" )
         ct_dim = f.dim if f.dim <= 4 else -1
         f_name = f.__class__.__name__
         g_name = g.__class__.__name__
 
-        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ device }"
+        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
         full_name = "sdot.bindings." + dylib_name
         try:
             mod = importlib.import_module( full_name )
         except ImportError:
             self.compile_binding_for( dylib_name, [
-                bindings_dir / f"ot_plan_1d_{ device }.cpp", # TODO: rule to find the .cpp
+                bindings_dir / f"ot_plan_1d_{ driver.normalized_device_type }.cpp", # TODO: rule to find the .cpp
                 geometry_dir / "SimpleSquareMatrix_eigen.cpp",
                 geometry_dir / "VtkOutput.cpp",
             ] )

@@ -7,11 +7,11 @@
 
 namespace sdot {
 
-template<class T,int batch_dim=0>
+template<class T>
 struct Affine1d;
 
 template<class T>
-struct Affine1d<T,0> {
+struct Affine1d {
     using  TF             = IntermediateScalarType<std::decay_t<T>>::type;
     using  Piece          = PieceOfAffine1d<TF>;
     using  TT             = TensorView<T,1>;
@@ -32,11 +32,11 @@ struct Affine1d<T,0> {
 };
 
 template<class T>
-struct Affine1d<T,1> {
+struct BatchOfAffine1d {
     using  TT             = TensorView<T,2>;
 
     PI     nb_rows        () const;
-    auto   row            ( PI num_batch ) const -> Affine1d<T,0>;
+    auto   row            ( PI num_batch ) const -> Affine1d<T>;
 
     TT     xs;            ///<
     TT     ys;            ///<

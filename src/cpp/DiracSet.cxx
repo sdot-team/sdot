@@ -6,7 +6,7 @@
 namespace sdot {
 
 #define UTP template<class T>
-#define DTP DiracSet<T,0>
+#define DTP DiracSet<T>
 
 UTP PI DTP::nb_diracs() const {
     return xs.size();
@@ -36,13 +36,13 @@ UTP auto DTP::arg_sort() -> std::vector<PI> const {
 #undef DTP
 
 #define UTP template<class T>
-#define DTP DiracSet<T,1>
+#define DTP BatchOfDiracSet<T>
 
 UTP PI DTP::nb_rows() const {
     return xs.size( 0 );
 }
 
-UTP DiracSet<T,0> DTP::row( PI num_batch ) const  {
+UTP DiracSet<T> DTP::row( PI num_batch ) const  {
    return { xs.row( num_batch ), ws.row( num_batch ) };
 }
 

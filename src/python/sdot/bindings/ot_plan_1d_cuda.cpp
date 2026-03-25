@@ -10,8 +10,8 @@ namespace nb = nanobind;
 
 using TF = SDOT_SCALAR_TYPE;
 
-using NF = nb::ndarray<const TF,nb::device::cpu>;
-using MF = nb::ndarray<TF,nb::device::cpu>;
+using NF = nb::ndarray<const TF,nb::device::cuda>;
+using MF = nb::ndarray<TF,nb::device::cuda>;
 // using TF = SDOT_CT_DIM;
 
 
@@ -41,9 +41,10 @@ static void forward( NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys, MF dist
     // space dim
     CHECK_DIM_1( dirac_xs );
 
-    BatchOfAffine1d<const TF> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-    BatchOfDiracSet<const TF> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-    w2_distance( diracs, functions, tensor_view_1( distance ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ) );
+    ASSERT( 0 );
+    // BatchOfAffine1d<const TF> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
+    // BatchOfDiracSet<const TF> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
+    // w2_distance( diracs, functions, tensor_view_1( distance ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ) );
 }
 
 static void backward(
@@ -87,11 +88,12 @@ static void backward(
     CHECK_BATCH_SIZE( grad_point_xs );
     CHECK_BATCH_SIZE( grad_point_ys );
 
-    BatchOfAffine1d<TF> grad_functions{ .xs = tensor_view_2( grad_point_xs ), .ys = tensor_view_2( grad_point_ys ) };
-    BatchOfDiracSet<TF> grad_diracs{ .xs = tensor_view_3( grad_dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( grad_dirac_ws ) };
-    BatchOfAffine1d<const TF> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-    BatchOfDiracSet<const TF> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-    w2_distance_backward( tensor_view_1( grad_distances ), tensor_view_2( grad_barycenters ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ), diracs, functions, grad_diracs, grad_functions );
+    ASSERT( 0 );
+    // BatchOfAffine1d<TF> grad_functions{ .xs = tensor_view_2( grad_point_xs ), .ys = tensor_view_2( grad_point_ys ) };
+    // BatchOfDiracSet<TF> grad_diracs{ .xs = tensor_view_3( grad_dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( grad_dirac_ws ) };
+    // BatchOfAffine1d<const TF> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
+    // BatchOfDiracSet<const TF> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
+    // w2_distance_backward( tensor_view_1( grad_distances ), tensor_view_2( grad_barycenters ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ), diracs, functions, grad_diracs, grad_functions );
 }
 
 #define MK_MOD( NAME ) \

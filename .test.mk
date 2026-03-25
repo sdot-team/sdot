@@ -14,10 +14,10 @@ PYTEST = .venv/bin/pytest
 # 	make build
 # 	${PYDIRS} valgrind ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 # 	${PYDIRS} valgrind ${PYTHON} tests/test_dask.py
+# 	rm -rf src/python/sdot/bindings/*.so
+# 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
 
-all:
-	rm -rf src/python/sdot/bindings/*.so
-	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
+all: vg
 
 ct:
 	${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
@@ -27,4 +27,5 @@ vg:
 	ssh lmo "make -C ~/sdot_with_interfaces -f .test.mk vg_loc"
 
 vg_loc:
-	make test
+	rm -rf src/python/sdot/bindings/*.so
+	SDOT_DEVICE=cuda ${PYDIRS} ${PYTHON} docs/examples/ct_reconstruction/ct_reconstruction.py
