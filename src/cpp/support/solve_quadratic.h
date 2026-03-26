@@ -7,7 +7,7 @@
 namespace sdot {
 
 ///< a is multiplied by 2
-T_T T solve_quadratic( T a, T b, T c, T default_value = 0 ) {
+T_T HD T solve_quadratic( T a, T b, T c, T default_value = 0 ) {
     const T scale = std::max( { std::abs( a ), std::abs( b ), std::abs( c ) } );
     if ( scale == 0.0 )
        return 0.0;

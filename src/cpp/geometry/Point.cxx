@@ -4,8 +4,8 @@
 
 namespace sdot {
 
-#define UTP template<class T,int dim>
-#define DTP Point<T,dim>
+#define UTP template<class T,int dim,class Arch>
+#define DTP Point<T,dim,Arch>
 
 UTP PI DTP::size() const {
     return content.size();
@@ -15,8 +15,8 @@ UTP PI DTP::size() const {
 #undef DTP
 
 // ---------------------------------------------------------------------------
-#define UTP template<class T>
-#define DTP Point<T,-1>
+#define UTP template<class T,class Arch>
+#define DTP Point<T,-1,Arch>
 
 UTP PI DTP::size() const {
     return content.size();
@@ -27,8 +27,8 @@ UTP PI DTP::size() const {
 
 } // namespace sdot
 
-template<class T,int dim>
-std::ostream &operator<<( std::ostream &os, const sdot::Point<T,dim> &p ) {
+template<class T,int dim,class Arch>
+std::ostream &operator<<( std::ostream &os, const sdot::Point<T,dim,Arch> &p ) {
     for( sdot::PI i = 0; i < p.size(); ++i )
         os << ( i ? ", " : "" ) << p[ i ];
     return os;

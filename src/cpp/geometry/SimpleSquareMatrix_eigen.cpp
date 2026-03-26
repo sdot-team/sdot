@@ -3,8 +3,8 @@
 
 namespace sdot {
 
-template<class T,int ct_size>
-auto SimpleSquareMatrix<T,ct_size>::eigen_system() const -> EigenSystem {
+template<class T,int ct_size,class Arch>
+auto SimpleSquareMatrix<T,ct_size,Arch>::eigen_system() const -> EigenSystem {
     const PI n = size();
 
     // copy lower triangular into Eigen matrix
@@ -17,7 +17,7 @@ auto SimpleSquareMatrix<T,ct_size>::eigen_system() const -> EigenSystem {
     Eigen::SelfAdjointEigenSolver<EMat> es( m.template selfadjointView<Eigen::Lower>() );
 
     // eigenvalues ascending, eigenvectors as rows
-    EigenSystem res{ Point<T,ct_size>( n ), SimpleSquareMatrix<T,ct_size>( n ) };
+    EigenSystem res{ Point<T,ct_size,Arch>( n ), SimpleSquareMatrix<T,ct_size,Arch>( n ) };
     for( PI i = 0; i < n; ++i ) {
         res.values[ i ] = es.eigenvalues()[ i ];
         for( PI d = 0; d < n; ++d )
@@ -27,7 +27,7 @@ auto SimpleSquareMatrix<T,ct_size>::eigen_system() const -> EigenSystem {
 }
 
 // Eigen compiled only in this translation unit
-template auto SimpleSquareMatrix<FP32>::eigen_system() const -> SimpleSquareMatrix<FP32>::EigenSystem;
-template auto SimpleSquareMatrix<FP64>::eigen_system() const -> SimpleSquareMatrix<FP64>::EigenSystem;
+template auto SimpleSquareMatrix<FP32,-1,Cpu>::eigen_system() const -> SimpleSquareMatrix<FP32,-1,Cpu>::EigenSystem;
+template auto SimpleSquareMatrix<FP64,-1,Cpu>::eigen_system() const -> SimpleSquareMatrix<FP64,-1,Cpu>::EigenSystem;
 
 } // namespace sdot

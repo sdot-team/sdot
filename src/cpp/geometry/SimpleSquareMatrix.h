@@ -6,12 +6,12 @@
 namespace sdot {
 
 // _size
-template<class T,int ct_size=-1>
+template<class T,int ct_size,class Arch>
 class SimpleSquareMatrix {
 public:
     using       value_type              = T;
-    using       Content                    = Point<T,(ct_size>=0?ct_size*ct_size:-1)>;
-    using       Vec                     = Point<T,ct_size>;
+    using       Content                 = Point<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
+    using       Vec                     = Point<T,ct_size,Arch>;
 
     /**/        SimpleSquareMatrix      ( PI size ) : content( size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
 
@@ -19,11 +19,11 @@ public:
     T&          operator()              ( PI r, PI c ) { return content[ r * size() + c ]; }
 
     struct EigenSystem {
-        Point<T,ct_size>              values;   ///< eigenvalues, ascending order
-        SimpleSquareMatrix<T,ct_size> vectors;  ///< row i = eigenvector i
+        Point<T,ct_size,Arch>              values;   ///< eigenvalues, ascending order
+        SimpleSquareMatrix<T,ct_size,Arch> vectors;  ///< row i = eigenvector i
     };
 
-    auto        without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1)>;
+    auto        without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch>;
     auto        with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
     EigenSystem eigen_system            () const;
     T           determinant             () const;
@@ -56,6 +56,6 @@ T_Td SimpleSquareMatrix<T,d> operator-( const SimpleSquareMatrix<T,d> &a ) { Sim
  */
 } // namespace sdot
 
-T_Td std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,d> &p );
+T_TdA std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,d,A> &p );
 
 #include "SimpleSquareMatrix.cxx"

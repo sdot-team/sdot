@@ -34,15 +34,29 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
     set_languages( "cxx20" )
     set_targetdir( os.getenv( "SDOT_OUTPUT_DIR" ) )
 
+    arch = os.getenv( "SDOT_ARCH" )
+    if arch == "cuda" then
+        add_rules( "cuda.build" )
+        -- set_toolchains("cuda")
+        -- add_extsources( "cuda", ".cpp" )
+        -- add_cuflags( "-arch=native" )
+        add_cuflags( "-diag-suppress 1160", {force = true} )
+        add_cuflags( "--expt-relaxed-constexpr" )
+        add_cuflags( "--use_fast_math" )
+        add_cuflags( "--extended-lambda" )
+        -- add_packages("cuda")
+    end
+
     for _, f in ipairs( split_env( "SDOT_SRC_FILES" ) ) do
-        add_files(f)
+        add_files( f )
     end
 
     add_defines( "SDOT_BINDING_NAME=" .. os.getenv( "SDOT_BINDING_NAME" ) )
-    add_defines( "SDOT_SCALAR_TYPE=" .. os.getenv( "SDOT_SCALAR_TYPE" ) )
+    for _, f in ipairs( split_env("SDOT_DEFINES" ) ) do
+        add_defines( f )
+    end
 
-    add_cxxflags("-fvisibility=hidden", "-fvisibility-inlines-hidden")
-
+    -- add_cxxflags("-fvisibility=hidden", "-fvisibility-inlines-hidden")
     for _, f in ipairs( split_env("SDOT_EXTRA_CFLAGS" ) ) do
         add_cxxflags(f)
     end

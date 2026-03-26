@@ -3,84 +3,73 @@
 #include "common_macros.h"
 #include "common_types.h"
 #include "ASSERT.h"
+#include "Arch.h"
+
+#ifdef __CUDACC__
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <cub/cub.cuh>
+#endif
 
 #include <algorithm>
 #include <ostream>
 #include <array>
 
 namespace sdot {
+template<class T,int ct_rank,class Arch>
+class Tensor;
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
-template<class T,int ct_rank>
+template<class T,int ct_rank,class Arch>
 class TensorView {
 public:
-    using  Strides   = std::array<SI,ct_rank>;  ///< byte strides
-    using  Extent    = std::array<PI,ct_rank>;
-    using  RawPtr    = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
+    using          Strides           = std::array<SI,ct_rank>;  ///< byte strides
+    using          Shape             = std::array<PI,ct_rank>;
+    using          RawPtr            = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
 
-    /* */  TensorView( T *data, Extent ext, Strides str ) : extent( ext ), strides( str ), ptr( reinterpret_cast<RawPtr>( data ) ) {}
-    /* */  TensorView( T *data, Extent ext ) : extent( ext ), strides( contiguous_strides( ext ) ), ptr( reinterpret_cast<RawPtr>( data ) ) {}
-    /* */  TensorView( T *data, PI size ) : extent{ size }, strides{ sizeof( T ) }, ptr( reinterpret_cast<RawPtr>( data ) ) {}
+    HD             TensorView        ( T *data, Shape shape, Strides strides ) : _strides( strides ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
+    HD             TensorView        ( T *data, Shape shape ) : _strides( contiguous_strides( shape ) ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
+    HD             TensorView        ( T *data, PI size ) : _shape{ size }, _strides{ sizeof( T ) }, _ptr( reinterpret_cast<RawPtr>( data ) ) {}
 
-    T&     operator()( PI i0, PI i1, PI i2 ) const { return *reinterpret_cast<T *>( ptr + i0 * strides[ 0 ] + i1 * strides[ 1 ] + i2 * strides[ 2 ] ); }
-    T&     operator()( PI i0, PI i1 ) const { return *reinterpret_cast<T *>( ptr + i0 * strides[ 0 ] + i1 * strides[ 1 ] ); }
-    T&     operator()( PI i0 ) const { return *reinterpret_cast<T *>( ptr + i0 * strides[ 0 ] ); }
-    T&     operator()() const { return *reinterpret_cast<T *>( ptr ); }
+    static HD auto contiguous_strides( const Shape &ext ) -> Strides;
 
-    T&     operator[]( PI i0 ) const { return *reinterpret_cast<T *>( ptr + i0 * strides[ 0 ] ); }
+    HD T&          operator()        ( PI i0, PI i1, PI i2 ) const { static_assert( ct_rank == 3 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] + i1 * _strides[ 1 ] + i2 * _strides[ 2 ] ); }
+    HD T&          operator()        ( PI i0, PI i1 ) const { static_assert( ct_rank == 2 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] + i1 * _strides[ 1 ] ); }
+    HD T&          operator()        ( PI i0 ) const { static_assert( ct_rank == 1 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] ); }
+    HD T&          operator()        () const { static_assert( ct_rank == 0 ); return *reinterpret_cast<T *>( _ptr ); }
 
-    bool   empty     () const { return ct_rank == 0 ? false : std::none_of( extent.begin(), extent.end(), []( auto a ) { return a != 0; } ); }
+    HD T&          operator[]        ( PI i0 ) const { static_assert( ct_rank == 1 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] ); }
 
-    PI     size      ( PI d ) const { return extent[ d ]; }
-    PI     size      () const { ASSERT( rank() == 1 ); return size( 0 ); }
-    PI     rank      () const { return ct_rank; }
+    auto           strides           () const { return _strides; }
+    HD SI          stride            ( PI d ) const { return _strides[ d ]; }
+    HD SI          shape             ( PI d ) const { return _shape[ d ]; }
+    auto           shape             () const { return _shape; }
+    HD bool        empty             () const { return ct_rank == 0 ? false : std::none_of( _shape.begin(), _shape.end(), []( auto a ) { return a != 0; } ); }
+    HD PI          rank              () const { return ct_rank; }
+    HD PI          size              ( PI d ) const { return _shape[ d ]; }
+    HD PI          size              () const { static_assert( ct_rank == 1 ); return size( 0 ); }
 
-    auto   squeeze   ( PI axis ) const -> TensorView<T,ct_rank-1> {
-        std::array<SI,ct_rank-1> nstrides;
-        std::array<PI,ct_rank-1> nextent;
-        for( PI i = 0; i < ct_rank-1; ++i ) {
-            nstrides[ i ] = strides[ i + ( i >= axis ) ];
-            nextent[ i ] = extent[ i + ( i >= axis ) ];
-        }
-        return { reinterpret_cast<T *>( ptr ), nextent, nstrides };
-    }
+    HD T*          data              () const { return reinterpret_cast<T *>( _ptr ); }
 
-    auto   row       ( PI index ) const -> TensorView<T,ct_rank-1> {
-        std::array<SI,ct_rank-1> nstrides;
-        std::array<PI,ct_rank-1> nextent;
-        for( PI i = 1; i < ct_rank; ++i ) {
-            nstrides[ i - 1 ] = strides[ i ];
-            nextent[ i - 1 ] = extent[ i ];
-        }
-        return { reinterpret_cast<T *>( ptr + index * strides[ 0 ] ), nextent, nstrides };
-    }
-
-    static Strides contiguous_strides( const Extent &ext ) {
-        Strides s;
-        s[ ct_rank - 1 ] = sizeof( T );
-        for( int i = ct_rank - 2; i >= 0; --i )
-            s[ i ] = s[ i + 1 ] * ext[ i + 1 ];
-        return s;
-    }
+    T_U auto       sum_along_axis_1  () const -> Tensor<U,1,Arch>;
+    void           with_cpu_version  ( auto &&func ) const;
+    auto           squeeze           ( PI axis ) const -> TensorView<T,ct_rank-1,Arch>;
+    HD auto        row               ( PI index ) const -> TensorView<T,ct_rank-1,Arch>;
 
 private:
-    Extent  extent;   ///<
-    Strides strides;  ///< byte strides
-    RawPtr  ptr;      ///<
+    Strides        _strides;         ///< byte strides
+    Shape          _shape;           ///<
+    RawPtr         _ptr;             ///<
 };
 
 } // namespace sdot
 
-T_Td std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,d> &p ) {
-    if constexpr( d == 0 )
-        return os << p();
-    else if constexpr ( d == 1 ) {
-        for( sdot::PI i = 0; i < p.size(); ++i )
-            os << ( i ? ", " : "" ) << p[ i ];
-        return os;
-    } else {
-        for( sdot::PI i = 0; i < p.size( 0 ); ++i )
-            os << "\n" << p.row( i );
-        return os;
-    }
-}
+template<class T,int ct_rank>
+std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cpu> &p );
+
+#ifdef __CUDACC__
+template<class T,int ct_rank>
+std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cuda> &p );
+#endif
+
+#include "TensorView.cxx"

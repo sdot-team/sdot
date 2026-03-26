@@ -49,7 +49,11 @@ def loss( dirac_coords ):
     g = sdot.BatchOfSumOfWeightedDiracs1d( dirac_xs )
     return torch.sum( sdot.distances( f, g ) )
 
-n = 100
+
+import faulthandler
+faulthandler.enable()
+
+n = 1000
 sinogram = Sinogram( n, n )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
@@ -64,6 +68,7 @@ coords = dirac_coords.detach().numpy()
 # pyplot.style.use( 'dark_background' )
 pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
 pyplot.axis( 'equal' )
+pyplot.savefig( "yo.png" )
 pyplot.show()
 
 

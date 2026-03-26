@@ -7,39 +7,39 @@
 
 namespace sdot {
 
-template<class T>
-struct Affine1d;
-
-template<class T>
+template<class T,class Arch>
 struct Affine1d {
-    using  TF             = IntermediateScalarType<std::decay_t<T>>::type;
-    using  Piece          = PieceOfAffine1d<TF>;
-    using  TT             = TensorView<T,1>;
+    using    TF                       = IntermediateScalarType<std::decay_t<T>,Arch>::type;
+    using    Piece                    = PieceOfAffine1d<TF>;
+    using    TT                       = TensorView<T,1,Arch>;
 
-    Piece  get_first_piece         ( TF point_scale ) const;
-    TF     take_some_mass          ( Piece &current_piece, TF point_scale, TF mass_to_take, auto &&on_taken_piece ) const; ///< return right position
-    void   get_next_piece          ( Piece &piece, TF point_scale ) const;
-    void   get_grad_ys             ( T ratio, auto grad_y ) const;
+    HD void  accumulate_linear_grad_ys( const Piece &piece, TF slope, TF offset, TF scale, auto grad_ys ) const;          ///< backward of moment += piece.moment() with dual variable (slope*t + offset): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
+    HD void  accumulate_w2_grad_ys    ( const Piece &piece, TF dirac_pos, TF potential, TF g_scale, auto grad_ys ) const; ///< backward of w2 += piece.w2_dist(dirac_pos): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
+    HD Piece get_first_piece          ( TF point_scale ) const;
+    HD TF    take_some_mass           ( Piece &current_piece, TF point_scale, TF mass_to_take, auto &&on_taken_piece ) const; ///< return right position
+    HD void  get_next_piece           ( Piece &piece, TF point_scale ) const;
+    HD void  get_grad_ys              ( T ratio, auto grad_y ) const;
 
-    void   accumulate_w2_grad_ys   ( const Piece &piece, TF dirac_pos, TF potential, TF g_scale, auto grad_ys ) const; ///< backward of w2 += piece.w2_dist(dirac_pos): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
-    void   accumulate_linear_grad_ys( const Piece &piece, TF slope, TF offset, TF scale, auto grad_ys ) const;          ///< backward of moment += piece.moment() with dual variable (slope*t + offset): accumulates into grad_ys[piece.index-1] and grad_ys[piece.index]
+    HD PI    nb_points                () const;
+    HD TF    mass                     () const;
 
-    PI     nb_points      () const;
-    TF     mass           () const;
-
-    TT     xs;            ///<
-    TT     ys;            ///<
+    TT       xs;                      ///<
+    TT       ys;                      ///<
 };
 
-template<class T>
+template<class T,class Arch>
 struct BatchOfAffine1d {
-    using  TT             = TensorView<T,2>;
+    using   TF       = IntermediateScalarType<std::decay_t<T>,Arch>::type;
+    using   TT       = TensorView<T,2,Arch>;
 
-    PI     nb_rows        () const;
-    auto   row            ( PI num_batch ) const -> Affine1d<T>;
+    HD PI   nb_points() const;
+    HD PI   nb_rows  () const;
+    HD auto row      ( PI num_batch ) const -> Affine1d<T,Arch>;
 
-    TT     xs;            ///<
-    TT     ys;            ///<
+    auto    masses   () const -> Tensor<TF,1,Arch>;
+
+    TT      xs;      ///<
+    TT      ys;      ///<
 };
 
 } // namespace sdot

@@ -48,3 +48,5 @@ site/
 CLAUDE.md
 
 .xmake/
+.fake_cuda/
+.test.mk

@@ -1,12 +1,20 @@
 CompileFlags:
   Add:
-    - -std=c++23
     - -fdiagnostics-absolute-paths
-    - -Isrc
-    - -I/Users/hugo.leclerc/.xmake/packages/z/zpp_bits/v4.6/f3139335543f4e64a5f21de0ee253a99/include
-    - -Isubprojects/eigen3
-    - -Wall
+    - -std=c++23
     - -Wextra
+    - -Isrc
+    - -Wall
+    # CUDA keyword stubs (pour clangd qui n'est pas nvcc)
+    - -D__device__=
+    - -D__host__=
+    - -D__global__=
+    - -D__forceinline__=inline
+    # CCCL version info
+    - -DCUDART_VERSION=12040
+    - -D__CUDACC_VER_MAJOR__=12
+    - -D__CUDACC_VER_MINOR__=4
+    - -DCCCL_DISABLE_CTK_COMPATIBILITY_CHECK
 
 Index:
   Background: Build
