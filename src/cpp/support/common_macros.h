@@ -10,3 +10,9 @@
 #define T_p   template<PI p>
 
 #define ASSERTED_EQUAL( A, B ) ( []( auto a, auto b ) { if ( a != b ) throw std::runtime_error( #A " and " #B " are not equal" ); return a; } )( A, B )
+
+#ifdef __CUDACC__
+#  define HD __host__ __device__
+#else
+#  define HD
+#endif

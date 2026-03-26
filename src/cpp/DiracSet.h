@@ -23,16 +23,18 @@ struct DiracSet {
 //
 template<class T,class Arch>
 struct BatchOfDiracSet {
-    using TF        = IntermediateScalarType<std::decay_t<T>,Arch>::type;
-    using TT        = TensorView<T,2,Arch>;
+    using   TF        = IntermediateScalarType<std::decay_t<T>,Arch>::type;
+    using   TT        = TensorView<T,2,Arch>;
 
-    PI    nb_rows   () const;
-    auto  row       ( PI num_batch ) const -> DiracSet<T,Arch>;
+    HD PI   nb_diracs () const;
+    HD PI   nb_rows   () const;
+    HD auto row       ( PI num_batch ) const -> DiracSet<T,Arch>;
 
-    auto  masses    () const -> Tensor<TF,1,Arch>;
+    void    arg_sorts ( Tensor<PI,2,Arch> &sorted_is, Tensor<std::remove_const_t<T>,2,Arch> &sorted_xs ) const;
+    auto    masses    () const -> Tensor<TF,1,Arch>;
 
-    TT    xs;       ///< positions
-    TT    ws;       ///< weights
+    TT      xs;       ///< positions
+    TT      ws;       ///< weights
 };
 
 } // namespace sdot

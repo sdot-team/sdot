@@ -53,6 +53,12 @@ public:
     const T*    data      () const { return Arch::raw_ptr( storage ); }
     T*          data      () { return Arch::raw_ptr( storage ); }
 
+    const T*    begin     () const { return data(); }
+    T*          begin     () { return data(); }
+
+    const T*    end       () const { static_assert( ct_rank == 1 ); return data() + size( 0 ); }
+    T*          end       () { static_assert( ct_rank == 1 ); return data() + size( 0 ); }
+
 private:
     static PI   total_size( const Extent &ext ) { PI s = 1; for( auto e : ext ) s *= e; return s; }
 

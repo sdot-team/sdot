@@ -53,7 +53,7 @@ def loss( dirac_coords ):
 import faulthandler
 faulthandler.enable()
 
-n = 100
+n = 1000
 sinogram = Sinogram( n, n )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.50, + 1.0 )
 sinogram.add_disk( [ 0.0, 0.0 ], 0.45, - 1.0 )
@@ -68,6 +68,7 @@ coords = dirac_coords.detach().numpy()
 # pyplot.style.use( 'dark_background' )
 pyplot.plot( coords[ :, 0 ], coords[ :, 1 ], "." )
 pyplot.axis( 'equal' )
+pyplot.savefig( "yo.png" )
 pyplot.show()
 
 
