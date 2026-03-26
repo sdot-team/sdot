@@ -1,10 +1,12 @@
 #pragma once
 
 #include "../support/parallel_for.h"
-#include "../support/P.h"
+// #include "../support/P.h"
 #include "w2_distance.h"
 
+#ifdef __CUDACC__
 #include <thrust/extrema.h>
+#endif
 
 namespace sdot {
 
