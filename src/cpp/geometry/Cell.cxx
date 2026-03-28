@@ -5,8 +5,8 @@
 
 namespace sdot {
 
-#define UTP template<class TF,int ct_dim>
-#define DTP Cell<TF,ct_dim>
+#define UTP template<class TF,int ct_dim,class Arch>
+#define DTP Cell<TF,ct_dim,Arch>
 
 UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), item_map( actual_dim + 1 ), pf( actual_dim ), df( actual_dim ) {
     if ( ct_dim >= 0 )
@@ -253,7 +253,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
             cut_index = cut_corr[ cut_index ];
 }
 
-UTP void DTP::_add_measure_rec( TF &res, SimpleSquareMatrix<TF,ct_dim> &M, const auto &cut_indices, PI prev_vertex_index ) const {
+UTP void DTP::_add_measure_rec( TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, const auto &cut_indices, PI prev_vertex_index ) const {
     using namespace std;
 
     if ( cut_indices.size() == 0 ) {
@@ -288,7 +288,7 @@ UTP TF DTP::measure() const {
     item_map.prepare_for( cuts.size() );
     ++curr_op_id;
 
-    SimpleSquareMatrix<TF,ct_dim> M( dim() );
+    SimpleSquareMatrix<TF,ct_dim,Arch> M( dim() );
     TF res = 0;
 
     for( PI vertex_index = 0; vertex_index < vertices.size(); ++vertex_index )
@@ -360,8 +360,8 @@ UTP void DTP::check_consistency( TF eps ) const {
         }
 
         // check pos
-        SimpleSquareMatrix<TF,ct_dim> m( dim() );
-        Point<TF,ct_dim> x = pf();
+        SimpleSquareMatrix<TF,ct_dim,Arch> m( dim() );
+        Point<TF,ct_dim,Arch> x = pf();
         for( PI r = 0; r < dim(); ++r ) {
             for( PI c = 0; c < dim(); ++c )
                 m( r, c ) = cuts[ v.cut_indices[ r ] ].dir[ c ];
@@ -387,7 +387,8 @@ UTP void DTP::check_consistency( TF eps ) const {
 
 } // namespace sdot
 
-T_Td std::ostream& operator<<( std::ostream& os, const sdot::Cell< T, d >& p ) {
+template<class TF,int ct_dim,class Arch>
+std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,ct_dim,Arch >& p ) {
     os << "vertices:";
     for ( const auto& v : p.vertices ) {
         os << "\n  pos: " << v.pos << " cuts: " << v.cut_indices << " edge: ";

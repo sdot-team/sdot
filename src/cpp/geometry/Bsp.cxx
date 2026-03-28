@@ -5,12 +5,12 @@
 
 namespace sdot {
 
-#define UTP template<class AdditionalPtData,class TF,int ct_dim>
-#define DTP Bsp<AdditionalPtData,TF,ct_dim>
+#define UTP template<class AdditionalPtData,class TF,int ct_dim,class Arch>
+#define DTP Bsp<AdditionalPtData,TF,ct_dim,Arch>
 
-UTP DTP::Bsp( TensorView<const TF,3> all_the_paths, TensorView<const TF,2> min_max,
-              TensorView<const PI,1> local_indices, TensorView<const TF,2> local_points,
-              TensorView<const TF,2> path, PI max_points_per_cell ) : nb_points( local_points.size( 0 ) ), dim( local_points.size( 1 ) ), pf( dim ) {
+UTP DTP::Bsp( TensorView<const TF,3,Arch> all_the_paths, TensorView<const TF,2,Arch> min_max,
+              TensorView<const PI,1,Arch> local_indices, TensorView<const TF,2,Arch> local_points,
+              TensorView<const TF,2,Arch> path, PI max_points_per_cell ) : nb_points( local_points.size( 0 ) ), dim( local_points.size( 1 ) ), pf( dim ) {
     // copy point data
     pt_data.resize( local_points.size( 0 ) );
     for( PI i = 0; i < local_points.size( 0 ); ++i ) {
@@ -58,7 +58,7 @@ UTP void DTP::display_vtk( VtkOutput &vo ) const {
     }
 }
 
-UTP void DTP::make_node_cells( PI node_index, TensorView<const TF,2> min_max ) {
+UTP void DTP::make_node_cells( PI node_index, TensorView<const TF,2,Arch> min_max ) {
     using namespace std;
 
     //
@@ -118,7 +118,7 @@ UTP void DTP::fill_node( PI node_index, const PI beg_pt_data, const PI end_pt_da
     avg /= nb_points;
 
     // cov — fill lower triangular, then symmetrize and divide
-    SimpleSquareMatrix<TF> cov( dim );
+    SimpleSquareMatrix<TF,-1,Arch> cov( dim );
     for( PI num_point = 0; num_point < nb_points; ++num_point )
         for( PI r = 0; r < dim; ++r )
             for( PI c = 0; c <= r; ++c )
@@ -183,7 +183,7 @@ UTP void DTP::fill_node( PI node_index, const PI beg_pt_data, const PI end_pt_da
     fill_node( n1, beg, end_pt_data, max_points_per_cell );
 }
 
-UTP void DTP::add_path( TensorView<const TF,2> path, PI num_bsp ) {
+UTP void DTP::add_path( TensorView<const TF,2,Arch> path, PI num_bsp ) {
     Node *node = &nodes[ 0 ];
     for( PI r = 0; r < path.size( 0 ); ++r ) {
         // if we already have the child, go to it
@@ -228,7 +228,7 @@ UTP bool DTP::is_in_charge_of( const Pt &pos ) const {
     return true;
 }
 
-UTP auto DTP::sum_pos_for( TensorView<const TF,2> points ) const -> Pt {
+UTP auto DTP::sum_pos_for( TensorView<const TF,2,Arch> points ) const -> Pt {
     ASSERT( points.size( 1 ) == dim );
     Pt res( dim );
 
@@ -246,9 +246,9 @@ UTP auto DTP::sum_pos_for( TensorView<const TF,2> points ) const -> Pt {
     return res;
 }
 
-UTP SimpleSquareMatrix<TF> DTP::sum_cov_for( TensorView<const TF,2> points, const Pt &avg ) const {
+UTP SimpleSquareMatrix<TF,-1,Arch> DTP::sum_cov_for( TensorView<const TF,2,Arch> points, const Pt &avg ) const {
     ASSERT( points.size( 1 ) == dim );
-    SimpleSquareMatrix<TF> res( dim );
+    SimpleSquareMatrix<TF,-1,Arch> res( dim );
 
     const PI nb_points = points.size( 0 );
     for( PI num_point = 0; num_point < nb_points; ++num_point ) {
@@ -265,7 +265,7 @@ UTP SimpleSquareMatrix<TF> DTP::sum_cov_for( TensorView<const TF,2> points, cons
     return res;
 }
 
-UTP auto DTP::split_hst_for( TensorView<const TF,2> points, const Pt &split_dir, TF split_beg, TF split_end, PI nb_bins ) const -> std::vector<TF> {
+UTP auto DTP::split_hst_for( TensorView<const TF,2,Arch> points, const Pt &split_dir, TF split_beg, TF split_end, PI nb_bins ) const -> std::vector<TF> {
     using namespace std;
     std::vector<TF> res( nb_bins, 0 );
 
@@ -308,8 +308,8 @@ UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix )
 
 } // namespace sdot
 
-template<class AdditionalPtData,class TF,int dim>
-std::ostream &operator<<( std::ostream &os, const sdot::Bsp<AdditionalPtData,TF,dim> &p ) {
+template<class AdditionalPtData,class TF,int dim,class Arch>
+std::ostream &operator<<( std::ostream &os, const sdot::Bsp<AdditionalPtData,TF,dim,Arch> &p ) {
     p.display_rec( os, 0 );
     return os;
 }

@@ -1,5 +1,7 @@
 from pathlib import Path
 import importlib
+import inspect
+import textwrap
 import sys
 import os
 
@@ -177,7 +179,6 @@ class DriverProxy:
 
     # ---------------------------------- helpers ----------------------------------
     def bindings_for( self, f, g ):
-        geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "geometry"
         ct_dim = f.dim if f.dim <= 4 else -1
         f_name = f.__class__.__name__
         g_name = g.__class__.__name__
@@ -186,22 +187,16 @@ class DriverProxy:
 
         full_name = "sdot.bindings.generated." + dylib_name
         try:
-            mod = importlib.import_module( full_name )
+            return importlib.import_module( full_name )
         except ImportError:
-            self.compile_binding_for( dylib_name, self.generate_bindings_sources_for( f, g, dylib_name ) + [
-                geometry_dir / "SimpleSquareMatrix_eigen.cpp",
-                geometry_dir / "VtkOutput.cpp",
-            ] )
-            mod = importlib.import_module( full_name )
+            pass
 
-        return mod
+        self.compile_binding_for( dylib_name, self.bindings_source_for( f, g ) )
+        return importlib.import_module( full_name )
 
-    def generate_bindings_sources_for( self, f, g, dylib_name ) -> list[ Path ]:
-        src_dir = Path( __file__ ).parent / "bindings" / "generated" / "sources" / dylib_name
-        Path.mkdir( src_dir, exist_ok = True, parents = True )
-
+    def binding_source_for( self, f, g ) -> str:
         #
-        bnd_text = """
+        bnd_text = self.cpp_src( """
             #include "../../../../../../cpp/cpu/w2_distance.h"
             #include "../../../nanobind_wrappers.h"
 
@@ -252,32 +247,173 @@ class DriverProxy:
                     "SDOT W2 backward implementation"
                 );
             }
+        """ )
+
+        return bnd_text
+
+    def cpp_src( self, text: str, repl = {} ):
+        """Dedent a triple-quoted C++ source string and prepend a #line directive
+        pointing back to the Python file/line where the call was made, so that
+        compiler errors link directly to the Python source.
         """
 
-        bnd_text = bnd_text.replace( "SDOT_NANOBIND_ARCH", self.normalized_device_type )
-        bnd_text = bnd_text.replace( "SDOT_SCALAR_TYPE", self.normalized_dtype )
+        text = textwrap.dedent( text ).lstrip( "\n" )
 
-        ext = "cpp"
-        if self.normalized_device_type == "cuda":
-            ext = ".cu"
+        for k, v in repl.items():
+            text = text.replace( k, str( v ) )
 
-        bnd_path = src_dir / ( "ot_plan." + ext )
-        bnd_path.write_text( bnd_text )
+        bmap = {
+            "SDOT_NANOBIND_ARCH": self.normalized_device_type,
+            "SDOT_SCALAR_TYPE"  : self.normalized_dtype,
+            "SDOT_ARCH"         : self.normalized_device_type,
+        }
+        for k, v in bmap.items():
+            text = text.replace( k, v )
 
         #
-        return [ bnd_path ]
+        frame = inspect.currentframe().f_back
+        filename = frame.f_code.co_filename.replace( "\\", "/" )
+        lineno   = frame.f_lineno + 1   # +1: content starts on the line after the opening """
+        return f'#line { lineno } "{ filename }"\n' + text
+
+    def Bsp( self, paths_for_all_the_bsps, minmax, indices, points, path, max_points_per_cell = 20 ):
+        """ Make a Bsp
+
+            paths_for_all_the_bsps is used when the bsp will be included in other bsps, not stored locally
+
+        """
+        minmax = self.t2( minmax )
+
+        dim = minmax.shape[ 1 ]
+        ct_dim = dim if dim <= 4 else -1
+        dylib_name = f"bsp_{ self.normalized_dtype }_{ ct_dim }_{ self.normalized_device_type }"
+
+        def src_func():
+            res = self.cpp_src( """
+                #include "../../../../../cpp/geometry/Bsp.h"
+                #include "../../nanobind_wrappers.h"
+                #include <nanobind/stl/string.h>
+                #include <sstream>
+                #include <span>
+
+                namespace nb = nanobind;
+                using namespace sdot;
+
+                using NA = nanobind::device::SDOT_NANOBIND_ARCH;
+                using TF = SDOT_SCALAR_TYPE;
+
+                using Arch = ArchFor<NA>::type;
+                using NF = nb::ndarray<const TF,NA>;
+                using NI = nb::ndarray<const PI,NA>;
+                using MF = nb::ndarray<TF,NA>;
+
+                static constexpr int ct_dim = SDOT_CT_DIM;
+                using BspType = Bsp<PI,TF,2,Arch>;
+                using Pt = BspType::Pt;
+
+                static Pt to_Pt( const auto &na ) {
+                    return std::span<TF>( na.data(), na.size() );
+                }
+
+                NB_MODULE( SDOT_BINDING_NAME, m ) {
+                    nb::class_<BspType>( m, "Bsp" )
+                        .def( "__init__", []( BspType *self, NF all_the_paths, NF min_max_pts, NI indices, NF points, NF path, PI max_points_per_cell ) {
+                            new ( self ) BspType(
+                                tensor_view_3( all_the_paths ),
+                                tensor_view_2( min_max_pts ),
+                                tensor_view_1( indices ),
+                                tensor_view_2( points ),
+                                tensor_view_2( path ),
+                                max_points_per_cell
+                            );
+                        } )
+                        .def( "__repr__", []( const BspType &b ) -> std::string {
+                            std::ostringstream ss;
+                            ss << b;
+                            return ss.str();
+                        } )
+                        .def( "nb_points", []( const BspType &b ) {
+                            return b.nb_points;
+                        } )
+                        .def( "write_vtk", []( const BspType &b, std::string filename ) {
+                            VtkOutput vo;
+                            b.display_vtk( vo );
+                            vo.save( filename );
+                        } )
+                    ;
+                }
+            """, { "SDOT_CT_DIM": ct_dim } )
+            return res
+
+        # get the binding
+        geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "geometry"
+        bnd = self.import_bindings( dylib_name, src_func, [
+            geometry_dir / "SimpleSquareMatrix_eigen.cpp",
+            geometry_dir / "VtkOutput.cpp",
+        ] )
+
+        print( bnd )
+
+        bsp = bnd.Bsp
+
+        return bsp(
+            self.t2( paths_for_all_the_bsps ),
+            minmax,
+            self.t2( indices ),
+            self.t2( points ),
+            self.t2( path ),
+            max_points_per_cell
+        )
 
 
+    def import_bindings( self, dylib_name: str, src_func = None, src_paths: list[ Path ] = [] ) -> any:
+        full_name = "sdot.bindings.generated." + dylib_name
 
-    def compile_binding_for( self, dylib_name: str, src_paths: list[ Path ] ):
+        # the dylib already exists ?
+        try:
+            return importlib.import_module( full_name )
+        except ( ImportError, SystemError ):
+            pass
+
+        # else, make the source, compile
+        self.compile_binding_for( dylib_name, src_func, src_paths )
+
+        # and try again to import it
+        importlib.invalidate_caches()
+        return importlib.import_module( full_name )
+
+    def compile_binding_for( self, dylib_name: str, src_func, src_paths: list[ Path ] ):
         import subprocess
         import shutil
         import sys
         import os
         import re
 
+        #
         project_root = Path( __file__ ).absolute().parents[ 3 ]
         bindings_src = Path( __file__ ).parent / "bindings"
+
+        # make the source text
+        txt = src_func()
+        txt = txt.replace( "SDOT_BINDING_NAME", dylib_name )
+
+        # file extension
+        ext = ".cpp"
+        if self.normalized_device_type == "cuda":
+            ext = ".cu"
+
+        # directories
+        gen_dir = bindings_src / "generated"
+        src_dir = gen_dir / "sources"
+
+        Path.mkdir( src_dir, exist_ok = True, parents = True )
+
+        # ensure generated/ is a proper Python package
+        ( gen_dir / "__init__.py" ).touch( exist_ok = True )
+
+        # store the source text
+        bnd_path = src_dir / ( dylib_name + ext )
+        bnd_path.write_text( txt )
 
         # find the xmake utility
         xmake = shutil.which( "xmake" )
@@ -296,19 +432,81 @@ class DriverProxy:
             f"SDOT_SCALAR_TYPE={ driver.normalized_dtype }",
         ]
 
+        # build nanobind against the active Python so xmake doesn't use a stale cache
+        nb_include, nb_lib = self._ensure_nanobind_lib()
+
         #
         env = {
             **os.environ,
             "SDOT_BINDING_NAME" : dylib_name,
             "SDOT_SRC_INCLUDE"  : str( project_root / "src" ),
             "SDOT_OUTPUT_DIR"   : str( bindings_src / "generated" ),
-            "SDOT_SRC_FILES"    : str.join( ",", map( str, src_paths ) ),
+            "SDOT_SRC_FILES"    : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
             "SDOT_DEFINES"      : str.join( ",", defines ),
             "SDOT_ARCH"         : self.normalized_device_type,
             "PATH"              : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
+            "SDOT_NB_INCLUDE"   : nb_include,
+            "SDOT_NB_LIB"       : nb_lib,
         }
-        subprocess.run( [ xmake, "f", "-y" ], cwd = bindings_src, env = env, check = True )
-        subprocess.run( [ xmake ], cwd = bindings_src, env=env, check = True )
+        def run( cmd ):
+            out = subprocess.run( cmd, cwd = bindings_src, env = env )
+            if out.returncode:
+                sys.exit( out.returncode )
+        run( [ xmake, "f", "-y", "--require=yes" ] )
+        run( [ xmake ] )
+
+    def _ensure_nanobind_lib( self ) -> tuple[ str, str ]:
+        """Build (once) libnanobind.a from the active Python's nanobind sources.
+
+        Returns (SDOT_NB_INCLUDE, SDOT_NB_LIB) strings for xmake.lua.
+        """
+        import importlib.util
+        import subprocess
+        import sysconfig
+        import hashlib
+        import platform
+
+        # locate nanobind installed alongside this Python
+        spec = importlib.util.find_spec( "nanobind" )
+        if spec is None:
+            raise RuntimeError( "nanobind n'est pas installé dans l'environnement Python actif" )
+        nb_src = Path( spec.origin ).parent  # e.g. .../site-packages/nanobind
+
+        py_inc   = sysconfig.get_path( "include" )
+        py_ver   = sysconfig.get_python_version()
+        mac_ver  = platform.mac_ver()[ 0 ] or "unknown"
+
+        # cache key: nanobind version + Python path + macOS version
+        key_str  = f"{ nb_src }|{ sys.executable }|{ mac_ver }"
+        cache_id = hashlib.sha1( key_str.encode() ).hexdigest()[ :12 ]
+        cache_dir = Path.home() / ".cache" / "sdot" / f"nanobind-{ py_ver }-{ cache_id }"
+        lib_path  = cache_dir / "libnanobind_sdot.a"
+
+        if not lib_path.exists():
+            cache_dir.mkdir( parents=True, exist_ok=True )
+            robin_map = nb_src / "ext" / "robin_map" / "include"
+            nb_combined = nb_src / "src" / "nb_combined.cpp"
+            obj_path = cache_dir / "nb_combined.o"
+
+            # compile
+            subprocess.run( [
+                "clang++", "-std=c++20", "-O2",
+                f"-I{ py_inc }", f"-I{ nb_src / 'include' }", f"-I{ robin_map }",
+                "-fPIC", "-fvisibility=hidden",
+                "-mmacosx-version-min=14.0",
+                "-c", str( nb_combined ), "-o", str( obj_path ),
+            ], check=True )
+
+            # archive
+            subprocess.run( [ "ar", "rcs", str( lib_path ), str( obj_path ) ], check=True )
+
+        includes = ",".join( [
+            py_inc,
+            str( nb_src / "include" ),
+            str( nb_src / "ext" / "robin_map" / "include" ),
+        ] )
+        lib = f"{ cache_dir }:nanobind_sdot"
+        return includes, lib
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:

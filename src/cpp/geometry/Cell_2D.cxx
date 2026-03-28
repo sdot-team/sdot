@@ -6,8 +6,8 @@
 
 namespace sdot {
 
-#define UTP template<class TF>
-#define DTP Cell<TF,2>
+#define UTP template<class TF,class Arch>
+#define DTP Cell<TF,2,Arch>
 
 UTP DTP::Cell( int actual_dim ) {
     ASSERT( actual_dim == ct_dim );
@@ -314,7 +314,8 @@ UTP void DTP::check_consistency( TF eps ) const {
 
 } // namespace sdot
 
-T_T std::ostream& operator<<( std::ostream &os, const sdot::Cell<T,2> &p ) {
+template<class TF,class Arch>
+std::ostream& operator<<( std::ostream &os, const sdot::Cell<TF,2,Arch> &p ) {
     for ( const auto &v : p.vertices )
         os << "\n  pos: " << v.pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot;
     return os;

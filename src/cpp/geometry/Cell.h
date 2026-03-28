@@ -8,7 +8,7 @@
 namespace sdot {
 
 //
-template< class TF, int ct_dim = -1 >
+template<class TF,int ct_dim,class Arch>
 class Cell {
 public:
     struct      FaceCorr { PI64 vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
@@ -16,12 +16,12 @@ public:
 
     using       FaceMap  = MapOfUniqueSortedIndices<(ct_dim>1?ct_dim-2:-1),PI,FaceCorr>;
     using       ItemMap  = RecursiveMapOfUniqueSortedIndices<ct_dim,PI,ItemCorr>;
-    using       PF       = PointFactory<TF,ct_dim>;
-    using       DF       = PointFactory<PI,ct_dim>;
+    using       PF       = PointFactory<TF,ct_dim,Arch>;
+    using       DF       = PointFactory<PI,ct_dim,Arch>;
+    using       Pt       = Point<TF,ct_dim,Arch>;
+    using       It       = Point<PI,ct_dim,Arch>;
     using       VF       = std::vector<TF>;
     using       VI       = std::vector<int>;
-    using       Pt       = Point<TF,ct_dim>;
-    using       It       = Point<PI,ct_dim>;
 
     struct EdgeLink {
         PI num_cut_to_remove;
@@ -60,7 +60,7 @@ public:
 
     static void     _for_each_2_comb_excepted     ( PI size, PI excepted, auto&& func );
     void            _cut_int_ext_edge             ( PI n0, EdgeLink &e0, TF s0, TF s1 );
-    void            _add_measure_rec              ( TF &res, SimpleSquareMatrix<TF,ct_dim> &M, const auto &cut_indices, PI prev_vertex_index ) const;
+    void            _add_measure_rec              ( TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, const auto &cut_indices, PI prev_vertex_index ) const;
 
     VI              vertex_corr;                  ///<
     mutable PI64    curr_op_id;                   ///<
@@ -76,7 +76,9 @@ public:
 
 } // namespace sdot
 
-T_Td std::ostream& operator<<( std::ostream& os, const sdot::Cell< T, d >& p );
+
+template<class TF,int ct_dim,class Arch>
+std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,ct_dim,Arch>& p );
 
 #include "Cell.cxx"
 

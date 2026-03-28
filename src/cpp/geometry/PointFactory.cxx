@@ -4,15 +4,15 @@
 
 namespace sdot {
 
-#define UTP template<class T,int dim>
-#define DTP PointFactory<T,dim>
+#define UTP template<class T,int ct_dim,class Arch>
+#define DTP PointFactory<T,ct_dim,Arch>
 
 #undef UTP
 #undef DTP
 
 // --------------------------------------------------------------------------------------
-#define UTP template<class T>
-#define DTP PointFactory<T,-1>
+#define UTP template<class T,class Arch>
+#define DTP PointFactory<T,-1,Arch>
 
 #undef UTP
 #undef DTP

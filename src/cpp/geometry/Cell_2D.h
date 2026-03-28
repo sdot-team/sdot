@@ -5,14 +5,14 @@
 namespace sdot {
 
 //
-template< class TF>
-class Cell<TF,2> {
+template<class TF,class Arch>
+class Cell<TF,2,Arch> {
 public:
     static constexpr PI ct_dim   = 2;
-    using               VF       = std::vector<TF>;
+    using               Pt       = Point<TF,ct_dim,Arch>;
+    using               It       = Point<PI,ct_dim,Arch>;
     using               VI       = std::vector<int>;
-    using               Pt       = Point<TF,ct_dim>;
-    using               It       = Point<PI,ct_dim>;
+    using               VF       = std::vector<TF>;
 
     struct VertexAndCut {
         bool outside_the_cut() const { return sp > 0; }
@@ -52,6 +52,7 @@ public:
 
 } // namespace sdot
 
-T_T std::ostream& operator<<( std::ostream& os, const sdot::Cell<T,2> &p );
+template<class TF,class Arch>
+std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,2,Arch> &p );
 
 #include "Cell_2D.cxx"

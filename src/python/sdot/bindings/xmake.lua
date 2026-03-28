@@ -13,7 +13,14 @@ set_defaultmode( "release" )
 
 -- ──────────────────────────── dépendances ────────────────────────────────────
 
-add_requires( "nanobind" )
+-- If SDOT_NB_INCLUDE / SDOT_NB_LIB are set we use a locally-built nanobind
+-- (compiled against the active Python) instead of the xmake-managed package.
+local _nb_include = os.getenv( "SDOT_NB_INCLUDE" )
+local _nb_lib     = os.getenv( "SDOT_NB_LIB" )
+
+if not _nb_include then
+    add_requires( "nanobind" )
+end
 add_requires( "zpp_bits" )
 add_requires( "eigen" )
 
@@ -40,7 +47,7 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
         -- set_toolchains("cuda")
         -- add_extsources( "cuda", ".cpp" )
         -- add_cuflags( "-arch=native" )
-        add_cuflags( "-diag-suppress 1160", {force = true} )
+        add_cuflags( "-diag-suppress 1160", { force = true } )
         add_cuflags( "--expt-relaxed-constexpr" )
         add_cuflags( "--use_fast_math" )
         add_cuflags( "--extended-lambda" )
@@ -57,17 +64,33 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
     end
 
     -- add_cxxflags("-fvisibility=hidden", "-fvisibility-inlines-hidden")
+    add_cxxflags( "-fdiagnostics-absolute-paths" )
     for _, f in ipairs( split_env("SDOT_EXTRA_CFLAGS" ) ) do
         add_cxxflags(f)
     end
 
-    add_packages( "nanobind", "zpp_bits", "eigen" )
+    if _nb_include then
+        add_packages( "zpp_bits", "eigen" )
+    else
+        add_packages( "nanobind", "zpp_bits", "eigen" )
+    end
 
     on_load( function(target)
         target:add("includedirs", os.getenv( "SDOT_SRC_INCLUDE" ))
+        if _nb_include then
+            target:add("includedirs", _nb_include:split(","))
+            -- Python symbols are resolved at runtime via the interpreter
+            target:add("shflags", "-undefined dynamic_lookup", { force = true })
+            if _nb_lib then
+                -- _nb_lib is "dir:libname", e.g. "/tmp/nb_build:nanobind_mamba"
+                local parts = _nb_lib:split(":")
+                target:add("linkdirs", parts[1])
+                target:add("links",    parts[2])
+            end
+        end
     end )
 
-    after_build( function( target )
+    before_build( function( target )
         import( "core.project.task" )
         -- SDOT_SRC_INCLUDE pointe vers project_root/src, on remonte d'un cran
         local project_root = path.directory( os.getenv( "SDOT_SRC_INCLUDE" ) )

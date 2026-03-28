@@ -13,16 +13,16 @@ namespace sdot {
  *
  * This version is for the generic case (it uses std::map which may be slow).
 */
-template<int s,class PII=PI32,class PIO=PI32>
+template<int s,class Arch,class PII=PI32,class PIO=PI32>
 class MapOfUniqueSortedIndices {
 public:
     void  prepare_for( PII /*max_PI_value*/ ) { values.clear(); }
 
     PIO&  operator[] ( const std::span<PII> &a ) { auto iter = values.find( a ); if ( iter == values.end() ) iter = values.insert( iter, { a, {} } ); return iter->second; }
-    PIO&  operator() ( const Point<PII,s+1> &a, PI ind_to_remove ) { return operator[]( a.without_index( ind_to_remove ) ); }
+    PIO&  operator() ( const Point<PII,s+1,Arch> &a, PI ind_to_remove ) { return operator[]( a.without_index( ind_to_remove ) ); }
 
 private:
-    using Map        = std::map<Point<PII,s>,PIO>;
+    using Map        = std::map<Point<PII,s,Arch>,PIO,Arch>;
 
     Map   values;    ///<
 };

@@ -1,18 +1,29 @@
-# Sdot
+---
+# https://vitepress.dev/reference/default-theme-home-page
+layout: home
 
-Welcome to the documentation for **Sdot**, a high-performance library for Semi-Discrete Optimal Transport.
+hero:
+  name: "SDOT"
+  text: "A high-performance versatile library for Semi-Discrete Optimal Transport."
+  tagline: C trop bien
+  actions:
+    - theme: brand
+      text: Markdown Examples
+      link: /markdown-examples
+    - theme: alt
+      text: API Examples
+      link: /api-examples
 
-Semi-Discrete means that **only one the the two measures has to be a sum of diracs**. It can be seen of a generalisation of discrete optimal transport (as can be seen in fantastic libraries like [geomloss](https://www.kernel-operations.io/geomloss/) or [pot](https://pythonot.github.io/)).
+features:
+  - title: High performance on modern architectures
+    details: Dedicated and optimized algorithms, SIMD, CUDA, Metal, ...
+  - title: Wrappers for a wide variety of languages and frameworks
+    details: Jax, PyTorch, Dask, ...
+  - title: Wide variety of target distributions
+    details: Images, meshes, sum of gaussians, ...
+  - title: Works with any number of dimensions
+    details: 2d, 3d, 42d, ...
+  - title: Distance norms
+    details: Euclidean, TaMere, Gros
+---
 
-Roughly speaking, OT gives ways to compare two functions/measures while allowing "displacement", instead of just comparing the value for each point. [You can click here for a more detailed mathematical background](math_barkground.md)
-
-## Features
-
-- Works in any number of dimension
-- Fast C++/Cuda implementation with Python bindings.
-- Support for **PyTorch** and **JAX** (gradient for every inputs and outputs).
-
-## Navigation
-
-- [Examples](gallery/index.md)
-- [API Reference](api.md)

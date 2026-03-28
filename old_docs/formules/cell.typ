@@ -15,12 +15,5 @@ Si une coupe ne change rien, on vérifie que refaire toutes les coupes avec un v
 
 = GPU
 
-Prop: on fait une zone tampon, on fera des wrappers sur les vecteurs pour utiliser ces zones tampon.
-
-                 2
-
-           c1          c0
-
-       0        c2         1
-
-       
+Prop: dans le paths, on propose max sp pour tous les points
+  -> il faudrait aussi garde minmax

@@ -6,10 +6,10 @@
 namespace sdot {
 
 //
-template<class T,int _dim=-1>
+template<class T,int ct_dim,class Arch>
 class PointFactory {
 public:
-    using PT          = Point<T,_dim>;
+    using PT          = Point<T,ct_dim,Arch>;
 
     /**/  PointFactory( PI /*size*/ ) {}
 
@@ -18,14 +18,14 @@ public:
     PT    value_at    ( PI index, T value ) const { PT res = zeros(); res[ index ] = value; return res; }
     PT    zeros       () const { PT res; for( PI i = 0; i < dim(); ++i ) res[ i ] = 0; return res; }
 
-    PI    dim         () const { return _dim; }
+    PI    dim         () const { return ct_dim; }
 };
 
 //
-template<class T>
-class PointFactory<T,-1> {
+template<class T,class Arch>
+class PointFactory<T,-1,Arch> {
 public:
-    using PT          = Point<T,-1>;
+    using PT          = Point<T,-1,Arch>;
 
     /**/  PointFactory( PI size ) : _dim( size ) {}
 
