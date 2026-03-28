@@ -81,9 +81,7 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
-    def plan( self, f: BatchOfDistributions, g: BatchOfDistributions ):
-        bindings = driver.bindings_for( f, g )
-
+    def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, *args ):

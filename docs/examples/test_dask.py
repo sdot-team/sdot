@@ -80,17 +80,9 @@ points = da.random.random( ( 150, 2 ), chunks = ( 10, 2 ) ).astype( "float64" ) 
 minmax = da.stack( [ da.min( points, axis = 0 ), da.max( points, axis = 0 ) ] ).compute()
 splits, all_the_paths = base_splits( points, max_points_per_bsp = 50 )
 
-bsps = [ dask.delayed( sdot.driver.Bsp )( all_the_paths, minmax, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ), 20 ) for split in splits ]
+bsps = [ dask.delayed( sdot.Bsp )( all_the_paths, minmax, split[ "indices" ], split[ "points" ], numpy.array( split[ "path" ] ), 20 ) for split in splits ]
 
 for i, bsp in enumerate( bsps ):
     bsp = bsp.compute()
     bsp.write_vtk( f"build/out_{ i }.vtk" )
     print( bsp )
-
-# import sys
-# import importlib.util
-# spec = importlib.util.spec_from_file_location('bsp_FP64_2_cpu', 'src/python/sdot/bindings/generated/bsp_FP64_2_cpu.cpython-313-darwin.so')
-# print(spec)
-# m = importlib.util.module_from_spec(spec)
-# spec.loader.exec_module(m)
-# print('ok', m)

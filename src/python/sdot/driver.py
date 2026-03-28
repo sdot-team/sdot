@@ -178,79 +178,6 @@ class DriverProxy:
         return getattr( self._instance, name )
 
     # ---------------------------------- helpers ----------------------------------
-    def bindings_for( self, f, g ):
-        ct_dim = f.dim if f.dim <= 4 else -1
-        f_name = f.__class__.__name__
-        g_name = g.__class__.__name__
-
-        dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
-
-        full_name = "sdot.bindings.generated." + dylib_name
-        try:
-            return importlib.import_module( full_name )
-        except ImportError:
-            pass
-
-        self.compile_binding_for( dylib_name, self.bindings_source_for( f, g ) )
-        return importlib.import_module( full_name )
-
-    def binding_source_for( self, f, g ) -> str:
-        #
-        bnd_text = self.cpp_src( """
-            #include "../../../../../../cpp/cpu/w2_distance.h"
-            #include "../../../nanobind_wrappers.h"
-
-            namespace nb = nanobind;
-            using namespace sdot;
-
-            using NA = nanobind::device::SDOT_NANOBIND_ARCH;
-            using TF = SDOT_SCALAR_TYPE;
-
-            using Arch = ArchFor<NA>::type;
-            using NF = nb::ndarray<const TF,NA>;
-            using MF = nb::ndarray<TF,NA>;
-
-            // Forward function that works with both 1D and 2D arrays
-            void forward( NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys, MF distance, MF barycenters, MF potentials, MF cuts ) {
-                BatchOfAffine1d<const TF,Arch> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-                BatchOfDiracSet<const TF,Arch> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-                w2_distance( diracs, functions, tensor_view_1( distance ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ) );
-            }
-
-            void backward(
-                NF barycenters, NF potentials, NF cuts,
-                NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys,
-                NF grad_distances, NF grad_barycenters, NF grad_potentials, NF grad_cuts,
-                MF grad_dirac_xs, MF grad_dirac_ws, MF grad_point_xs, MF grad_point_ys
-            ) {
-                BatchOfAffine1d<TF,Arch> grad_functions{ .xs = tensor_view_2( grad_point_xs ), .ys = tensor_view_2( grad_point_ys ) };
-                BatchOfDiracSet<TF,Arch> grad_diracs{ .xs = tensor_view_3( grad_dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( grad_dirac_ws ) };
-                BatchOfAffine1d<const TF,Arch> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-                BatchOfDiracSet<const TF,Arch> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-                w2_distance_backward( tensor_view_1( grad_distances ), tensor_view_2( grad_barycenters ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ), diracs, functions, grad_diracs, grad_functions );
-            }
-
-            #define MK_MOD( NAME ) NB_MODULE( NAME, m )
-
-            MK_MOD( SDOT_BINDING_NAME ) {
-                m.def( "forward", &forward,
-                    nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "point_xs" ), nb::arg( "point_ys" ),
-                    nb::arg( "distance" ), nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
-                    "SDOT plan to get distance and barycenters with f = sum of diracs (1D), g = piecewise affine function"
-                );
-
-                m.def( "backward", &backward,
-                    nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
-                    nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "points_xs" ), nb::arg( "points_ys" ),
-                    nb::arg( "grad_distance" ), nb::arg( "grad_barycenters" ), nb::arg( "grad_potentials" ), nb::arg( "grad_cuts" ),
-                    nb::arg( "grad_dirac_xs" ), nb::arg( "grad_dirac_ws" ), nb::arg( "grad_points_xs" ), nb::arg("grad_points_ys"),
-                    "SDOT W2 backward implementation"
-                );
-            }
-        """ )
-
-        return bnd_text
-
     def cpp_src( self, text: str, repl = {} ):
         """Dedent a triple-quoted C++ source string and prepend a #line directive
         pointing back to the Python file/line where the call was made, so that
@@ -276,96 +203,6 @@ class DriverProxy:
         lineno   = frame.f_lineno + 1   # +1: content starts on the line after the opening """
         return f'#line { lineno } "{ filename }"\n' + text
 
-    def Bsp( self, paths_for_all_the_bsps, minmax, indices, points, path, max_points_per_cell = 20 ):
-        """ Make a Bsp
-
-            paths_for_all_the_bsps is used when the bsp will be included in other bsps, not stored locally
-
-        """
-        minmax = self.t2( minmax )
-
-        dim = minmax.shape[ 1 ]
-        ct_dim = dim if dim <= 4 else -1
-        dylib_name = f"bsp_{ self.normalized_dtype }_{ ct_dim }_{ self.normalized_device_type }"
-
-        def src_func():
-            res = self.cpp_src( """
-                #include "../../../../../cpp/geometry/Bsp.h"
-                #include "../../nanobind_wrappers.h"
-                #include <nanobind/stl/string.h>
-                #include <sstream>
-                #include <span>
-
-                namespace nb = nanobind;
-                using namespace sdot;
-
-                using NA = nanobind::device::SDOT_NANOBIND_ARCH;
-                using TF = SDOT_SCALAR_TYPE;
-
-                using Arch = ArchFor<NA>::type;
-                using NF = nb::ndarray<const TF,NA>;
-                using NI = nb::ndarray<const PI,NA>;
-                using MF = nb::ndarray<TF,NA>;
-
-                static constexpr int ct_dim = SDOT_CT_DIM;
-                using BspType = Bsp<PI,TF,2,Arch>;
-                using Pt = BspType::Pt;
-
-                static Pt to_Pt( const auto &na ) {
-                    return std::span<TF>( na.data(), na.size() );
-                }
-
-                NB_MODULE( SDOT_BINDING_NAME, m ) {
-                    nb::class_<BspType>( m, "Bsp" )
-                        .def( "__init__", []( BspType *self, NF all_the_paths, NF min_max_pts, NI indices, NF points, NF path, PI max_points_per_cell ) {
-                            new ( self ) BspType(
-                                tensor_view_3( all_the_paths ),
-                                tensor_view_2( min_max_pts ),
-                                tensor_view_1( indices ),
-                                tensor_view_2( points ),
-                                tensor_view_2( path ),
-                                max_points_per_cell
-                            );
-                        } )
-                        .def( "__repr__", []( const BspType &b ) -> std::string {
-                            std::ostringstream ss;
-                            ss << b;
-                            return ss.str();
-                        } )
-                        .def( "nb_points", []( const BspType &b ) {
-                            return b.nb_points;
-                        } )
-                        .def( "write_vtk", []( const BspType &b, std::string filename ) {
-                            VtkOutput vo;
-                            b.display_vtk( vo );
-                            vo.save( filename );
-                        } )
-                    ;
-                }
-            """, { "SDOT_CT_DIM": ct_dim } )
-            return res
-
-        # get the binding
-        geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "geometry"
-        bnd = self.import_bindings( dylib_name, src_func, [
-            geometry_dir / "SimpleSquareMatrix_eigen.cpp",
-            geometry_dir / "VtkOutput.cpp",
-        ] )
-
-        print( bnd )
-
-        bsp = bnd.Bsp
-
-        return bsp(
-            self.t2( paths_for_all_the_bsps ),
-            minmax,
-            self.t2( indices ),
-            self.t2( points ),
-            self.t2( path ),
-            max_points_per_cell
-        )
-
-
     def import_bindings( self, dylib_name: str, src_func = None, src_paths: list[ Path ] = [] ) -> any:
         full_name = "sdot.bindings.generated." + dylib_name
 
@@ -388,10 +225,18 @@ class DriverProxy:
         import sys
         import os
         import re
+        import nanobind
+        import sysconfig
 
         #
         project_root = Path( __file__ ).absolute().parents[ 3 ]
         bindings_src = Path( __file__ ).parent / "bindings"
+
+        # nanobind paths
+        nb_include    = nanobind.include_dir()
+        nb_source     = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
+        nb_ext_include = os.path.join( os.path.dirname( nb_include ), "ext", "robin_map", "include" )
+        py_include    = sysconfig.get_path( "include" )
 
         # make the source text
         txt = src_func()
@@ -432,81 +277,35 @@ class DriverProxy:
             f"SDOT_SCALAR_TYPE={ driver.normalized_dtype }",
         ]
 
-        # build nanobind against the active Python so xmake doesn't use a stale cache
-        nb_include, nb_lib = self._ensure_nanobind_lib()
+        # per-Python package cache and build dir so xmake recompiles nanobind
+        # against the correct Python when switching environments
+        import platform
+        abi_tag  = f"{ sys.implementation.cache_tag }-{ platform.machine() }"  # e.g. cpython-313-arm64
+        xmake_cache = Path.home() / ".cache" / "sdot" / f"xmake-{ abi_tag }"
+        build_dir   = xmake_cache / "build" / dylib_name
 
         #
         env = {
             **os.environ,
-            "SDOT_BINDING_NAME" : dylib_name,
-            "SDOT_SRC_INCLUDE"  : str( project_root / "src" ),
-            "SDOT_OUTPUT_DIR"   : str( bindings_src / "generated" ),
-            "SDOT_SRC_FILES"    : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
-            "SDOT_DEFINES"      : str.join( ",", defines ),
-            "SDOT_ARCH"         : self.normalized_device_type,
-            "PATH"              : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
-            "SDOT_NB_INCLUDE"   : nb_include,
-            "SDOT_NB_LIB"       : nb_lib,
+            "SDOT_BINDING_NAME"      : dylib_name,
+            "SDOT_SRC_INCLUDE"       : str( project_root / "src" ),
+            "SDOT_OUTPUT_DIR"        : str( bindings_src / "generated" ),
+            "SDOT_SRC_FILES"         : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
+            "SDOT_DEFINES"           : str.join( ",", defines ),
+            "SDOT_ARCH"              : self.normalized_device_type,
+            "SDOT_NANOBIND_INC"      : str( nb_include ),
+            "SDOT_NANOBIND_SRC"      : str( nb_source ),
+            "SDOT_ROBIN_MAP_INC"     : str( nb_ext_include ),
+            "SDOT_PYTHON_INC"        : str( py_include ),
+            "PATH"                   : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
+            "XMAKE_PKG_INSTALLDIR"   : str( xmake_cache / "packages" ),
         }
         def run( cmd ):
             out = subprocess.run( cmd, cwd = bindings_src, env = env )
             if out.returncode:
                 sys.exit( out.returncode )
-        run( [ xmake, "f", "-y", "--require=yes" ] )
+        run( [ xmake, "f", "-y", "--require=yes", f"--builddir={ build_dir }" ] )
         run( [ xmake ] )
-
-    def _ensure_nanobind_lib( self ) -> tuple[ str, str ]:
-        """Build (once) libnanobind.a from the active Python's nanobind sources.
-
-        Returns (SDOT_NB_INCLUDE, SDOT_NB_LIB) strings for xmake.lua.
-        """
-        import importlib.util
-        import subprocess
-        import sysconfig
-        import hashlib
-        import platform
-
-        # locate nanobind installed alongside this Python
-        spec = importlib.util.find_spec( "nanobind" )
-        if spec is None:
-            raise RuntimeError( "nanobind n'est pas installé dans l'environnement Python actif" )
-        nb_src = Path( spec.origin ).parent  # e.g. .../site-packages/nanobind
-
-        py_inc   = sysconfig.get_path( "include" )
-        py_ver   = sysconfig.get_python_version()
-        mac_ver  = platform.mac_ver()[ 0 ] or "unknown"
-
-        # cache key: nanobind version + Python path + macOS version
-        key_str  = f"{ nb_src }|{ sys.executable }|{ mac_ver }"
-        cache_id = hashlib.sha1( key_str.encode() ).hexdigest()[ :12 ]
-        cache_dir = Path.home() / ".cache" / "sdot" / f"nanobind-{ py_ver }-{ cache_id }"
-        lib_path  = cache_dir / "libnanobind_sdot.a"
-
-        if not lib_path.exists():
-            cache_dir.mkdir( parents=True, exist_ok=True )
-            robin_map = nb_src / "ext" / "robin_map" / "include"
-            nb_combined = nb_src / "src" / "nb_combined.cpp"
-            obj_path = cache_dir / "nb_combined.o"
-
-            # compile
-            subprocess.run( [
-                "clang++", "-std=c++20", "-O2",
-                f"-I{ py_inc }", f"-I{ nb_src / 'include' }", f"-I{ robin_map }",
-                "-fPIC", "-fvisibility=hidden",
-                "-mmacosx-version-min=14.0",
-                "-c", str( nb_combined ), "-o", str( obj_path ),
-            ], check=True )
-
-            # archive
-            subprocess.run( [ "ar", "rcs", str( lib_path ), str( obj_path ) ], check=True )
-
-        includes = ",".join( [
-            py_inc,
-            str( nb_src / "include" ),
-            str( nb_src / "ext" / "robin_map" / "include" ),
-        ] )
-        lib = f"{ cache_dir }:nanobind_sdot"
-        return includes, lib
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:

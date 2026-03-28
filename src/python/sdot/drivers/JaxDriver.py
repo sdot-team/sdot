@@ -88,8 +88,7 @@ class JaxDriver:
     def repeat( self, tensor, shape ):
         return jnp.tile( tensor, shape )
 
-    def plan( self, f, g ):
-        bindings = driver.bindings_for( f, g )
+    def plan( self, bindings, f, g ):
         np_dtype = np.dtype( self.dtype )
 
         input_tensors = f.tensor_list() + g.tensor_list()
