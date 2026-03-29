@@ -233,10 +233,10 @@ class DriverProxy:
         bindings_src = Path( __file__ ).parent / "bindings"
 
         # nanobind paths
-        nb_include    = nanobind.include_dir()
-        nb_source     = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
-        nb_ext_include = os.path.join( os.path.dirname( nb_include ), "ext", "robin_map", "include" )
-        py_include    = sysconfig.get_path( "include" )
+        nanobind_include_dir = nanobind.include_dir()
+        nanobind_ext_include = os.path.join( os.path.dirname( nanobind_include_dir ), "ext", "robin_map", "include" )
+        nanobind_source      = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
+        python_include       = sysconfig.get_path( "include" )
 
         # make the source text
         txt = src_func()
@@ -275,6 +275,7 @@ class DriverProxy:
         defines = [
             f"SDOT_NANOBIND_ARCH={ self.normalized_device_type }",
             f"SDOT_SCALAR_TYPE={ driver.normalized_dtype }",
+            f"SDOT_ARCH={ self.normalized_device_type }",
         ]
 
         # per-Python package cache and build dir so xmake recompiles nanobind
@@ -282,7 +283,7 @@ class DriverProxy:
         import platform
         abi_tag  = f"{ sys.implementation.cache_tag }-{ platform.machine() }"  # e.g. cpython-313-arm64
         xmake_cache = Path.home() / ".cache" / "sdot" / f"xmake-{ abi_tag }"
-        build_dir   = xmake_cache / "build" / dylib_name
+        build_dir = xmake_cache / "build" / dylib_name
 
         #
         env = {
@@ -293,10 +294,10 @@ class DriverProxy:
             "SDOT_SRC_FILES"         : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
             "SDOT_DEFINES"           : str.join( ",", defines ),
             "SDOT_ARCH"              : self.normalized_device_type,
-            "SDOT_NANOBIND_INC"      : str( nb_include ),
-            "SDOT_NANOBIND_SRC"      : str( nb_source ),
-            "SDOT_ROBIN_MAP_INC"     : str( nb_ext_include ),
-            "SDOT_PYTHON_INC"        : str( py_include ),
+            "SDOT_NANOBIND_INC"      : str( nanobind_include_dir ),
+            "SDOT_NANOBIND_SRC"      : str( nanobind_source ),
+            "SDOT_ROBIN_MAP_INC"     : str( nanobind_ext_include ),
+            "SDOT_PYTHON_INC"        : str( python_include ),
             "PATH"                   : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
             "XMAKE_PKG_INSTALLDIR"   : str( xmake_cache / "packages" ),
         }

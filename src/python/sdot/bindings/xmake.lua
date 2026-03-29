@@ -69,9 +69,9 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
         target:add("sysincludedirs", os.getenv( "SDOT_PYTHON_INC" ))
 
         if target:is_plat("macosx") then
-             target:add("cxflags", "-mmacosx-version-min=11.0")
-             target:add("ldflags", "-mmacosx-version-min=11.0")
-             target:add("shflags", "-mmacosx-version-min=11.0")
+            --  target:add("cxflags", "-mmacosx-version-min=11.0")
+            --  target:add("ldflags", "-mmacosx-version-min=11.0")
+            --  target:add("shflags", "-mmacosx-version-min=11.0")
              target:add("ldflags", "-Wl,-undefined,dynamic_lookup")
              target:add("shflags", "-Wl,-undefined,dynamic_lookup")
         end
