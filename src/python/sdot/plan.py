@@ -35,9 +35,9 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
     dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
     def src_func():
-        return driver.cpp_src( """
-            #include "../../../../../cpp/cpu/w2_distance.h"
-            #include "../../nanobind_wrappers.h"
+        return driver.cpp_src( { "SDOT_CT_DIM": ct_dim }, """
+            #include <sdot/nanobind_wrappers.h>
+            #include <sdot/cpu/w2_distance.h>
 
             namespace nb = nanobind;
             using namespace sdot;
@@ -86,7 +86,7 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
                     "SDOT W2 backward implementation"
                 );
             }
-        """, { "SDOT_CT_DIM": ct_dim } )
+        """ )
 
     # get the binding
     bindings = driver.import_bindings( dylib_name, src_func, [] )
