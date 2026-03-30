@@ -25,11 +25,14 @@ UTP void DTP::display_vtk( VtkOutput& vo ) const {
     }
 }
 
-UTP DTP DTP::axis_aligned_hypercube( int dim, TF length ) {
+UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1 ) {
+    const TF length = norm_2( p0 - p1 );
+    const PI dim = p0.size();
+
     Cell res = englobing_simplex( dim, 10 * length );
     for( PI d = 0; d < dim; ++d ) {
-        res.cut( res.pf.value_at( d, +1 ), length / 2, 2 * d + 0 );
-        res.cut( res.pf.value_at( d, -1 ), length / 2, 2 * d + 0 );
+        res.cut( res.pf.value_at( d, +1 ), + p1[ d ], 2 * d + 0 );
+        res.cut( res.pf.value_at( d, -1 ), - p0[ d ], 2 * d + 1 );
     }
     return res;
 }

@@ -4,8 +4,21 @@ class Cell:
     """
 
     """
-    def __init__( self ):
+    def __init__( self, dim = None ):
         self._instance = None
+        self._bindings = None
+
+        if dim is not None:
+            self._checked_instance( dim )
+
+
+    @staticmethod
+    def axis_aligned_hypercube( min_max ):
+        min_max = driver.array( min_max )
+        dim = min_max.shape[ 1 ]
+        res = Cell()
+        res._instance = res._checked_bindings( dim ).axis_aligned_hypercube( min_max )
+        return res
 
     def cut( self, dir, dot: float, id = 0 ):
         dir = driver.array( dir )
@@ -19,10 +32,16 @@ class Cell:
     def _checked_instance( self, dim ):
         if self._instance is not None:
             return self._instance
+        self._instance = self._checked_bindings( dim ).Cell( dim )
+        return self._instance
+
+    def _checked_bindings( self, dim ):
+        if self._bindings is not None:
+            return self._bindings
         ct_dim = dim if dim <= 4 else -1
         dylib_name = f"Cell_{ ct_dim }_{ driver.normalized_dtype }"
-        self._instance = driver.import_bindings( dylib_name, lambda: self._binding_code( ct_dim ) ).Cell( dim )
-        return self._instance
+        self._bindings = driver.import_bindings( dylib_name, lambda: self._binding_code( ct_dim ) )
+        return self._bindings
 
 
     def _binding_code( self, ct_dim ):
@@ -52,6 +71,13 @@ class Cell:
             }
 
             NB_MODULE( SDOT_BINDING_NAME, m ) {
+                m.def( "axis_aligned_hypercube", []( AF min_max ) {
+                    auto t = tensor_view_2( min_max );
+                    return CellType::axis_aligned_hypercube(
+                        to_Pt( t.row( 0 ) ),
+                        to_Pt( t.row( 1 ) )
+                    );
+                } );
                 nb::class_<CellType>( m, "Cell" )
                     .def( "__init__", []( CellType *self, int dim ) {
                         new ( self ) CellType(

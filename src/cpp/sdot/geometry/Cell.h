@@ -46,7 +46,7 @@ public:
 
     /**/            Cell                          ( int dim );
 
-    static Cell     axis_aligned_hypercube        ( int dim, TF length );
+    static Cell     axis_aligned_hypercube        ( Pt p0, Pt p1 );
     static Cell     axis_aligned_simplex          ( int dim, TF length );
     static Cell     englobing_simplex             ( Pt center, TF radius );
     static Cell     simplex                       ( int dim, std::span<Pt> points );

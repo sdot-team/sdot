@@ -9,7 +9,5 @@ import sdot
 # for i, item in enumerate( bsp.items ):
 #     item.write_vtk( f"results/out_{ i }.vtk" ).compute()
 #     # ic( item.compute() )
-cell = sdot.Cell()
-cell.cut( [ 1, 0 ], 10 )
-
+cell = sdot.Cell.axis_aligned_hypercube( [ [ -3, -7 ], [ 2, 1 ] ] )
 print( cell )

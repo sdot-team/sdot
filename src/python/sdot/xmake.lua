@@ -27,8 +27,6 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
     set_languages( "cxx20" )
     set_targetdir( os.getenv( "SDOT_OUTPUT_DIR" ) )
 
-    add_includedirs( path.absolute( "../../../cpp/", os.scriptdir() ) )
-
     arch = os.getenv( "SDOT_ARCH" )
     if arch == "cuda" then
         add_rules( "cuda.build" )
@@ -79,9 +77,9 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
         end
     end )
 
-    before_build( function( target )
-        import( "core.project.task" )
-        local project_root = path.directory( os.getenv( "SDOT_SRC_INCLUDE" ) )
-        task.run( "project", { kind = "compile_commands", outputdir = project_root } )
-    end )
+    -- before_build( function( target )
+    --     import( "core.project.task" )
+    --     local project_root = path.directory( os.getenv( "SDOT_SRC_INCLUDE" ) )
+    --     task.run( "project", { kind = "compile_commands", outputdir = project_root } )
+    -- end )
 target_end()

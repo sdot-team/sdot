@@ -221,7 +221,7 @@ class DriverProxy:
             return self._dylib_cache[ dylib_name ]
 
         # the dylib already exists ?
-        full_name = "sdot.bindings.generated." + dylib_name
+        full_name = "sdot.bindings." + dylib_name
         if "SDOT_BUILD" not in os.environ or int( os.environ[ "SDOT_BUILD" ] ) == 0:
             try:
                 return importlib.import_module( full_name )
@@ -233,26 +233,36 @@ class DriverProxy:
 
         # and try again to import it
         importlib.invalidate_caches()
-        return importlib.import_module( full_name )
+        res = importlib.import_module( full_name )
+        self._dylib_cache[ dylib_name ] = res
+        return res
 
     def compile_binding_for( self, dylib_name: str, src_func, src_paths: list[ Path ] ):
         import subprocess
+        import sysconfig
+        import nanobind
         import shutil
         import sys
         import os
         import re
-        import nanobind
-        import sysconfig
 
         #
+        from ._cache import bindings_cache_dir
+
         project_root = Path( __file__ ).absolute().parents[ 3 ]
-        bindings_src = Path( __file__ ).parent / "bindings"
+
+        # dir for the .so
+        dylib_dir = bindings_cache_dir()
+
+        # dir for the generated sources
+        src_dir = dylib_dir / "src" / dylib_name
+        src_dir.mkdir( parents = True, exist_ok = True )
 
         # nanobind paths
         nanobind_include_dir = nanobind.include_dir()
         nanobind_ext_include = os.path.join( os.path.dirname( nanobind_include_dir ), "ext", "robin_map", "include" )
-        nanobind_source      = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
-        python_include       = sysconfig.get_path( "include" )
+        nanobind_source = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
+        python_include = sysconfig.get_path( "include" )
 
         # make the source text
         txt = src_func()
@@ -263,17 +273,8 @@ class DriverProxy:
         if self.normalized_device_type == "cuda":
             ext = ".cu"
 
-        # directories
-        gen_dir = bindings_src / "generated"
-        src_dir = gen_dir / "sources"
-
-        Path.mkdir( src_dir, exist_ok = True, parents = True )
-
-        # ensure generated/ is a proper Python package
-        ( gen_dir / "__init__.py" ).touch( exist_ok = True )
-
         # store the source text
-        bnd_path = src_dir / ( dylib_name + ext )
+        bnd_path = src_dir / ( "binding" + ext )
         bnd_path.write_text( txt )
 
         # find the xmake utility
@@ -294,19 +295,12 @@ class DriverProxy:
             f"SDOT_ARCH={ self.normalized_device_type }",
         ]
 
-        # per-Python package cache and build dir so xmake recompiles nanobind
-        # against the correct Python when switching environments
-        import platform
-        abi_tag  = f"{ sys.implementation.cache_tag }-{ platform.machine() }"  # e.g. cpython-313-arm64
-        xmake_cache = Path.home() / ".cache" / "sdot" / f"xmake-{ abi_tag }"
-        build_dir = xmake_cache / "build" / dylib_name
-
         #
         env = {
             **os.environ,
             "SDOT_BINDING_NAME"      : dylib_name,
-            "SDOT_SRC_INCLUDE"       : str( project_root / "src" ),
-            "SDOT_OUTPUT_DIR"        : str( bindings_src / "generated" ),
+            "SDOT_SRC_INCLUDE"       : str( project_root / "src" / "cpp" ),
+            "SDOT_OUTPUT_DIR"        : str( dylib_dir ),
             "SDOT_SRC_FILES"         : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
             "SDOT_DEFINES"           : str.join( ",", defines ),
             "SDOT_ARCH"              : self.normalized_device_type,
@@ -315,14 +309,14 @@ class DriverProxy:
             "SDOT_ROBIN_MAP_INC"     : str( nanobind_ext_include ),
             "SDOT_PYTHON_INC"        : str( python_include ),
             "PATH"                   : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
-            "XMAKE_PKG_INSTALLDIR"   : str( xmake_cache / "packages" ),
         }
+        sdot_dir = Path( __file__ ).parent
         def run( cmd ):
-            out = subprocess.run( cmd, cwd = bindings_src, env = env )
+            out = subprocess.run( cmd, cwd = dylib_dir, env = env )
             if out.returncode:
                 sys.exit( out.returncode )
-        run( [ xmake, "f", "-y", "--require=yes", f"--builddir={ build_dir }" ] )
-        run( [ xmake ] )
+        run( [ xmake, "f", "-P", str( sdot_dir ), "-y", "--require=yes" ] )
+        run( [ xmake, "-P", str( sdot_dir ) ] )
 
     # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:
