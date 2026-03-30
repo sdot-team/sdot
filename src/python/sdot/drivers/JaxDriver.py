@@ -73,7 +73,8 @@ class JaxDriver:
         if tensor is None:
             return tensor
         res = jnp.asarray( tensor, dtype = self.dtype, device = self.device )
-        assert res.ndim == ndim
+        if ndim is not None:
+            assert res.ndim == ndim
         return res
 
     def ones( self, shape ):

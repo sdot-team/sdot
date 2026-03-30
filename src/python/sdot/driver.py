@@ -1,7 +1,8 @@
 from pathlib import Path
 import importlib
-import inspect
 import textwrap
+import inspect
+import numpy
 import sys
 import os
 
@@ -41,6 +42,7 @@ class DriverProxy:
         self._user_device = None
         self._user_dtype = None
 
+        self._dylib_cache = {}
         self._instance = None
 
         if d := os.getenv( "SDOT_FRAMEWORK" ):
@@ -129,6 +131,12 @@ class DriverProxy:
     def dtype( self, value ):
         self.user_dtype = value
 
+
+    # ---------------------------------- itype ----------------------------------
+    @property
+    def numpy_itype( self ):
+        return numpy.int64
+
     # ---------------------------------- device ----------------------------------
     @property
     def normalized_device_type( self ) -> str:
@@ -171,6 +179,10 @@ class DriverProxy:
     def device( self, value ):
         self.user_device = value
 
+    # ---------------------------------- arrays ----------------------------------
+    def array( self, a ):
+        return self.tn( a, None )
+
     # ---------------------------------- __getattr__ ----------------------------------
     def __getattr__( self, name ):
         if self._instance is None:
@@ -178,7 +190,7 @@ class DriverProxy:
         return getattr( self._instance, name )
 
     # ---------------------------------- helpers ----------------------------------
-    def cpp_src( self, text: str, repl = {} ):
+    def cpp_src( self, repl: dict[str,any], text: str ):
         """Dedent a triple-quoted C++ source string and prepend a #line directive
         pointing back to the Python file/line where the call was made, so that
         compiler errors link directly to the Python source.
@@ -204,13 +216,17 @@ class DriverProxy:
         return f'#line { lineno } "{ filename }"\n' + text
 
     def import_bindings( self, dylib_name: str, src_func = None, src_paths: list[ Path ] = [] ) -> any:
-        full_name = "sdot.bindings.generated." + dylib_name
+        # in the cache ?
+        if dylib_name in self._dylib_cache:
+            return self._dylib_cache[ dylib_name ]
 
         # the dylib already exists ?
-        try:
-            return importlib.import_module( full_name )
-        except ( ImportError, SystemError ):
-            pass
+        full_name = "sdot.bindings.generated." + dylib_name
+        if "SDOT_BUILD" not in os.environ or int( os.environ[ "SDOT_BUILD" ] ) == 0:
+            try:
+                return importlib.import_module( full_name )
+            except ( ImportError, SystemError ):
+                pass
 
         # else, make the source, compile
         self.compile_binding_for( dylib_name, src_func, src_paths )

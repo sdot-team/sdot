@@ -1,0 +1,77 @@
+from .driver import driver
+
+class Cell:
+    """
+
+    """
+    def __init__( self ):
+        self._instance = None
+
+    def cut( self, dir, dot: float, id = 0 ):
+        dir = driver.array( dir )
+        assert dir.ndim == 1
+
+        self._checked_instance( dir.shape[ 0 ] ).cut( dir, dot, id )
+
+    def __repr__( self ) -> str:
+        return self._instance.__repr__()
+
+    def _checked_instance( self, dim ):
+        if self._instance is not None:
+            return self._instance
+        ct_dim = dim if dim <= 4 else -1
+        dylib_name = f"Cell_{ ct_dim }_{ driver.normalized_dtype }"
+        self._instance = driver.import_bindings( dylib_name, lambda: self._binding_code( ct_dim ) ).Cell( dim )
+        return self._instance
+
+
+    def _binding_code( self, ct_dim ):
+        return driver.cpp_src( { "SDOT_CT_DIM": ct_dim }, """
+            #include <sdot/nanobind_wrappers.h>
+            #include <nanobind/stl/string.h>
+            #include <sdot/geometry/Cell.h>
+            #include <sstream>
+            #include <span>
+
+            namespace nb = nanobind;
+            using namespace sdot;
+
+            using NbArch = nanobind::device::cpu;
+            using Arch = ArchFor<NbArch>::type;
+            using TF = SDOT_SCALAR_TYPE;
+
+            using AF = nb::ndarray<const TF,NbArch>;
+            using MF = nb::ndarray<TF,NbArch>;
+
+            static constexpr int ct_dim = SDOT_CT_DIM;
+            using CellType = Cell<TF,ct_dim,Arch>;
+            using Pt = CellType::Pt;
+
+            static Pt to_Pt( const auto &na ) {
+                return std::span<const TF>( na.data(), na.size() );
+            }
+
+            NB_MODULE( SDOT_BINDING_NAME, m ) {
+                nb::class_<CellType>( m, "Cell" )
+                    .def( "__init__", []( CellType *self, int dim ) {
+                        new ( self ) CellType(
+                            dim
+                        );
+                    } )
+                    .def( "__repr__", []( const CellType &b ) -> std::string {
+                        std::ostringstream ss;
+                        ss << b;
+                        return ss.str();
+                    } )
+                    .def( "cut", []( CellType &self, const AF dir, TF dot, PI id ) {
+                        self.cut( to_Pt( dir ), dot, id );
+                    } )
+                    // .def( "write_vtk", []( const CellType &b, std::string filename ) {
+                    //     VtkOutput vo;
+                    //     b.display_vtk( vo );
+                    //     vo.save( filename );
+                    // } )
+                ;
+            }
+        """ )
+

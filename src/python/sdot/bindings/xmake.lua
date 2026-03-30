@@ -27,6 +27,8 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
     set_languages( "cxx20" )
     set_targetdir( os.getenv( "SDOT_OUTPUT_DIR" ) )
 
+    add_includedirs( path.absolute( "../../../cpp/", os.scriptdir() ) )
+
     arch = os.getenv( "SDOT_ARCH" )
     if arch == "cuda" then
         add_rules( "cuda.build" )

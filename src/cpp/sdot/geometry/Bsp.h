@@ -17,6 +17,7 @@ public:
     using Ce = Cell<TF,ct_dim,Arch>;  ///< cell
     using Ad = AdditionalPtData; ///<
     using Ci = std::array<PI,2>; ///< child indices
+    using Sm = std::array<TF,2>; ///< split maximums
 
     struct Node {
         /**/ Node     ( PI dim ) : child_indices{ 0, 0 }, beg_pt_data( 0 ), end_pt_data( 0 ), split_dir( dim ), cell( dim ) {}
@@ -27,6 +28,7 @@ public:
         Ci   child_indices;
         PI   beg_pt_data;
         PI   end_pt_data;
+        Sm   split_maxs;
         Pt   split_dir;
         TF   split_dot;
         PI   num_bsp;
@@ -56,7 +58,7 @@ public:
     bool                is_in_charge_of( const Pt &pos ) const;
     void                display_vtk    ( VtkOutput &vo ) const;
 
-    void                make_node_cells( PI node_index, TensorView<const TF,2,Arch> min_max );
+    void                make_node_cells( PI node_index );
     auto                split_hst_for  ( TensorView<const TF,2,Arch> points, const Pt &split_dir, TF split_beg, TF split_end, PI nb_bins ) const -> std::vector<TF>;
     auto                sum_pos_for    ( TensorView<const TF,2,Arch> points ) const -> Pt; ///< [ sum of xs, ..., sum of zs, sum of 1 ]
     auto                sum_cov_for    ( TensorView<const TF,2,Arch> points, const Pt &avg ) const -> SimpleSquareMatrix<TF,-1,Arch>;

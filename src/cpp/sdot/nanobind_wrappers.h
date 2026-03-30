@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../../../cpp/support/common_macros.h"
-#include "../../../cpp/support/TensorView.h"
+#include "support/common_macros.h"
+#include "support/TensorView.h"
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 

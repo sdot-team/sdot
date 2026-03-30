@@ -21,7 +21,7 @@ public:
     T_U      Point                   ( TensorView<U,1,Arch> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     // T_d   Point                   ( const Point<T,d,A> &values ) : data( values.begin(), values.end() ) {}
     // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
-    /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
+    /**/     Point                   ( std::span<const T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     /**/     Point                   ( PI /*size*/ = ct_dim ) { for( auto &v : content ) v = 0; }
 
     T_Up     operator std::array<U,p>() const { std::array<U,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = content[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
@@ -117,6 +117,7 @@ T_TdA Point<T,d,A> operator-( const Point<T,d,A> &a ) { Point<T,d,A> res( a.size
 } // namespace sdot
 
 T_TdA std::ostream &operator<<( std::ostream &os, const sdot::Point<T,d,A> &p );
+T_Up std::ostream &operator<<( std::ostream &os, const std::array<U,p> &v );
 T_T std::ostream &operator<<( std::ostream &os, const std::vector<T> &p );
 
 #include "Point.cxx"

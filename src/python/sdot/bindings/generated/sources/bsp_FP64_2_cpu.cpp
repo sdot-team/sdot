@@ -1,4 +1,4 @@
-#line 46 "/Users/hugo.leclerc/sdot_with_interfaces/src/python/sdot/Bsp.py"
+#line 44 "/Users/hugo.leclerc/sdot_with_interfaces/src/python/sdot/Bsp.py"
 #include "../../../../../cpp/geometry/Bsp.h"
 #include "../../nanobind_wrappers.h"
 #include <nanobind/stl/string.h>
