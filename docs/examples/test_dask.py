@@ -1,5 +1,3 @@
-# from sdot.bindings import sdot_bsp_bindings
-# from matplotlib import pyplot
 import dask.array as da  # type: ignore[import-untyped]
 import sdot
 

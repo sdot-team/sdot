@@ -10,6 +10,7 @@ class BspConfig:
     def __init__( self, max_points_per_cell, max_points_per_node ):
         self.max_points_per_cell = max_points_per_cell
         self.max_points_per_node = max_points_per_node
+        self.use_cov = False
 
 
 class IntermediateNode:
@@ -23,14 +24,24 @@ class IntermediateNode:
         self.cell = cell
 
         # find the cut
-        avg, cov = self._avg_and_cov( positions, nb_points )
-        eig_system = numpy.linalg.eig( cov )
-        num_eigval = numpy.argmax( eig_system.eigenvalues )
-        eigval = eig_system.eigenvalues[ num_eigval ]
-        if eigval == 0:
-            raise RuntimeError( "TODO: all the points in the same place" )
+        if config.use_cov:
+            avg, cov = self._avg_and_cov( positions, nb_points )
+            eig_system = numpy.linalg.eig( cov )
+            num_eigval = numpy.argmax( eig_system.eigenvalues )
+            eigval = eig_system.eigenvalues[ num_eigval ]
+            if eigval == 0:
+                raise RuntimeError( "TODO: all the points in the same place" )
 
-        self.split_dir = eig_system.eigenvectors[ num_eigval ]
+            self.split_dir = eig_system.eigenvectors[ num_eigval ]
+        else:
+            ( ( loc_min_max_pts, avg ), ) = dask.compute( (
+                da.max( positions, axis = 0 ) - da.min( positions, axis = 0 ),
+                ( da.max( positions, axis = 0 ) + da.min( positions, axis = 0 ) ) / 2
+            ) )
+            d = loc_min_max_pts.argmax()
+            eigval = loc_min_max_pts[ d ]
+            self.split_dir = numpy.array( [ d == i for i in range( dim ) ] )
+
         proj = positions @ self.split_dir.T
 
         # 1D histogram
@@ -102,7 +113,6 @@ class FinalNode:
 
 
 def make_node( indices, positions, nb_points: int, dim: int, cell: Cell, config: BspConfig, min_max_pts ):
-    print( nb_points )
     if nb_points > config.max_points_per_node:
         return IntermediateNode( indices, positions, nb_points, dim, cell, config, min_max_pts )
     return FinalNode( indices, positions, cell, config, min_max_pts )
@@ -133,7 +143,6 @@ class Bsp:
         cell = Cell.axis_aligned_hypercube( min_max_pts )
 
         root = make_node( indices, positions, nb_points, dim, cell, config, min_max_pts )
-        # print( root )
 
         import pyvista
         plotter = pyvista.Plotter( theme = pyvista.plotting.themes.DarkTheme() )
