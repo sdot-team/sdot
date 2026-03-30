@@ -26,12 +26,60 @@ class Cell:
 
         self._checked_instance( dir.shape[ 0 ] ).cut( dir, dot, id )
 
+    @property
+    def cuts( self ):
+        return self._checked_instance( None ).cuts()
+
+    @property
+    def faces( self ):
+        return self._checked_instance( None ).faces()
+
+    @property
+    def vertices( self ):
+        """
+        position of vertices (tensor[ num_vertex, dim ])
+        """
+        return self._checked_instance( None ).vertices()
+
+    def plot( self, plotter = None, offset = None ):
+        import pyvista
+
+        pts = self.vertices # [ num_vertex, dim ]
+        dim = pts.shape[ 1 ]
+
+        own_plotter = plotter is None
+        if own_plotter:
+            plotter = pyvista.Plotter( theme = pyvista.plotting.themes.DarkTheme() )
+            if dim == 2:
+                plotter.view_xy()
+
+        if dim < 3:
+            pts = driver.hstack( [ pts ] + [ driver.zeros( [ pts.shape[ 0 ], 1 ] ) ] * ( 3 - dim ) )
+        elif dim > 3:
+            pts = pts[ :, :3 ]
+
+        if offset:
+            pts += driver.array( offset )
+
+        faces = []
+        for face in self.faces:
+            faces.append( len( face ) )
+            faces += face
+        plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges=True )
+
+        if own_plotter:
+            plotter.reset_camera()
+            plotter.show()
+
+
     def __repr__( self ) -> str:
         return self._instance.__repr__()
 
-    def _checked_instance( self, dim ):
+    def _checked_instance( self, dim = None ):
         if self._instance is not None:
             return self._instance
+        if dim is None:
+            raise RuntimeError( "dim cell" )
         self._instance = self._checked_bindings( dim ).Cell( dim )
         return self._instance
 
@@ -47,7 +95,10 @@ class Cell:
     def _binding_code( self, ct_dim ):
         return driver.cpp_src( { "SDOT_CT_DIM": ct_dim }, """
             #include <sdot/nanobind_wrappers.h>
+            #include <sdot/support/Tensor.h>
             #include <nanobind/stl/string.h>
+            #include <nanobind/stl/vector.h>
+            #include <nanobind/stl/tuple.h>
             #include <sdot/geometry/Cell.h>
             #include <sstream>
             #include <span>
@@ -91,6 +142,28 @@ class Cell:
                     } )
                     .def( "cut", []( CellType &self, const AF dir, TF dot, PI id ) {
                         self.cut( to_Pt( dir ), dot, id );
+                    } )
+                    .def( "vertices", []( const CellType &self ) {
+                        Tensor<TF,2,Cpu> res( Shape(), { self.nb_vertices(), self.dim() } );
+                        self.for_each_vertex( [&]( Pt pos, PI index ) {
+                            for( PI d = 0; d < self.dim(); ++d )
+                                res( index, d ) = pos[ d ];
+                        } );
+                        return to_ndarray_2d( res );
+                    } )
+                    .def( "faces", []( const CellType &self ) {
+                        std::vector<std::vector<PI>> res; // [ num_face ][ num_vertex ]
+                        self.for_each_face( [&]( std::vector<PI> &&c ) {
+                            res.push_back( std::move( c ) );
+                        } );
+                        return res;
+                    } )
+                    .def( "cuts", []( const CellType &self ) {
+                        std::vector<std::tuple<nanobind::ndarray<nanobind::numpy,TF>,TF>> res;
+                        self.for_each_cut( [&]( Pt dir, TF dot, PI id ) {
+                            res.push_back( { to_ndarray_1d( dir ), dot } );
+                        } );
+                        return res;
                     } )
                     // .def( "write_vtk", []( const CellType &b, std::string filename ) {
                     //     VtkOutput vo;

@@ -1,4 +1,6 @@
 from .driver import driver
+from .Cell import Cell
+
 from pathlib import Path
 import dask.array as da  # type: ignore[import-untyped]
 import numpy
@@ -9,15 +11,17 @@ class BspConfig:
         self.max_points_per_cell = max_points_per_cell
         self.max_points_per_node = max_points_per_node
 
+
 class IntermediateNode:
     """
-    split_dir
-    split_dot
-    max_sps[ num_dir, num_cut ]
-    - child_indices
-
+        split_dir
+        split_dot
+        children
+        cell
     """
-    def __init__( self, indices, positions, nb_points, config: BspConfig ):
+    def __init__( self, indices, positions, nb_points: int, dim: int, cell: Cell, config: BspConfig, min_max_pts ):
+        self.cell = cell
+
         # find the cut
         avg, cov = self._avg_and_cov( positions, nb_points )
         eig_system = numpy.linalg.eig( cov )
@@ -39,23 +43,35 @@ class IntermediateNode:
         cut_index = numpy.searchsorted( numpy.cumsum( hist ), hist.sum() / 2 )
         # if abs( new_nb_points_list[ 0 ] - new_nb_points_list[ 1 ] ) / hist.sum() >= 0.2:
         #     raise RuntimeError( "TODO: loop to find the cut for bad distributions" )
-        split_dot = bins[ cut_index ]
+        self.split_dot = bins[ cut_index ]
 
-        # "left" part
-        filter_0 = ( positions @ self.split_dir ) > split_dot
-        new_points_0 = positions[ filter_0 ]
-        max_sps_0 = da.max( da.dot( new_points_0, self.split_dir ) )
+        # children
+        self.children = []
+        def add_child( filter, sgn ):
+            new_positions = positions[ filter ]
 
+            cuts_and_maxes = []
+            for cut_dir, _ in cell.cuts:
+                cuts_and_maxes.append( ( cut_dir, da.max( da.dot( new_positions, cut_dir ) ) ) )
+            cuts_and_maxes.append( ( sgn * self.split_dir, da.max( da.dot( new_positions, sgn * self.split_dir ) ) ) )
 
-        # "right" part
-        filter_1 = da.logical_not( filter_0 )
-        new_points_1 = positions[ filter_1 ]
-        max_sps_1 = da.max( da.dot( new_points_0, - self.split_dir ) )
+            new_shape, cuts_and_maxes = dask.compute( lazy_shape( new_positions ), cuts_and_maxes )
 
-        self.children = [
-            make_node( indices[ filter_0 ], new_points_0, hist[ : cut_index ].sum(), config ),
-            make_node( indices[ filter_1 ], new_points_0, hist[ cut_index : ].sum(), config )
-        ]
+            new_cell = Cell.axis_aligned_hypercube( min_max_pts )
+            for cut_dir, cut_dot in cuts_and_maxes:
+                new_cell.cut( cut_dir, cut_dot )
+
+            self.children.append( make_node( indices[ filter ], new_positions, new_shape[ 0 ], dim, new_cell, config, min_max_pts ) )
+
+        filter_0 = ( positions @ self.split_dir ) > self.split_dot
+        add_child( filter_0, - 1 )
+        add_child( da.logical_not( filter_0 ), + 1 )
+
+    def plot_rec( self, plotter, depth = 0 ):
+        self.cell.plot( plotter, offset = [ 0, 0, depth / 3 ] )
+
+        for child in self.children:
+            child.plot_rec( plotter, depth + 1 )
 
     def _avg_and_cov( self, positions, nb_points ):
         avg = da.average( positions, axis = 0 )
@@ -66,17 +82,30 @@ class IntermediateNode:
 
         return da.compute( avg, cov )
 
+@dask.delayed
+def lazy_shape( a ):
+    return a.shape
 
 class FinalNode:
-    def __init__( self, indices, positions, config: BspConfig ):
+    def __init__( self, indices, positions, cell: Cell, config: BspConfig, min_max_pts ):
         self.positions = positions
         self.indices = indices
+        self.cell = cell
 
-def make_node( indices, positions, nb_points, config: BspConfig ):
-    nb_points = positions.shape[ 0 ]
+    def plot_rec( self, plotter, depth = 0 ):
+        self.cell.plot( plotter, offset = [ 0, 0, depth / 3 ] )
+
+        pts = self.positions.compute()
+        if pts.shape[ 1 ] < 3:
+            pts = driver.hstack( [ pts ] + [ driver.zeros( [ pts.shape[ 0 ], 1 ] ) ] * ( 3 - pts.shape[ 1 ] ) )
+        plotter.add_points( driver.to_numpy( pts ) )
+
+
+def make_node( indices, positions, nb_points: int, dim: int, cell: Cell, config: BspConfig, min_max_pts ):
+    print( nb_points )
     if nb_points > config.max_points_per_node:
-        return IntermediateNode( indices, positions, nb_points, config )
-    return FinalNode( indices, positions, config )
+        return IntermediateNode( indices, positions, nb_points, dim, cell, config, min_max_pts )
+    return FinalNode( indices, positions, cell, config, min_max_pts )
 
 
 class Bsp:
@@ -94,15 +123,24 @@ class Bsp:
     """
 
     def __init__( self, positions, max_points_per_cell = 30, max_points_per_node = 1e6 ):
-        if positions.shape is None:
-            positions.compute_chunk_sizes()
-        nb_points = positions.shape[ 0 ]
+        min_max_pts, ( nb_points, dim ) = dask.compute(
+            da.stack( [ da.min( positions, axis = 0 ), da.max( positions, axis = 0 ) ] ),
+            lazy_shape( positions )
+        )
 
         config = BspConfig( max_points_per_cell, max_points_per_node )
-        root = make_node( da.arange( nb_points, dtype = driver.numpy_itype ), positions, nb_points, config )
-        print( root )
+        indices = da.arange( nb_points, dtype = driver.numpy_itype )
+        cell = Cell.axis_aligned_hypercube( min_max_pts )
 
-        # min_max_pts = da.stack( [ da.min( points, axis = 0 ), da.max( points, axis = 0 ) ] ).compute()
+        root = make_node( indices, positions, nb_points, dim, cell, config, min_max_pts )
+        # print( root )
+
+        import pyvista
+        plotter = pyvista.Plotter( theme = pyvista.plotting.themes.DarkTheme() )
+        root.plot_rec( plotter )
+        plotter.show()
+
+        #
         # splits, all_the_paths = self._base_splits( points, max_points_per_bsp )
         # self._class_binding = self._get_class_binding( min_max_pts.shape[ 1 ] )
 

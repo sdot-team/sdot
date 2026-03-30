@@ -147,6 +147,20 @@ UTP void DTP::_for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {
     }
 }
 
+UTP void DTP::for_each_vertex( auto &&func ) const {
+    for( PI index = 0; index < vertices.size(); ++index )
+        func( vertices[ index ].pos, index );
+}
+
+UTP void DTP::for_each_face( auto &&/* func */ ) const {
+    TODO;
+}
+
+UTP void DTP::for_each_cut( auto &&func ) const {
+    for( const auto &cut : cuts )
+        func( cut.dir, cut.sp, cut.id );
+}
+
 // UTP void DTP::make_simplex( TF radius, int d ) {
 //     if ( d == 0 )
 //         vertices[ 0 ] = pf( radius );

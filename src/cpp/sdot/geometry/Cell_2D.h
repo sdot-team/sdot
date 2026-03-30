@@ -38,11 +38,15 @@ public:
     static Cell     englobing_simplex             ( Pt center, TF radius );
     static Cell     simplex                       ( int dim, std::span<Pt> points );
 
-    void            for_each_cut                  ( auto &&func );
+    void            for_each_vertex               ( auto &&func ) const;
+    void            for_each_face                 ( auto &&func ) const;
+    void            for_each_cut                  ( auto &&func ) const;
 
     void            check_consistency             ( TF eps = 1e-6 ) const;
     void            display_vtk                   ( VtkOutput &vo ) const;
     TF              measure                       () const;
+
+    PI              nb_vertices                   () const { return vertices.size(); }
     PI              dim                           () const { return ct_dim; }
 
     void            cut                           ( const Pt &cut_dir, TF cut_dot, PI cut_id );

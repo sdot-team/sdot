@@ -80,6 +80,9 @@ class JaxDriver:
     def ones( self, shape ):
         return jnp.ones( shape, dtype = self.dtype, device = self.device )
 
+    def zeros( self, shape ):
+        return jnp.zeros( shape, dtype = self.dtype, device = self.device )
+
     def linspace( self, a, b, n ):
         return jnp.linspace( a, b, n, dtype = self.dtype, device = self.device )
 
@@ -88,6 +91,14 @@ class JaxDriver:
 
     def repeat( self, tensor, shape ):
         return jnp.tile( tensor, shape )
+
+    def hstack( self, lst ):
+        return jnp.hstack( lst )
+
+    def to_numpy( self, t ):
+        return np.array( t )
+        # if isinstance( t, list ):
+        # return t.to_numpy()
 
     def plan( self, bindings, f, g ):
         np_dtype = np.dtype( self.dtype )

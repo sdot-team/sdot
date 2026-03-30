@@ -297,8 +297,20 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
     }
 }
 
-UTP void DTP::for_each_cut( auto &&func ) {
-    for( VertexAndCut &v : vertices )
+UTP void DTP::for_each_vertex( auto &&func ) const {
+    for( PI index = 0; index < vertices.size(); ++index )
+        func( vertices[ index ].pos, index );
+}
+
+UTP void DTP::for_each_face( auto &&func ) const {
+    std::vector<PI> res( vertices.size() );
+    for( PI i = 0; i < res.size(); ++i )
+        res[ i ] = i;
+    func( std::move( res ) );
+}
+
+UTP void DTP::for_each_cut( auto &&func ) const {
+    for( const VertexAndCut &v : vertices )
         func( v.cut_dir, v.cut_dot, v.cut_id );
 }
 
