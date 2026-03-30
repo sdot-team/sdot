@@ -22,6 +22,7 @@ public:
     // T_d   Point                   ( const Point<T,d,A> &values ) : data( values.begin(), values.end() ) {}
     // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( std::span<const T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
+    /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     /**/     Point                   ( PI /*size*/ = ct_dim ) { for( auto &v : content ) v = 0; }
 
     T_Up     operator std::array<U,p>() const { std::array<U,p> res; for( PI i = 0; i < std::min( p, size() ); ++i ) res[ i ] = content[ i ]; for( PI i = size(); i < p; ++i ) res[ i ] = 0; return res; }
@@ -46,6 +47,7 @@ public:
     auto     end                     () const { return content.end(); }
     auto     end                     () { return content.end(); }
 
+    PI       arg_max                 () const { PI res = 0; for( PI i = 1; i < size(); ++i ) if ( content[ res ] < content[ i ] ) res = i; return res; }
 
     Content  content;
 };
@@ -85,6 +87,8 @@ public:
     auto        begin                   () { return content.begin(); }
     auto        end                     () const { return content.end(); }
     auto        end                     () { return content.end(); }
+
+    PI          arg_max                 () const { PI res = 0; for( PI i = 1; i < size(); ++i ) if ( content[ res ] < content[ i ] ) res = i; return res; }
 
     Content     content;
 };
