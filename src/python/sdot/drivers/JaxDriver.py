@@ -97,6 +97,9 @@ class JaxDriver:
     def empty( self, shape ):
         return jnp.ones( shape, dtype = self.dtype, device = self.device )
 
+    def expand_dims( self, tensor, index ):
+        return jnp.expand_dims( tensor, index )
+
     def repeat( self, tensor, shape ):
         return jnp.tile( tensor, shape )
 

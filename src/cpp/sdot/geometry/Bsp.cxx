@@ -9,6 +9,8 @@ namespace sdot {
 #define DTP Bsp<AdditionalPtData,TF,ct_dim,Arch>
 
 UTP DTP::Bsp( const auto &node_summary, PI node_index, TensorView<const TF,2,Arch> positions, TensorView<const PI,1,Arch> indices, PI max_points_per_cell ) : nb_points( positions.size( 0 ) ), dim( positions.size( 1 ) ), pf( dim ) {
+    P( node_index );
+
     // pt_data
     const PI nb_points = positions.size( 0 );
     pt_data.reserve( nb_points );

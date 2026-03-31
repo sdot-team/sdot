@@ -24,7 +24,7 @@ using TF = float;
 
 // static W2Out compute_w2( const Tensor<TF,1> &dirac_xs, const Tensor<TF,1> &dirac_ws, const Tensor<TF,1> &point_xs, const Tensor<TF,1> &point_ys ) {
 //     Affine1d<const TF,0> functions{ .xs = point_xs, .ys = point_ys };
-//     DiracSet<const TF,0> diracs{ .xs = dirac_xs, .ws = dirac_ws };
+//     SumOfWeightedDiracs1d<const TF,0> diracs{ .xs = dirac_xs, .ws = dirac_ws };
 //     const size_t nb_diracs = dirac_xs.size( 1 );
 //     const size_t nb_points = point_xs.size( 1 );
 
@@ -38,7 +38,7 @@ using TF = float;
 //     Tensor<TF,0> grad_dist;
 
 //     Affine1d<TF,0> grad_functions{ .xs = res.grad_point_xs, .ys = res.grad_point_ys };
-//     DiracSet<TF,0> grad_diracs{ .xs = res.grad_dirac_xs, .ws = res.grad_dirac_ws };
+//     SumOfWeightedDiracs1d<TF,0> grad_diracs{ .xs = res.grad_dirac_xs, .ws = res.grad_dirac_ws };
 
 //     w2_distance_backward(
 //         grad_dist.view(), grad_bary.view(), res.potentials.view(), res.barycenters.view(), res.cuts.view(),

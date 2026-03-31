@@ -183,6 +183,7 @@ class Bsp:
         class_binding = self._class_binding( dim )
         for node_index in final_nodes:
             self.items.append( dask.delayed( self._make_item )( class_binding, node_summary, node_index, all_the_nodes[ node_index ].positions, all_the_nodes[ node_index ].indices, config ) )
+        self.items = dask.persist( *self.items )
 
     def _make_item( self, class_binding, node_summary, node_index: int, positions, indices, config ):
         positions = driver.t2( positions )

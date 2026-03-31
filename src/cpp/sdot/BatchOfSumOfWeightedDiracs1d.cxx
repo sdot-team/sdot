@@ -1,59 +1,26 @@
 #pragma once
 
-#include "support/TODO.h"
-#include "support/P.h"
-#include "DiracSet.h"
-#include <algorithm>
+#include "BatchOfSumOfWeightedDiracs1d.h"
 
 namespace sdot {
 
 #define UTP template<class T,class Arch>
-#define DTP DiracSet<T,Arch>
+#define DTP BatchOfSumOfWeightedDiracs1d<T,Arch>
 
 UTP PI DTP::nb_diracs() const {
-    return xs.size();
-}
-
-UTP DTP::TF DTP::mass() const {
-    TF res = 0;
-    for( PI i = 0; i < nb_diracs(); ++i )
-        res += static_cast<TF>( ws[ i ] );
-    return res;
-}
-
-UTP auto DTP::arg_sort() -> std::vector<PI> const {
-    std::vector<PI> res( nb_diracs() );
-
-    for( PI i = 0; i < nb_diracs(); ++i )
-        res[ i ] = i;
-
-    std::sort( res.begin(), res.end(), [&]( PI index_a, PI index_b ) {
-        return xs[ index_a ] < xs[ index_b ];
-    });
-
-    return res;
-}
-
-#undef UTP
-#undef DTP
-
-#define UTP template<class T,class Arch>
-#define DTP BatchOfDiracSet<T,Arch>
-
-UTP PI DTP::nb_diracs() const {
-    return xs.size( 1 );
+    return positions.size( 1 );
 }
 
 UTP PI DTP::nb_rows() const {
-    return xs.size( 0 );
+    return positions.size( 0 );
 }
 
-UTP DiracSet<T,Arch> DTP::row( PI num_batch ) const  {
-   return { xs.row( num_batch ), ws.row( num_batch ) };
+UTP SumOfWeightedDiracs1d<T,Arch> DTP::row( PI num_batch ) const  {
+   return { positions.row( num_batch ), weights.row( num_batch ) };
 }
 
 UTP auto DTP::masses() const -> Tensor<TF,1,Arch> {
-    return ws.template sum_along_axis_1<TF>();
+    return weights.template sum_along_axis_1<TF>();
 }
 
 UTP void DTP::arg_sorts( Tensor<PI,2,Arch> &sorted_is, Tensor<std::remove_const_t<T>,2,Arch> &sorted_xs ) const {

@@ -1,7 +1,11 @@
 # base distributions (1d and batch version are generated after)
 from .distributions.PiecewiseAffineFunction1d import PiecewiseAffineFunction1d as PiecewiseAffineFunction1d
+from .distributions.PiecewiseConstantImage import PiecewiseConstantImage as PiecewiseConstantImage
+from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 from .distributions.Distribution import Distribution as Distribution
+
+from .distributions.helpers.distribution_methods import variants_of
 
 
 # Ot plans
@@ -19,42 +23,42 @@ from .plan import plan as plan, distance as distance, distances as distances, ba
 from .driver import driver as driver
 
 
-# tools to generate variants for the distributions
-from .distributions.distribution_methods import generate_batch_version_of as generate_batch_version_of, generate_1d_version_of as generate_1d_version_of
-from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions
-from typing import TYPE_CHECKING, Any
+# variants
+SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d = variants_of( SumOfWeightedDiracs )
+# PiecewiseAffineGrid1d, BatchOfPiecewiseAffineGrid, BatchOfPiecewiseAffineGrid1d = variants_of( PiecewiseAffineGrid )
 
+# # generated variants
+# if TYPE_CHECKING:
+#     class SumOfWeightedDiracs1d( SumOfWeightedDiracs ):
+#         positions : Any
+#         def __init__( self, positions = None, weights = None ): ...
 
-# generated variants
-if TYPE_CHECKING:
-    class SumOfWeightedDiracs1d( SumOfWeightedDiracs ):
-        positions : Any
-        def __init__( self, positions = None, weights = None ): ...
+#     class BatchOfSumOfWeightedDiracs( BatchOfDistributions ):
+#         nb_diracs : int
+#         positions : Any
+#         weights   : Any
+#         def __init__( self, positions = None, weights = None ): ...
 
-    class BatchOfSumOfWeightedDiracs( BatchOfDistributions ):
-        nb_diracs : int
-        positions : Any
-        weights   : Any
-        def __init__( self, positions = None, weights = None ): ...
+#     class BatchOfPiecewiseConstantImage( BatchOfDistributions ):
+#         values  : Any
+#         corners : Any
+#         def __init__( self, values = None, corners = None ): ...
 
-    class BatchOfSumOfWeightedDiracs1d( BatchOfSumOfWeightedDiracs ):
-        def __init__( self, positions = None, weights = None ): ...
+#     class BatchOfSumOfWeightedDiracs1d( BatchOfSumOfWeightedDiracs ):
+#         def __init__( self, positions = None, weights = None ): ...
 
-    class BatchOfPiecewiseAffineFunction1d( BatchOfDistributions ):
-        nb_points : int
-        xs        : Any
-        ys        : Any
-        x0        : float
-        x1        : float
-        def __init__( self, xs = None, ys = None, x0: float = 0, x1: float = 1 ): ...
-else:
-    SumOfWeightedDiracs1d            = generate_1d_version_of( SumOfWeightedDiracs )
+#     class BatchOfPiecewiseAffineFunction1d( BatchOfDistributions ):
+#         nb_points : int
+#         xs        : Any
+#         ys        : Any
+#         x0        : float
+#         x1        : float
+#         def __init__( self, xs = None, ys = None, x0: float = 0, x1: float = 1 ): ...
 
-    BatchOfSumOfWeightedDiracs       = generate_batch_version_of( SumOfWeightedDiracs )
-    BatchOfSumOfWeightedDiracs1d     = generate_batch_version_of( SumOfWeightedDiracs1d )
-    BatchOfPiecewiseAffineFunction1d = generate_batch_version_of( PiecewiseAffineFunction1d )
+# else:
+#     SumOfWeightedDiracs1d            = generate_1d_version_of( SumOfWeightedDiracs )
 
-
-driver = driver
-
-
+#     BatchOfSumOfWeightedDiracs       = generate_batch_version_of( SumOfWeightedDiracs )
+#     BatchOfSumOfWeightedDiracs1d     = generate_batch_version_of( SumOfWeightedDiracs1d )
+#     BatchOfPiecewiseConstantImage    = generate_batch_version_of( PiecewiseConstantImage )
+#     BatchOfPiecewiseAffineFunction1d = generate_batch_version_of( PiecewiseAffineFunction1d )

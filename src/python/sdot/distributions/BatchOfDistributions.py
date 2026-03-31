@@ -3,7 +3,7 @@ class BatchOfDistributions:
     Base class for all batch distributions.
 
     Subclasses should be decorated with @generate_distribution_methods to
-    automatically receive __init__, _nd_positions, dim, always_1d, and one
+    automatically receive __init__, _nd_positions, dim, is_a_1d_version, and one
     property per TensorField axis name.
     """
 
@@ -17,6 +17,11 @@ class BatchOfDistributions:
 
     @property
     def always_1d( self ) -> bool:
+        return False
+
+    @property
+    def is_a_1d_version( self ) -> bool:
+        """ true if comes from a multidimensional version (meaning that we can call .multidimensionnal_version()) """
         return False
 
     def tensor_list( self ) -> list:

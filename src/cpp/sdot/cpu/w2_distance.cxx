@@ -10,7 +10,7 @@
 
 namespace sdot {
 
-T_T void w2_distance( DiracSet<const T,Cpu> diracs, Affine1d<const T,Cpu> points, TensorView<T,0,Cpu> distance, TensorView<T,1,Cpu> barycenters, TensorView<T,1,Cpu> potentials, TensorView<T,2,Cpu> cuts ) {
+T_T void w2_distance( SumOfWeightedDiracs1d<const T,Cpu> diracs, PiecewiseAffineFunction1d<const T,Cpu> points, TensorView<T,0,Cpu> distance, TensorView<T,1,Cpu> barycenters, TensorView<T,1,Cpu> potentials, TensorView<T,2,Cpu> cuts ) {
     using TF = typename IntermediateScalarType<T,Cpu>::type;
 
     const std::vector<PI> dirac_indices = diracs.arg_sort();
@@ -30,7 +30,7 @@ T_T void w2_distance( DiracSet<const T,Cpu> diracs, Affine1d<const T,Cpu> points
     for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
         const PI dirac_index = dirac_indices[ i ];
 
-        const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( diracs.ws[ dirac_index ] );
+        const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( diracs.weights[ dirac_index ] );
         const TF dirac_x = diracs.xs[ dirac_index ];
         if ( normalized_dirac_mass <= 0.0 )
             throw std::runtime_error( "dirac_mass must be strictly positive" );
@@ -64,13 +64,13 @@ T_T void w2_distance( DiracSet<const T,Cpu> diracs, Affine1d<const T,Cpu> points
        distance() = static_cast<T>( w2 );
 }
 
-T_T void w2_distance( BatchOfDiracSet<const T,Cpu> diracs, BatchOfAffine1d<const T,Cpu> functions, TensorView<T,1,Cpu> distance, TensorView<T,2,Cpu> barycenters, TensorView<T,2,Cpu> potentials, TensorView<T,3,Cpu> cuts ) {
+T_T void w2_distance( BatchOfSumOfWeightedDiracs1d<const T,Cpu> diracs, BatchOfPiecewiseAffineFunction1d<const T,Cpu> functions, TensorView<T,1,Cpu> distance, TensorView<T,2,Cpu> barycenters, TensorView<T,2,Cpu> potentials, TensorView<T,3,Cpu> cuts ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance( diracs.row( r ), functions.row( r ), distance.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ) );
     });
 }
 
-T_T void w2_distance_backward( TensorView<const T,0,Cpu> grad_distance, TensorView<const T,1,Cpu> grad_barycenters, TensorView<const T,1,Cpu> barycenters, TensorView<const T,1,Cpu> potentials, TensorView<const T,2,Cpu> cuts, DiracSet<const T,Cpu> diracs, Affine1d<const T,Cpu> points, DiracSet<T,Cpu> grad_diracs, Affine1d<T,Cpu> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,0,Cpu> grad_distance, TensorView<const T,1,Cpu> grad_barycenters, TensorView<const T,1,Cpu> barycenters, TensorView<const T,1,Cpu> potentials, TensorView<const T,2,Cpu> cuts, SumOfWeightedDiracs1d<const T,Cpu> diracs, PiecewiseAffineFunction1d<const T,Cpu> points, SumOfWeightedDiracs1d<T,Cpu> grad_diracs, PiecewiseAffineFunction1d<T,Cpu> grad_functions ) {
     using TF = typename IntermediateScalarType<T,Cpu>::type;
     using namespace std;
 
@@ -112,7 +112,7 @@ T_T void w2_distance_backward( TensorView<const T,0,Cpu> grad_distance, TensorVi
     for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
         const PI dirac_index = dirac_indices[ i ];
 
-        const TF normalized_dirac_mass  = dirac_scale * static_cast<TF>( diracs.ws[ dirac_index ] );
+        const TF normalized_dirac_mass  = dirac_scale * static_cast<TF>( diracs.weights[ dirac_index ] );
         const TF dirac_x                = static_cast<TF>( diracs.xs[ dirac_index ] );
         const TF psi_i                  = static_cast<TF>( potentials[ dirac_index ] );  // saved from forward (mirrors `potentials[d] = potential`)
         const TF barycenter_i           = static_cast<TF>( barycenters[ dirac_index ] );
@@ -226,24 +226,24 @@ T_T void w2_distance_backward( TensorView<const T,0,Cpu> grad_distance, TensorVi
 
     // Backward of: normalized_dirac_mass = dirac_scale * ws[d]
     // mirrors the dirac_scale normalization (analog of point_scale for the dirac side)
-    if ( ! grad_diracs.ws.empty() ) {
+    if ( ! grad_diracs.weights.empty() ) {
         for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
             const TF psi_i               = static_cast<TF>( potentials[ i ] );
             const TF bary_grad_potential_i = bary_grad_potentials[ i ];
             const TF grad_bary_i         = static_cast<TF>( grad_barycenters[ i ] );
             const TF barycenter_i        = static_cast<TF>( barycenters[ i ] );
-            const TF wi                  = static_cast<TF>( diracs.ws[ i ] );
+            const TF wi                  = static_cast<TF>( diracs.weights[ i ] );
 
             // dL/dw_i = ( g_dist * (psi_i - avg_potential) + (bary_grad_potential_i - avg_bary_grad_potential + bary_moment_total) ) * dirac_scale - grad_bary_i * barycenter_i / wi
             TF g_wi = ( g_dist * ( psi_i - avg_potential ) + ( bary_grad_potential_i - avg_bary_grad_potential + bary_moment_total ) ) * dirac_scale;
             g_wi -= grad_bary_i * barycenter_i / wi;
-            grad_diracs.ws[ i ] = static_cast<T>( g_wi );
+            grad_diracs.weights[ i ] = static_cast<T>( g_wi );
         }
     }
 }
 
 /// Gradients of Wasserstein 2 distance
-T_T void w2_distance_backward( TensorView<const T,1,Cpu> grad_distance, TensorView<const T,2,Cpu> grad_barycenters, TensorView<const T,2,Cpu> barycenters, TensorView<const T,2,Cpu> potentials, TensorView<const T,3,Cpu> cuts, BatchOfDiracSet<const T,Cpu> diracs, BatchOfAffine1d<const T,Cpu> functions, BatchOfDiracSet<T,Cpu> grad_diracs, BatchOfAffine1d<T,Cpu> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,1,Cpu> grad_distance, TensorView<const T,2,Cpu> grad_barycenters, TensorView<const T,2,Cpu> barycenters, TensorView<const T,2,Cpu> potentials, TensorView<const T,3,Cpu> cuts, BatchOfSumOfWeightedDiracs1d<const T,Cpu> diracs, BatchOfPiecewiseAffineFunction1d<const T,Cpu> functions, BatchOfSumOfWeightedDiracs1d<T,Cpu> grad_diracs, BatchOfPiecewiseAffineFunction1d<T,Cpu> grad_functions ) {
     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
         w2_distance_backward( grad_distance.row( r ), grad_barycenters.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ), diracs.row( r ), functions.row( r ), grad_diracs.row( r ), grad_functions.row( r ) );
     });
@@ -252,7 +252,7 @@ T_T void w2_distance_backward( TensorView<const T,1,Cpu> grad_distance, TensorVi
 
 // -------------------------------------- CUDA  --------------------------------------
 #ifdef __CUDACC__
-T_T void w2_distance( BatchOfDiracSet<const T,Cuda> diracs, BatchOfAffine1d<const T,Cuda> points, TensorView<T,1,Cuda> distances, TensorView<T,2,Cuda> barycenters, TensorView<T,2,Cuda> potentials, TensorView<T,3,Cuda> cuts ) {
+T_T void w2_distance( BatchOfSumOfWeightedDiracs1d<const T,Cuda> diracs, BatchOfAffine1d<const T,Cuda> points, TensorView<T,1,Cuda> distances, TensorView<T,2,Cuda> barycenters, TensorView<T,2,Cuda> potentials, TensorView<T,3,Cuda> cuts ) {
     enum class Error { no_error, dirac_masses_is_null, target_masses_is_null, dirac_masse_is_negative_or_null };
     using TF = typename IntermediateScalarType<T,Cuda>::type;
 
@@ -328,7 +328,7 @@ T_T void w2_distance( BatchOfDiracSet<const T,Cuda> diracs, BatchOfAffine1d<cons
     }
 }
 
-T_T void w2_distance_backward( TensorView<const T,1,Cuda> grad_distance, TensorView<const T,2,Cuda> grad_barycenters, TensorView<const T,2,Cuda> barycenters, TensorView<const T,2,Cuda> potentials, TensorView<const T,3,Cuda> cuts, BatchOfDiracSet<const T,Cuda> diracs, BatchOfAffine1d<const T,Cuda> points, BatchOfDiracSet<T,Cuda> grad_diracs, BatchOfAffine1d<T,Cuda> grad_functions ) {
+T_T void w2_distance_backward( TensorView<const T,1,Cuda> grad_distance, TensorView<const T,2,Cuda> grad_barycenters, TensorView<const T,2,Cuda> barycenters, TensorView<const T,2,Cuda> potentials, TensorView<const T,3,Cuda> cuts, BatchOfSumOfWeightedDiracs1d<const T,Cuda> diracs, BatchOfAffine1d<const T,Cuda> points, BatchOfSumOfWeightedDiracs1d<T,Cuda> grad_diracs, BatchOfAffine1d<T,Cuda> grad_functions ) {
     using TF = typename IntermediateScalarType<T,Cuda>::type;
 
     Tensor<PI,2,Cuda> sorted_indices;

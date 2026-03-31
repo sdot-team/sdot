@@ -1,28 +1,40 @@
+from typing import Self
+
 class Distribution:
     """
     Base class for all (non-batch) distributions.
 
     Subclasses should be decorated with @generate_distribution_methods to
     automatically receive __init__, batch_version, _nd_positions, dim,
-    always_1d, and one property per TensorField axis name.
+    is_a_1d_version, and one property per TensorField axis name.
     """
+
+    UnidimensionalBatchVersion : type
+    MultidimensionalVersion    : type
+    UnidimensionalVersion      : type
+    BatchVersion               : type
+    batch_size                 : int
+    dim                        : int
+
+    def multidimensional_version( self, *_ ) -> Self: ...
+    def unidimensional_version( self, *_ ) -> Self: ...
+    def batch_version( self, *_ ) -> Self: ...
 
     @staticmethod
     def batch_class():
         raise RuntimeError( "To be redefined" )
 
-    def batch_version( self, batch_size: int ):
-        raise RuntimeError( f"To be redefined for { type( self ) }" )
+    @property
+    def always_1d( self ) -> bool:
+        return False
 
     @property
-    def batch_size( self ) -> int:
-        return 1
+    def is_a_1d_version( self ) -> bool:
+        """ true if comes from a multidimensional version (meaning that we can call .multidimensionnal_version()) """
+        return False
 
     @property
-    def dim( self ) -> int:
-        raise RuntimeError( f"To be redefined for { type( self ) }" )
-
-    def tensor_list( self ) -> list:
+    def tensors( self ) -> list:
         raise RuntimeError( f"To be redefined for { type( self ) }" )
 
     # def __getattr__( self, name: str ) -> int:

@@ -17,7 +17,7 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
     if isinstance( g, Distribution ):
         return plan( f, g.batch_version( f.batch_size ) )
 
-    # always unidimensional
+    # always unidimensional ?
     if _check_1d and f.always_1d:
         return plan( f, g, _check_1d = False ).unidimensionnal_version()
 
@@ -35,9 +35,57 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
     dylib_name = f"ot_plan_{ f_name }_{ g_name }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
     def src_func():
-        return driver.cpp_src( { "SDOT_CT_DIM": ct_dim }, """
+        # forward_args
+        forward_args = [ "MF distance", "MF barycenters", "MF potentials" ]
+        if f.always_1d or g.always_1d:
+            forward_args += [ "MF cuts" ]
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            for t_name, _ in d_data.tensor_list( True ):
+                forward_args.append( f"NF { d_name }_{ t_name }" )
+
+        # backward_args
+        backward_args = [ "NF barycenters", "NF potentials" ]
+        if f.always_1d or g.always_1d:
+            backward_args += [ "NF cuts" ]
+        backward_args += [ "NF grad_distances", "NF grad_barycenters", "NF grad_potentials", "NF grad_cuts" ]
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            for t_name, _ in d_data.tensor_list( True ):
+                backward_args.append( f"NF { d_name }_{ t_name }" )
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            for t_name, _ in d_data.tensor_list( True ):
+                backward_args.append( f"NF grad_{ d_name }_{ t_name }" )
+
+        #
+        input_instances = ""
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            args = []
+            for t_name, t_data in d_data.tensor_list( True ):
+                args.append( f".{ t_name } = tensor_view_{ t_data.ndim }( { d_name }_{ t_name } )" )
+            input_instances += f"{ d_data.__class__.__name__ }<const TF,Arch> { d_name }{{ { str.join( ", ", args ) } }}; "
+
+        #
+        grad_output_instances = ""
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            args = []
+            for t_name, t_data in d_data.tensor_list( True ):
+                args.append( f".{ t_name } = tensor_view_{ t_data.ndim }( grad_{ d_name }_{ t_name } )" )
+            grad_output_instances += f"{ d_data.__class__.__name__ }<TF,Arch> grad_{ d_name }{{ { str.join( ", ", args ) } }}; "
+
+        includes = [ f"#include <sdot/{ g.__class__.__name__ }.h>" ]
+
+        m = {
+            "GRAD_OUTPUT_INSTANCES": grad_output_instances,
+            "INPUT_INSTANCES": input_instances,
+            "FORWARD_ARGS": str.join( ", ", forward_args ),
+            "BACKWARD_ARGS": str.join( ", ", backward_args ),
+            "SDOT_INCLUDES": str.join( "\n", includes ),
+            "SDOT_CT_DIM": ct_dim,
+        }
+
+        return driver.cpp_src( m, """
             #include <sdot/nanobind_wrappers.h>
             #include <sdot/cpu/w2_distance.h>
+            SDOT_INCLUDES
 
             namespace nb = nanobind;
             using namespace sdot;
@@ -50,41 +98,27 @@ def plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistr
             using MF = nb::ndarray<TF,NA>;
 
             // Forward function that works with both 1D and 2D arrays
-            void forward( NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys, MF distance, MF barycenters, MF potentials, MF cuts ) {
-                BatchOfAffine1d<const TF,Arch> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-                BatchOfDiracSet<const TF,Arch> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-                w2_distance( diracs, functions, tensor_view_1( distance ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ) );
+            void forward( FORWARD_ARGS ) {
+                INPUT_INSTANCES
+                w2_distance( f, g, tensor_view_1( distance ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ) );
             }
 
-            void backward(
-                NF barycenters, NF potentials, NF cuts,
-                NF dirac_xs, NF dirac_ws, NF point_xs, NF point_ys,
-                NF grad_distances, NF grad_barycenters, NF grad_potentials, NF grad_cuts,
-                MF grad_dirac_xs, MF grad_dirac_ws, MF grad_point_xs, MF grad_point_ys
-            ) {
-                BatchOfAffine1d<TF,Arch> grad_functions{ .xs = tensor_view_2( grad_point_xs ), .ys = tensor_view_2( grad_point_ys ) };
-                BatchOfDiracSet<TF,Arch> grad_diracs{ .xs = tensor_view_3( grad_dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( grad_dirac_ws ) };
-                BatchOfAffine1d<const TF,Arch> functions{ .xs = tensor_view_2( point_xs ), .ys = tensor_view_2( point_ys ) };
-                BatchOfDiracSet<const TF,Arch> diracs{ .xs = tensor_view_3( dirac_xs ).squeeze( 2 ), .ws = tensor_view_2( dirac_ws ) };
-                w2_distance_backward( tensor_view_1( grad_distances ), tensor_view_2( grad_barycenters ), tensor_view_2( barycenters ), tensor_view_2( potentials ), tensor_view_3( cuts ), diracs, functions, grad_diracs, grad_functions );
+            void backward( BACKWARD_ARGS ) {
+                GRAD_OUTPUT_INSTANCES
+                INPUT_INSTANCES
+                w2_distance_backward(
+                              tensor_view_1( grad_distances ),
+                              tensor_view_2( grad_barycenters ),
+                              tensor_view_2( barycenters ),
+                              tensor_view_2( potentials ),
+                              tensor_view_3( cuts ), f, g, grad_f, grad_g );
             }
 
             #define MK_MOD( NAME ) NB_MODULE( NAME, m )
 
             MK_MOD( SDOT_BINDING_NAME ) {
-                m.def( "forward", &forward,
-                    nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "point_xs" ), nb::arg( "point_ys" ),
-                    nb::arg( "distance" ), nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
-                    "SDOT plan to get distance and barycenters with f = sum of diracs (1D), g = piecewise affine function"
-                );
-
-                m.def( "backward", &backward,
-                    nb::arg( "barycenters" ), nb::arg( "potentials" ), nb::arg( "cuts" ),
-                    nb::arg( "dirac_xs" ), nb::arg( "dirac_ws" ), nb::arg( "points_xs" ), nb::arg( "points_ys" ),
-                    nb::arg( "grad_distance" ), nb::arg( "grad_barycenters" ), nb::arg( "grad_potentials" ), nb::arg( "grad_cuts" ),
-                    nb::arg( "grad_dirac_xs" ), nb::arg( "grad_dirac_ws" ), nb::arg( "grad_points_xs" ), nb::arg("grad_points_ys"),
-                    "SDOT W2 backward implementation"
-                );
+                m.def( "backward", &backward );
+                m.def( "forward", &forward );
             }
         """ )
 

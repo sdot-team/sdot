@@ -106,3 +106,20 @@ def check_affine_distances():
 
 def test_piecewise_affine():
     for_each_driver_comb( check_affine_distances )
+
+# if __name__ == "main":
+check_plan( "0 then 1/2 => 1",
+    sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+    sdot.PiecewiseAffine1d( [ 1, 1 ] ),
+    [ 1 / 3, 1 / 12 ],
+    [ 1 / 2, 1 / 2 ]
+)
+
+# from icecream import install
+# install()
+
+# # g = sdot.PiecewiseAffineFunction1d( [ 0, 1 ], [ 1, 1 ] )
+# f = sdot.SumOfWeightedDiracs1d( [ 0, 1 ], [ 1, 1 ] )
+# ic( f.positions )
+# ic( f.multidimensional_version().positions )
+

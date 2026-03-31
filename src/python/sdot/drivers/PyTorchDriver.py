@@ -83,6 +83,9 @@ class PyTorchDriver:
     def empty( self, shape ):
         return torch.zeros( shape, dtype = self.dtype, device = self.device )
 
+    def expand_dims( self, tensor, index ):
+        return tensor.unsqueeze( index )
+
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 

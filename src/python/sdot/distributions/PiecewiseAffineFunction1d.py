@@ -1,5 +1,5 @@
 from .Distribution import Distribution
-from sdot.distributions.distribution_methods import TensorField, generate_distribution_methods
+from sdot.distributions.helpers.distribution_methods import TensorField, generate_distribution_methods
 from ..driver import driver
 
 
@@ -18,6 +18,9 @@ class PiecewiseAffineFunction1d( Distribution ):
     xs = TensorField( "nb_points" )
     ys = TensorField( "nb_points" )
 
+    # declared for IDE autocompletion — generated at runtime from axis names
+    nb_points: int
+
     def default_xs( self ):
         return driver.linspace( self.x0, self.x1, self.ys.shape[ -1 ] ) if self.ys is not None else None
 
@@ -30,5 +33,3 @@ class PiecewiseAffineFunction1d( Distribution ):
         self.xs = xs
         self.ys = ys
 
-    # declared for IDE autocompletion — generated at runtime from axis names
-    nb_points: int
