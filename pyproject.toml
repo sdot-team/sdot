@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "sdot"
 version = "0.1.0"
@@ -8,6 +12,9 @@ dependencies = [
     "meson",    # build system — nécessaire aussi en runtime (compilation des extensions)
     "ninja",    # backend meson
 ]
+
+[tool.setuptools]
+package-dir = {"" = "src/python"}
 
 # [project.optional-dependencies]
 # torch = ["torch"]

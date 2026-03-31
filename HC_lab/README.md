@@ -14,6 +14,26 @@ pip install torch  --index-url https://download.pytorch.org/whl/cu121
 `python docs/examples/ct_reconstruction/ct_reconstruction.py`
 
 
+DOCS
+ npx vitepress --version
+ npm run docs:build
+ npm run docs:dev
+
+
+
+dans pyproject.toml
+
+[tool.setuptools]
+package-dir = {"" = "src/python"}
+
+install dans venv  via :
+`pip install -e . ` #depuis le rep du toml
+
+
+PB binding python C++
+
+
+
 Architecture globale de src/python/sdot
 1. Modules de base
 plan.py : Gère la création des plans de transport optimal entre distributions
