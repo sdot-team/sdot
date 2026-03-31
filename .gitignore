@@ -1,8 +1,9 @@
 # Build artifacts
+compile_commands.json
+.xmake/
 build/
 bin/
 lib/
-compile_commands.json
 *.o
 *.a
 *.so
@@ -25,28 +26,24 @@ __pycache__/
 dist/
 wheels/
 
-# Meson subprojects (téléchargés automatiquement, ne pas tracker)
-subprojects/zpp_bits/
-subprojects/catch2/
-subprojects/eigen3/
-
-# C++ / CMake
-CMakeUserPresets.json
-.cmake/
+# system
+.DS_Store
 
 # IDEs
 .vscode/
 .idea/
-.DS_Store
+.zed/
+
+# AI
+CLAUDE.md
+.claude/
+.test.mk
 
 # Documentation
-docs/gallery/posts/
-docs/assets/examples/
-site/
-.zensical/
-.claude/
-CLAUDE.md
+docs/.vitepress/cache
+docs/.vitepress/dist
+node_modules/
+octave*
 
-.xmake/
-.fake_cuda/
-.test.mk
+#
+results/

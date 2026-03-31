@@ -1,6 +1,7 @@
 from ..distributions.BatchOfDistributions import BatchOfDistributions
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..driver import driver
+import numpy as np
 import torch
 
 class PyTorchDriver:
@@ -66,8 +67,12 @@ class PyTorchDriver:
         if tensor is None:
             return tensor
         res = torch.as_tensor( tensor, dtype = self.dtype, device = self.device )
-        assert res.ndim == ndim
+        if ndim is not None:
+            assert res.ndim == ndim
         return res
+
+    def zeros( self, shape ):
+        return torch.zeros( shape, dtype = self.dtype, device = self.device )
 
     def ones( self, shape ):
         return torch.ones( shape, dtype = self.dtype, device = self.device )
@@ -81,9 +86,15 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
-    def plan( self, f: BatchOfDistributions, g: BatchOfDistributions ):
-        bindings = driver.bindings_for( f, g )
+    def hstack( self, lst ):
+        return torch.hstack( lst )
 
+    def to_numpy( self, t ):
+        return np.array( t )
+        # if isinstance( t, list ):
+        # return t.to_numpy()
+
+    def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, *args ):
