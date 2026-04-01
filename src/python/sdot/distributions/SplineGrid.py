@@ -1,4 +1,4 @@
-from sdot.distributions.helpers.distribution_methods import TensorField, generate_distribution_methods, Distribution, driver
+from sdot.distributions.helpers.distribution_methods import TensorField, ListOfTensorFields, generate_distribution_methods, Distribution, driver
 
 
 @generate_distribution_methods
@@ -18,13 +18,13 @@ class SplineGrid( Distribution ):
     """
 
     values    = TensorField( "shape * dim" )
-    bounds    = TensorField( "nb_bounds", "dim" ) # nb_bounds must be equal to dim + 1
-    knots     = TensorField( "dim", "nb_points_per_dim" )
+    bounds    = TensorField( "dim + 1", "dim" )
+    knots     = ListOfTensorFields( "dim", [ "shape[ index ]" ] )
     order     = 1
 
     nb_points : list[ int ] # for each dim
     nb_bounds : int
-    shape     : int
+    shape     : list[ int ]
 
     def __init__( self, values = None, bounds_or_knots = None, knots = None, bounds = None, order = 1 ):
         if bounds_or_knots is not None:

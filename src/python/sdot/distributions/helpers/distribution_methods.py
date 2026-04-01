@@ -1,13 +1,16 @@
 from ..BatchOfDistributions import BatchOfDistributions
 from ..Distribution import Distribution
-from .TensorField import TensorField
+
+from .ListOfTensorFields import ListOfTensorFields
+from .TensorField import TensorField, _axis_names
+
 from ...driver import driver
 
 from typing import TypeVar, Type
-# from inspect import signature
 
 _D = TypeVar( '_D', bound=Distribution )
 _T = TypeVar( '_T' )
+
 
 def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
     """
@@ -44,22 +47,11 @@ def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
 
     # all the axis names
     axis_names = [ "batch_size" ]
-    for axis_name, field in fields:
+    for _, field in fields:
         if isinstance( field, TensorField ):
-            for axis_name in field.axis_names:
-                axis_name = axis_name.replace( ' ', '' )
-                if "*" in axis_name:
-                    name = axis_name.split( "*" )[ 0 ]
-                    axis = axis_name.split( "*" )[ 1 ]
-                    assert( name )
-                    assert( axis )
-                    if name not in axis_names:
-                        axis_names.append( name )
-                    if axis not in axis_names:
-                        axis_names.append( axis )
-                else:
-                    if axis_name not in axis_names:
-                        axis_names.append( axis_name )
+            for name in _axis_names( field.axis_names ):
+                if name not in axis_names:
+                    axis_names.append( name )
 
     # make the varians (batch, unidim, ...)
     _make_variant( cls, fields, axis_names, batch_version = 0, unidimensional_version = 1 )
@@ -106,11 +98,28 @@ def _make_variant( cls, fields, axis_names : list[ str ], batch_version : int, u
     setattr( cls, variant_name + "Version", res )
     for class_name, field in fields:
         new_field = field
-        if isinstance( field, TensorField ):
-            new_axis_names = [ "batch_size" ] * batch_version + list( field.axis_names )
+
+        # if ListOfTensorFields, add/remove axes
+        if isinstance( new_field, ListOfTensorFields ):
+            if new_field.main_axis_name == "dim":
+                tensor_axis_names = []
+                for tensor_axis_name in new_field.tensor_axis_names:
+                    n = tensor_axis_name.replace( ' ', '' ).replace( "[index]", "," )
+                    tensor_axis_names.append( n )
+                new_field = TensorField( *tensor_axis_names )
+            else:
+                new_tensor_axis_names = [ "batch_size" ] * batch_version + list( new_field.tensor_axis_names )
+                if unidimensional_version:
+                    new_tensor_axis_names = list( filter( lambda x: x != "dim", new_tensor_axis_names ) )
+                new_field = ListOfTensorFields( new_field.main_axis_name, new_tensor_axis_names )
+
+        # if TensorField, add/remove axes
+        if isinstance( new_field, TensorField ):
+            new_axis_names = [ "batch_size" ] * batch_version + list( new_field.axis_names )
             if unidimensional_version:
                 new_axis_names = list( filter( lambda x: x != "dim", new_axis_names ) )
             new_field = TensorField( *new_axis_names )
+
         setattr( res, class_name, new_field )
         if hasattr( new_field, '__set_name__' ):
             new_field.__set_name__( res, class_name )
@@ -125,7 +134,7 @@ def _setup_distribution_class( cls, fields, axis_names : list[ str ] ):
                     kwargs.setdefault( name, args[ i ] )
             for name, val in fields:
                 default = val
-                if isinstance( val, ( TensorField, property ) ):
+                if isinstance( val, ( ListOfTensorFields, TensorField, property ) ):
                     default = None
                 setattr( self, name, kwargs.get( name, default ) )
         cls.__init__ = __init__
@@ -215,43 +224,11 @@ def _collect_attributes( cls, stop_classes = [] ):
 def _axis_count( distribution, axis_name ):
     for name, field in _collect_attributes( type( distribution ) ):
         if isinstance( field, TensorField ):
-            # if we have a value (to get the shape)
-            v = distribution.__dict__.get( f'_{ name }' )
-            if v is None:
-                continue
-
-            #
-            nb_fields_with_mul = 0
-            for field_axis_name in field.axis_names:
-                nb_fields_with_mul += "*" in field_axis_name
-
-            #
-            num_axis = 0
-            for field_axis_name in field.axis_names:
-                field_axis_name = field_axis_name.replace( ' ', '' )
-                if "*" in field_axis_name:
-                    field_name = field_axis_name.split( "*" )[ 0 ]
-                    field_axis = field_axis_name.split( "*" )[ 1 ]
-
-                    if axis_name == field_name:
-                        dim = getattr( distribution, field_axis )
-                        if dim is None:
-                            break
-
-                        res = []
-                        for d in range( dim ):
-                            res.append( v.shape[ num_axis + d ] )
-                        return res
-
-                    if axis_name == field_axis:
-                        if nb_fields_with_mul > 1:
-                            raise NotImplementedError( "handle tensors with multiple a * b axes" )
-                        return v.ndim - ( len( field.axis_names ) - 1 )
-
-                    break # num_axis += dim -> TODO: find a simple way to avoid the infinite loop
-                else:
-                    if axis_name == field_axis_name:
-                        return v.shape[ num_axis ]
-
-                    num_axis += 1
-
+            # if we have a value for this tensor field (to get the shape)
+            value = distribution.__dict__.get( f'_{ name }' )
+            if value is not None:
+                # -> we can try to use the shape
+                res = field._get_axis_sizes( distribution, value, axis_name )
+                if len( res ):
+                    return res[ 0 ]
+    return None

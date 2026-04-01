@@ -121,10 +121,13 @@ def test_piecewise_affine():
 
 # f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
 # ic( f.shape )
-f = sdot.BatchOfPiecewiseAffineGrid( [[ 1, 0, 1 ],[ 1, 0, 1 ]] ) #
-ic( f.batch_size )
-ic( f.shape )
-ic( f.dim )
+f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
+# ic( f.batch_size )
+# ic( f.shape )
+# ic( f.dim )
+
+f.knots = [ 0, 1, 2 ]
+ic( f.knots )
 
 
 # # g = sdot.PiecewiseAffineGrid1d( [ 0, 1 ], [ 1, 1 ] )
