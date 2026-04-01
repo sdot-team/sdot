@@ -34,7 +34,7 @@ def check_grad( name: str, input, loss, attr, eps = 1e-4, tol = 1e-3 ):
 
 def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
     # forward
-    plan = sdot.plan( f, g )
+    plan = sdot.ot_plan( f, g )
 
     if exp_dist is not None:
         if not close( plan.distances, sdot.driver.t1( exp_dist ) ):
@@ -118,20 +118,11 @@ def test_piecewise_affine():
 #     [ 1 / 3, 1 / 12 ],
 #     [ 1 / 2, 1 / 2 ]
 # )
+import torch
 
 # f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
 # ic( f.shape )
-f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
-# ic( f.batch_size )
-# ic( f.shape )
-# ic( f.dim )
-
-f.knots = [ 0, 1, 2 ]
-ic( f.knots )
-
-
-# # g = sdot.PiecewiseAffineGrid1d( [ 0, 1 ], [ 1, 1 ] )
-# f = sdot.SumOfWeightedDiracs1d( [ 0, 1 ], [ 1, 1 ] )
-# ic( f.positions )
-# ic( f.multidimensional_version().positions )
+f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] )
+g = sdot.SumOfWeightedDiracs1d( [ 0, 1 ] )
+p = sdot.ot_plan( f, g )
 

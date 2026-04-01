@@ -13,6 +13,7 @@ class Distribution:
     MultidimensionalVersion    : type
     UnidimensionalVersion      : type
     BatchVersion               : type
+    BaseVersion                : type
     batch_size                 : int
     dim                        : int
 
@@ -20,13 +21,9 @@ class Distribution:
     def unidimensional_version( self, *_ ) -> Self: ...
     def batch_version( self, *_ ) -> Self: ...
 
-    @staticmethod
-    def batch_class():
-        raise RuntimeError( "To be redefined" )
-
     @property
     def always_1d( self ) -> bool:
-        return False
+        return self.__class__.__name__.endswith( "1d" )
 
     @property
     def is_a_1d_version( self ) -> bool:

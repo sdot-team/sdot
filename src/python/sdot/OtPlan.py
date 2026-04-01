@@ -21,6 +21,6 @@ class OtPlan:
         self.distances = distances
         self.cuts = cuts
 
-    def unidimensionnal_version( self ):
+    def unidimensional_version( self ):
         assert self.barycenters.shape[ 1 ] == 1
         return OtPlan1d( self.distances, self.barycenters[ :, 0 ], self.potentials, self.cuts )

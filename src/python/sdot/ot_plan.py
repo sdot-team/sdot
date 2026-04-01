@@ -1,0 +1,181 @@
+from .distributions.helpers.distribution_methods import _collect_attributes
+from .distributions.helpers.ListOfTensorFields import ListOfTensorFields
+from .distributions.helpers.TensorField import TensorField
+
+from .distributions.BatchOfDistributions import BatchOfDistributions
+from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
+from .distributions.Distribution import Distribution
+
+from .BatchOf1dOtPlans import BatchOf1dOtPlans
+from .BatchOfOtPlans import BatchOfOtPlans
+from .OtPlan1d import OtPlan1d
+from .OtPlan import OtPlan
+from .driver import driver
+
+import hashlib
+import struct
+
+
+def ot_plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ) -> OtPlan | OtPlan1d | BatchOfOtPlans | BatchOf1dOtPlans:
+    # ensure batch version
+    if isinstance( f, Distribution ) and isinstance( g, Distribution ):
+        res = ot_plan( f.batch_version( 1 ), g.batch_version( 1 ) )
+        assert isinstance( res, BatchOfOtPlans )
+        return res.unbatch()
+    if isinstance( f, Distribution ):
+        return ot_plan( f.batch_version( g.batch_size ), g )
+    if isinstance( g, Distribution ):
+        return ot_plan( f, g.batch_version( f.batch_size ) )
+
+    # always unidimensional ?
+    if f.is_an_unidimensional_verion and g.is_an_unidimensional_verion:
+        return ot_plan( f.multidimensional_version(), g.multidimensional_version() ).unidimensional_version()
+    if f.is_an_unidimensional_verion:
+        return ot_plan( f.multidimensional_version(), g )
+    if g.is_an_unidimensional_verion:
+        return ot_plan( f, g.multidimensional_version() )
+
+    # ensure `f` is a BatchOfSumOfWeightedDiracs, even if it means swapping `f` and `g`
+    if not isinstance( f, SumOfWeightedDiracs.BatchVersion ):
+        if isinstance( g, SumOfWeightedDiracs.BatchVersion ):
+            return ot_plan( g, f )
+        raise RuntimeError( "TODO: handle cases where f and g are both _not_ SumOfWeightedDiracs" )
+
+    # check dims are the same
+    if f.dim != g.dim:
+        raise RuntimeError( f"f and g are not of same dim ({ f.dim } and { g.dim })" )
+
+    # special case: 1d
+    if f.dim == 1:
+        return _ot_plan_1d( f, g )
+
+    # generic case
+    return _ot_plan_nd( f, g )
+
+
+def _ot_plan_nd( f : BatchOfDistributions, g : BatchOfDistributions ):
+    # ct_dim = f.dim if f.dim <= 4 else -1
+    raise NotImplementedError
+
+def _encode_base62( s: str, length: int = 11 ) -> str:
+    chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    h = struct.unpack( '>Q', hashlib.sha256( s.encode() ).digest()[ :8 ] )[ 0 ]
+    res = []
+    for _ in range( length ):
+        res.append( chars[ h % 62 ] )
+        h //= 62
+    return ''.join( reversed( res ) )
+
+def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
+    p_func, includes = type( g ).BaseVersion.primitive_function( f )
+
+    dylib_name = f"ot_plan_{ _encode_base62( p_func ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+
+    def src_func():
+        # inputs of backward_args and forward_args
+        backward_args = [ ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 2 ), ( "AF", "grad_distances", 1 ),
+                          ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
+        forward_args = []
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            for a_name, a_data in _collect_attributes( type( d_data ) ):
+                if isinstance( a_data, ListOfTensorFields ):
+                    backward_args.append( ( "const std::vector<AF> &", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+                    forward_args.append( ( "const std::vector<AF> &", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+                if isinstance( a_data, TensorField ):
+                    backward_args.append( ( "AF", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+                    forward_args.append( ( "AF", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+
+        # outputs of backward_args and forward_args
+        forward_args += [ ( "MF", "distance", 1 ), ( "MF", "barycenters", 3 ), ( "MF", "potentials", 2 ), ( "MF", "cuts", 3 ) ]
+
+        for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
+            for a_name, a_data in _collect_attributes( type( d_data ) ):
+                if isinstance( a_data, ListOfTensorFields ):
+                    backward_args.append( ( "std::vector<MF> &", f"grad_{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+                if isinstance( a_data, TensorField ):
+                    backward_args.append( ( "MF", f"grad_{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
+
+        # tensor_conv
+        backward_tensor_conv = str.join( " ", [ _tensor_conv_for( t, n, r ) for t, n, r in backward_args ] )
+        forward_tensor_conv = str.join( " ", [ _tensor_conv_for( t, n, r ) for t, n, r in forward_args ] )
+
+        m = {
+            "BACKWARD_TENSOR_CONV": backward_tensor_conv,
+            "FORWARD_TENSOR_CONV": forward_tensor_conv,
+            "BACKWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in backward_args ] ),
+            "FORWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in forward_args ] ),
+            "PRIMITIVE_FUNC": p_func,
+            "SDOT_INCLUDES": str.join( "\n", [ f"#include <{ include }>" for include in includes ] ),
+        }
+
+        return driver.cpp_src( m, """
+            #include <sdot/nanobind_wrappers.h>
+            #include <sdot/ot_plan_1d.h>
+            SDOT_INCLUDES
+
+            namespace nb = nanobind;
+            using namespace sdot;
+
+            using NA = nanobind::device::SDOT_NANOBIND_ARCH;
+            using TF = SDOT_SCALAR_TYPE;
+
+            using Arch = ArchFor<NA>::type;
+            using AF = nb::ndarray<const TF,NA>; // const array
+            using MF = nb::ndarray<TF,NA>; // mutable array
+
+            // Forward function that works with both 1D and 2D arrays
+            void forward( FORWARD_ARGS ) {
+                FORWARD_TENSOR_CONV
+                ot_plan_1d_forward( f_positions, f_weights, PRIMITIVE_FUNC, distance, barycenters, potentials, cuts );
+            }
+
+            void backward( BACKWARD_ARGS ) {
+                BACKWARD_TENSOR_CONV
+                // w2_distance_backward(
+                //               tensor_view_1( grad_distances ),
+                //               tensor_view_2( grad_barycenters ),
+                //               tensor_view_2( barycenters ),
+                //               tensor_view_2( potentials ),
+                //               tensor_view_3( cuts ), f, g, grad_f, grad_g );
+            }
+
+            #define MK_MOD( NAME ) NB_MODULE( NAME, m )
+
+            MK_MOD( SDOT_BINDING_NAME ) {
+                m.def( "backward", &backward );
+                m.def( "forward", &forward );
+            }
+        """ )
+
+    # get the binding
+    bindings = driver.import_bindings( dylib_name, src_func, [] )
+    return driver.plan( bindings, f, g )
+
+
+def distances( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
+    """ Squared Wasserstein distances """
+    return ot_plan( f, g ).distances
+
+def distance( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
+    """ Squared Wasserstein distance """
+    d = distances( f, g )
+    if d.ndim == 1:
+        if d.shape[ 0 ] != 1:
+            raise RuntimeError( "sdot.distance works only for batch_size = 1" )
+        return d[ 0 ]
+    assert d.ndim == 0
+    return d.item()
+
+
+def barycenters( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
+    return ot_plan( f, g ).barycenters
+
+
+def _tensor_conv_for( type, name, rank ):
+    if "vector" in type:
+        tt = "const TF"
+        if "MF" in type:
+            tt = "TF"
+        return f"std::vector<TensorView<{ tt },{ rank },Arch>> { name }( _{ name }.size() ); for( PI i = 0; i < _{ name }.size(); ++i ) { name }[ i ] = tensor_view_{ rank }( _{ name }[ i ] );"
+
+    return f"auto { name } = tensor_view_{ rank }( _{ name } );"

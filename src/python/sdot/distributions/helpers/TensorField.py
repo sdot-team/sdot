@@ -28,6 +28,8 @@ class TensorField:
     """
 
     def __init__( self, *axis_names: str ):
+        self.comes_from_a_dim_list = False
+        self.removed_dim_axes = []
         self.axis_names = axis_names
         self.name = None
 
@@ -146,6 +148,8 @@ class TensorField:
 
         return out
 
+    def _rank( self, distribution ):
+        return _rank( distribution, self.axis_names )
 
 # ------------------------------------------------------ helpers ------------------------------------------------------
 def _rank( distribution, base_axis_names ):

@@ -76,6 +76,8 @@ class ListOfTensorFields:
         # register the tensor list
         distribution.__dict__[ f'_{ self.name }' ] = tensors
 
+    def _rank( self, distribution ):
+        return _rank( distribution, self.tensor_axis_names )
 
     def _get_axis_sizes( self, distribution, v, axis_name ) -> list[ tuple[ int, ... ] | int ]:
         raise NotImplementedError

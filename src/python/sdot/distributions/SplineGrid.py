@@ -13,8 +13,6 @@ class SplineGrid( Distribution ):
     By default ``knots`` is a linspace between bounds for each axis.
 
     If ``bounds`` and ``knots`` are defined, ``knots`` are "normalized" to fit into the bounds (it's a way to define a rotated/skewed grid for instance)
-
-    Of course
     """
 
     values    = TensorField( "shape * dim" )
@@ -24,7 +22,7 @@ class SplineGrid( Distribution ):
 
     nb_points : list[ int ] # for each dim
     nb_bounds : int
-    shape     : list[ int ]
+    shape     : list[ int ] # for each dim
 
     def __init__( self, values = None, bounds_or_knots = None, knots = None, bounds = None, order = 1 ):
         if bounds_or_knots is not None:
@@ -43,4 +41,5 @@ class SplineGrid( Distribution ):
         self.knots = knots
         self.order = order
 
-
+    def primitive_function( self ):
+        return "piecewise_cst_primitive( g_values )", [ "sdot/PiecewiseCstPrimitive.h" ]

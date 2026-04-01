@@ -24,5 +24,5 @@ class OtPlan1d:
 
         self.distance = distances.item()
 
-    def unidimensionnal_version( self ):
+    def unidimensional_version( self ):
         return self

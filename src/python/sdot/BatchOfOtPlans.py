@@ -28,7 +28,7 @@ class BatchOfOtPlans:
 
         return OtPlan( self.distances[ 0 ], self.barycenters[ 0, :, : ], self.potentials[ 0, : ], self.cuts[ 0, :, : ] )
 
-    def unidimensionnal_version( self ):
+    def unidimensional_version( self ):
         assert  self.barycenters.shape[ 2 ] == 1
 
         return BatchOf1dOtPlans( self.distances, self.barycenters[ :, :, 0 ], self.potentials, self.cuts )

@@ -7,7 +7,7 @@ from ..driver import driver
 class SumOfWeightedDiracs( Distribution ):
     """
     positions : tensor[ nb_diracs, dim ]
-    weights   : tensor[ nb_diracs ]         (ones by default)
+    weights   : tensor[ nb_diracs ] (ones by default)
     """
 
     positions = TensorField( "nb_diracs", "dim" )

@@ -116,7 +116,7 @@ class JaxDriver:
     def plan( self, bindings, f, g ):
         np_dtype = np.dtype( self.dtype )
 
-        input_tensors = f.tensor_list() + g.tensor_list()
+        input_tensors = f.flat_tensor_list() + g.flat_tensor_list()
         dirac_xs = input_tensors[ 0 ]
 
         batch_size = dirac_xs.shape[ 0 ]

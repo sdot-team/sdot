@@ -31,5 +31,5 @@ class BatchOf1dOtPlans:
 
         return OtPlan1d( self.distances[ 0 ], self.barycenters[ 0, : ], self.potentials[ 0, : ], self.cuts[ 0, :, : ] )
 
-    def unidimensionnal_version( self ):
+    def unidimensional_version( self ):
         return self

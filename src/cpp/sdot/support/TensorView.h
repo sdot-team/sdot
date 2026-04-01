@@ -30,6 +30,10 @@ public:
     HD             TensorView        ( T *data, Shape shape, Strides strides ) : _strides( strides ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
     HD             TensorView        ( T *data, Shape shape ) : _strides( contiguous_strides( shape ) ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
     HD             TensorView        ( T *data, PI size ) : _shape{ size }, _strides{ sizeof( T ) }, _ptr( reinterpret_cast<RawPtr>( data ) ) {}
+    HD             TensorView        () {}
+
+    // HD             TensorView        ( const TensorView &that ) : _shape{ that._shape }, _strides{ that._strides }, _ptr( that._ptr ) {}
+    // HD void        operator=         ( const TensorView &that ) { _shape = that._shape; _strides = that._strides; _ptr = that._ptr; }
 
     static HD auto contiguous_strides( const Shape &ext ) -> Strides;
 

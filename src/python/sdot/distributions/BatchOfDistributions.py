@@ -1,3 +1,5 @@
+from typing import Self
+
 class BatchOfDistributions:
     """
     Base class for all batch distributions.
@@ -7,25 +9,34 @@ class BatchOfDistributions:
     property per TensorField axis name.
     """
 
-    @property
-    def batch_size( self ) -> int:
-        raise RuntimeError( f"To be redefined for { type( self ) }" )
+    MultidimensionalVersion    : type
+    UnidimensionalVersion      : type
+    BaseVersion                : type
+    batch_size                 : int
+    dim                        : int
+
+    def multidimensional_version( self, *_ ) -> Self: ...
 
     @property
-    def dim( self ) -> int:
-        raise RuntimeError( f"To be redefined for { type( self ) }" )
-
-    @property
-    def always_1d( self ) -> bool:
-        return False
+    def is_an_unidimensional_verion( self ) -> bool:
+        return self.__class__.__name__.endswith( "1d" )
 
     @property
     def is_a_1d_version( self ) -> bool:
         """ true if comes from a multidimensional version (meaning that we can call .multidimensionnal_version()) """
         return False
 
-    def tensor_list( self ) -> list:
-        raise RuntimeError( f"To be redefined for { type( self ) }" )
+    def flat_tensor_list( self ) -> list:
+        from .helpers.distribution_methods import _collect_attributes, TensorField, ListOfTensorFields
+        
+        res = []
+        for a_name, a_data in _collect_attributes( type( self ) ):
+            if isinstance( a_data, ListOfTensorFields ):
+                for item in getattr( self, a_name ):
+                    res.append( item )
+            if isinstance( a_data, TensorField ):
+                res.append( getattr( self, a_name ) )
+        return res
 
     # def __getattr__( self, name: str ) -> int:
     #     # Never actually called for attributes that exist; signals to static

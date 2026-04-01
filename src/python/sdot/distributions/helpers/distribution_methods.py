@@ -46,26 +46,38 @@ def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
     fields = _collect_attributes( cls )
 
     # all the axis names
-    axis_names = [ "batch_size" ]
+    all_the_axis_names = [ "batch_size" ]
     for _, field in fields:
         if isinstance( field, TensorField ):
             for name in _axis_names( field.axis_names ):
-                if name not in axis_names:
-                    axis_names.append( name )
+                if name not in all_the_axis_names:
+                    all_the_axis_names.append( name )
 
-    # make the varians (batch, unidim, ...)
-    _make_variant( cls, fields, axis_names, batch_version = 0, unidimensional_version = 1 )
-    _make_variant( cls, fields, axis_names, batch_version = 1, unidimensional_version = 0 )
-    _make_variant( cls, fields, axis_names, batch_version = 1, unidimensional_version = 1 )
-    cls.UnidimensionalBatchVersion.MultidimensionalVersion = cls.BatchVersion
-    cls.BatchVersion.UnidimensionalVersion = cls.UnidimensionalBatchVersion
-    cls.UnidimensionalVersion.MultidimensionalVersion = cls
+    # make the variants (batch, unidim, ...)
+    clu = _make_variant( cls, fields, batch_version = 0, unidimensional_version = 1 )
+    clb = _make_variant( cls, fields, batch_version = 1, unidimensional_version = 0 )
+    clt = _make_variant( cls, fields, batch_version = 1, unidimensional_version = 1 )
+
+    # links beteen variants
+    cls.UnidimensionalBatchVersion = clt
+    cls.UnidimensionalVersion = clu
+    cls.BatchVersion = clb
+    cls.BaseVersion = cls
+
+    clu.MultidimensionalVersion = cls
+    clu.BatchVersion = clt
+    clu.BaseVersion = cls
+
+    clb.BaseVersion = cls
+
+    clt.MultidimensionalVersion = clb
+    clt.BaseVersion = cls
 
     # add generated methods and properties for these variants
-    _setup_distribution_class( cls.UnidimensionalBatchVersion, fields, axis_names )
-    _setup_distribution_class( cls.UnidimensionalVersion, fields, axis_names )
-    _setup_distribution_class( cls.BatchVersion, fields, axis_names )
-    _setup_distribution_class( cls, fields, axis_names )
+    _setup_distribution_class( cls.UnidimensionalBatchVersion, all_the_axis_names )
+    _setup_distribution_class( cls.UnidimensionalVersion, all_the_axis_names )
+    _setup_distribution_class( cls.BatchVersion, all_the_axis_names )
+    _setup_distribution_class( cls, all_the_axis_names )
 
     return cls
 
@@ -77,7 +89,7 @@ def variants_of( cls: Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[ _D ] 
     return u, b, t
 
 
-def _make_variant( cls, fields, axis_names : list[ str ], batch_version : int, unidimensional_version : int ):
+def _make_variant( cls, fields, batch_version : int, unidimensional_version : int ):
     class_name = cls.__name__
     if batch_version:
         class_name = 'BatchOf' + class_name
@@ -88,25 +100,20 @@ def _make_variant( cls, fields, axis_names : list[ str ], batch_version : int, u
     if batch_version:
         parent = BatchOfDistributions
 
-    variant_name = ""
-    if unidimensional_version:
-        variant_name += "Unidimensional"
-    if batch_version:
-        variant_name += 'Batch'
-
     res = type( class_name, ( parent, ), { '__annotations__': { "pouet": int } } )
-    setattr( cls, variant_name + "Version", res )
     for class_name, field in fields:
         new_field = field
 
         # if ListOfTensorFields, add/remove axes
+        comes_from_a_dim_list = False
         if isinstance( new_field, ListOfTensorFields ):
-            if new_field.main_axis_name == "dim":
+            if unidimensional_version and new_field.main_axis_name == "dim":
                 tensor_axis_names = []
                 for tensor_axis_name in new_field.tensor_axis_names:
                     n = tensor_axis_name.replace( ' ', '' ).replace( "[index]", "," )
                     tensor_axis_names.append( n )
                 new_field = TensorField( *tensor_axis_names )
+                new_field.comes_from_a_dim_list = True
             else:
                 new_tensor_axis_names = [ "batch_size" ] * batch_version + list( new_field.tensor_axis_names )
                 if unidimensional_version:
@@ -115,17 +122,25 @@ def _make_variant( cls, fields, axis_names : list[ str ], batch_version : int, u
 
         # if TensorField, add/remove axes
         if isinstance( new_field, TensorField ):
+            removed_dim_axes = []
             new_axis_names = [ "batch_size" ] * batch_version + list( new_field.axis_names )
             if unidimensional_version:
+                removed_dim_axes = [ i for i, x in enumerate( new_axis_names ) if x == "dim" ]
                 new_axis_names = list( filter( lambda x: x != "dim", new_axis_names ) )
             new_field = TensorField( *new_axis_names )
+            new_field.removed_dim_axes = removed_dim_axes
+            new_field.comes_from_a_dim_list = comes_from_a_dim_list
 
         setattr( res, class_name, new_field )
         if hasattr( new_field, '__set_name__' ):
             new_field.__set_name__( res, class_name )
 
+    return res
 
-def _setup_distribution_class( cls, fields, axis_names : list[ str ] ):
+
+def _setup_distribution_class( cls, axis_names : list[ str ] ):
+    fields = _collect_attributes( cls )
+
     # --- __init__ -----------------------------------------------------------
     if '__init__' not in vars( cls ):
         def __init__( self, *args, **kwargs ):
@@ -184,10 +199,13 @@ def _setup_distribution_class( cls, fields, axis_names : list[ str ] ):
                 if isinstance( field, TensorField ):
                     v = getattr( self, name ) # .__dict__.get( name )
                     if v is not None:
-                        if "dim" in field.axis_names:
-                            kw[ name ] = driver.expand_dims( v, field.axis_names.index( "dim" ) )
-                        else:
-                            kw[ name ] = v
+                        for n in field.removed_dim_axes:
+                            v = driver.expand_dims( v, n )
+                        if field.comes_from_a_dim_list:
+                            raise NotImplementedError
+                        kw[ name ] = v
+                elif isinstance( field, ListOfTensorFields ):
+                    raise NotImplementedError
                 else:
                     kw[ name ] = self.__dict__.get( name )
             # make the new instance

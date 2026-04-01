@@ -38,6 +38,8 @@ static auto tensor_view_3( const nanobind::ndarray<TF,TA> &v ) {
     return TensorView<TF,3,typename ArchFor<TA>::type>( v.data(), extent, strides );
 }
 
+
+
 // to nanobind types
 template<class Vec>
 static auto to_ndarray_1d( Vec &&vec ) {

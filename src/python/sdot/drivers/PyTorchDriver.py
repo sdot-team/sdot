@@ -128,7 +128,9 @@ class PyTorchDriver:
 
                 return tuple( grads )
 
-        input_tensors = f.tensor_list() + g.tensor_list()
+        input_tensors = f.flat_tensor_list() + g.flat_tensor_list()
+        ic( input_tensors )
+
         outputs = SDOTFunction.apply( *input_tensors )
         assert isinstance( outputs, tuple )
         return BatchOfOtPlans( *outputs )
