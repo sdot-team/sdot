@@ -9,6 +9,7 @@ class GenericTensor( numpy.ndarray ):
     """ created only to please typing """
     requires_grad : bool
 
+
 class TensorField:
     """
     Descriptor for a tensor field in a Distribution (or BatchOfDistributions, ...).
@@ -26,16 +27,9 @@ class TensorField:
     When we set a TensorField, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
     """
 
-    def __init__( self, *axis_names ):
-        self.from_a_unidimensionnal_version = False
-        self.from_a_batch_version = False
+    def __init__( self, *axis_names: str ):
         self.axis_names = axis_names
         self.name = None
-
-        if "*dim" not in axis_names:
-            self.rank = len( axis_names )
-        else:
-            self.rank = None
 
     def __set_name__( self, distribution, name ):
         self.name = name
@@ -47,55 +41,72 @@ class TensorField:
     def __get__( self, distribution: object, _type: type ) -> GenericTensor: ...
 
     def __get__( self, distribution, _type = None ):
+        # not in a Distribution ?
         if distribution is None:
             return self
 
-        val = distribution.__dict__.get( f'_{ self.name }' )
-
-        if val is None:
-            default_method = getattr( type( distribution ), f'default_{ self.name }', None )
-            if default_method is not None:
-                sig = signature( default_method )
-                if len( sig.parameters ) == 2:
-                    val = default_method( distribution, isinstance( distribution, BatchOfDistributions ) )
-                else:
-                    val = default_method( distribution )
-
-                val = driver.tn( val, self.rank )
-
-                distribution.__dict__[ f'_{ self.name }' ] = val
-
-        return val
-
-    def __set__( self, obj, value ):
+        # we have a value ?
+        value = distribution.__dict__.get( f'_{ self.name }' )
         if value is not None:
-            obj.__dict__[ f'_{ self.name }' ] = driver.tn( value, self.rank )
+            return value
+
+        # we have a default method ?
+        default_method = getattr( type( distribution ), f'default_{ self.name }', None )
+        if default_method is not None:
+            # make the new value
+            sig = signature( default_method )
+            if len( sig.parameters ) == 2:
+                value = default_method( distribution, isinstance( distribution, BatchOfDistributions ) )
+            else:
+                value = default_method( distribution )
+
+            # register it
+            self.__set__( distribution, value )
+
+            # return the normalized value
+            return distribution.__dict__[ f'_{ self.name }' ]
+
+        # not foud :(
+        return None
+
+    def __set__( self, distribution, value ):
+        if value is None:
+            return
+
+        # get rank
+        axis_names = solved_axis_names( distribution, self.axis_names )
+        if axis_names is not None:
+            rank = len( axis_names )
         else:
-            obj.__dict__[ f'_{ self.name }' ] = None
+            rank = None
+
+        # make tensor
+        tensor = driver.tn( value, rank, self.name )
+
+        # check the dimensions
+        # for ///<
+
+        # register the tensor
+        distribution.__dict__[ f'_{ self.name }' ] = tensor
 
 
-    # # @overload
-    # # def __get__( self, obj: None, objtype: type ) -> 'TensorField': ...
-    # # @overload
-    # # def __get__( self, obj: object, objtype: type ) -> Any: ...
-    # def __get__( self, obj, objtype = None ):
-    #     if obj is None:
-    #         return self
-    #     val = obj.__dict__.get( f'_{ self.name }' )
-    #     if val is None:
-    #         default_method = getattr( type( obj ), f'default_{ self.name }', None )
-    #         if default_method is not None:
-    #             return default_method( obj )
-    #     return val
+def solved_axis_names( distribution, base_axis_names ):
+    res = []
+    for axis_name in base_axis_names:
+        axis_name = axis_name.replace( ' ', '' )
+        if "*" in axis_name:
+            name = axis_name.split( "*" )[ 0 ]
+            axis = axis_name.split( "*" )[ 1 ]
+            assert( name )
+            assert( axis )
 
-    # def _batch_version( self, value, batch_size ):
-    #     """ Add a leading batch dimension and repeat. """
-    #     # if "..." in self.axis_names:
-    #     #     idx = ( None, ) + ( slice( None ), ) * value.ndim
-    #     #     rpt = [ batch_size ] + [ 1 ] * value.ndim
-    #     #     return driver.repeat( value[ idx ], rpt )
+            axis_size = getattr( distribution, axis )
+            if axis_size is None:
+                return None
 
-    #     idx = ( None, ) + ( slice( None ), ) * self.rank
-    #     rpt = [ batch_size ] + [ 1 ] * self.rank
-    #     return driver.repeat( value[ idx ], rpt )
-
+            assert isinstance( axis_size, int )
+            for d in range( axis_size ):
+                res.append( f"{ name }_{ d }" )
+        else:
+            res.append( axis_name )
+    return res

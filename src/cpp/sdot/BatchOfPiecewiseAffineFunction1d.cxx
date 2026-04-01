@@ -1,11 +1,11 @@
 #pragma once
 
-#include "BatchOfPiecewiseAffineFunction1d.h"
+#include "BatchOfPiecewiseAffineGrid1d.h"
 
 namespace sdot {
 
 #define UTP template<class T,class Arch>
-#define DTP BatchOfPiecewiseAffineFunction1d<T,Arch>
+#define DTP BatchOfPiecewiseAffineGrid1d<T,Arch>
 
 UTP PI DTP::nb_points() const {
     return xs.size( 1 );
@@ -15,7 +15,7 @@ UTP PI DTP::nb_rows() const {
     return xs.size( 0 );
 }
 
-UTP PiecewiseAffineFunction1d<T,Arch> DTP::row( PI num_batch ) const  {
+UTP PiecewiseAffineGrid1d<T,Arch> DTP::row( PI num_batch ) const  {
    return { xs.row( num_batch ), ys.row( num_batch ) };
 }
 

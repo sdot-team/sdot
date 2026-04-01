@@ -60,4 +60,4 @@ def ot_plan_for_Piecewise1dAffineFunctions( f, g ) -> BatchOfOtPlans:
     return BatchOfOtPlans( distances, barycenters, potentials, cuts )
 
 
-map_of_plan_methods[ "BatchOfPiecewiseAffineFunction1d" ] = ot_plan_for_Piecewise1dAffineFunctions
+map_of_plan_methods[ "BatchOfPiecewiseAffineGrid1d" ] = ot_plan_for_Piecewise1dAffineFunctions

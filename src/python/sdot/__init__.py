@@ -1,7 +1,7 @@
 # base distributions (1d and batch version are generated after)
-from .distributions.PiecewiseAffineFunction1d import PiecewiseAffineFunction1d as PiecewiseAffineFunction1d
-from .distributions.PiecewiseConstantImage import PiecewiseConstantImage as PiecewiseConstantImage
+# from .distributions.PiecewiseConstantImage import PiecewiseConstantImage as PiecewiseConstantImage
 from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions
+from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseAffineGrid
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 from .distributions.Distribution import Distribution as Distribution
 
@@ -25,7 +25,7 @@ from .driver import driver as driver
 
 # variants
 SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d = variants_of( SumOfWeightedDiracs )
-# PiecewiseAffineGrid1d, BatchOfPiecewiseAffineGrid, BatchOfPiecewiseAffineGrid1d = variants_of( PiecewiseAffineGrid )
+PiecewiseAffineGrid1d, BatchOfPiecewiseAffineGrid, BatchOfPiecewiseAffineGrid1d = variants_of( PiecewiseAffineGrid )
 
 # # generated variants
 # if TYPE_CHECKING:
@@ -47,7 +47,7 @@ SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d 
 #     class BatchOfSumOfWeightedDiracs1d( BatchOfSumOfWeightedDiracs ):
 #         def __init__( self, positions = None, weights = None ): ...
 
-#     class BatchOfPiecewiseAffineFunction1d( BatchOfDistributions ):
+#     class BatchOfPiecewiseAffineGrid1d( BatchOfDistributions ):
 #         nb_points : int
 #         xs        : Any
 #         ys        : Any
@@ -61,4 +61,4 @@ SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d 
 #     BatchOfSumOfWeightedDiracs       = generate_batch_version_of( SumOfWeightedDiracs )
 #     BatchOfSumOfWeightedDiracs1d     = generate_batch_version_of( SumOfWeightedDiracs1d )
 #     BatchOfPiecewiseConstantImage    = generate_batch_version_of( PiecewiseConstantImage )
-#     BatchOfPiecewiseAffineFunction1d = generate_batch_version_of( PiecewiseAffineFunction1d )
+#     BatchOfPiecewiseAffineGrid1d = generate_batch_version_of( PiecewiseAffineGrid1d )

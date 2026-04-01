@@ -1,4 +1,7 @@
-import numpy, sdot
+from icecream.builtins import install
+import numpy
+import sdot
+install()
 
 def close( a, b, eps = 1e-5 ):
     return abs( a - b ).max() < eps
@@ -62,7 +65,7 @@ def check_affine_distances():
     # constant density
     check_plan( "0 then 1/2 => 1",
         sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
         [ 1 / 3, 1 / 12 ],
         [ 1 / 2, 1 / 2 ]
     )
@@ -70,7 +73,7 @@ def check_affine_distances():
     # non constant density
     check_plan( "0 then 1/2 => 2 x",
         sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.PiecewiseAffineFunction1d( [ 0, 2 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 0, 2 ] ),
         [ 1 / 2, 1 / 12 ],
         [ 2 / 3, 2 / 3 ]
     )
@@ -78,7 +81,7 @@ def check_affine_distances():
     # density is normalized by default
     check_plan( "0 then 1/2 => 1 x",
         sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
-        sdot.PiecewiseAffineFunction1d( [ 0, 1 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 0, 1 ] ),
         [ 1 / 2, 1 / 12 ],
         [ 2 / 3, 2 / 3 ]
     )
@@ -86,39 +89,45 @@ def check_affine_distances():
     #
     check_plan( "[ 0, 1 ] => 1",
         sdot.SumOfWeightedDiracs1d( [ 0, 1 ] ),
-        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
         [ 1 / 12 ],
         [ 1 / 4, 3 / 4 ]
     )
 
     check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
         sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.PiecewiseAffineFunction1d( [ 1, 1 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
         [ 1 / 1200 ],
         numpy.linspace( 0.05, 0.95, 10 )
     )
 
     check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 2 x",
         sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.PiecewiseAffineFunction1d( [ 0, 2 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 0, 2 ] ),
         [ 0.03405928239226341248 ]
     )
 
 def test_piecewise_affine():
     for_each_driver_comb( check_affine_distances )
 
+
 # if __name__ == "main":
-check_plan( "0 then 1/2 => 1",
-    sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
-    sdot.PiecewiseAffine1d( [ 1, 1 ] ),
-    [ 1 / 3, 1 / 12 ],
-    [ 1 / 2, 1 / 2 ]
-)
+# check_plan( "0 then 1/2 => 1",
+#     sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+#     sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
+#     [ 1 / 3, 1 / 12 ],
+#     [ 1 / 2, 1 / 2 ]
+# )
 
-# from icecream import install
-# install()
+# f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
+# ic( f.shape )
+f = sdot.BatchOfPiecewiseAffineGrid( [[ 1, 0, 1 ],[ 1, 0, 1 ]] ) #
+ic( f.batch_size )
+ic( f.shape )
+ic( f.dim )
 
-# # g = sdot.PiecewiseAffineFunction1d( [ 0, 1 ], [ 1, 1 ] )
+
+# # g = sdot.PiecewiseAffineGrid1d( [ 0, 1 ], [ 1, 1 ] )
 # f = sdot.SumOfWeightedDiracs1d( [ 0, 1 ], [ 1, 1 ] )
 # ic( f.positions )
 # ic( f.multidimensional_version().positions )

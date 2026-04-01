@@ -8,7 +8,7 @@
 namespace sdot {
 
 template<class T,class Arch>
-struct PiecewiseAffineFunction1d {
+struct PiecewiseAffineGrid1d {
     using    TF                       = IntermediateScalarType<std::decay_t<T>,Arch>::type;
     using    Piece                    = PieceOfAffine1d<TF>;
     using    TT                       = TensorView<T,1,Arch>;
@@ -29,4 +29,4 @@ struct PiecewiseAffineFunction1d {
 
 } // namespace sdot
 
-#include "PiecewiseAffineFunction1d.cxx"
+#include "PiecewiseAffineGrid1d.cxx"

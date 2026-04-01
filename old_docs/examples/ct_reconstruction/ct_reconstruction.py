@@ -45,7 +45,7 @@ def plot( dirac_coords, max_num = 10000 ):
 def loss( dirac_coords ):
     dirac_xs = sinogram.projection( dirac_coords )
 
-    f = sdot.BatchOfPiecewiseAffineFunction1d( sinogram.xs, sinogram.ys )
+    f = sdot.BatchOfPiecewiseAffineGrid1d( sinogram.xs, sinogram.ys )
     g = sdot.BatchOfSumOfWeightedDiracs1d( dirac_xs )
     return torch.sum( sdot.distances( f, g ) )
 

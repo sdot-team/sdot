@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PiecewiseAffineFunction1d.h"
+#include "PiecewiseAffineGrid1d.h"
 #include <stdexcept>
 #include <utility>
 
@@ -8,7 +8,7 @@ namespace sdot {
 
     // --------------------------------------------------- batch dim 0 ---------------------------------------------------
 #define UTP template<class T,class Arch>
-#define DTP PiecewiseAffineFunction1d<T,Arch>
+#define DTP PiecewiseAffineGrid1d<T,Arch>
 
 UTP DTP::Piece DTP::get_first_piece( TF point_scale ) const {
     #ifndef __CUDACC__

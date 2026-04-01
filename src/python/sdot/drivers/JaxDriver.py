@@ -68,13 +68,15 @@ class JaxDriver:
         """ make a rank 0 tensor """
         return self.tn( tensor, 0 )
 
-    def tn( self, tensor, ndim ):
+    def tn( self, tensor, ndim, name = None ):
         """ make a rank ndim tensor """
         if tensor is None:
             return tensor
         res = jnp.asarray( tensor, dtype = self.dtype, device = self.device )
-        if ndim is not None:
-            assert res.ndim == ndim
+        if ndim is not None and res.ndim != ndim:
+            if name is not None:
+                raise IndexError( f"expecting for field '{ name }' a { ndim }d tensor, but { res.ndim }d was provided." )
+            raise IndexError( f"expecting a { ndim }d tensor, but { res.ndim }d was provided." )
         return res
 
     def i1( self, tensor ):
