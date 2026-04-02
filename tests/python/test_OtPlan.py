@@ -38,19 +38,20 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
 
     if exp_dist is not None:
         if not close( plan.distances, sdot.driver.t1( exp_dist ) ):
-            raise AssertionError( f"bad distances (exp: {  exp_dist }, obt: { plan.distances })" )
+            raise AssertionError( f"bad distances (exp: {  exp_dist }, obt: { plan.distances }) for case '{ name }'" )
     if exp_bary is not None:
         if not close( plan.barycenters, sdot.driver.t1( exp_bary ) ):
-            raise AssertionError( f"bad barycenters (exp: { exp_bary }, obt: { plan.barycenters })" )
+            raise AssertionError( f"bad barycenters (exp: { exp_bary }, obt: { plan.barycenters }) for case '{ name }'" )
 
-    # grad
+    # backward
     if sdot.driver.normalized_dtype == "FP64":
         for proc in [ sdot.distances, sdot.barycenters ]:
-            for m, attr in [ ( f, "positions" ), ( f, "weights" ), ( g, "ys" ), ( g, "xs" ) ]: #
+            for m, attr in [ ( f, "positions" ), ( f, "weights" ), ( g, "values" ), ( g, "knots" ) ]: #
                 def loss( input ):
                     setattr( m, attr, input )
                     return proc( f, g ).sum()
                 check_grad( name, getattr( m, attr ), loss, attr )
+
 
 def for_each_driver_comb( cb ):
     for framework in [ "torch", "jax" ]: #
@@ -60,6 +61,7 @@ def for_each_driver_comb( cb ):
                 sdot.driver.device = device
                 sdot.driver.dtype = dtype
                 cb()
+
 
 def check_affine_distances():
     # constant density
@@ -118,11 +120,12 @@ def test_piecewise_affine():
 #     [ 1 / 3, 1 / 12 ],
 #     [ 1 / 2, 1 / 2 ]
 # )
-import torch
+# import torch
+# sdot.driver.dtype = "FP64"
 
-# f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ) #
-# ic( f.shape )
-f = sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] )
-g = sdot.SumOfWeightedDiracs1d( [ 0, 1 ] )
-p = sdot.ot_plan( f, g )
-
+# check_plan( "0 then 1/2 => 1",
+#     sdot.BatchOfSumOfWeightedDiracs1d( [ [ 0 ], [ 1 / 2 ] ] ),
+#     sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
+#     [ 1 / 3, 1 / 12 ],
+#     [ 1 / 2, 1 / 2 ]
+# )

@@ -10,6 +10,9 @@
 #define T_p   template<PI p>
 
 #define ASSERTED_EQUAL( A, B ) ( []( auto a, auto b ) { if ( a != b ) throw std::runtime_error( #A " and " #B " are not equal" ); return a; } )( A, B )
+#define DECAYED_TYPE_OF( v )   std::decay_t<decltype( v )>
+#define IS_BASE_OF( A, V )     std::is_base_of_v<A,std::decay_t<V>>
+#define FORWARD( v )           std::forward<decltype( v )>( v )
 
 #ifdef __CUDACC__
 #  define HD __host__ __device__

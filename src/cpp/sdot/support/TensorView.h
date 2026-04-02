@@ -1,5 +1,6 @@
 #pragma once
 
+#include "StrideIterator.h"
 #include "common_macros.h"
 #include "common_types.h"
 #include "ASSERT.h"
@@ -54,6 +55,9 @@ public:
     HD PI          size              () const { static_assert( ct_rank == 1 ); return size( 0 ); }
 
     HD T*          data              () const { return reinterpret_cast<T *>( _ptr ); }
+
+    HD auto        begin             () const { ASSERT( rank() == 1 ); return StrideIterator<T>{ _ptr, _strides[ 0 ], 0 }; }
+    HD auto        end               () const { return StrideIterator<T>{ _ptr, _strides[0], _shape[ 0 ] }; }
 
     T_U auto       sum_along_axis_1  () const -> Tensor<U,1,Arch>;
     void           with_cpu_version  ( auto &&func ) const;

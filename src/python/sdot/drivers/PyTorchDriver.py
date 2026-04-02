@@ -100,37 +100,52 @@ class PyTorchDriver:
         # return t.to_numpy()
 
     def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
+        def unflatten_args( args ):
+            """ helper function to convert a flat list of tensor to a list compatible with what is expected for the binding (e.g. with vector<Tensor> for knots of SplineGrid, ...) """
+            res = []
+            inp = list( args )
+            f.unflat_tensor_list( res, inp )
+            g.unflat_tensor_list( res, inp )
+            return res
+
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, *args ):
+                # get constants
                 batch_size = dirac_xs.shape[ 0 ]
                 nb_diracs = dirac_xs.shape[ 1 ]
                 dim = dirac_xs.shape[ 2 ]
 
+                # room for the outputs
                 barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
                 potentials = self.empty( [ batch_size, nb_diracs ] )
                 distances = self.empty( [ batch_size ] )
                 cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
 
-                bindings.forward( dirac_xs, *args, distances, barycenters, potentials, cuts )
+                # arguments as expected by the binding
+                binding_inputs = unflatten_args( [ dirac_xs ] + list( args ) )
 
-                ctx.save_for_backward( barycenters, potentials, cuts, dirac_xs, *args )
+                # call the C++ procedure
+                bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
+
+                ctx.save_for_backward( dirac_xs, *args, barycenters, potentials, cuts )
 
                 return distances, barycenters, potentials, cuts
 
             @staticmethod
             def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
-                grads = []
-                for arg in ctx.saved_tensors[ 3: ]:
-                    grads.append( self.empty( arg.shape ) )
+                # get room for the output gradients
+                flat_grad_outputs = [ self.empty( arg.shape ) for arg in ctx.saved_tensors[ :-3 ] ]
 
-                bindings.backward( *ctx.saved_tensors, grad_distance, grad_barycenters, grad_potentials, grad_cuts, *grads )
+                # arguments as expected by the binding
+                binding_grad_outputs = unflatten_args( flat_grad_outputs )
+                binding_inputs = unflatten_args( ctx.saved_tensors[ :-3 ] )
 
-                return tuple( grads )
+                bindings.backward( *binding_inputs, *ctx.saved_tensors[ -3: ], grad_distance, grad_barycenters, grad_potentials, grad_cuts, *binding_grad_outputs )
+
+                return tuple( flat_grad_outputs )
 
         input_tensors = f.flat_tensor_list() + g.flat_tensor_list()
-        ic( input_tensors )
-
         outputs = SDOTFunction.apply( *input_tensors )
         assert isinstance( outputs, tuple )
         return BatchOfOtPlans( *outputs )

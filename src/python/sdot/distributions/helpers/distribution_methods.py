@@ -184,6 +184,12 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
                     if v is not None:
                         rpt = [ batch_size ] + [ 1 ] * v.ndim
                         kw[ name ] = driver.repeat( v[ None, ... ], rpt )
+                elif isinstance( field, ListOfTensorFields ):
+                    v = getattr( self, name ) # .__dict__.get( name )
+                    if v is not None:
+                        # rpt = [ batch_size ] + [ 1 ] * v.ndim
+                        # kw[ name ] = driver.repeat( v[ None, ... ], rpt )
+                        raise NotImplementedError
                 else:
                     kw[ name ] = self.__dict__.get( name )
             # make the new instance

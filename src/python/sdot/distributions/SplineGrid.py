@@ -42,4 +42,7 @@ class SplineGrid( Distribution ):
         self.order = order
 
     def primitive_function( self ):
-        return "piecewise_cst_primitive( g_values )", [ "sdot/PiecewiseCstPrimitive.h" ]
+        prim = f"batch_of_spline_grids( CtInt<{ self.order }>(), g_values )"
+        grad = "grad_g_values"
+        incl = [ "sdot/BatchOfSplineGrids.h" ]
+        return prim, grad, incl

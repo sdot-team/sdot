@@ -1,8 +1,11 @@
 #pragma once
 
+#include "support/IntermediateScalarType.h"
+#include "support/common_macros.h"
 #include "support/parallel_for.h"
-// #include "../support/P.h"
 #include "ot_plan_1d.h"
+#include "support/P.h"
+#include <numeric>
 
 #ifdef __CUDACC__
 #include <thrust/extrema.h>
@@ -10,8 +13,77 @@
 
 namespace sdot {
 
-T_T void ot_plan_1d_forward( TensorView<const T,2,Cpu> dirac_xs, TensorView<const T,1,Cpu> dirac_ws, auto &&primitive, TensorView<T,0,Cpu> distance, TensorView<T,2,Cpu> barycenters, TensorView<T,1,Cpu> potentials, TensorView<T,2,Cpu> cuts ) {
-    TODO;
+template<class T>
+void ot_plan_1d_forward( TensorView<const T,2,Cpu> dirac_xs_, TensorView<const T,1,Cpu> dirac_ws, auto &&primitive, TensorView<T,0,Cpu> distance, TensorView<T,2,Cpu> barycenters, TensorView<T,1,Cpu> potentials, TensorView<T,2,Cpu> cuts ) {
+    using TF = typename IntermediateScalarType<T,Cpu>::type;
+    using namespace std;
+
+    const auto dirac_xs = dirac_xs_.squeeze( 1 );
+    const PI nb_diracs = dirac_xs.size( 0 );
+    if ( nb_diracs == 0 )
+        return;
+
+    // ws size
+    if ( dirac_ws.size() == 0 ) {
+        T value = 1;
+        TensorView<const T,1,Cpu> new_dirac_ws( &value, { nb_diracs }, { 0 } );
+        return ot_plan_1d_forward( dirac_xs_, new_dirac_ws, FORWARD( primitive ), distance, barycenters, potentials, cuts );
+    }
+    ASSERT( dirac_ws.size() == nb_diracs );
+
+    // arg sort for dirac_indices
+    vector<PI> dirac_indices( nb_diracs );
+    iota( dirac_indices.begin(), dirac_indices.end(), PI( 0 ) );
+    sort( dirac_indices.begin(), dirac_indices.end(), [&]( PI index_a, PI index_b ) {
+        return dirac_xs[ index_a ] < dirac_xs[ index_b ];
+    });
+
+    // diracs_mass
+    TF diracs_mass = std::accumulate( dirac_ws.begin(), dirac_ws.end(), TF( 0 ) );
+    if ( diracs_mass == 0 ) throw std::runtime_error( "mass of the diracs is null" );
+    const TF dirac_scale = 1 / diracs_mass;
+
+    //
+    auto piece = primitive.first_piece();
+    TF prev_dirac_x = 42;
+    TF potential = 0;
+    TF prev_x0 = piece.x0;
+    TF w2 = 0;
+    for( PI i = 0; i < nb_diracs; ++i ) {
+        const PI dirac_index = dirac_indices[ i ];
+        const TF dirac_x = dirac_xs[ dirac_index ];
+
+        const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( dirac_ws[ dirac_index ] );
+        if ( normalized_dirac_mass <= 0.0 )
+            throw std::runtime_error( "dirac_mass must be strictly positive" );
+
+        // Update potential using jumping relation at last_ti
+        if ( ! potentials.empty() ) {
+            if ( i > 0 )
+                 potential += std::pow( dirac_x - prev_x0, 2 ) - std::pow( prev_dirac_x - prev_x0, 2 );
+            potentials[ dirac_index ] = static_cast<T>( potential );
+        }
+
+        TF moment = 0;
+        piece.take_some_mass( normalized_dirac_mass, [&]( const auto &part ) {
+            w2 += part.w2_dist( dirac_x );
+            moment += part.moment();
+        } );
+
+        if ( ! barycenters.empty() )
+            barycenters( dirac_index, 0 ) = static_cast<T>( moment / normalized_dirac_mass );
+
+        if ( ! cuts.empty() ) {
+            cuts( dirac_index, 0 ) = prev_x0;
+            cuts( dirac_index, 1 ) = piece.x0;
+        }
+
+        prev_x0 = piece.x0;
+        prev_dirac_x = dirac_x;
+    }
+
+    if ( ! distance.empty() )
+        distance() = static_cast<T>( w2 );
 }
 
 T_T void ot_plan_1d_forward( TensorView<const T,3,Cpu> dirac_xs, TensorView<const T,2,Cpu> dirac_ws, auto &&primitive, TensorView<T,1,Cpu> distance, TensorView<T,3,Cpu> barycenters, TensorView<T,2,Cpu> potentials, TensorView<T,3,Cpu> cuts ) {
@@ -20,104 +92,88 @@ T_T void ot_plan_1d_forward( TensorView<const T,3,Cpu> dirac_xs, TensorView<cons
     } );
 }
 
-// T_T void ot_plan_1d( SumOfWeightedDiracs1d<const T,Cpu> diracs, PiecewiseAffineGrid1d<const T,Cpu> points, TensorView<T,0,Cpu> distance, TensorView<T,1,Cpu> barycenters, TensorView<T,1,Cpu> potentials, TensorView<T,2,Cpu> cuts ) {
-//     using TF = typename IntermediateScalarType<T,Cpu>::type;
+// ---------------------------------------------------------------------------------------------- backward ----------------------------------------------------------------------------------------------
+T_T void ot_plan_1d_backward( TensorView<const T,2,Cpu> dirac_xs_, TensorView<const T,1,Cpu> dirac_ws, auto &&primitive, TensorView<const T,2,Cpu> barycenters, TensorView<const T,1,Cpu> potentials, TensorView<const T,2,Cpu> cuts, TensorView<const T,0,Cpu> grad_distance, TensorView<const T,2,Cpu> grad_barycenters, TensorView<const T,1,Cpu> grad_potentials, TensorView<const T,2,Cpu> grad_cuts, TensorView<T,2,Cpu> grad_dirac_xs, TensorView<T,1,Cpu> grad_dirac_ws, TensorView<T,1,Cpu> grad_g_values ) {
+    using TF = typename IntermediateScalarType<T,Cpu>::type;
+    using namespace std;
 
-//     const std::vector<PI> dirac_indices = diracs.arg_sort();
-//     const TF diracs_mass = diracs.mass();
-//     const TF points_mass = points.mass();
+    //
+    using TF = typename IntermediateScalarType<T,Cpu>::type;
+    using namespace std;
 
-//     if ( diracs_mass == 0 ) throw std::runtime_error( "mass of the diracs is null" );
-//     if ( points_mass == 0 ) throw std::runtime_error( "mass of the points is null" );
-//     const TF dirac_scale = 1 / diracs_mass;
-//     const TF point_scale = 1 / points_mass;
+    const auto dirac_xs = dirac_xs_.squeeze( 1 );
+    const PI nb_diracs = dirac_xs.size( 0 );
+    if ( nb_diracs == 0 )
+        return;
 
-//     PieceOfAffine1d<TF> current_piece = points.get_first_piece( point_scale );
-//     TF prev_cut_position = current_piece.x0;
-//     TF prev_dirac_x = 42;
-//     TF potential = 0;
-//     TF w2 = 0;
-//     for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
-//         const PI dirac_index = dirac_indices[ i ];
+    // ws size
+    if ( dirac_ws.size() == 0 ) {
+        T value = 1;
+        T grad_value = 0;
+        TensorView<const T,1,Cpu> new_dirac_ws( &value, { nb_diracs }, { 0 } );
+        TensorView<const T,1,Cpu> new_grad_dirac_ws( &grad_value, { nb_diracs }, { 0 } );
+        return ot_plan_1d_backward( dirac_xs_, new_dirac_ws, FORWARD( primitive ), barycenters, potentials, cuts, grad_distance, grad_barycenters, grad_potentials, grad_cuts, grad_dirac_xs, new_grad_dirac_ws, grad_g_values );
+    }
+    ASSERT( dirac_ws.size() == nb_diracs );
 
-//         const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( diracs.weights[ dirac_index ] );
-//         const TF dirac_x = diracs.xs[ dirac_index ];
-//         if ( normalized_dirac_mass <= 0.0 )
-//             throw std::runtime_error( "dirac_mass must be strictly positive" );
+    // arg sort for dirac_indices
+    vector<PI> dirac_indices( nb_diracs );
+    iota( dirac_indices.begin(), dirac_indices.end(), PI( 0 ) );
+    sort( dirac_indices.begin(), dirac_indices.end(), [&]( PI index_a, PI index_b ) {
+        return dirac_xs[ index_a ] < dirac_xs[ index_b ];
+    });
 
-//         // Update potential using jumping relation at last_ti
-//         if ( ! potentials.empty() ) {
-//             if ( i > 0 )
-//                  potential += std::pow( dirac_x - prev_cut_position, 2 ) - std::pow( prev_dirac_x - prev_cut_position, 2 );
-//             potentials[ dirac_index ] = static_cast<T>( potential );
-//         }
+    // diracs_mass
+    TF diracs_mass = std::accumulate( dirac_ws.begin(), dirac_ws.end(), TF( 0 ) );
+    if ( diracs_mass == 0 ) throw std::runtime_error( "mass of the diracs is null" );
+    const TF dirac_scale = 1 / diracs_mass;
 
-//         TF moment = 0;
-//         const TF cut_position = points.take_some_mass( current_piece, point_scale, normalized_dirac_mass, [&]( const PieceOfAffine1d<TF> &piece ) {
-//             w2 += piece.w2_dist( dirac_x );
-//             moment += piece.moment();
-//         } );
+    //
+    auto piece = primitive.last_piece();
+    TF prev_dirac_x = 42;
+    TF prev_x0 = piece.x0;
+    TF w2 = 0;
+    for( PI i = nb_diracs; i--; ) {
+        const PI dirac_index = dirac_indices[ i ];
+        const TF dirac_x = dirac_xs[ dirac_index ];
 
-//         if ( ! barycenters.empty() )
-//             barycenters[ dirac_index ] = static_cast<T>( moment / normalized_dirac_mass );
+        const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( dirac_ws[ dirac_index ] );
+        if ( normalized_dirac_mass <= 0.0 )
+            throw std::runtime_error( "dirac_mass must be strictly positive" );
 
-//         if ( ! cuts.empty() ) {
-//             cuts( dirac_index, 0 ) = prev_cut_position;
-//             cuts( dirac_index, 1 ) = cut_position;
-//         }
 
-//         prev_cut_position = cut_position;
-//         prev_dirac_x = dirac_x;
-//     }
+        // Update potential using jumping relation at last_ti
+        // if ( i > 0 )
+        //     potential += std::pow( dirac_x - prev_x0, 2 ) - std::pow( prev_dirac_x - prev_x0, 2 );
 
-//     if ( ! distance.empty() )
-//        distance() = static_cast<T>( w2 );
-// }
+        // TF moment = 0;
+        // piece.take_some_mass( normalized_dirac_mass, [&]( const auto &part ) {
+        //     w2 += part.w2_dist( dirac_x );
+        //     moment += part.moment();
+        // } );
 
-// T_T void ot_plan_1d( BatchOfSumOfWeightedDiracs1d<const T,Cpu> diracs, BatchOfPiecewiseAffineGrid1d<const T,Cpu> functions, TensorView<T,1,Cpu> distance, TensorView<T,2,Cpu> barycenters, TensorView<T,2,Cpu> potentials, TensorView<T,3,Cpu> cuts ) {
-//     parallel_for<PI>( 0, ASSERTED_EQUAL( diracs.nb_rows(), functions.nb_rows() ), [&]( PI r ) {
-//         ot_plan_1d( diracs.row( r ), functions.row( r ), distance.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ) );
-//     });
-// }
+        // if ( ! barycenters.empty() )
+        //     barycenters( dirac_index, 0 ) = static_cast<T>( moment / normalized_dirac_mass );
+
+        // if ( ! cuts.empty() ) {
+        //     cuts( dirac_index, 0 ) = prev_x0;
+        //     cuts( dirac_index, 1 ) = piece.x0;
+        // }
+
+        // prev_x0 = piece.x0;
+        // prev_dirac_x = dirac_x;
+    }
+}
+
+T_T void ot_plan_1d_backward( TensorView<const T,3,Cpu> dirac_xs, TensorView<const T,2,Cpu> dirac_ws, auto &&primitive, TensorView<const T,3,Cpu> barycenters, TensorView<const T,2,Cpu> potentials, TensorView<const T,3,Cpu> cuts, TensorView<const T,1,Cpu> grad_distance, TensorView<const T,3,Cpu> grad_barycenters, TensorView<const T,2,Cpu> grad_potentials, TensorView<const T,3,Cpu> grad_cuts, TensorView<T,3,Cpu> grad_dirac_xs, TensorView<T,2,Cpu> grad_dirac_ws, TensorView<T,2,Cpu> grad_g_values ) {
+    parallel_for<PI>( 0, dirac_xs.size( 0 ), [&]( PI r ) {
+        ot_plan_1d_backward( dirac_xs.row( r ), dirac_ws.row( r ), primitive.row( r ), barycenters.row( r ), potentials.row( r ), cuts.row( r ), grad_distance.row( r ), grad_barycenters.row( r ), grad_potentials.row( r ), grad_cuts.row( r ), grad_dirac_xs.row( r ), grad_dirac_ws.row( r ), grad_g_values.row( r ) );
+    } );
+}
+
 
 // T_T void ot_plan_1d_backward( TensorView<const T,0,Cpu> grad_distance, TensorView<const T,1,Cpu> grad_barycenters, TensorView<const T,1,Cpu> barycenters, TensorView<const T,1,Cpu> potentials, TensorView<const T,2,Cpu> cuts, SumOfWeightedDiracs1d<const T,Cpu> diracs, PiecewiseAffineGrid1d<const T,Cpu> points, SumOfWeightedDiracs1d<T,Cpu> grad_diracs, PiecewiseAffineGrid1d<T,Cpu> grad_functions ) {
-//     using TF = typename IntermediateScalarType<T,Cpu>::type;
-//     using namespace std;
 
-//     const vector<PI> dirac_indices = diracs.arg_sort();
-//     const TF diracs_mass = diracs.mass();
-//     const TF points_mass = points.mass();
-//     const TF dirac_scale = 1.0 / diracs_mass;
-//     const TF point_scale = 1.0 / points_mass;
-
-//     const TF g_dist = grad_distance.empty() ? 0 : static_cast<TF>( grad_distance() );
-
-//     // Mirror forward state variables
-//     PieceOfAffine1d<TF> current_piece = points.get_first_piece( point_scale );
-//     TF prev_cut_position = current_piece.x0;
-//     // bary_grad_potential: "barycenter gradient potential", mirrors `potential` in the forward.
-//     // Satisfies the same jumping relation with grad_bary_per_mass_i = grad_barycenters[d] / m_i:
-//     //   bary_grad_potential_i = bary_grad_potential_{i-1} + T_{i-1} * (grad_bary_per_mass_i - grad_bary_per_mass_{i-1})
-//     // (the forward has: potential_i = potential_{i-1} + (dirac_x_i - T)^2 - (dirac_x_{i-1} - T)^2)
-//     TF bary_grad_potential = 0;
-//     TF prev_grad_bary_per_mass = 0;  // mirrors prev_dirac_x in forward
-
-//     // Normalization accumulators, mirror w2 and moment in forward
-//     TF avg_potential           = 0;  // sum_i m_i * psi_i
-//     TF avg_bary_grad_potential = 0;  // sum_i m_i * bary_grad_potential_i
-//     TF w2_total                = 0;  // mirrors w2 in forward
-//     TF bary_moment_total       = 0;  // sum_i grad_bary_per_mass_i * moment_i
-
-//     vector<TF> bary_grad_potentials( diracs.nb_diracs(), 0 );  // per dirac in original order, for ws grad
-
-//     // Per-piece left/right shape-function integrals, needed for grad_xs
-//     const PI nb_pts = points.nb_points();
-//     vector<TF> accum_gl( nb_pts ); // grad_functions.xs.empty() ? 0 : nb_pts, 0 );
-//     vector<TF> accum_gr( nb_pts ); // grad_functions.xs.empty() ? 0 : nb_pts, 0 );
-
-//     // Boundary dirac data for Leibniz boundary terms at xs[0] and xs[nb_pts-1]
-//     TF first_dirac_x = 0, first_grad_bary_per_mass = 0;  // psi=0, bary_grad_potential=0 at i=0
-//     TF last_dirac_x = 0, last_psi = 0, last_grad_bary_per_mass = 0, last_bary_grad_potential = 0;
 
 //     for( PI i = 0; i < diracs.nb_diracs(); ++i ) {
 //         const PI dirac_index = dirac_indices[ i ];

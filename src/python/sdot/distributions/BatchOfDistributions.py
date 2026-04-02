@@ -1,3 +1,4 @@
+from ..driver import driver
 from typing import Self
 
 class BatchOfDistributions:
@@ -28,18 +29,34 @@ class BatchOfDistributions:
 
     def flat_tensor_list( self ) -> list:
         from .helpers.distribution_methods import _collect_attributes, TensorField, ListOfTensorFields
-        
+
         res = []
         for a_name, a_data in _collect_attributes( type( self ) ):
             if isinstance( a_data, ListOfTensorFields ):
-                for item in getattr( self, a_name ):
-                    res.append( item )
+                v = getattr( self, a_name )
+                if v is not None:
+                    for item in v:
+                        res.append( item )
+                else:
+                    for _ in range( getattr( self, a_data.main_axis_name ) ):
+                        res.append( driver.empty( [] ) )
             if isinstance( a_data, TensorField ):
-                res.append( getattr( self, a_name ) )
+                v = getattr( self, a_name )
+                if v is not None:
+                    res.append( v )
+                else:
+                    res.append( driver.empty( [] ) )
         return res
 
-    # def __getattr__( self, name: str ) -> int:
-    #     # Never actually called for attributes that exist; signals to static
-    #     # type checkers (PyLance, mypy) that dynamically generated axis-name
-    #     # properties (nb_diracs, batch_size, …) are intentional and return int.
-    #     raise AttributeError( name )
+    def unflat_tensor_list( self, out: list, inp: list ):
+        from .helpers.distribution_methods import _collect_attributes, TensorField, ListOfTensorFields
+
+        for _, a_data in _collect_attributes( type( self ) ):
+            if isinstance( a_data, ListOfTensorFields ):
+                loc = []
+                for _ in range( getattr( self, a_data.main_axis_name ) ):
+                    loc.append( inp.pop( 0 ) )
+                out.append( loc )
+            if isinstance( a_data, TensorField ):
+                out.append( inp.pop( 0 ) )
+

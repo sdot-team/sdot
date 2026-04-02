@@ -20,7 +20,7 @@ def ot_plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDi
     # ensure batch version
     if isinstance( f, Distribution ) and isinstance( g, Distribution ):
         res = ot_plan( f.batch_version( 1 ), g.batch_version( 1 ) )
-        assert isinstance( res, BatchOfOtPlans )
+        assert isinstance( res, ( BatchOfOtPlans, BatchOf1dOtPlans ) )
         return res.unbatch()
     if isinstance( f, Distribution ):
         return ot_plan( f.batch_version( g.batch_size ), g )
@@ -67,14 +67,13 @@ def _encode_base62( s: str, length: int = 11 ) -> str:
     return ''.join( reversed( res ) )
 
 def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
-    p_func, includes = type( g ).BaseVersion.primitive_function( f )
+    p_func, g_func, includes = type( g ).BaseVersion.primitive_function( g )
 
-    dylib_name = f"ot_plan_{ _encode_base62( p_func ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+    dylib_name = f"ot_plan_{ _encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
     def src_func():
         # inputs of backward_args and forward_args
-        backward_args = [ ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 2 ), ( "AF", "grad_distances", 1 ),
-                          ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
+        backward_args = []
         forward_args = []
         for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
             for a_name, a_data in _collect_attributes( type( d_data ) ):
@@ -86,7 +85,9 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
                     forward_args.append( ( "AF", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
 
         # outputs of backward_args and forward_args
-        forward_args += [ ( "MF", "distance", 1 ), ( "MF", "barycenters", 3 ), ( "MF", "potentials", 2 ), ( "MF", "cuts", 3 ) ]
+        backward_args += [ ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 3 ),
+                          ( "AF", "grad_distances", 1 ), ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
+        forward_args += [ ( "MF", "distances", 1 ), ( "MF", "barycenters", 3 ), ( "MF", "potentials", 2 ), ( "MF", "cuts", 3 ) ]
 
         for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:
             for a_name, a_data in _collect_attributes( type( d_data ) ):
@@ -105,11 +106,13 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
             "BACKWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in backward_args ] ),
             "FORWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in forward_args ] ),
             "PRIMITIVE_FUNC": p_func,
+            "PRIMITIVE_GRAD": g_func,
             "SDOT_INCLUDES": str.join( "\n", [ f"#include <{ include }>" for include in includes ] ),
         }
 
         return driver.cpp_src( m, """
             #include <sdot/nanobind_wrappers.h>
+            #include <nanobind/stl/vector.h>
             #include <sdot/ot_plan_1d.h>
             SDOT_INCLUDES
 
@@ -126,17 +129,12 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
             // Forward function that works with both 1D and 2D arrays
             void forward( FORWARD_ARGS ) {
                 FORWARD_TENSOR_CONV
-                ot_plan_1d_forward( f_positions, f_weights, PRIMITIVE_FUNC, distance, barycenters, potentials, cuts );
+                ot_plan_1d_forward( f_positions, f_weights, PRIMITIVE_FUNC, distances, barycenters, potentials, cuts );
             }
 
             void backward( BACKWARD_ARGS ) {
                 BACKWARD_TENSOR_CONV
-                // w2_distance_backward(
-                //               tensor_view_1( grad_distances ),
-                //               tensor_view_2( grad_barycenters ),
-                //               tensor_view_2( barycenters ),
-                //               tensor_view_2( potentials ),
-                //               tensor_view_3( cuts ), f, g, grad_f, grad_g );
+                ot_plan_1d_backward( f_positions, f_weights, PRIMITIVE_FUNC, barycenters, potentials, cuts, grad_distances, grad_barycenters, grad_potentials, grad_cuts, grad_f_positions, grad_f_weights, PRIMITIVE_GRAD );
             }
 
             #define MK_MOD( NAME ) NB_MODULE( NAME, m )

@@ -62,12 +62,14 @@ class DriverProxy:
         # else, look in imported modules
         for name in self.prefered_frameworks:
             if name in sys.modules:
+                self._user_framework = name
                 return name
 
         # try to import jax
         for name in self.prefered_frameworks:
             try:
                 __import__( name )
+                self._user_framework = name
                 return name
             except ImportError:
                 pass

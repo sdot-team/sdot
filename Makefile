@@ -14,7 +14,7 @@ docs:
 	npm run docs:build
 
 test:
-	PYTHONPATH=$(CURDIR)/src/python $(PYTHON) -m pytest tests/
+	SDOT_BUILD=1 PYTHONPATH=$(CURDIR)/src/python $(PYTHON) -m pytest tests/
 
 help:
 	@echo "  make all    : Alias for 'make test'"
