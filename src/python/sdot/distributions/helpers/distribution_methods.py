@@ -256,3 +256,43 @@ def _axis_count( distribution, axis_name ):
                 if len( res ):
                     return res[ 0 ]
     return None
+
+
+
+def flat_tensor_list( distribution ) -> list:
+    res = []
+    for a_name, a_data in _collect_attributes( type( distribution ) ):
+        if isinstance( a_data, ListOfTensorFields ):
+            v = getattr( distribution, a_name )
+            if v is not None:
+                for item in v:
+                    res.append( item )
+            else:
+                for _ in range( getattr( distribution, a_data.main_axis_name ) ):
+                    res.append( driver.empty( [] ) )
+        if isinstance( a_data, TensorField ):
+            v = getattr( distribution, a_name )
+            if v is not None:
+                res.append( v )
+            else:
+                res.append( driver.empty( [] ) )
+    return res
+
+def unflat_tensor_list( distribution, out: list, inp: list ):
+    for _, a_data in _collect_attributes( type( distribution ) ):
+        if isinstance( a_data, ListOfTensorFields ):
+            loc = []
+            for _ in range( getattr( distribution, a_data.main_axis_name ) ):
+                loc.append( inp.pop( 0 ) )
+            out.append( loc )
+        if isinstance( a_data, TensorField ):
+            out.append( inp.pop( 0 ) )
+
+
+def unflatten_args( f, g, args ):
+    """ Convert a flat list of tensors to the structured list expected by the C++ binding. """
+    res = []
+    inp = list( args )
+    unflat_tensor_list( f, res, inp )
+    unflat_tensor_list( g, res, inp )
+    return res

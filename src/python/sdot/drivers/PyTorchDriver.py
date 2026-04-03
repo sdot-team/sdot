@@ -1,6 +1,7 @@
-from ..distributions.BatchOfDistributions import BatchOfDistributions, unflatten_args
+from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list
+from ..distributions.BatchOfDistributions import BatchOfDistributions
 from ..BatchOfOtPlans import BatchOfOtPlans
-from ..driver import driver
+# from ..driver import driver
 import numpy as np
 import torch
 
@@ -137,7 +138,7 @@ class PyTorchDriver:
 
                 return tuple( flat_grad_outputs )
 
-        input_tensors = f.flat_tensor_list() + g.flat_tensor_list()
+        input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
         outputs = SDOTFunction.apply( *input_tensors )
         assert isinstance( outputs, tuple )
         return BatchOfOtPlans( *outputs )

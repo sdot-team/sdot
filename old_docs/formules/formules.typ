@@ -2,13 +2,11 @@
 #set page(fill: black)
 #set text(fill: white)
 
-= Normalisation
-
 = La grosse formule
 
     $ W = sum_i integral_(Q_i)^(Q_(i+1)) ( x - p_i )^2 rho( x ) dif x $
 
-= On essaye en integrant la normalisation
+= grad w en integrant la normalisation
 
     $P$ selon l'axe des primitives
 
@@ -44,51 +42,12 @@
     ] $
 
 
+= grad ys
 
-=== Ex avec 3 diracs:
+    $ ( partial W ) / ( partial w_z ) = sum_i [ ( partial P_(i+1) ) / ( partial w_z ) ( Q_(i+1) - p_i )^2 ]
+                                      - sum_i [ ( partial P_(i  ) ) / ( partial w_z ) ( Q_(i  ) - p_i )^2 ]
+    ] $
 
-    $ P_0 &= 0 \
-      P_1 &= w_0 / ( w_0 + w_1 + w_2 ) \
-      P_2 &= ( w_0 + w_1 ) / ( w_0 + w_1 + w_2 ) \
-      P_3 &= 1 $
+= Rq
 
-Donc
-    $ ( partial P_0 ) / ( partial w_j ) = 0 $
-
-    $ ( partial P_1 ) / ( partial w_0 ) &= ( s - w_0 ) / s^2 \
-      ( partial P_1 ) / ( partial w_1 ) &= - w_0 / s^2 \
-      ( partial P_1 ) / ( partial w_2 ) &= - w_0 / s^2
-    $
-
-    $ ( partial P_2 ) / ( partial w_0 ) &= ( s - w_0 - w_1 ) / s^2 \
-      ( partial P_2 ) / ( partial w_1 ) &= ( s - w_0 - w_1 ) / s^2 \
-      ( partial P_2 ) / ( partial w_2 ) &= (   - w_0 - w_1 ) / s^2
-    $
-
-    $ ( partial P_3 ) / ( partial w_j ) = 0 $
-
-=== Ex avec 2 diracs:
-
-    $ W =
-        integral_(Q_0)^(Q_1) ( x - p_0 )^2 rho( x ) dif x +
-        integral_(Q_1)^(Q_2) ( x - p_1 )^2 rho( x ) dif x +
-        integral_(Q_2)^(Q_3) ( x - p_2 )^2 rho( x ) dif x
-    $
-
-    $ ( partial W ) / ( partial w_0 )
-            & = ( s - w_0 ) / s^2 * ( Q_1 - p_0 )^2 \ // Q1
-            // Q0
-            & + ( s - w_0 - w_1 ) / s^2 * ( Q_2 - p_1 )^2 \ // Q2
-            & - ( s - w_0 ) / s^2 * ( Q_1 - p_1 )^2 \ // Q1
-            // Q3
-            & - ( s - w_0 - w_1 ) / s^2 * ( Q_2 - p_2 )^2 \ // Q2
-    $
-
-    $ ( partial W ) / ( partial w_0 )
-            & = ( s - w_0 ) / s^2 * ( Q_1 - p_0 )^2 \ // Q1
-            // Q0
-            & + ( s - w_0 - w_1 ) / s^2 * ( Q_2 - p_1 )^2 \ // Q2
-            & - ( s - w_0 ) / s^2 * ( Q_1 - p_1 )^2 \ // Q1
-            // Q3
-            & - ( s - w_0 - w_1 ) / s^2 * ( Q_2 - p_2 )^2 \ // Q2
-     $
+On est partie sur la convention tenseur vide

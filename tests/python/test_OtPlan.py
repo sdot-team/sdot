@@ -1,3 +1,4 @@
+from sdot.distributions.helpers.distribution_methods import flat_tensor_list
 from icecream.builtins import install
 import numpy
 import sdot
@@ -17,17 +18,13 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
         if not close( plan.barycenters, sdot.driver.t1( exp_bary ) ):
             raise AssertionError( f"bad barycenters (exp: { exp_bary }, obt: { plan.barycenters }) for case '{ name }'" )
 
-    # for the backward test we need batch version, so that empty tensor => None (convention
-    bf = f if isinstance( f, sdot.BatchOfDistributions ) else f.batch_version( 1 )
-    bg = g if isinstance( g, sdot.BatchOfDistributions ) else g.batch_version( 1 )
-
     #
-    _flat_inputs = bf.flat_tensor_list() + bg.flat_tensor_list()
+    _flat_inputs = flat_tensor_list( f ) + flat_tensor_list( g )
 
     # a function to call ot_plan from a flat list of tensors
-    _apply_fn = sdot.make_apply_fn( bf, bg )
+    _apply_fn = sdot.make_apply_fn( f, g )
 
-    # only dirac pos
+    # only dirac pos and weights
     flat_inputs = _flat_inputs[ :2 ]
     def apply_fn( *x ):
         return _apply_fn( *x, *_flat_inputs[ 2: ] )
@@ -50,7 +47,7 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
 
 
 def for_each_driver_comb( cb ):
-    for framework in [ "torch" ]: #, "jax"
+    for framework in [ "torch", "jax" ]: #
         for dtype in [ "FP64", "FP32" ]: #
             for device in [ "cpu" ]: #, "cuda"
                 sdot.driver.framework = framework
@@ -113,17 +110,16 @@ def check_affine_distances():
 def test_piecewise_affine():
     for_each_driver_comb( check_affine_distances )
 
-import torch
+# import torch
+# check_plan( "[ 0, 1 ] => 1",
+#     sdot.SumOfWeightedDiracs1d( [ 0, .5, 1, 2 ], [ 1, 1, 1, 2 ] ),
+#     sdot.PiecewiseAffineGrid1d( [ 1, 2, 1 ] ),
+# )
 
-check_plan( "[ 0, 1 ] => 1",
-    sdot.SumOfWeightedDiracs1d( [ 0, .5, 1, 2 ], [ 1, 1, 1, 2 ] ),
-    sdot.PiecewiseAffineGrid1d( [ 1, 2, 1 ] ),
-)
-
-check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => several knots",
-    sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-    sdot.PiecewiseAffineGrid1d( [ 1, 0, 2 ], knots = [ 0, 1, 2 ] ),
-)
+# check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => several knots",
+#     sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
+#     sdot.PiecewiseAffineGrid1d( [ 1, 0, 2 ], knots = [ 0, 1, 2 ] ),
+# )
 
 # check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
 #     sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),

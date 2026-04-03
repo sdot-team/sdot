@@ -133,27 +133,34 @@ T_T void ot_plan_1d_backward( TensorView<const T,2,Cpu> dirac_xs_, TensorView<co
 
         // grad_dirac_ws
         if ( ! grad_dirac_ws.empty() ) {
-            if ( nb_diracs >= 2 ) {
-                TF w_total = 0, running_acc = 0;
-                for( PI i = 0; i < nb_diracs; ++i ) {
-                    const PI di = dirac_indices[ i ];
-                    const TF wi = dirac_ws[ di ];
-                    const TF Li = pow( cuts( di, 0 ) - dirac_xs[ di ], 2 );
-                    const TF Ri = pow( cuts( di, 1 ) - dirac_xs[ di ], 2 );
-                    w_total += ( diracs_mass - running_acc - wi ) * Ri;
-                    w_total -= ( diracs_mass - running_acc ) * Li;
-                    running_acc += wi;
-                }
-
-                const TF base_coeff = g_dist / pow( diracs_mass, 2 );
-                TF cum_L = 0, cum_R = 0;
-                for( PI i = 0; i < nb_diracs; ++i ) {
-                    const PI di = dirac_indices[ i ];
-                    cum_L += pow( cuts( di, 0 ) - dirac_xs[ di ], 2 );
-                    grad_dirac_ws( di ) = base_coeff * ( w_total + diracs_mass * ( cum_L - cum_R ) );
-                    cum_R += pow( cuts( di, 1 ) - dirac_xs[ di ], 2 );
-                }
+            TF w_total = 0, running_acc = 0;
+            for( PI i = 0; i < nb_diracs; ++i ) {
+                const PI di = dirac_indices[ i ];
+                const TF wi = dirac_ws[ di ];
+                const TF Li = pow( cuts( di, 0 ) - dirac_xs[ di ], 2 );
+                const TF Ri = pow( cuts( di, 1 ) - dirac_xs[ di ], 2 );
+                w_total += ( diracs_mass - running_acc - wi ) * Ri;
+                w_total -= ( diracs_mass - running_acc ) * Li;
+                running_acc += wi;
             }
+
+            const TF base_coeff = g_dist / pow( diracs_mass, 2 );
+            TF cum_L = 0, cum_R = 0;
+            for( PI i = 0; i < nb_diracs; ++i ) {
+                const PI di = dirac_indices[ i ];
+                cum_L += pow( cuts( di, 0 ) - dirac_xs[ di ], 2 );
+                grad_dirac_ws( di ) = base_coeff * ( w_total + diracs_mass * ( cum_L - cum_R ) );
+                cum_R += pow( cuts( di, 1 ) - dirac_xs[ di ], 2 );
+            }
+        }
+
+        // grad_g_values
+        if ( ! grad_g_values.empty() ) {
+            // for( PI dirac_i = 0; dirac_i < nb_diracs; ++dirac_i ) {
+            //     // const TF dirac_w = dirac_scale * static_cast<TF>( dirac_ws[ dirac_i ] );
+            //     grad_g_values( dirac_i, 0 ) = 2 * g_dist * dirac_w * ( dirac_xs[ dirac_i ] - barycenters( dirac_i, 0 ) );
+            // }
+            // TODO;
         }
     }
 

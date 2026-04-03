@@ -1,4 +1,4 @@
-from ..distributions.BatchOfDistributions import unflatten_args
+from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..driver import driver
 import jax.numpy as jnp
@@ -117,7 +117,7 @@ class JaxDriver:
     def plan( self, bindings, f, g ):
         np_dtype = np.dtype( self.dtype )
 
-        input_tensors = f.flat_tensor_list() + g.flat_tensor_list()
+        input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
         dirac_xs = input_tensors[ 0 ]
 
         batch_size = dirac_xs.shape[ 0 ]
@@ -138,12 +138,12 @@ class JaxDriver:
         def sdot_op( *inputs ):
             def fwd_cb( *jax_inputs ):
                 np_inputs = [ np.asarray( x ) for x in jax_inputs ]
-                
+
                 distances   = np.empty( ( batch_size, ),                dtype = np_dtype )
                 barycenters = np.empty( ( batch_size, nb_diracs, dim ), dtype = np_dtype )
                 potentials  = np.empty( ( batch_size, nb_diracs ),      dtype = np_dtype )
                 cuts        = np.empty( ( batch_size, nb_diracs, 2 ),   dtype = np_dtype )
-                
+
                 binding_inputs = unflatten_args( f, g, np_inputs )
                 bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
                 return distances, barycenters, potentials, cuts
@@ -161,21 +161,21 @@ class JaxDriver:
 
             def bwd_cb( *jax_args ):
                 np_args = [ np.asarray( x ) for x in jax_args ]
-                
+
                 # Order in pure_callback call below: distances, barycenters, potentials, cuts, *saved_inputs, grad_distances, ...
                 np_dist, np_bary, np_pot, np_cuts = np_args[ 0 ], np_args[ 1 ], np_args[ 2 ], np_args[ 3 ]
                 n_in = len( input_tensors )
                 np_inputs = np_args[ 4 : 4 + n_in ]
                 np_grad_out = np_args[ 4 + n_in : ] # grad_distances, grad_barycenters, grad_potentials, grad_cuts
-                
+
                 flat_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
-                
+
                 binding_inputs = unflatten_args( f, g, np_inputs )
                 binding_grad_inputs = unflatten_args( f, g, flat_grad_inputs )
-                
+
                 # bindings.backward expects: inputs..., distances, barycenters, potentials, cuts, grad_outputs..., grad_inputs...
                 bindings.backward( *binding_inputs, np_dist, np_bary, np_pot, np_cuts, *np_grad_out, *binding_grad_inputs )
-                
+
                 return tuple( flat_grad_inputs )
 
             return jax.pure_callback(
