@@ -16,7 +16,7 @@ from .OtPlan import OtPlan as OtPlan
 from .Cell import Cell as Cell
 from .Bsp import Bsp as Bsp
 
-from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters
+from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters, make_apply_fn as make_apply_fn
 
 
 # hardware/framework interfaces

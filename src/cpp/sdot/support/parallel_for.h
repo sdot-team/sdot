@@ -3,6 +3,7 @@
 #include <vector>
 #include <algorithm>
 #include <cstddef>
+#include <exception>
 
 namespace sdot {
 
@@ -28,30 +29,36 @@ void parallel_for( Index start, Index end, auto &&func ) {
         return;
     }
 
-    // Parallel execution
+    // Parallel execution — propagate exceptions back to the calling thread
     std::vector<std::thread> threads;
-    threads.reserve(num_threads);
+    std::vector<std::exception_ptr> exceptions( num_threads );
+    threads.reserve( num_threads );
 
     const Index chunk_size = ( count + num_threads - 1 ) / num_threads;
 
-    for( unsigned int t = 0; t < num_threads; ++t) {
+    for( unsigned int t = 0; t < num_threads; ++t ) {
         const Index chunk_start = start + t * chunk_size;
-        const Index chunk_end = std::min(chunk_start + chunk_size, end);
+        const Index chunk_end = std::min( chunk_start + chunk_size, end );
 
         if ( chunk_start >= chunk_end )
             break;
 
-        threads.emplace_back( [ chunk_start, chunk_end, &func ]() {
-            for( Index i = chunk_start; i < chunk_end; ++i ) {
-                func( i );
+        threads.emplace_back( [ chunk_start, chunk_end, &func, &ex = exceptions[ t ] ]() {
+            try {
+                for( Index i = chunk_start; i < chunk_end; ++i )
+                    func( i );
+            } catch ( ... ) {
+                ex = std::current_exception();
             }
         });
     }
 
-    // Wait for all threads
-    for( auto &thread : threads ) {
+    for( auto &thread : threads )
         thread.join();
-    }
+
+    for( auto &ex : exceptions )
+        if ( ex )
+            std::rethrow_exception( ex );
 }
 
 } // namespace sdot

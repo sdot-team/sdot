@@ -29,9 +29,6 @@ UTP DTP::SplineGrid( Values values, Knots knots ) : values( values ), knots( kno
     if ( s == 0 )
         ERROR( "null mass for g" );
     coeff_values = 1 / s;
-
-    P( "==========================================================" );
-    P( coeff_values );
 }
 
 UTP TF DTP::Piece::value_at( TF x ) const {
@@ -45,6 +42,7 @@ UTP void DTP::Piece::take_some_mass( TF mass_to_take, auto &&func ) {
         const TF yn = value_at( xn );
 
         func( Part{
+            .i1 = i1,
             .x0 = x0,
             .x1 = xn,
             .y0 = y0,
@@ -62,6 +60,7 @@ UTP void DTP::Piece::take_some_mass( TF mass_to_take, auto &&func ) {
     mass_to_take -= mass;
 
     func( Part{
+        .i1 = i1,
         .x0 = x0,
         .x1 = x1,
         .y0 = y0,
@@ -93,6 +92,7 @@ UTP void DTP::Piece::take_some_mass( TF mass_to_take, auto &&func ) {
         mass_to_take -= mass;
 
         func( Part{
+            .i1 = i1,
             .x0 = x0,
             .x1 = x1,
             .y0 = y0,
@@ -105,6 +105,7 @@ UTP void DTP::Piece::take_some_mass( TF mass_to_take, auto &&func ) {
     const TF yn = value_at( xn );
 
     func( Part{
+        .i1 = i1,
         .x0 = x0,
         .x1 = xn,
         .y0 = y0,
@@ -172,6 +173,22 @@ UTP TF DTP::Part::moment() const {
     // TODO: better precision handling
     return ( std::pow( x1, 2 ) - std::pow( x0, 2 ) ) * a / 2
          + ( std::pow( x1, 3 ) - std::pow( x0, 3 ) ) * b / 3;
+}
+
+UTP void DTP::accumulate_gradients( const Part &part, TF coeff_x2, TF coeff_x1, TF coeff_x0, TensorView<TF,1,Cpu> grad_values ) const {
+    const TF X0 = knots[ part.i1 - 1 ];
+    const TF X1 = knots[ part.i1 ];
+    const TF inv_H = 1 / ( X1 - X0 );
+
+    auto V = [&]( TF x ) { return coeff_x2 * x * x + coeff_x1 * x + coeff_x0; };
+
+    // Simpson's rule for cubic (V is quadratic, shape is linear)
+    auto integrate = [&]( auto &&f ) {
+        return ( part.x1 - part.x0 ) / 6 * ( f( part.x0 ) + 4 * f( ( part.x0 + part.x1 ) / 2 ) + f( part.x1 ) );
+    };
+
+    grad_values[ part.i1 - 1 ] += integrate( [&]( TF x ) { return V( x ) * ( X1 - x ) * inv_H; } );
+    grad_values[ part.i1 ]     += integrate( [&]( TF x ) { return V( x ) * ( x - X0 ) * inv_H; } );
 }
 
 #undef UTP

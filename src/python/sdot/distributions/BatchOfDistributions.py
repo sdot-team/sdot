@@ -1,6 +1,7 @@
 from ..driver import driver
 from typing import Self
 
+
 class BatchOfDistributions:
     """
     Base class for all batch distributions.
@@ -60,3 +61,11 @@ class BatchOfDistributions:
             if isinstance( a_data, TensorField ):
                 out.append( inp.pop( 0 ) )
 
+
+def unflatten_args( f, g, args ):
+    """ Convert a flat list of tensors to the structured list expected by the C++ binding. """
+    res = []
+    inp = list( args )
+    f.unflat_tensor_list( res, inp )
+    g.unflat_tensor_list( res, inp )
+    return res

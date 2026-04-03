@@ -113,7 +113,7 @@ def _make_variant( cls, fields, batch_version : int, unidimensional_version : in
                     n = tensor_axis_name.replace( ' ', '' ).replace( "[index]", "," )
                     tensor_axis_names.append( n )
                 new_field = TensorField( *tensor_axis_names )
-                new_field.comes_from_a_dim_list = True
+                comes_from_a_dim_list = True
             else:
                 new_tensor_axis_names = [ "batch_size" ] * batch_version + list( new_field.tensor_axis_names )
                 if unidimensional_version:
@@ -208,7 +208,7 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
                         for n in field.removed_dim_axes:
                             v = driver.expand_dims( v, n )
                         if field.comes_from_a_dim_list:
-                            raise NotImplementedError
+                            v = [ v ] # raise NotImplementedError
                         kw[ name ] = v
                 elif isinstance( field, ListOfTensorFields ):
                     raise NotImplementedError

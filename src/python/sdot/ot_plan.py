@@ -85,7 +85,7 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
                     forward_args.append( ( "AF", f"{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
 
         # outputs of backward_args and forward_args
-        backward_args += [ ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 3 ),
+        backward_args += [ ( "AF", "distances", 1 ), ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 3 ),
                           ( "AF", "grad_distances", 1 ), ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
         forward_args += [ ( "MF", "distances", 1 ), ( "MF", "barycenters", 3 ), ( "MF", "potentials", 2 ), ( "MF", "cuts", 3 ) ]
 
@@ -134,7 +134,7 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
 
             void backward( BACKWARD_ARGS ) {
                 BACKWARD_TENSOR_CONV
-                ot_plan_1d_backward( f_positions, f_weights, PRIMITIVE_FUNC, barycenters, potentials, cuts, grad_distances, grad_barycenters, grad_potentials, grad_cuts, grad_f_positions, grad_f_weights, PRIMITIVE_GRAD );
+                ot_plan_1d_backward( f_positions, f_weights, PRIMITIVE_FUNC, distances, barycenters, potentials, cuts, grad_distances, grad_barycenters, grad_potentials, grad_cuts, grad_f_positions, grad_f_weights, PRIMITIVE_GRAD );
             }
 
             #define MK_MOD( NAME ) NB_MODULE( NAME, m )
@@ -148,6 +148,46 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
     # get the binding
     bindings = driver.import_bindings( dylib_name, src_func, [] )
     return driver.plan( bindings, f, g )
+
+
+def make_apply_fn( f: BatchOfDistributions, g: BatchOfDistributions ):
+    """
+    Returns a callable (*flat_inputs) -> (distances, barycenters, potentials, cuts)
+    suitable for torch.autograd.gradcheck or jax.test_util.check_grads.
+
+    flat_inputs is the concatenation of f.flat_tensor_list() and g.flat_tensor_list().
+    The function rebuilds f and g from the flat inputs by walking _collect_attributes,
+    then calls ot_plan internally.
+    """
+    def _rebuild( dist, fields, inp ):
+        new_d = object.__new__( type( dist ) )
+        new_d.__dict__.update( { k: v for k, v in dist.__dict__.items() if not k.startswith( '_' ) } )
+        for name, field in fields:
+            if isinstance( field, ListOfTensorFields ):
+                count = getattr( dist, field.main_axis_name )
+                orig = getattr( dist, name )
+                tensors = [ inp.pop( 0 ) for _ in range( count ) ]
+                if orig is not None:
+                    setattr( new_d, name, tensors )
+            else:
+                t = inp.pop( 0 )
+                if getattr( dist, name ) is not None:
+                    setattr( new_d, name, t )
+        return new_d
+
+    f_fields = [ ( name, field ) for name, field in _collect_attributes( type( f ) )
+                 if isinstance( field, ( TensorField, ListOfTensorFields ) ) ]
+    g_fields = [ ( name, field ) for name, field in _collect_attributes( type( g ) )
+                 if isinstance( field, ( TensorField, ListOfTensorFields ) ) ]
+
+    def apply_fn( *flat_inputs ):
+        inp = list( flat_inputs )
+        new_f = _rebuild( f, f_fields, inp )
+        new_g = _rebuild( g, g_fields, inp )
+        plan = ot_plan( new_f, new_g )
+        return plan.distances # , plan.barycenters, plan.potentials, plan.cuts
+
+    return apply_fn
 
 
 def distances( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):

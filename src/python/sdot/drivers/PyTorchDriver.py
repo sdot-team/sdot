@@ -1,4 +1,4 @@
-from ..distributions.BatchOfDistributions import BatchOfDistributions
+from ..distributions.BatchOfDistributions import BatchOfDistributions, unflatten_args
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..driver import driver
 import numpy as np
@@ -100,14 +100,6 @@ class PyTorchDriver:
         # return t.to_numpy()
 
     def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
-        def unflatten_args( args ):
-            """ helper function to convert a flat list of tensor to a list compatible with what is expected for the binding (e.g. with vector<Tensor> for knots of SplineGrid, ...) """
-            res = []
-            inp = list( args )
-            f.unflat_tensor_list( res, inp )
-            g.unflat_tensor_list( res, inp )
-            return res
-
         class SDOTFunction( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, dirac_xs, *args ):
@@ -123,25 +115,25 @@ class PyTorchDriver:
                 cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
 
                 # arguments as expected by the binding
-                binding_inputs = unflatten_args( [ dirac_xs ] + list( args ) )
+                binding_inputs = unflatten_args( f, g, [ dirac_xs ] + list( args ) )
 
                 # call the C++ procedure
                 bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
 
-                ctx.save_for_backward( dirac_xs, *args, barycenters, potentials, cuts )
+                ctx.save_for_backward( dirac_xs, *args, distances, barycenters, potentials, cuts )
 
                 return distances, barycenters, potentials, cuts
 
             @staticmethod
             def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
                 # get room for the output gradients
-                flat_grad_outputs = [ self.empty( arg.shape ) for arg in ctx.saved_tensors[ :-3 ] ]
+                flat_grad_outputs = [ self.empty( arg.shape ) for arg in ctx.saved_tensors[ :-4 ] ]
 
                 # arguments as expected by the binding
-                binding_grad_outputs = unflatten_args( flat_grad_outputs )
-                binding_inputs = unflatten_args( ctx.saved_tensors[ :-3 ] )
+                binding_grad_outputs = unflatten_args( f, g, flat_grad_outputs )
+                binding_inputs = unflatten_args( f, g, ctx.saved_tensors[ :-4 ] )
 
-                bindings.backward( *binding_inputs, *ctx.saved_tensors[ -3: ], grad_distance, grad_barycenters, grad_potentials, grad_cuts, *binding_grad_outputs )
+                bindings.backward( *binding_inputs, *ctx.saved_tensors[ -4: ], grad_distance, grad_barycenters, grad_potentials, grad_cuts, *binding_grad_outputs )
 
                 return tuple( flat_grad_outputs )
 

@@ -31,7 +31,7 @@ public:
     HD             TensorView        ( T *data, Shape shape, Strides strides ) : _strides( strides ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
     HD             TensorView        ( T *data, Shape shape ) : _strides( contiguous_strides( shape ) ), _shape( shape ), _ptr( reinterpret_cast<RawPtr>( data ) ) {}
     HD             TensorView        ( T *data, PI size ) : _shape{ size }, _strides{ sizeof( T ) }, _ptr( reinterpret_cast<RawPtr>( data ) ) {}
-    HD             TensorView        () {}
+    HD             TensorView        () : _strides{}, _shape{}, _ptr( nullptr ) {}
 
     // HD             TensorView        ( const TensorView &that ) : _shape{ that._shape }, _strides{ that._strides }, _ptr( that._ptr ) {}
     // HD void        operator=         ( const TensorView &that ) { _shape = that._shape; _strides = that._strides; _ptr = that._ptr; }
@@ -49,7 +49,7 @@ public:
     HD SI          stride            ( PI d ) const { return _strides[ d ]; }
     HD SI          shape             ( PI d ) const { return _shape[ d ]; }
     auto           shape             () const { return _shape; }
-    HD bool        empty             () const { return ct_rank == 0 ? false : std::none_of( _shape.begin(), _shape.end(), []( auto a ) { return a != 0; } ); }
+    HD bool        empty             () const { return ct_rank == 0 ? _ptr == nullptr : std::none_of( _shape.begin(), _shape.end(), []( auto a ) { return a != 0; } ); }
     HD PI          rank              () const { return ct_rank; }
     HD PI          size              ( PI d ) const { return _shape[ d ]; }
     HD PI          size              () const { static_assert( ct_rank == 1 ); return size( 0 ); }
