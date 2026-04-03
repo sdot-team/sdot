@@ -40,7 +40,7 @@ struct SplineGrid<TF,1,Knots> {
     Piece  first_piece() const;
     Piece  last_piece () const;
 
-    void   accumulate_gradients( const Part &part, TF coeff_x2, TF coeff_x1, TF coeff_x0, TensorView<TF,1,Cpu> grad_values ) const;
+    void   accumulate_gradients_dist( const Part &part, TF g_dist, TF dirac_x, TensorView<TF,1,Cpu> grad_values ) const;
 
     TF     coeff_values;
     Values values;

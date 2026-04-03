@@ -24,10 +24,10 @@ def check_plan( name: str, f, g, exp_dist = None, exp_bary = None ):
     # a function to call ot_plan from a flat list of tensors
     _apply_fn = sdot.make_apply_fn( f, g )
 
-    # only dirac pos and weights
-    flat_inputs = _flat_inputs[ :2 ]
+    # dirac pos and weights, ys
+    flat_inputs = _flat_inputs[ :3 ]
     def apply_fn( *x ):
-        return _apply_fn( *x, *_flat_inputs[ 2: ] )
+        return _apply_fn( *x, *_flat_inputs[ 3: ] )
 
     # backward: check all gradients at once
     if sdot.driver.normalized_framework == "torch" and sdot.driver.normalized_dtype == "FP64":
@@ -127,3 +127,10 @@ def test_piecewise_affine():
 #     [ 1 / 1200 ],
 #     numpy.linspace( 0.05, 0.95, 10 )
 # )
+
+if __name__ == "__main__":
+    check_plan( "[ 0, 1 ] => 1",
+        sdot.SumOfWeightedDiracs1d( [ 0, 1 ] ),
+        sdot.PiecewiseAffineGrid1d( [ 1, 0, 1 ] ),
+    )
+    print( "All good" )

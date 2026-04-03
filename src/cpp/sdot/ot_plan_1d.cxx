@@ -156,11 +156,21 @@ T_T void ot_plan_1d_backward( TensorView<const T,2,Cpu> dirac_xs_, TensorView<co
 
         // grad_g_values
         if ( ! grad_g_values.empty() ) {
-            // for( PI dirac_i = 0; dirac_i < nb_diracs; ++dirac_i ) {
-            //     // const TF dirac_w = dirac_scale * static_cast<TF>( dirac_ws[ dirac_i ] );
-            //     grad_g_values( dirac_i, 0 ) = 2 * g_dist * dirac_w * ( dirac_xs[ dirac_i ] - barycenters( dirac_i, 0 ) );
-            // }
-            // TODO;
+            for( PI i = 0; i < grad_g_values.size(); ++i )
+                grad_g_values[ i ] = 0;
+
+            auto piece = primitive.first_piece();
+            TF w2 = 0;
+            for( PI i = 0; i < nb_diracs; ++i ) {
+                const PI dirac_index = dirac_indices[ i ];
+                const TF dirac_x = dirac_xs[ dirac_index ];
+
+                const TF normalized_dirac_mass = dirac_scale * static_cast<TF>( dirac_ws[ dirac_index ] );
+
+                piece.take_some_mass( normalized_dirac_mass, [&]( const auto &part ) {
+                    primitive.accumulate_gradients_dist( part, g_dist, dirac_x, grad_g_values );
+                } );
+            }
         }
     }
 

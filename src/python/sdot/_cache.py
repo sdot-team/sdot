@@ -6,8 +6,8 @@ import os
 
 def sdot_cache_dir() -> Path:
     """Base sdot cache directory.  Respects SDOT_CACHE_DIR env var; otherwise
-    follows platform conventions (~/.cache/sdot on Linux/Mac,
-    %LOCALAPPDATA%/sdot on Windows).
+    follows platform conventions (~/.cache/sdot on Linux,
+    %LOCALAPPDATA%/sdot on Windows), ....
     """
     if d := os.getenv( "SDOT_CACHE_DIR" ):
         return Path(d)

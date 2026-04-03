@@ -44,10 +44,15 @@
 
 = grad ys
 
-    $ ( partial W ) / ( partial w_z ) = sum_i [ ( partial P_(i+1) ) / ( partial w_z ) ( Q_(i+1) - p_i )^2 ]
-                                      - sum_i [ ( partial P_(i  ) ) / ( partial w_z ) ( Q_(i  ) - p_i )^2 ]
-    ] $
+    $ W = sum_i integral_(Q_i)^(Q_(i+1)) ( x - p_i )^2 rho( x ) dif x $
 
-= Rq
+    $ ( partial W ) / ( partial y_z ) = \
+        sum_i integral_(Q_i)^(Q_(i+1)) ( x - p_i )^2 rho'( x ) dif x \
 
-On est partie sur la convention tenseur vide
+        + sum_i [ ( partial Q_(i+1) ) / ( partial w_z ) ( Q_(i+1) - p_i )^2 rho( Q_(i+1) ) ] \
+
+        - sum_i [ ( partial Q_(i  ) ) / ( partial w_z ) ( Q_(i  ) - p_i )^2 rho( Q_i ) ]
+    $
+
+    avec $ rho = rho^r / (integral rho^r ) $
+

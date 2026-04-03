@@ -142,7 +142,7 @@ UTP typename DTP::Piece DTP::last_piece() const {
     const TF y1 = coeff_values * values[ i1 ];
     const TF x0 = knots[ i0 ];
     const TF x1 = knots[ i1 ];
-     return Piece{
+    return Piece{
         .coeff_values = coeff_values,
         .values = values,
         .knots = knots,
@@ -175,21 +175,46 @@ UTP TF DTP::Part::moment() const {
          + ( std::pow( x1, 3 ) - std::pow( x0, 3 ) ) * b / 3;
 }
 
-UTP void DTP::accumulate_gradients( const Part &part, TF coeff_x2, TF coeff_x1, TF coeff_x0, TensorView<TF,1,Cpu> grad_values ) const {
-    const TF X0 = knots[ part.i1 - 1 ];
-    const TF X1 = knots[ part.i1 ];
-    const TF inv_H = 1 / ( X1 - X0 );
+UTP void DTP::accumulate_gradients_dist( const Part &part, TF g_dist, TF d, TensorView<TF,1,Cpu> grad_values ) const {
+    // const TF X0 = knots[ part.i1 - 1 ];
+    // const TF X1 = knots[ part.i1 ];
+    // const TF inv_H = 1 / ( X1 - X0 );
 
-    auto V = [&]( TF x ) { return coeff_x2 * x * x + coeff_x1 * x + coeff_x0; };
+    // auto V = [&]( TF x ) { return coeff_x2 * x * x + coeff_x1 * x + coeff_x0; };
 
-    // Simpson's rule for cubic (V is quadratic, shape is linear)
-    auto integrate = [&]( auto &&f ) {
-        return ( part.x1 - part.x0 ) / 6 * ( f( part.x0 ) + 4 * f( ( part.x0 + part.x1 ) / 2 ) + f( part.x1 ) );
-    };
+    // // Simpson's rule for cubic (V is quadratic, shape is linear)
+    // auto integrate = [&]( auto &&f ) {
+    //     return ( part.x1 - part.x0 ) / 6 * ( f( part.x0 ) + 4 * f( ( part.x0 + part.x1 ) / 2 ) + f( part.x1 ) );
+    // };
 
-    grad_values[ part.i1 - 1 ] += integrate( [&]( TF x ) { return V( x ) * ( X1 - x ) * inv_H; } );
-    grad_values[ part.i1 ]     += integrate( [&]( TF x ) { return V( x ) * ( x - X0 ) * inv_H; } );
+    // grad_values[ part.i1 - 1 ] += integrate( [&]( TF x ) { return V( x ) * ( X1 - x ) * inv_H; } );
+    // grad_values[ part.i1 ]     += integrate( [&]( TF x ) { return V( x ) * ( x - X0 ) * inv_H; } );
+
+    //
+    const PI i0 = part.i1 - 1;
+    const PI i1 = part.i1 - 0;
+    const TF k0 = knots[ i0 ];
+    const TF k1 = knots[ i1 ];
+    if ( k0 == k1 )
+        return;
+
+    const TF p0 = part.x0;
+    const TF p1 = part.x1;
+
+    // i0 part: integrate( ( k1 - x ) / ( k1 - k0 ) * ( x - d )^2, x, part.x0, part.x1 )
+    // i1 part: integrate( ( x - k0 ) / ( k1 - k0 ) * ( x - d )^2, x, part.x0, part.x1 )
+
+    grad_values[ i0 ] += (
+        -12*d*d*k1*p0 + 12*d*d*k1*p1 - 4*p0*p0*p0*(2*d + k1) + 6*d*p0*p0*(d + 2*k1) + 4*p1*p1*p1*(2*d + k1) - 6*d*p1*p1*(d + 2*k1) + 3*p0*p0*p0*p0 - 3*p1*p1*p1
+    ) / ( 12 * ( k1 - k0 ) );
+
+    grad_values[ i1 ] += ( ( p0 - p1 ) * (
+        12*d*d*k0 - 6*d*d*p0 - 6*d*d*p1 - 12*d*k0*p0 - 12*d*k0*p1 + 8*d*p0*p0 + 8*d*p0*p1 + 8*d*p1*p1 + 4*k0*p0*p0 + 4*k0*p0*p1 + 4*k0*p1*p1 - 3*p0*p0*p0 -
+        3*p0*p0*p1 - 3*p0*p1*p1 - 3*p1*p1*p1
+    ) ) / ( 12 * ( k1 - k0 ) );
+
 }
+
 
 #undef UTP
 #undef DTP
