@@ -86,7 +86,7 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
 
         # outputs of backward_args and forward_args
         backward_args += [ ( "AF", "distances", 1 ), ( "AF", "barycenters", 3 ), ( "AF", "potentials", 2 ), ( "AF", "cuts", 3 ),
-                          ( "AF", "grad_distances", 1 ), ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
+                           ( "AF", "grad_distances", 1 ), ( "AF", "grad_barycenters", 3 ), ( "AF", "grad_potentials", 2 ), ( "AF", "grad_cuts", 3 ) ]
         forward_args += [ ( "MF", "distances", 1 ), ( "MF", "barycenters", 3 ), ( "MF", "potentials", 2 ), ( "MF", "cuts", 3 ) ]
 
         for d_name, d_data in [ ( "f", f ), ( "g", g ) ]:

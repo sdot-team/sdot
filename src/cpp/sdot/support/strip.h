@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-namespace uot {
+namespace sdot {
 
 inline std::string_view strip( std::string_view res ) {
     while ( res.size() && res.back() == ' ' )
@@ -12,4 +12,4 @@ inline std::string_view strip( std::string_view res ) {
     return res;
 }
 
-} // namespace uot
+} // namespace sdot

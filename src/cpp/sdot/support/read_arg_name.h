@@ -2,7 +2,7 @@
 
 #include "strip.h"
 
-namespace uot {
+namespace sdot {
 
 inline std::string_view read_arg_name( std::string_view &arg_names ) {
     int nb_open_par = 0;
@@ -47,4 +47,4 @@ inline std::string_view read_arg_name( std::string_view &arg_names ) {
     return res;
 }
 
-} // namespace uot
+} // namespace sdot

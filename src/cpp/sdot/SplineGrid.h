@@ -3,7 +3,7 @@
 namespace sdot {
 
 ///
-template<class TF,int order,class... Knots>
+template<class TF,int order>
 struct SplineGrid;
 
 } // namespace sdot

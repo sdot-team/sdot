@@ -42,7 +42,9 @@ class SplineGrid( Distribution ):
         self.order = order
 
     def primitive_function( self ):
-        prim = f"batch_of_spline_grids( CtInt<{ self.order }>(), g_values )"
-        grad = "grad_g_values"
+        grad_knots = [ f"grad_g_knots[ { i } ]" for i in range( self.dim ) ]
+
+        prim = f"batch_of_spline_grids( CtInt<{ self.order }>(), g_values, g_bounds, g_knots )"
+        grad_args = str.join( ", ", [ "grad_g_values", "grad_g_bounds" ] + grad_knots )
         incl = [ "sdot/BatchOfSplineGrids.h" ]
-        return prim, grad, incl
+        return prim, grad_args, incl
