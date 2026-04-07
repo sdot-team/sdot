@@ -1,3 +1,6 @@
+
+pip install --index-url https://test.pypi.org/simple/ sdot==0.1.1
+
 # ENV
 
 make venv

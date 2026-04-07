@@ -1,36 +1,32 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sdot"
-version = "0.1.0"
+version = "0.1.1"
 description = "Semi-discrete optimal transport"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"# Changé de {text = "MIT"} à "MIT" pour éviter l'avertissement
+authors = [{name = "sdot-team"}]
 dependencies = [
-    "nanobind",
-    "numpy",
-    "meson",    # build system — nécessaire aussi en runtime (compilation des extensions)
-    "ninja",    # backend meson
+    "numpy>=1.25",  # Essentiel pour runtime
+    "nanobind",     # Nécessaire pour les bindings C++ (runtime)
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src/python"}
+[project.optional-dependencies]
+dev = ["pytest", "timing"]  # Pour tests/dev
+torch = ["torch>=2.0"]      # Backend PyTorch
+jax = ["jax>=0.4", "jaxlib>=0.4"]  # Backend JAX (ajouté jaxlib)
+dask = ["dask[array]>=2024.1"]     # Intégration Dask
+plot = ["matplotlib>=3.7"]         # Pour plotting
 
-# [project.optional-dependencies]
-# torch = ["torch"]
-# jax   = ["jax", "jaxlib"]
-# dask  = ["dask[array]"]
-# plot  = ["matplotlib"]
-# docs  = [
-#     "mkdocs-material",
-#     "mkdocstrings[python]",
-#     "pyyaml",
-# ]
-# dev = [
-#     "pytest",
-#     "timing",
-#     "sdot[torch,jax,dask,plot,ot,docs]",
-# ]
+[tool.setuptools.packages.find]
+where = ["src/python"]
+
+[tool.setuptools.package-data]
+sdot = ["bindings/*.so"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
