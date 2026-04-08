@@ -5,8 +5,8 @@
 
 namespace sdot {
 
-#define UTP template<class TF,int ct_dim,class Arch>
-#define DTP Cell<TF,ct_dim,Arch>
+#define UTP template<class TF,int ct_dim,class Arch,class CellInfo,class CutInfo>
+#define DTP Cell<TF,ct_dim,Arch,CellInfo,CutInfo>
 
 UTP DTP::Cell( int actual_dim ) : curr_op_id( 0 ), item_map( actual_dim + 1 ), pf( actual_dim ), df( actual_dim ) {
     if ( ct_dim >= 0 )
@@ -25,21 +25,24 @@ UTP void DTP::display_vtk( VtkOutput& vo ) const {
     }
 }
 
-UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1 ) {
+UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1, CellInfo cell_info, CutInfo cut_info ) {
     const TF length = norm_2( p0 - p1 );
     const PI dim = p0.size();
 
     Cell res = englobing_simplex( dim, 10 * length );
+    res.info = cell_info;
     for( PI d = 0; d < dim; ++d ) {
-        res.cut( res.pf.value_at( d, +1 ), + p1[ d ], 2 * d + 0 );
-        res.cut( res.pf.value_at( d, -1 ), - p0[ d ], 2 * d + 1 );
+        res.cut( res.pf.value_at( d, +1 ), + p1[ d ], 2 * d + 0, cut_info );
+        res.cut( res.pf.value_at( d, -1 ), - p0[ d ], 2 * d + 1, cut_info );
     }
     return res;
 }
 
-UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
+UTP DTP DTP::simplex( int dim, std::span<Pt> points, CellInfo cell_info, CutInfo cut_info ) {
     const PI nb_vertices = points.size();
+
     Cell res( dim );
+    res.info = cell_info;
 
     // vertices
     res.vertices.clear();
@@ -74,16 +77,16 @@ UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
 
         //
         res.cuts.push_back( Cut{
+            .info = cut_info,
             .dir = dir,
             .sp = dot( dir, p1 ),
-            .id = 0,
             .ext = 1
         } );
     }
     return res;
 }
 
-UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
+UTP DTP DTP::axis_aligned_simplex( int dim, TF length, CellInfo cell_info, CutInfo cut_info ) {
     const PI nb_vertices = dim + 1;
     PF pf( dim );
 
@@ -93,10 +96,10 @@ UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
     for ( PI num_vertex = 1; num_vertex < nb_vertices; ++num_vertex )
         points.push_back( pf.value_at( num_vertex - 1, length ) );
 
-    return simplex( points );
+    return simplex( points, cell_info, cut_info );
 }
 
-UTP DTP DTP::englobing_simplex( Pt center, TF radius ) {
+UTP DTP DTP::englobing_simplex( Pt center, TF radius, CellInfo cell_info, CutInfo cut_info ) {
     const PI dim = center.size();
     PF pf( dim );
 
@@ -132,7 +135,7 @@ UTP DTP DTP::englobing_simplex( Pt center, TF radius ) {
 
     points.push_back( center + a );
 
-    return simplex( dim, points );
+    return simplex( dim, points, cell_info, cut_info );
 }
 
 UTP void DTP::_for_each_2_comb_excepted( PI size, PI excepted, auto&& func ) {

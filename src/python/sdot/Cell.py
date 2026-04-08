@@ -1,15 +1,20 @@
 from .driver import driver
 
+
 class Cell:
     """
 
     """
-    def __init__( self, dim = None ):
-        self._instance = None
+    def __init__( self, dim = None, instance = None ):
         self._bindings = None
 
-        if dim is not None:
-            self._checked_instance( dim )
+        if instance is not None:
+            self._instance = instance
+            dim = instance.dim()
+        else:
+            self._instance = None
+            if dim is not None:
+                self._checked_instance( dim )
 
 
     @staticmethod
@@ -142,8 +147,11 @@ class Cell:
                         ss << b;
                         return ss.str();
                     } )
-                    .def( "cut", []( CellType &self, const AF dir, TF dot, PI id ) {
-                        self.cut( to_Pt( dir ), dot, id );
+                    .def( "cut", []( CellType &self, const AF dir, TF dot ) {
+                        self.cut( to_Pt( dir ), dot, { } );
+                    } )
+                    .def( "dim", []( CellType &self ) {
+                        return self.dim();
                     } )
                     .def( "vertices", []( const CellType &self ) {
                         Tensor<TF,2,Cpu> res( Shape(), { self.nb_vertices(), self.dim() } );
@@ -162,7 +170,7 @@ class Cell:
                     } )
                     .def( "cuts", []( const CellType &self ) {
                         std::vector<std::tuple<nanobind::ndarray<nanobind::numpy,TF>,TF>> res;
-                        self.for_each_cut( [&]( Pt dir, TF dot, PI id ) {
+                        self.for_each_cut( [&]( Pt dir, TF dot, const auto & ) {
                             res.push_back( { to_ndarray_1d( dir ), dot } );
                         } );
                         return res;

@@ -7,10 +7,26 @@
 
 namespace sdot {
 
+
 //
 template<class TF,int ct_dim,class Arch>
+struct StdCellInfo {
+    using Pt  = Point<TF,ct_dim,Arch>;
+
+    PI    global_dirac_index = PI( -1 );
+    PI    local_dirac_index = PI( -1 );
+    Pt    dirac_position;
+    TF    dirac_weight;
+    TF    potential;
+};
+
+//
+template<class TF,int ct_dim,class Arch,class _CellInfo=StdCellInfo<TF,ct_dim,Arch>,class _CutInfo=StdCellInfo<TF,ct_dim,Arch>>
 class Cell {
 public:
+    using       CellInfo = _CellInfo;
+    using       CutInfo  = _CutInfo;
+
     struct      FaceCorr { PI64 vertex_index_plus_curr_op_id = 0; PI cut_ind_to_remove; };
     struct      ItemCorr { PI64 vertex_index_plus_curr_op_id = 0; };
 
@@ -27,6 +43,7 @@ public:
         PI num_cut_to_remove;
         PI vertex_index;
     };
+
     struct Vertex {
         using     EdgeLinks = std::vector<EdgeLink>;
 
@@ -34,9 +51,10 @@ public:
         It        cut_indices;
         EdgeLinks edge_links;
     };
+
     struct Cut {
         Pt   dir;
-        TF   sp;
+        TF   dot;
         PI   id;
         bool ext;
     };
@@ -46,10 +64,10 @@ public:
 
     /**/            Cell                          ( int dim );
 
-    static Cell     axis_aligned_hypercube        ( Pt p0, Pt p1 );
-    static Cell     axis_aligned_simplex          ( int dim, TF length );
-    static Cell     englobing_simplex             ( Pt center, TF radius );
-    static Cell     simplex                       ( int dim, std::span<Pt> points );
+    static Cell     axis_aligned_hypercube        ( Pt p0, Pt p1, CellInfo cell_info = {}, CutInfo cut_info = {} );
+    static Cell     axis_aligned_simplex          ( int dim, TF length, CellInfo cell_info = {}, CutInfo cut_info = {} );
+    static Cell     englobing_simplex             ( Pt center, TF radius, CellInfo cell_info = {}, CutInfo cut_info = {} );
+    static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = {}, CutInfo cut_info = {} );
 
     void            check_consistency             ( TF eps = 1e-6 ) const;
     void            for_each_vertex               ( auto &&func ) const;
@@ -77,6 +95,8 @@ public:
     VF              sps;                          ///< scalar product
     PF              pf;                           ///< point factory
     DF              df;                           ///< index factory
+
+    CellInfo        info;                         ///<
 };
 
 } // namespace sdot

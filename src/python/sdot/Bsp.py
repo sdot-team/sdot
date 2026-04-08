@@ -19,8 +19,12 @@ class Bsp:
 
     """
 
-    def __init__( self, positions, weights, max_points_per_cell = 30, max_points_per_node = 1e6 ):
+    def __init__( self, positions, weights, max_points_per_cell = 30, max_points_per_node = 1e6, normalize_weights = True ):
         config = BspConfig( max_points_per_cell, max_points_per_node )
+
+        # normalization of weights
+        if normalize_weights:
+            weights /= weights.sum()
 
         #
         ( nb_points, dim ) = positions.shape
@@ -33,9 +37,19 @@ class Bsp:
         cell = Cell.axis_aligned_hypercube( min_max_pts )
 
         #
-        item = self.class_binding( [ ( [ 0, 0 ], cell._instance ) ], 0, positions, numpy.arange( nb_points ), config.max_points_per_cell )
+        item = self.class_binding( [ ( [ 0, 0 ], cell._instance ) ], 0, positions, numpy.arange( nb_points ), weights, config.max_points_per_cell )
         self.items = [ item ]
         #.append( dask.delayed( self._make_item )( class_binding, node_summary, node_index, all_the_nodes[ node_index ].positions, all_the_nodes[ node_index ].indices, config ) )
+
+
+    @property
+    def nb_points( self ):
+        return self.items[ 0 ].nb_points()
+
+
+    @property
+    def dim( self ):
+        return self.items[ 0 ].dim()
 
 
     def write_vtk( self, filename: str ):
@@ -126,12 +140,13 @@ class Bsp:
 
                 NB_MODULE( SDOT_BINDING_NAME, m ) {
                     nb::class_<BspType>( m, "Bsp" )
-                        .def( "__init__", []( BspType *self, const NodeSummary &node_summary, PI node_index, NF positions, NI indices, PI max_points_per_cell ) {
+                        .def( "__init__", []( BspType *self, const NodeSummary &node_summary, PI node_index, NF positions, NI indices, NF weights, PI max_points_per_cell ) {
                             new ( self ) BspType(
                                 node_summary,
                                 node_index,
                                 tensor_view_2( positions ),
                                 tensor_view_1( indices ),
+                                tensor_view_1( weights ),
                                 max_points_per_cell
                             );
                         } )
@@ -142,6 +157,9 @@ class Bsp:
                         } )
                         .def( "nb_points", []( const BspType &b ) {
                             return b.nb_points;
+                        } )
+                        .def( "dim", []( const BspType &b ) {
+                            return b.dim;
                         } )
                         .def( "write_vtk", []( const BspType &b, std::string filename ) {
                             VtkOutput vo;

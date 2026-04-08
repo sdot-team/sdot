@@ -8,7 +8,7 @@ namespace sdot {
 #define UTP template<class AdditionalPtData,class TF,int ct_dim,class Arch>
 #define DTP Bsp<AdditionalPtData,TF,ct_dim,Arch>
 
-UTP DTP::Bsp( const auto &node_summary, PI node_index, TensorView<const TF,2,Arch> positions, TensorView<const PI,1,Arch> indices, PI max_points_per_cell ) : nb_points( positions.size( 0 ) ), dim( positions.size( 1 ) ), pf( dim ) {
+UTP DTP::Bsp( const auto &node_summary, PI node_index, TensorView<const TF,2,Arch> positions, TensorView<const PI,1,Arch> indices, TensorView<const TF,1,Arch> weights, PI max_points_per_cell ) : nb_points( positions.size( 0 ) ), dim( positions.size( 1 ) ), pf( dim ) {
     // pt_data
     const PI nb_points = positions.size( 0 );
     pt_data.reserve( nb_points );
@@ -16,6 +16,7 @@ UTP DTP::Bsp( const auto &node_summary, PI node_index, TensorView<const TF,2,Arc
         pt_data.push_back( {
             .additional_data = 0,
             .position = positions.row( num_point ),
+            .weight = weights[ num_point ],
             .index = indices[ num_point ],
         } );
     }
@@ -182,10 +183,10 @@ UTP typename DTP::Cell DTP::make_new_cell( const Cell &base_cell, const Pt &spli
         TF sp = dot( pt_data[ beg ].position, split_dir );
         for( PI ind = beg + 1; ind < end; ++ind )
             sp = max( sp, dot( pt_data[ ind ].position, split_dir ) );
-        new_cell.cut( split_dir, sp, 0 );
+        new_cell.cut( split_dir, sp, {} );
     };
 
-    base_cell.for_each_cut( [&]( const Pt split_dir, TF, PI ) {
+    base_cell.for_each_cut( [&]( const Pt split_dir, TF, const auto & ) {
         cut( split_dir );
     } );
     cut( split_dir );
@@ -210,27 +211,45 @@ UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix )
     }
 }
 
-UTP void DTP::for_each_cell( const auto &primitive, auto &&func ) {
-    Cell base_cell = primitive.base_cell( dim );
+UTP void DTP::for_each_cell( const auto &primitive, TensorView<const TF,1,Arch> sorted_potentials, auto &&func ) {
+    Cell base_cell = primitive.base_cell( dim, {}, { .global_dirac_index = PI( -1 ) } );
+
     for( PI n0 = 0; n0 < pt_data.size(); ++n0 ) {
-        const Pt p0 = pt_data[ n0 ].position;
-        const TF w0 = 1;
+        const TF p0 = sorted_potentials[ n0 ];
+        const Pt v0 = pt_data[ n0 ].position;
+        const TF w0 = pt_data[ n0 ].weight;
+        const PI i0 = pt_data[ n0 ].index;
+
         Cell cell = base_cell;
+        cell.info.global_dirac_index = i0;
+        cell.info.local_dirac_index = n0;
+        cell.info.dirac_position = v0;
+        cell.info.dirac_weight = w0;
+        cell.info.potential = w0;
+
         for( PI n1 = 0; n1 < pt_data.size(); ++n1 ) {
             if ( n0 == n1 )
                 continue;
-            const Pt p1 = pt_data[ n1 ].position;
-            const TF w1 = 1;
+            const TF p1 = sorted_potentials[ n1 ];
+            const Pt v1 = pt_data[ n1 ].position;
+            const TF w1 = pt_data[ n1 ].weight;
+            const PI i1 = pt_data[ n1 ].index;
 
-            const Pt dir = p1 - p0;
+            const Pt dir = v1 - v0;
 
             auto n = norm_2_p2( dir );
-            auto s0 = dot( dir, p0 );
-            auto s1 = dot( dir, p1 );
+            auto s0 = dot( dir, v0 );
+            auto s1 = dot( dir, v1 );
 
-            auto off = s0 + ( 1 + ( w0 - w1 ) / n ) / 2 * ( s1 - s0 );
+            auto off = s0 + ( 1 + ( p0 - p1 ) / n ) / 2 * ( s1 - s0 );
 
-            cell.cut( dir, off, n1 );
+            cell.cut( dir, off, {
+                .global_dirac_index = i1,
+                .local_dirac_index = n1,
+                .dirac_position = v1,
+                .dirac_weight = w1,
+                .potential = p1
+            } );
         }
 
         func( cell );

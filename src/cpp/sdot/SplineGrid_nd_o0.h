@@ -16,7 +16,7 @@ struct SplineGrid<TF,ct_dim,0,Arch> {
 
     /**/   SplineGrid    ( Values values, Bounds bounds, const std::vector<Knots> &knots );
 
-    Cell   base_cell     ( PI dim ) const;
+    Cell   base_cell     ( PI dim, typename Cell::CellInfo cell_info = {}, typename Cell::CutInfo cut_info = {} ) const;
 
     TF     coeff_values;
     Values values;

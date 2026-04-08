@@ -44,7 +44,6 @@ class SplineGrid( Distribution ):
     def primitive_function( self ):
         grad_knots = [ f"grad_g_knots[ { i } ]" for i in range( self.dim ) ]
 
-        ic( self, isinstance( self, Distribution ) )
         if isinstance( self, Distribution ):
             prim = f"spline_grid( CtInt<{ self.order }>(), g_values, g_bounds, g_knots )"
             incl = [ "sdot/SplineGrid.h" ]

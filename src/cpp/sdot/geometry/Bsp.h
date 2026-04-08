@@ -49,6 +49,7 @@ public:
     struct PtData {
         Ad   additional_data;
         Pt   position;
+        TF   weight;
         PI   index;
     };
 
@@ -62,7 +63,7 @@ public:
         PI len;
     };
 
-    /**/                Bsp               ( const auto &node_summary, PI node_index, TensorView<const TF,2,Arch> positions, TensorView<const PI,1,Arch> indices, PI max_points_per_cell );
+    /**/                Bsp               ( const auto &node_summary, PI node_index, TensorView<const TF,2,Arch> positions, TensorView<const PI,1,Arch> indices, TensorView<const TF,1,Arch> weights, PI max_points_per_cell );
 
     bool                is_in_charge_of   ( const Pt &pos ) const;
     void                display_vtk       ( VtkOutput &vo ) const;
@@ -73,7 +74,7 @@ public:
     void                display_rec       ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
     void                add_path          ( TensorView<const TF,2,Arch> path, PI num_bsp );
 
-    void                for_each_cell     ( const auto &primitive, auto &&func );
+    void                for_each_cell     ( const auto &primitive, TensorView<const TF,1,Arch> sorted_potentials, auto &&func );
 
     friend std::ostream &operator<<       ( std::ostream &os, const Bsp &p ) { p.display_rec( os, 0 ); return os; }
 

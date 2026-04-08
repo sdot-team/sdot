@@ -1,85 +1,93 @@
 #pragma once
 
 #include "../support/ASSERT.h"
-#include "../support/P.h"
+//#include "../support/P.h"
 #include "Cell_2D.h"
 
 namespace sdot {
 
-#define UTP template<class TF,class Arch>
-#define DTP Cell<TF,2,Arch>
+#define UTP template<class TF,class Arch,class CellInfo,class CutInfo>
+#define DTP Cell<TF,2,Arch,CellInfo,CutInfo>
 
 UTP DTP::Cell( int actual_dim ) {
     ASSERT( actual_dim == ct_dim );
-    vertices = {
-        VertexAndCut{
+    edges = {
+        Edge{
             .cut_dir = { 0, -1 },
             .cut_dot = 0,
-            .cut_id = 0,
-            .pos = { 0, 0 },
-            .ext = 1
+            .info = {},
+
+            .vertex_pos = { 0, 0 },
+            .vertex_ext = 1
         },
-        VertexAndCut{
+        Edge{
             .cut_dir = { 1, 1 },
             .cut_dot = 1,
-            .cut_id = 0,
-            .pos = { 1, 0 },
-            .ext = 1
+            .info = {},
+
+            .vertex_pos = { 1, 0 },
+            .vertex_ext = 1
         },
-        VertexAndCut{
+        Edge{
             .cut_dir = { -1, 0 },
             .cut_dot = 0,
-            .cut_id = 0,
-            .pos = { 0, 1 },
-            .ext = 1
+            .info = {},
+
+            .vertex_pos = { 0, 1 },
+            .vertex_ext = 1
         }
     };
 }
 
 UTP void DTP::display_vtk( VtkOutput &vo ) const {
-    for ( PI n0 = 0; n0 < vertices.size(); ++n0 ) {
-        const PI n1 = ( n0 + 1 ) % vertices.size();
-        std::array<VtkOutput::Pt,2> edge{ VtkOutput::Pt( vertices[ n0 ].pos ), VtkOutput::Pt( vertices[ n1 ].pos ) };
+    for ( PI n0 = 0; n0 < edges.size(); ++n0 ) {
+        const PI n1 = ( n0 + 1 ) % edges.size();
+        std::array<VtkOutput::Pt,2> edge{ VtkOutput::Pt( edges[ n0 ].vertex_pos ), VtkOutput::Pt( edges[ n1 ].vertex_pos ) };
         vo.add_edge( edge );
     }
 }
 
-UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1, bool ext ) {
+UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1, CellInfo cell_info, CutInfo cut_info ) {
     Cell res;
-    res.vertices = {
-        VertexAndCut{
+    res.info = cell_info;
+    res.edges = {
+        Edge{
             .cut_dir = { 0, -1 },
             .cut_dot = - p0[ 1 ],
-            .cut_id = 0,
-            .pos = { p0[ 0 ], p0[ 1 ] },
-            .ext = ext
+            .info = cut_info,
+
+            .vertex_pos = { p0[ 0 ], p0[ 1 ] },
+            .vertex_ext = false
         },
-        VertexAndCut{
+        Edge{
             .cut_dir = { 1, 0 },
             .cut_dot = p1[ 0 ],
-            .cut_id = 0,
-            .pos = { p1[ 0 ], p0[ 1 ] },
-            .ext = ext
+            .info = cut_info,
+
+            .vertex_pos = { p1[ 0 ], p0[ 1 ] },
+            .vertex_ext = false
         },
-        VertexAndCut{
+        Edge{
             .cut_dir = { 0, 1 },
             .cut_dot = p1[ 1 ],
-            .cut_id = 0,
-            .pos = { p1[ 0 ], p1[ 1 ] },
-            .ext = ext
+            .info = cut_info,
+
+            .vertex_pos = { p1[ 0 ], p1[ 1 ] },
+            .vertex_ext = false
         },
-        VertexAndCut{
+        Edge{
             .cut_dir = { -1, 0 },
             .cut_dot = - p0[ 0 ],
-            .cut_id = 0,
-            .pos = { p0[ 0 ], p1[ 1 ] },
-            .ext = ext
+            .info = cut_info,
+
+            .vertex_pos = { p0[ 0 ], p1[ 1 ] },
+            .vertex_ext = false
         }
     };
     return res;
 }
 
-UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
+UTP DTP DTP::simplex( int dim, std::span<Pt> points, CellInfo cell_info, CutInfo cut_info ) {
     // const PI nb_vertices = points.size();
     Cell res( dim );
     ASSERT( 0 );
@@ -126,7 +134,7 @@ UTP DTP DTP::simplex( int dim, std::span<Pt> points ) {
     return res;
 }
 
-UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
+UTP DTP DTP::axis_aligned_simplex( int dim, TF length, CellInfo cell_info, CutInfo cut_info ) {
     throw std::runtime_error( "TODO" );
     // const PI nb_vertices = dim + 1;
     // PF pf( dim );
@@ -140,7 +148,7 @@ UTP DTP DTP::axis_aligned_simplex( int dim, TF length ) {
     // return simplex( points );
 }
 
-UTP DTP DTP::englobing_simplex( Pt center, TF radius ) {
+UTP DTP DTP::englobing_simplex( Pt center, TF radius, CellInfo cell_info, CutInfo cut_info ) {
     throw std::runtime_error( "TODO" );
     // const PI dim = center.size();
     // PF pf( dim );
@@ -180,17 +188,17 @@ UTP DTP DTP::englobing_simplex( Pt center, TF radius ) {
     // return simplex( dim, points );
 }
 
-UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
+UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, CutInfo cut_info ) {
     // nothing to cut
-    if ( vertices.empty() )
+    if ( edges.empty() )
         return;
 
     // get the scalar product for each node
-    const PI old_vertices_size = vertices.size();
+    const PI old_vertices_size = edges.size();
     PI nb_out = 0;
     for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
-        TF sp = sdot::dot( cut_dir, vertices[ n0 ].pos ) - cut_dot;
-        vertices[ n0 ].sp = sp;
+        TF sp = sdot::dot( cut_dir, edges[ n0 ].vertex_pos ) - cut_dot;
+        edges[ n0 ].vertex_dot = sp;
         nb_out += ( sp > 0 );
     }
 
@@ -200,17 +208,17 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
 
     // void
     if ( nb_out == old_vertices_size ) {
-        vertices.clear();
+        edges.clear();
         return;
     }
 
-    // first case : need to create a new entry in vertices
+    // first case : need to create a new entry in edges
     if ( nb_out == 1 ) {
         // find int -> out edge
         PI n0 = 0, n1 = 0;
         for( PI n0_test = 0; n0_test < old_vertices_size; ++n0_test ) {
             const PI n1_test = ( n0_test + 1 ) % old_vertices_size;
-            if ( vertices[ n0_test ].inside_the_cut() && vertices[ n1_test ].outside_the_cut() ) {
+            if ( edges[ n0_test ].inside_the_cut() && edges[ n1_test ].outside_the_cut() ) {
                 n0 = n0_test;
                 n1 = n1_test;
                 break;
@@ -218,25 +226,25 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
         }
 
         const PI n2 = ( n0 + 2 ) % old_vertices_size;
-        const Pt p0 = vertices[ n0 ].pos;
-        const Pt p1 = vertices[ n1 ].pos;
-        const Pt p2 = vertices[ n2 ].pos;
-        const TF s0 = vertices[ n0 ].sp;
-        const TF s1 = vertices[ n1 ].sp;
-        const TF s2 = vertices[ n2 ].sp;
+        const Pt p0 = edges[ n0 ].vertex_pos;
+        const Pt p1 = edges[ n1 ].vertex_pos;
+        const Pt p2 = edges[ n2 ].vertex_pos;
+        const TF s0 = edges[ n0 ].vertex_dot;
+        const TF s1 = edges[ n1 ].vertex_dot;
+        const TF s2 = edges[ n2 ].vertex_dot;
 
         // modify the out vertex
-        VertexAndCut &v1 = vertices[ n1 ];
-        v1.pos = p1 - s1 / ( s2 - s1 ) * ( p2 - p1 );
-        v1.ext = 0;
+        Edge &v1 = edges[ n1 ];
+        v1.vertex_pos = p1 - s1 / ( s2 - s1 ) * ( p2 - p1 );
+        v1.vertex_ext = 0;
 
         // insert an item after n0
-        vertices.insert( vertices.begin() + n1, VertexAndCut{
+        edges.insert( edges.begin() + n1, Edge{
             .cut_dir = cut_dir,
             .cut_dot = cut_dot,
-            .cut_id = cut_id,
-            .pos = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 ),
-            .ext = 0
+            .info = cut_info,
+            .vertex_pos = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 ),
+            .vertex_ext = 0
         } );
 
         return;
@@ -247,7 +255,7 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
     PI n1 = 0;
     for ( PI n0_test = 0; n0_test < old_vertices_size; ++n0_test ) {
         const PI n1_test = ( n0_test + 1 ) % old_vertices_size;
-        if ( vertices[ n0_test ].inside_the_cut() && vertices[ n1_test ].outside_the_cut() ) {
+        if ( edges[ n0_test ].inside_the_cut() && edges[ n1_test ].outside_the_cut() ) {
             n0 = n0_test;
             n1 = n1_test;
             break;
@@ -259,66 +267,86 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, PI cut_id ) {
     PI n3 = 0;
     for ( PI n2_test = 0; n2_test < old_vertices_size; ++n2_test ) {
         const PI n3_test = ( n2_test + 1 ) % old_vertices_size;
-        if ( vertices[ n2_test ].outside_the_cut() && vertices[ n3_test ].inside_the_cut() ) {
+        if ( edges[ n2_test ].outside_the_cut() && edges[ n3_test ].inside_the_cut() ) {
             n2 = n2_test;
             n3 = n3_test;
             break;
         }
     }
 
-    const Pt p0 = vertices[ n0 ].pos;
-    const Pt p1 = vertices[ n1 ].pos;
-    const Pt p2 = vertices[ n2 ].pos;
-    const Pt p3 = vertices[ n3 ].pos;
-    const TF s0 = vertices[ n0 ].sp;
-    const TF s1 = vertices[ n1 ].sp;
-    const TF s2 = vertices[ n2 ].sp;
-    const TF s3 = vertices[ n3 ].sp;
+    const Pt p0 = edges[ n0 ].vertex_pos;
+    const Pt p1 = edges[ n1 ].vertex_pos;
+    const Pt p2 = edges[ n2 ].vertex_pos;
+    const Pt p3 = edges[ n3 ].vertex_pos;
+    const TF s0 = edges[ n0 ].vertex_dot;
+    const TF s1 = edges[ n1 ].vertex_dot;
+    const TF s2 = edges[ n2 ].vertex_dot;
+    const TF s3 = edges[ n3 ].vertex_dot;
 
     //
-    VertexAndCut &v1 = vertices[ n1 ];
+    Edge &v1 = edges[ n1 ];
     v1.cut_dir = cut_dir;
     v1.cut_dot = cut_dot;
-    v1.cut_id = cut_id;
-    v1.pos = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 );
-    v1.ext = 0;
+    v1.info = cut_info;
+    v1.vertex_pos = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 );
+    v1.vertex_ext = 0;
 
-    VertexAndCut &v2 = vertices[ n2 ];
-    v2.pos = p2 - s2 / ( s3 - s2 ) * ( p3 - p2 );
-    v2.ext = 0;
+    Edge &v2 = edges[ n2 ];
+    v2.vertex_pos = p2 - s2 / ( s3 - s2 ) * ( p3 - p2 );
+    v2.vertex_ext = 0;
 
     if ( const PI diff = nb_out - 2 ) {
         if ( n2 > n1 ) {
-            vertices.erase( vertices.begin() + n1 + 1, vertices.begin() + n2 );
+            edges.erase( edges.begin() + n1 + 1, edges.begin() + n2 );
         } else {
-            vertices.erase( vertices.begin(), vertices.begin() + n2 );
-            vertices.resize( old_vertices_size - diff );
+            edges.erase( edges.begin(), edges.begin() + n2 );
+            edges.resize( old_vertices_size - diff );
         }
     }
 }
 
 UTP void DTP::for_each_vertex( auto &&func ) const {
-    for( PI index = 0; index < vertices.size(); ++index )
-        func( vertices[ index ].pos, index );
+    for( PI index = 0; index < edges.size(); ++index )
+        func( edges[ index ].vertex_pos, index );
 }
 
 UTP void DTP::for_each_face( auto &&func ) const {
-    std::vector<PI> res( vertices.size() );
+    std::vector<PI> res( edges.size() );
     for( PI i = 0; i < res.size(); ++i )
         res[ i ] = i;
     func( std::move( res ) );
 }
 
 UTP void DTP::for_each_cut( auto &&func ) const {
-    for( const VertexAndCut &v : vertices )
-        func( v.cut_dir, v.cut_dot, v.cut_id );
+    for( const Edge &v : edges )
+        func( v.cut_dir, v.cut_dot, v.info );
+}
+
+UTP TF DTP::for_each_cut_with_measure( auto &&f ) const {
+    const PI n = edges.size();
+    TF sum = 0;
+    for ( PI i = 0; i < n; ++i ) {
+        const Pt &a = edges[ i ].vertex_pos;
+        const Pt &b = edges[ ( i + 1 ) % n ].vertex_pos;
+        sum += a[ 0 ] * b[ 1 ] - b[ 0 ] * a[ 1 ];
+
+        f( edges[ i ], norm_2( b - a ) );
+    }
+    return sum / 2;
 }
 
 UTP TF DTP::measure() const {
-    ASSERT( 0 );
+    const PI n = edges.size();
+    TF sum = 0;
+    for ( PI i = 0; i < n; ++i ) {
+        const Pt &a = edges[ i ].vertex_pos;
+        const Pt &b = edges[ ( i + 1 ) % n ].vertex_pos;
+        sum += a[ 0 ] * b[ 1 ] - b[ 0 ] * a[ 1 ];
+    }
+    return sum / 2;
 }
 
-UTP void DTP::check_consistency( TF eps ) const {
+UTP void DTP::check_consistency( TF ) const {
 }
 
 #undef UTP
@@ -328,7 +356,7 @@ UTP void DTP::check_consistency( TF eps ) const {
 
 template<class TF,class Arch>
 std::ostream& operator<<( std::ostream &os, const sdot::Cell<TF,2,Arch> &p ) {
-    for ( const auto &v : p.vertices )
-        os << "\n  pos: " << v.pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot;
+    for ( const auto &v : p.edges )
+        os << "\n  pos: " << v.vertex_pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot;
     return os;
 }
