@@ -19,7 +19,7 @@ public:
 
     /**/     Point                   ( std::initializer_list<T> values ) { auto iter = values.begin(); for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = *( iter++ ); for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     T_U      Point                   ( TensorView<U,1,Arch> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
-    // T_d   Point                   ( const Point<T,d,A> &values ) : data( values.begin(), values.end() ) {}
+    T_U      Point                   ( const Point<U,ct_dim,Arch> &values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     // /**/  Point                   ( const Point &values ) : data( values.begin(), values.end() ) {}
     /**/     Point                   ( std::span<const T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
     /**/     Point                   ( std::span<T> values ) { for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = values[ i ]; for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }

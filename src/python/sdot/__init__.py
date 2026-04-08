@@ -14,6 +14,8 @@ from .BatchOf1dOtPlans import BatchOf1dOtPlans as BatchOf1dOtPlans
 from .BatchOfOtPlans import BatchOfOtPlans as BatchOfOtPlans
 from .OtPlan1d import OtPlan1d as OtPlan1d
 from .OtPlan import OtPlan as OtPlan
+
+from .Polynomial import Polynomial as Polynomial
 from .Cell import Cell as Cell
 from .Bsp import Bsp as Bsp
 

@@ -1,6 +1,7 @@
 from .distributions.helpers.distribution_methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
 from .driver import driver, encode_base62, tensor_conv_for
 from .distributions.Distribution import Distribution
+from .Polynomial import Polynomial
 from .Cell import Cell
 from .Bsp import Bsp
 
@@ -32,6 +33,21 @@ class OtSolver:
         res = numpy.zeros( [ self.nb_diracs ] )
         self.bindings.get_search_dir( res, self.bsp.items[ 0 ], sorted_potentials, *self._inputs() )
         return res
+
+
+    def system( self, sorted_potentials, search_dirs ):
+        n = len( search_dirs )
+        M = numpy.zeros( [ n, n ] )
+        V = numpy.zeros( [ n ] )
+        self.bindings.get_system( M, V, self.bsp.items[ 0 ], sorted_potentials, search_dirs, *self._inputs() )
+        return M, V
+
+
+    def poly( self, sorted_potentials, search_dirs ) -> Polynomial:
+        n = len( search_dirs )
+        res = numpy.zeros( [ 1 + n + n * n + n * n * n ] )
+        self.bindings.get_poly_3( res, self.bsp.items[ 0 ], sorted_potentials, search_dirs, *self._inputs() )
+        return Polynomial( 3, n, res )
 
 
     def write_vtk( self, sorted_potentials, filename: str ):
@@ -105,6 +121,8 @@ class OtSolver:
             }
 
             return driver.cpp_src( m, """
+                #include <sdot/support/TaylorScalar.h>
+                #include <sdot/support/vector_map.h>
                 #include <sdot/nanobind_wrappers.h>
                 #include <nanobind/stl/function.h>
                 #include <nanobind/stl/vector.h>
@@ -147,6 +165,70 @@ class OtSolver:
                     } );
                 }
 
+                void get_system( MF _M, MF _V, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
+                    auto sorted_potentials = tensor_view_1( _sorted_potentials );
+                    auto search_dirs = vector_map( _search_dirs, []( AF af ) { return tensor_view_1( af ); } );
+                    auto M = tensor_view_2( _M );
+                    auto V = tensor_view_1( _V );
+                    const PI n = V.size();
+                    FORWARD_TENSOR_CONV
+                    auto primitive = PRIMITIVE_FUNC;
+                    std::vector<TF> loc_ders( n );
+                    bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
+                        for( TF &d : loc_ders )
+                            d = 0;
+                        TF measure = cell.for_each_cut_with_measure( [&]( const auto &cut, const TF cut_measure ) {
+                            if ( cut.info.global_dirac_index == PI( -1 ) )
+                                return;
+                            const TF coeff = cut_measure / ( 2 * norm_2( cut.info.dirac_position - cell.info.dirac_position ) );
+                            for( PI r = 0; r < n; ++r )
+                                loc_ders[ r ] += ( search_dirs[ r ][ cell.info.local_dirac_index ] - search_dirs[ r ][ cut.info.local_dirac_index ] ) * coeff;
+                        } );
+
+                        for( PI r = 0; r < n; ++r ) {
+                            for( PI c = 0; c < n; ++c )
+                                M( r, c ) += loc_ders[ c ] * loc_ders[ r ];
+                            V[ r ] += ( measure - cell.info.dirac_weight ) * loc_ders[ r ];
+                        }
+                    } );
+                }
+
+                void get_poly_3( MF _poly, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
+                    auto sorted_potentials = tensor_view_1( _sorted_potentials );
+                    auto search_dirs = vector_map( _search_dirs, []( AF af ) { return tensor_view_1( af ); } );
+                    auto poly = tensor_view_1( _poly );
+                    FORWARD_TENSOR_CONV
+                    auto primitive = PRIMITIVE_FUNC;
+                    const PI order = 3;
+
+                    using Scalar = TaylorScalar<TF>; // ??
+                    std::vector<Scalar> coefficients( search_dirs.size() );
+                    for( PI i = 0; i < search_dirs.size(); ++i )
+                        coefficients[ i ] = Scalar::variable( search_dirs.size(), i );
+
+                    auto modified_potentials = [&]( PI index ) {
+                        Scalar res = sorted_potentials[ index ];
+                        for( PI i = 0; i < search_dirs.size(); ++i )
+                            res += search_dirs[ i ][ index ] * coefficients[ i ];
+                        return res;
+                    };
+
+                    Scalar res = 0;
+                    bsp.for_each_cell( primitive, modified_potentials, [&]( auto &cell ) {
+                        auto err = cell.measure() - cell.info.dirac_weight;
+                        res += err * err;
+                    } );
+
+                    PI i = 0;
+                    poly[ i++ ] = res.c0;
+                    for( TF v : res.c1 )
+                        poly[ i++ ] = v;
+                    for( TF v : res.c2 )
+                        poly[ i++ ] = v;
+                    for( TF v : res.c3 )
+                        poly[ i++ ] = v;
+                }
+
                 void for_each_cell( const std::function<void( BspType::Cell &cell )> &function, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     FORWARD_TENSOR_CONV
@@ -170,6 +252,8 @@ class OtSolver:
                 NB_MODULE( SDOT_BINDING_NAME, m ) {
                     m.def( "get_search_dir", &get_search_dir );
                     m.def( "for_each_cell", &for_each_cell );
+                    m.def( "get_system", &get_system );
+                    m.def( "get_poly_3", &get_poly_3 );
                     m.def( "write_vtk", &write_vtk );
                 }
             """ )

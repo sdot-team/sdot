@@ -12,11 +12,12 @@ struct SplineGrid<TF,ct_dim,0,Arch> {
     using  Values        = TensorView<const TF,ct_dim,Arch>;
     using  Bounds        = TensorView<const TF,2,Arch>;
     using  Knots         = TensorView<const TF,1,Arch>;
-    using  Cell          = sdot::Cell<TF,ct_dim,Arch>;
+    // using  Cell          = sdot::Cell<TF,ct_dim,Arch>;
 
     /**/   SplineGrid    ( Values values, Bounds bounds, const std::vector<Knots> &knots );
 
-    Cell   base_cell     ( PI dim, typename Cell::CellInfo cell_info = {}, typename Cell::CutInfo cut_info = {} ) const;
+    template<class TU>
+    auto   base_cell     ( PI dim, typename Cell<TU,ct_dim,Arch>::CellInfo cell_info = {}, typename Cell<TU,ct_dim,Arch>::CutInfo cut_info = {} ) const;
 
     TF     coeff_values;
     Values values;

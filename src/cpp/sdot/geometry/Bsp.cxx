@@ -211,16 +211,18 @@ UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix )
     }
 }
 
-UTP void DTP::for_each_cell( const auto &primitive, TensorView<const TF,1,Arch> sorted_potentials, auto &&func ) {
-    Cell base_cell = primitive.base_cell( dim, {}, { .global_dirac_index = PI( -1 ) } );
+UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potentials, auto &&func ) {
+    using TR = DECAYED_TYPE_OF( TF( 0 ) + sorted_potentials( 0 ) );
+
+    sdot::Cell<TR,ct_dim,Arch> base_cell = primitive.template base_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
 
     for( PI n0 = 0; n0 < pt_data.size(); ++n0 ) {
-        const TF p0 = sorted_potentials[ n0 ];
+        const TR p0 = sorted_potentials( n0 );
         const Pt v0 = pt_data[ n0 ].position;
-        const TF w0 = pt_data[ n0 ].weight;
+        const TR w0 = pt_data[ n0 ].weight;
         const PI i0 = pt_data[ n0 ].index;
 
-        Cell cell = base_cell;
+        sdot::Cell<TR,ct_dim,Arch> cell = base_cell;
         cell.info.global_dirac_index = i0;
         cell.info.local_dirac_index = n0;
         cell.info.dirac_position = v0;
@@ -230,9 +232,9 @@ UTP void DTP::for_each_cell( const auto &primitive, TensorView<const TF,1,Arch> 
         for( PI n1 = 0; n1 < pt_data.size(); ++n1 ) {
             if ( n0 == n1 )
                 continue;
-            const TF p1 = sorted_potentials[ n1 ];
+            const TR p1 = sorted_potentials( n1 );
             const Pt v1 = pt_data[ n1 ].position;
-            const TF w1 = pt_data[ n1 ].weight;
+            const TR w1 = pt_data[ n1 ].weight;
             const PI i1 = pt_data[ n1 ].index;
 
             const Pt dir = v1 - v0;

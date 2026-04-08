@@ -33,15 +33,3 @@ std::ostream &operator<<( std::ostream &os, const sdot::Point<T,dim,Arch> &p ) {
         os << ( i ? ", " : "" ) << p[ i ];
     return os;
 }
-
-T_Up std::ostream &operator<<( std::ostream &os, const std::array<U,p> &v ) {
-    for( sdot::PI i = 0; i < v.size(); ++i )
-        os << ( i ? ", " : "" ) << v[ i ];
-    return os;
-}
-
-T_T std::ostream &operator<<( std::ostream &os, const std::vector<T> &p ) {
-    for( sdot::PI i = 0; i < p.size(); ++i )
-        os << ( i ? ", " : "" ) << p[ i ];
-    return os;
-}

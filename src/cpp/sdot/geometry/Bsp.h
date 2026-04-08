@@ -74,11 +74,11 @@ public:
     void                display_rec       ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
     void                add_path          ( TensorView<const TF,2,Arch> path, PI num_bsp );
 
-    void                for_each_cell     ( const auto &primitive, TensorView<const TF,1,Arch> sorted_potentials, auto &&func );
+    void                for_each_cell     ( const auto &primitive, const auto &sorted_potentials, auto &&func );
 
     friend std::ostream &operator<<       ( std::ostream &os, const Bsp &p ) { p.display_rec( os, 0 ); return os; }
 
-    PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)
+    PI                  nb_points;        ///< will be equal to pt_data.size() at some point (but not during the construction)
     std::vector<PtData> pt_data;
     std::vector<Node>   nodes;
     std::vector<Cell>   cells;

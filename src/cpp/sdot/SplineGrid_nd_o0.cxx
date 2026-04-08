@@ -155,9 +155,9 @@ UTP DTP::SplineGrid( Values values, Bounds bounds, const std::vector<Knots> & ) 
 //     }
 // }
 
-UTP DTP::Cell DTP::base_cell( PI dim, typename Cell::CellInfo cell_info, typename Cell::CutInfo cut_info ) const {
-    PointFactory<TF,ct_dim,Cpu> pf( dim );
-    return Cell::axis_aligned_hypercube( pf.zeros(), pf.ones(), cell_info, cut_info );
+UTP template<class TU> auto DTP::base_cell( PI dim, typename Cell<TU,ct_dim,Arch>::CellInfo cell_info, typename Cell<TU,ct_dim,Arch>::CutInfo cut_info ) const {
+    PointFactory<TU,ct_dim,Cpu> pf( dim );
+    return Cell<TU,ct_dim,Arch>::axis_aligned_hypercube( pf.zeros(), pf.ones(), cell_info, cut_info );
 }
 
 #undef UTP
