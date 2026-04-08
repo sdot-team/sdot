@@ -8,7 +8,7 @@ class BatchOfOtPlans:
     barycenters : Tensor[ batch_index, dirac_index, dim ]
     distances   : Tensor[ batch_index ]
     potentials  : Tensor[ batch_index, dirac_index ]
-    cuts        : Tensor[ batch_index, dirac_index, 2 ]
+    cuts        : Tensor[ batch_index, dirac_index, 2 ] # if 1D
     """
 
     def __init__( self, distances, barycenters, potentials, cuts ):

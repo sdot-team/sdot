@@ -18,6 +18,7 @@ class BatchOfDistributions:
     dim                        : int
 
     def multidimensional_version( self, *_ ) -> Self: ...
+    def batch_item( self, batch_index: int ) -> Self: ...
 
     @property
     def is_an_unidimensional_verion( self ) -> bool:

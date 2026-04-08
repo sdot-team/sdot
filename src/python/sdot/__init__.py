@@ -1,5 +1,6 @@
 # base distributions (1d and batch version are generated after)
 # from .distributions.PiecewiseConstantImage import PiecewiseConstantImage as PiecewiseConstantImage
+from .distributions.PiecewiseConstantGrid import PiecewiseConstantGrid as PiecewiseConstantGrid
 from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions
 from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseAffineGrid
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
@@ -18,6 +19,8 @@ from .Bsp import Bsp as Bsp
 
 from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters, make_apply_fn as make_apply_fn
 
+# solvers
+from .OtSolver import OtSolver as OtSolver
 
 # hardware/framework interfaces
 from .driver import driver as driver

@@ -43,7 +43,8 @@ CLAUDE.md
 docs/.vitepress/cache
 docs/.vitepress/dist
 node_modules/
-octave*
 
 #
 results/
+octave*
+*.vtk

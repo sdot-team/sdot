@@ -2,9 +2,12 @@ from pathlib import Path
 import importlib
 import textwrap
 import inspect
+import hashlib
+import struct
 import numpy
 import sys
 import os
+
 
 class DriverProxy:
     """
@@ -385,6 +388,26 @@ class DriverProxy:
     def _make_driver_instance( self ):
         Driver = DriverProxy._driver_class( self.normalized_framework )
         self._instance = Driver( self.normalized_dtype, self.normalized_device )
+
+
+def encode_base62( s: str, length: int = 11 ) -> str:
+    chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    h = struct.unpack( '>Q', hashlib.sha256( s.encode() ).digest()[ :8 ] )[ 0 ]
+    res = []
+    for _ in range( length ):
+        res.append( chars[ h % 62 ] )
+        h //= 62
+    return ''.join( reversed( res ) )
+
+def tensor_conv_for( type, name, rank ):
+    if "vector" in type:
+        tt = "const TF"
+        if "MF" in type:
+            tt = "TF"
+        return f"std::vector<TensorView<{ tt },{ rank },Arch>> { name }( _{ name }.size() ); for( PI i = 0; i < _{ name }.size(); ++i ) { name }[ i ] = tensor_view_{ rank }( _{ name }[ i ] );"
+
+    return f"auto { name } = tensor_view_{ rank }( _{ name } );"
+
 
 def add_buid_path():
     """

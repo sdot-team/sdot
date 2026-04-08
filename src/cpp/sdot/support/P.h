@@ -2,7 +2,6 @@
 
 #include "read_arg_name.h"
 #include <iostream>
-#include <ostream>
 #include <vector>
 #include <mutex>
 
@@ -23,7 +22,7 @@ void __print_with_mutex( std::ostream &os, std::string_view arg_names, const aut
     auto get_item = [&]( const auto &arg_value ) {
         if ( cpt++ )
             os << "\t";
-        os << "\033[90m" <<  read_arg_name( arg_names ) << ":\033[0m " << arg_value;
+        os << "\033[90m" << read_arg_name( arg_names ) << ":\033[0m " << arg_value;
     };
     ( get_item( arg_values ), ... );
     os << std::endl;

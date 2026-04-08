@@ -10,10 +10,11 @@ from .BatchOf1dOtPlans import BatchOf1dOtPlans
 from .BatchOfOtPlans import BatchOfOtPlans
 from .OtPlan1d import OtPlan1d
 from .OtPlan import OtPlan
-from .driver import driver
+from .Bsp import Bsp
 
-import hashlib
-import struct
+from .driver import driver, encode_base62, tensor_conv_for
+
+from typing import TYPE_CHECKING
 
 
 def ot_plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ) -> OtPlan | OtPlan1d | BatchOfOtPlans | BatchOf1dOtPlans:
@@ -53,23 +54,63 @@ def ot_plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDi
     return _ot_plan_nd( f, g )
 
 
-def _ot_plan_nd( f : BatchOfDistributions, g : BatchOfDistributions ):
-    # ct_dim = f.dim if f.dim <= 4 else -1
-    raise NotImplementedError
+def _ot_plan_nd( batch_of_f : BatchOfDistributions, batch_of_g : BatchOfDistributions ) -> BatchOfOtPlans:
+    """
+    """
+    if TYPE_CHECKING:
+        from . import BatchOfSumOfWeightedDiracs
+        assert isinstance( batch_of_f, BatchOfDistributions )
+        assert isinstance( batch_of_f, BatchOfSumOfWeightedDiracs )
 
-def _encode_base62( s: str, length: int = 11 ) -> str:
-    chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    h = struct.unpack( '>Q', hashlib.sha256( s.encode() ).digest()[ :8 ] )[ 0 ]
-    res = []
-    for _ in range( length ):
-        res.append( chars[ h % 62 ] )
-        h //= 62
-    return ''.join( reversed( res ) )
+    #
+    bindings = None
+
+    # for now, we make an ot_plan for each batch
+    for batch_index in range( batch_of_f.batch_size ):
+        f = batch_of_f.batch_item( batch_index )
+        g = batch_of_g.batch_item( batch_index )
+        assert isinstance( g, Distribution )
+
+        if bindings is None:
+            bindings = _nd_bindings( f, g )
+
+        bsp = Bsp( f.positions, f.weights )
+        solve_nd( bindings, bsp, g )
+
+        # return driver.plan_nd( bindings, f, g )
+
+    distances = []
+    barycenters = []
+    potentials = []
+    cuts = []
+    return BatchOfOtPlans( distances, barycenters, potentials, cuts )
+
+def solve_nd( bindings, bsp : Bsp, g : Distribution ):
+    from .distributions.helpers.distribution_methods import flat_tensor_list, unflat_tensor_list
+    flatten_g_content = flat_tensor_list( g )
+
+    assert len( bsp.items ) == 1
+
+    binding_inputs = []
+    unflat_tensor_list( g, binding_inputs, list( flatten_g_content ) )
+
+
+    # arg0: std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>>,
+    # arg1: sdot.bindings.bsp_FP64_2_cpu.Bsp,
+    # arg2: ndarray[dtype=float64, device='cpu', writable=False],
+    # arg3: ndarray[dtype=float64, device='cpu', writable=False],
+    # arg4: collections.abc.Sequence[ndarray[dtype=float64, device='cpu', writable=False]]
+
+    # Invoked with types: str, sdot.bindings.bsp_FP64_2_cpu.Bsp, jaxlib._jax.ArrayImpl, jaxlib._jax.ArrayImpl, list
+
+    bindings.write_vtk( "pouet.vtk", bsp.items[ 0 ], *binding_inputs )
+    # raise NotImplementedError
+
 
 def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
     p_func, g_func, includes = type( g ).BaseVersion.primitive_function( g )
 
-    dylib_name = f"ot_plan_{ _encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+    dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
     def src_func():
         # inputs of backward_args and forward_args
@@ -97,8 +138,8 @@ def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
                     backward_args.append( ( "MF", f"grad_{ d_name }_{ a_name }", a_data._rank( d_data ) or -1 ) )
 
         # tensor_conv
-        backward_tensor_conv = str.join( " ", [ _tensor_conv_for( t, n, r ) for t, n, r in backward_args ] )
-        forward_tensor_conv = str.join( " ", [ _tensor_conv_for( t, n, r ) for t, n, r in forward_args ] )
+        backward_tensor_conv = str.join( " ", [ tensor_conv_for( t, n, r ) for t, n, r in backward_args ] )
+        forward_tensor_conv = str.join( " ", [ tensor_conv_for( t, n, r ) for t, n, r in forward_args ] )
 
         m = {
             "BACKWARD_TENSOR_CONV": backward_tensor_conv,
@@ -208,12 +249,3 @@ def distance( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfD
 def barycenters( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDistributions ):
     return ot_plan( f, g ).barycenters
 
-
-def _tensor_conv_for( type, name, rank ):
-    if "vector" in type:
-        tt = "const TF"
-        if "MF" in type:
-            tt = "TF"
-        return f"std::vector<TensorView<{ tt },{ rank },Arch>> { name }( _{ name }.size() ); for( PI i = 0; i < _{ name }.size(); ++i ) { name }[ i ] = tensor_view_{ rank }( _{ name }[ i ] );"
-
-    return f"auto { name } = tensor_view_{ rank }( _{ name } );"

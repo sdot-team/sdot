@@ -107,48 +107,15 @@ def check_affine_distances():
         sdot.PiecewiseAffineGrid1d( [ 1, 0, 2 ], knots = [ 0, 1, 2 ] ),
     )
 
+
 def test_piecewise_affine():
     for_each_driver_comb( check_affine_distances )
 
-# import torch
-# check_plan( "[ 0, 1 ] => 1",
-#     sdot.SumOfWeightedDiracs1d( [ 0, .5, 1, 2 ], [ 1, 1, 1, 2 ] ),
-#     sdot.PiecewiseAffineGrid1d( [ 1, 2, 1 ] ),
-# )
-
-# check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => several knots",
-#     sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-#     sdot.PiecewiseAffineGrid1d( [ 1, 0, 2 ], knots = [ 0, 1, 2 ] ),
-# )
-
-# check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
-#     sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-#     sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
-#     [ 1 / 1200 ],
-#     numpy.linspace( 0.05, 0.95, 10 )
-# )
 
 if __name__ == "__main__":
     check_plan( "[ 0, 1 ] => 1",
-        sdot.SumOfWeightedDiracs1d( [ 1, 2, 4, 5 ], [ 2, 1, 1, 1 ] ),
-        sdot.PiecewiseAffineGrid1d( [ 1, 1, 1 ], knots = [ 0, 1, 2 ] ),
+        sdot.SumOfWeightedDiracs( [ [ 0.5, 0.5 ], [ 0.75, 0.5 ], [ 0.5, 0.75 ],  ] ),
+        sdot.PiecewiseConstantGrid( [ [ 1 ] ] ),
     )
 
-    check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 1",
-        sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.PiecewiseAffineGrid1d( [ 1, 1 ] ),
-        [ 1 / 1200 ],
-        numpy.linspace( 0.05, 0.95, 10 )
-    )
-
-    check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => 2 x",
-        sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.PiecewiseAffineGrid1d( [ 0, 2 ] ),
-        [ 0.03405928239226341248 ]
-    )
-
-    check_plan( "numpy.linspace( 0.05, 0.95, 10 ) => several knots",
-        sdot.SumOfWeightedDiracs1d( numpy.linspace( 0.05, 0.95, 10 ) ),
-        sdot.PiecewiseAffineGrid1d( [ 1, 0, 2 ], knots = [ 0, 1, 2 ] ),
-    )
     print( "All good" )

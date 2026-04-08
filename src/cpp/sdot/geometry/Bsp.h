@@ -73,6 +73,10 @@ public:
     void                display_rec       ( std::ostream &os, PI node_index, std::string prefix = "" ) const;
     void                add_path          ( TensorView<const TF,2,Arch> path, PI num_bsp );
 
+    void                for_each_cell     ( const auto &primitive, auto &&func );
+
+    friend std::ostream &operator<<       ( std::ostream &os, const Bsp &p ) { p.display_rec( os, 0 ); return os; }
+
     PI                  nb_points;     ///< will be equal to pt_data.size() at some point (but not during the construction)
     std::vector<PtData> pt_data;
     std::vector<Node>   nodes;
@@ -81,11 +85,9 @@ public:
     Pf                  pf;
 };
 
-        // split_hst_for_each_chunk = [ dask.delayed( bsp.value.split_hst_for )( chunk.value, split_dir,  ) for chunk in delayed_chunks ]
-
 } // namespace sdot
 
-template<class AdditionalPtData,class TF,int dim,class Arch>
-std::ostream &operator<<( std::ostream &os, const sdot::Bsp<AdditionalPtData,TF,dim,Arch> &p );
+// template<class AdditionalPtData,class TF,int dim,class Arch>
+// friend std::ostream &operator<<( std::ostream &os, const sdot::Bsp<AdditionalPtData,TF,dim,Arch> &p );
 
 #include "Bsp.cxx"

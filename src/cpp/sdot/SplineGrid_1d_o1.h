@@ -6,8 +6,8 @@
 namespace sdot {
 
 // 1d, order 1 (piecewise affine)
-template<class TF>
-struct SplineGrid<TF,1> {
+template<class TF,class Arch>
+struct SplineGrid<TF,1,1,Arch> {
     using  Values = TensorView<const TF,1,Cpu>;
     using  Bounds = TensorView<const TF,2,Cpu>;
     using  Knots  = TensorView<const TF,1,Cpu>;
@@ -29,7 +29,7 @@ struct SplineGrid<TF,1> {
         TF  y0, y1;
     };
 
-    /**/   SplineGrid ( Values values, Bounds bounds, const std::vector<Knots> &knots );
+    /**/   SplineGrid                    ( Values values, Bounds bounds, const std::vector<Knots> &knots );
 
     Cursor first_cursor                  () const;
     Cursor last_cursor                   () const;
@@ -41,6 +41,8 @@ struct SplineGrid<TF,1> {
     void   apply_normalization_correction( TF g_dist, TF phi_avg, TensorView<TF,1,Cpu> grad_values ) const;
     void   accumulate_gradients_dist     ( const Piece &p, TF g_dist, TF dirac_x, TF potential, TensorView<TF,1,Cpu> grad_values ) const;
     void   take_some_mass                ( Cursor &, TF mass_to_take, auto &&func ) const;
+
+    auto   base_cell                     ( PI dim ) const;
 
     TF     coeff_values;
     Values values;

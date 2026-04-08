@@ -68,9 +68,11 @@ def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
     clu.BatchVersion = clt
     clu.BaseVersion = cls
 
+    clb.BatchItemVersion = cls
     clb.BaseVersion = cls
 
     clt.MultidimensionalVersion = clb
+    clt.BatchItemVersion = clu
     clt.BaseVersion = cls
 
     # add generated methods and properties for these variants
@@ -195,6 +197,26 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
             # make the new instance
             return cls.BatchVersion( **kw )
         setattr( cls, 'batch_version', batch_version )
+
+    # --- batch_item -----------
+    if hasattr( cls, "BatchItemVersion" ) and "batch_item" not in vars( cls ):
+        def batch_item( self, batch_index ):
+            # make ctor args
+            kw = {}
+            for name, field in fields:
+                if isinstance( field, TensorField ):
+                    v = getattr( self, name )
+                    if v is not None:
+                        kw[ name ] = v[ batch_index, ... ]
+                elif isinstance( field, ListOfTensorFields ):
+                    lst = getattr( self, name )
+                    if lst is not None:
+                        kw[ name ] = [ v[ batch_index, ... ] for v in lst ]
+                else:
+                    kw[ name ] = self.__dict__.get( name )
+            # make the new instance
+            return cls.BatchItemVersion( **kw )
+        setattr( cls, 'batch_item', batch_item )
 
     # --- multidimensional_version -----------
     if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):

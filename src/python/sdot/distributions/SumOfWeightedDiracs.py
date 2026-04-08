@@ -12,6 +12,7 @@ class SumOfWeightedDiracs( Distribution ):
 
     positions = TensorField( "nb_diracs", "dim" )
     weights   = TensorField( "nb_diracs" )
+
     nb_diracs : int
 
     def __init__(self, positions = None, weights = None):

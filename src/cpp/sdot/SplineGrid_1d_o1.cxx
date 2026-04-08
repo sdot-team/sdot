@@ -5,8 +5,8 @@
 
 namespace sdot {
 
-#define UTP template<class TF>
-#define DTP SplineGrid<TF,1>
+#define UTP template<class TF,class Arch>
+#define DTP SplineGrid<TF,1,1,Arch>
 
 UTP DTP::SplineGrid( Values values, Bounds bounds, const std::vector<Knots> &knots_vec )
     : values( values ), bounds( bounds ), _knots( knots_vec.empty() ? Knots{} : knots_vec[ 0 ] ) {
@@ -155,6 +155,10 @@ UTP void DTP::apply_normalization_correction( TF g_dist, TF phi_avg, TensorView<
         if ( k + 1 < grad_values.size() ) A_k += ( knot( k + 1 ) - knot( k ) ) / 2;
         grad_values[ k ] -= g_dist * coeff_values * A_k * phi_avg;
     }
+}
+
+UTP auto DTP::base_cell( PI dim ) const {
+    return 17;
 }
 
 #undef UTP

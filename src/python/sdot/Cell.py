@@ -16,8 +16,10 @@ class Cell:
     def axis_aligned_hypercube( min_max ):
         min_max = driver.array( min_max )
         dim = min_max.shape[ 1 ]
+
         res = Cell()
         res._instance = res._checked_bindings( dim ).axis_aligned_hypercube( min_max )
+
         return res
 
     def cut( self, dir, dot: float, id = 0 ):

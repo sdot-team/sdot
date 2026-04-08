@@ -17,6 +17,7 @@ public:
     PT    with_func   ( auto &&func ) const { PT res; for( PI i = 0; i < dim(); ++i ) res[ i ] = func( i ); return res; }
     PT    value_at    ( PI index, T value ) const { PT res = zeros(); res[ index ] = value; return res; }
     PT    zeros       () const { PT res; for( PI i = 0; i < dim(); ++i ) res[ i ] = 0; return res; }
+    PT    ones        () const { PT res; for( PI i = 0; i < dim(); ++i ) res[ i ] = 1; return res; }
 
     PI    dim         () const { return ct_dim; }
 };
@@ -33,6 +34,7 @@ public:
     PT    with_func   ( auto &&func ) const { PT res( dim() ); for( PI i = 0; i < dim(); ++i ) res[ i ] = func( i ); return res; }
     PT    value_at    ( PI index, T value ) const { PT res = zeros(); res[ index ] = value; return res; }
     PT    zeros       () const { PT res( dim() ); for( PI cpt = 0; cpt < dim(); ++cpt ) res[ cpt ] = 0; return res; }
+    PT    ones        () const { PT res( dim() ); for( PI cpt = 0; cpt < dim(); ++cpt ) res[ cpt ] = 1; return res; }
 
     PI    dim         () const { return _dim; }
 
