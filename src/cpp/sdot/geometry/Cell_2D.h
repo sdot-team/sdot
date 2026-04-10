@@ -34,6 +34,13 @@ public:
         bool    vertex_ext;
     };
 
+    struct Facet {
+        auto  measure() const { return norm_2( edges[ 1 ]->vertex_pos - edges[ 0 ]->vertex_pos ); }
+
+        const Edge* edges[ 2 ];
+        CutInfo     info;
+    };
+
     using           Edges                         = std::vector<Edge>;
 
     /**/            Cell                          ( int dim = ct_dim );
@@ -44,6 +51,7 @@ public:
     static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = {}, CutInfo cut_info = {} );
 
     void            for_each_vertex               ( auto &&func ) const;
+    void            for_each_facet                ( auto &&func ) const; ///< func( Facet{ ... } )
     void            for_each_face                 ( auto &&func ) const;
     void            for_each_cut                  ( auto &&func ) const; ///< func( v.cut_dir, v.cut_dot, v.info )
 
@@ -55,9 +63,17 @@ public:
     TF              measure                       () const;
 
     PI              nb_vertices                   () const { return edges.size(); }
+    Pt              min_pos                       ( Pt base_pt ) const;
+    Pt              max_pos                       ( Pt base_pt ) const;
     PI              dim                           () const { return ct_dim; }
 
     void            cut                           ( const Pt &cut_dir, TF cut_dot, CutInfo cut_info );
+
+    friend std::ostream& operator<<( std::ostream &os, const Cell &p ) {
+        for ( const auto &v : p.edges )
+            os << "\n  pos: " << v.vertex_pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot;
+        return os;
+    }
 
     Edges           edges;                        ///<
     CellInfo        info;                         ///<
@@ -65,7 +81,5 @@ public:
 
 } // namespace sdot
 
-template<class TF,class Arch>
-std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,2,Arch> &p );
 
 #include "Cell_2D.cxx"

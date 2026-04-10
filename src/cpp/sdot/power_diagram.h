@@ -185,17 +185,23 @@ auto ot_system( Bsp<AdditionalPtData,TF,ct_dim,Cpu> &bsp, TensorView<const TF,1,
     TF E = 0;
 
     bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
-        TF sum = 0;
-        TF measure = cell.for_each_cut_with_measure( [&]( const auto &cut, const TF cut_measure ) {
-            if ( cut.info.global_dirac_index == PI( -1 ) )
-                return;
-            const TF cv = 1;
+        TF sum_der = 0;
+        TF measure = 0;
+        primitive.for_each_piece( cell, [&]( auto &piece, const auto &...piece_data ) {
 
-            const TF der = cv * cut_measure / ( 2 * norm_2( cut.info.dirac_position - cell.info.dirac_position ) );
-            m_rows.push_back( cell.info.local_dirac_index );
-            m_cols.push_back( cut.info.local_dirac_index );
-            m_vals.push_back( - der );
-            sum += der;
+            // facets
+            piece.for_each_facet( [&]( const auto &facet ) {
+                if ( facet.info.global_dirac_index == PI( -1 ) )
+                    return;
+                const TF der = primitive.facet_integral( facet, piece_data... ) / ( 2 * norm_2( facet.info.dirac_position - cell.info.dirac_position ) );
+                m_cols.push_back( facet.info.local_dirac_index );
+                m_rows.push_back( cell.info.local_dirac_index );
+                m_vals.push_back( - der );
+                sum_der += der;
+            } );
+
+            // volume
+            measure += primitive.integral( piece, piece_data... );
         } );
 
         if ( measure <= 0 )
@@ -203,7 +209,7 @@ auto ot_system( Bsp<AdditionalPtData,TF,ct_dim,Cpu> &bsp, TensorView<const TF,1,
 
         m_rows.push_back( cell.info.local_dirac_index );
         m_cols.push_back( cell.info.local_dirac_index );
-        m_vals.push_back( sum );
+        m_vals.push_back( sum_der );
 
         TF err = cell.info.dirac_weight - measure;
         v_vals.push_back( err );

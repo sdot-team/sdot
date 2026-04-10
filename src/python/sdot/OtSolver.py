@@ -14,6 +14,7 @@ class OtSolver:
     """
 
     def __init__( self, bsp: Bsp, g: Distribution, linear_solver: LinearSolver = None ):
+        self.sorted_potentials = None
         self.bsp = bsp
         self.g = g
 
@@ -28,23 +29,27 @@ class OtSolver:
     def dim( self ):
         return self.bsp.dim
 
-    def solve( self, sorted_potentials = None, max_iter = 100, error_tol = 1e-8 ):
-        if sorted_potentials is None:
-            sorted_potentials = driver.zeros( [ self.nb_diracs ] )
+    def solve( self, max_iter = 100, error_tol = 1e-8, verbose = 0 ):
+        if self.sorted_potentials is None:
+            self.sorted_potentials = driver.zeros( [ self.nb_diracs ] )
 
+        old_sorted_potentials = None
         for num_iter in range( max_iter ):
-            old_sorted_potentials = sorted_potentials.copy()
             for sub_iter in range( 10 ):
                 try:
-                    direction, error = self.linear_direction( sorted_potentials )
+                    direction, error = self.linear_direction( self.sorted_potentials )
+                    if verbose:
+                        ic( error )
                 except RuntimeError:
-                    sorted_potentials = ( old_sorted_potentials + sorted_potentials ) / 2
-                    print( "bum" )
+                    if old_sorted_potentials is None:
+                        raise RuntimeError( "initial self.sorted_potentials are bad" )
+                    self.sorted_potentials = ( old_sorted_potentials + self.sorted_potentials ) / 2
                     continue
-                sorted_potentials += direction
+                old_sorted_potentials = self.sorted_potentials.copy()
+                self.sorted_potentials += direction
                 break
 
-            ic( error )
+            # ic( error )
             if error < error_tol:
                 break
 
@@ -91,7 +96,7 @@ class OtSolver:
         self.bindings.for_each_cell( on_cell, self.bsp.items[ 0 ], sorted_potentials, *self._inputs() )
 
 
-    def plot( self, sorted_potentials, plotter = None ):
+    def plot( self, plotter = None ):
         import pyvista
 
         own_plotter = plotter is None
@@ -103,7 +108,7 @@ class OtSolver:
         def on_cell( cell ):
             cell.plot( plotter = plotter )
 
-        self.for_each_cell( sorted_potentials, on_cell )
+        self.for_each_cell( self.sorted_potentials, on_cell )
 
         if own_plotter:
             plotter.reset_camera()

@@ -2,10 +2,13 @@
 
 #include "../support/common_macros.h"
 #include "../support/TensorView.h"
-#include <zpp_bits.h>
 #include <vector>
 #include <array>
 #include <span>
+
+#ifdef USE_ZPP
+#include <zpp_bits.h>
+#endif
 
 namespace sdot {
 
@@ -14,7 +17,9 @@ template<class T,int ct_dim,class Arch>
 class Point {
 public:
     using    value_type              = T;
+    #ifdef USE_ZPP
     using    serialize               = zpp::bits::members<1>;
+    #endif
     using    Content                 = std::array<T,ct_dim>;
 
     /**/     Point                   ( std::initializer_list<T> values ) { auto iter = values.begin(); for( PI i = 0; i < std::min( values.size(), size() ); ++i ) content[ i ] = *( iter++ ); for( PI i = values.size(); i < size(); ++i ) content[ i ] = 0; }
@@ -49,7 +54,12 @@ public:
 
     PI       arg_max                 () const { PI res = 0; for( PI i = 1; i < size(); ++i ) if ( content[ res ] < content[ i ] ) res = i; return res; }
 
-    Content  content;
+    friend Point floor               ( const Point &a ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = floor( a[ i ] ); return res; }
+    friend Point ceil                ( const Point &a ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = ceil( a[ i ] ); return res; }
+    friend Point max                 ( const Point &a, const Point &b ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = max( a[ i ], b[ i ] ); return res; }
+    friend Point min                 ( const Point &a, const Point &b ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = min( a[ i ], b[ i ] ); return res; }
+
+    Content      content;
 };
 
 //
@@ -57,7 +67,9 @@ template<class T,class Arch>
 class Point<T,-1,Arch> {
 public:
     using       value_type              = T;
+    #ifdef USE_ZPP
     using       serialize               = zpp::bits::members<1>;
+    #endif
     using       Content                 = std::vector<T>;
 
     /**/        Point                   ( std::initializer_list<T> values ) : content( values ) {}
@@ -90,7 +102,12 @@ public:
 
     PI          arg_max                 () const { PI res = 0; for( PI i = 1; i < size(); ++i ) if ( content[ res ] < content[ i ] ) res = i; return res; }
 
-    Content     content;
+    friend Point floor                  ( const Point &a ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = floor( a[ i ] ); return res; }
+    friend Point ceil                   ( const Point &a ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = ceil( a[ i ] ); return res; }
+    friend Point max                    ( const Point &a, const Point &b ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = max( a[ i ], b[ i ] ); return res; }
+    friend Point min                    ( const Point &a, const Point &b ) { using namespace std; Point res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = min( a[ i ], b[ i ] ); return res; }
+
+    Content      content;
 };
 
 /// scalar product
@@ -115,8 +132,26 @@ T_TdA Point<T,d,A> operator-( const Point<T,d,A> &a, const Point<T,d,A> &b ) { P
 T_TdA Point<T,d,A> operator*( const T &a, const Point<T,d,A> &b ) { Point<T,d,A> res( b.size() ); for( PI i = 0; i < b.size(); ++i ) res[ i ] = a * b[ i ]; return res; }
 T_TdA Point<T,d,A> operator/( const Point<T,d,A> &a, const T &b ) { Point<T,d,A> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] / b; return res; }
 
+// unary ops
 T_TdA Point<T,d,A> operator+( const Point<T,d,A> &a ) { Point<T,d,A> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = + a[ i ]; return res; }
 T_TdA Point<T,d,A> operator-( const Point<T,d,A> &a ) { Point<T,d,A> res( a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = - a[ i ]; return res; }
+
+T_TdA void _for_each_in_range( const Point<T,d,A> &beg, const Point<T,d,A> &end, Point<T,d,A> &cur, int i, const auto &func ) {
+    if ( i == beg.size() ) {
+        func( cur );
+        return;
+    }
+
+    for( T v = beg[ i ]; v < end[ i ]; ++v ) {
+        cur[ i ] = v;
+        _for_each_in_range( beg, end, cur, i + 1, func );
+    }
+}
+
+T_TdA void for_each_in_range( const Point<T,d,A> &beg, const Point<T,d,A> &end, auto &&func ) {
+    Point<T,d,A> cur = beg;
+    _for_each_in_range( beg, end, cur, 0, func );
+}
 
 } // namespace sdot
 

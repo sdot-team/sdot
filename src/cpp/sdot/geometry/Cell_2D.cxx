@@ -310,6 +310,13 @@ UTP void DTP::for_each_vertex( auto &&func ) const {
         func( edges[ index ].vertex_pos, index );
 }
 
+UTP void DTP::for_each_facet( auto &&func ) const {
+    for( PI i = 0; i < edges.size(); ++i ) {
+        const PI j = ( i + 1 ) % edges.size();
+        func( Facet{ { &edges[ i ], &edges[ j ] }, edges[ i ].info } );
+    }
+}
+
 UTP void DTP::for_each_face( auto &&func ) const {
     std::vector<PI> res( edges.size() );
     for( PI i = 0; i < res.size(); ++i )
@@ -362,6 +369,18 @@ UTP TF DTP::measure() const {
     return sum / 2;
 }
 
+UTP typename DTP::Pt DTP::min_pos( Pt base_pt ) const {
+    for( const Edge &edge : edges )
+        base_pt = min( base_pt, edge.vertex_pos );
+    return base_pt;
+}
+
+UTP typename DTP::Pt DTP::max_pos( Pt base_pt ) const {
+    for( const Edge &edge : edges )
+        base_pt = max( base_pt, edge.vertex_pos );
+    return base_pt;
+}
+
 UTP void DTP::check_consistency( TF ) const {
 }
 
@@ -370,9 +389,3 @@ UTP void DTP::check_consistency( TF ) const {
 
 } // namespace sdot
 
-template<class TF,class Arch>
-std::ostream& operator<<( std::ostream &os, const sdot::Cell<TF,2,Arch> &p ) {
-    for ( const auto &v : p.edges )
-        os << "\n  pos: " << v.vertex_pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot;
-    return os;
-}

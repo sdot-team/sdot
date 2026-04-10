@@ -117,10 +117,8 @@ UTP void DTP::update_children_of( PI node_index, PI max_points_per_cell ) {
     Pt min_pos = pt_data[ beg_pt_data ].position;
     Pt max_pos = pt_data[ beg_pt_data ].position;
     for( PI i = beg_pt_data + 1; i < end_pt_data; ++i ) {
-        for( PI d = 0; d < dim; ++d ) {
-            min_pos[ d ] = min( min_pos[ d ], pt_data[ i ].position[ d ] );
-            max_pos[ d ] = max( max_pos[ d ], pt_data[ i ].position[ d ] );
-        }
+        min_pos = min( min_pos, pt_data[ i ].position );
+        max_pos = max( max_pos, pt_data[ i ].position );
     }
 
     PI d = ( max_pos - min_pos ).arg_max();
@@ -131,7 +129,7 @@ UTP void DTP::update_children_of( PI node_index, PI max_points_per_cell ) {
     std::vector<PI> bins( 256 );
     for( PI num_point = beg_pt_data; num_point < end_pt_data; ++num_point ) {
         TF p = dot( pt_data[ num_point ].position, split_dir ) - beg_dot;
-        p = max( TF( 0 ), min( TF( bins.size() - 1 ), bins.size() * p / ( end_dot - beg_dot ) ) );
+        p = std::max( TF( 0 ), std::min( TF( bins.size() - 1 ), bins.size() * p / ( end_dot - beg_dot ) ) );
         ++bins[ p ];
     }
 

@@ -85,6 +85,24 @@ public:
     void            _cut_int_ext_edge             ( PI n0, EdgeLink &e0, TF s0, TF s1 );
     void            _add_measure_rec              ( TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, const auto &cut_indices, PI prev_vertex_index ) const;
 
+    friend std::ostream& operator<<( std::ostream& os, const Cell &p ) {
+        os << "vertices:";
+        for ( const auto& v : p.vertices ) {
+            os << "\n  pos: " << v.pos << " cuts: " << v.cut_indices << " edge: ";
+            for ( const auto& edge : v.edge_links ) {
+                os << "[ n: " << edge.vertex_index << ", c: ";
+                for ( sdot::PI i = 0, c = 0; i < v.cut_indices.size(); ++i )
+                    if ( i != edge.num_cut_to_remove )
+                        os << ( c++ ? ", " : "" ) << v.cut_indices[ i ];
+                os << " ]";
+            }
+        }
+        os << "\ncuts:";
+        for ( const auto& v : p.cuts )
+            os << "\n  dir: " << v.dir << " sp: " << v.sp << " id: " << v.id << " ext: " << v.ext;
+        return os;
+    }
+
     VI              vertex_corr;                  ///<
     mutable PI64    curr_op_id;                   ///<
     VI              cut_corr;                     ///<

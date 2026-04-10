@@ -407,21 +407,3 @@ UTP void DTP::check_consistency( TF eps ) const {
 
 } // namespace sdot
 
-template<class TF,int ct_dim,class Arch>
-std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,ct_dim,Arch >& p ) {
-    os << "vertices:";
-    for ( const auto& v : p.vertices ) {
-        os << "\n  pos: " << v.pos << " cuts: " << v.cut_indices << " edge: ";
-        for ( const auto& edge : v.edge_links ) {
-            os << "[ n: " << edge.vertex_index << ", c: ";
-            for ( sdot::PI i = 0, c = 0; i < v.cut_indices.size(); ++i )
-                if ( i != edge.num_cut_to_remove )
-                    os << ( c++ ? ", " : "" ) << v.cut_indices[ i ];
-            os << " ]";
-        }
-    }
-    os << "\ncuts:";
-    for ( const auto& v : p.cuts )
-        os << "\n  dir: " << v.dir << " sp: " << v.sp << " id: " << v.id << " ext: " << v.ext;
-    return os;
-}

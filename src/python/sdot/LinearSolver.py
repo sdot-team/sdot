@@ -34,7 +34,7 @@ class LinearSolver:
         Maximum iterations for iterative solvers.
     """
 
-    def __init__( self, method='amg', tol=1e-10, max_iter = None ):
+    def __init__( self, method='auto', tol=1e-11, max_iter = 100 ):
         self.max_iter = max_iter
         self.method   = method
         self.tol      = tol

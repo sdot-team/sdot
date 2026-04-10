@@ -17,8 +17,8 @@
 #include <array>
 
 namespace sdot {
-template<class T,int ct_rank,class Arch>
-class Tensor;
+template<class T,int ct_rank,class Arch> class Tensor;
+template<class T,int ct_dim,class Arch> class Point;
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
 template<class T,int ct_rank,class Arch>
@@ -33,8 +33,8 @@ public:
     HD             TensorView        ( T *data, PI size ) : _shape{ size }, _strides{ sizeof( T ) }, _ptr( reinterpret_cast<RawPtr>( data ) ) {}
     HD             TensorView        () : _strides{}, _shape{}, _ptr( nullptr ) {}
 
-    // HD             TensorView        ( const TensorView &that ) : _shape{ that._shape }, _strides{ that._strides }, _ptr( that._ptr ) {}
-    // HD void        operator=         ( const TensorView &that ) { _shape = that._shape; _strides = that._strides; _ptr = that._ptr; }
+    // HD          TensorView        ( const TensorView &that ) : _shape{ that._shape }, _strides{ that._strides }, _ptr( that._ptr ) {}
+    // HD void     operator=         ( const TensorView &that ) { _shape = that._shape; _strides = that._strides; _ptr = that._ptr; }
 
     static HD auto contiguous_strides( const Shape &ext ) -> Strides;
 
@@ -43,6 +43,7 @@ public:
     HD T&          operator()        ( PI i0 ) const { static_assert( ct_rank == 1 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] ); }
     HD T&          operator()        () const { static_assert( ct_rank == 0 ); return *reinterpret_cast<T *>( _ptr ); }
 
+    HD T&          operator[]        ( Point<PI,ct_rank,Arch> index ) const { RawPtr ptr = _ptr; for( PI i = 0; i < rank(); ++i ) ptr += index[ i ] * _strides[ i ]; return *reinterpret_cast<T *>( ptr ); }
     HD T&          operator[]        ( PI i0 ) const { static_assert( ct_rank == 1 ); return *reinterpret_cast<T *>( _ptr + i0 * _strides[ 0 ] ); }
 
     auto           strides           () const { return _strides; }
