@@ -256,7 +256,60 @@ UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potential
 
         func( cell );
     }
+}
 
+UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &sorted_potentials ) {
+    using TR = DECAYED_TYPE_OF( TF( 0 ) + sorted_potentials( 0 ) );
+
+    const PI n0 = cell.info.local_dirac_index;
+    const TR p0 = sorted_potentials( n0 );
+    const Pt v0 = pt_data[ n0 ].position;
+    const TR w0 = pt_data[ n0 ].weight;
+    const PI i0 = pt_data[ n0 ].index;
+
+    sdot::Cell<TR,ct_dim,Arch> res = primitive.template base_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
+    res.info.global_dirac_index = i0;
+    res.info.local_dirac_index = n0;
+    res.info.dirac_position = v0;
+    res.info.dirac_weight = w0;
+    res.info.potential = w0;
+
+    cell.for_each_cut( [&]( const auto &dir, const auto &dot, const auto &cut_info ) {
+        if ( cut_info.global_dirac_index == PI( -1 ) ) {
+            res.cut( dir, dot, {
+                .global_dirac_index = cut_info.global_dirac_index,
+                .local_dirac_index = cut_info.local_dirac_index,
+                .dirac_position = cut_info.dirac_position,
+                .dirac_weight = cut_info.dirac_weight,
+                .potential = cut_info.potential
+            } );
+            return;
+        }
+
+        const PI n1 = cut_info.local_dirac_index;
+        const TR p1 = sorted_potentials( n1 );
+        const Pt v1 = pt_data[ n1 ].position;
+        const TR w1 = pt_data[ n1 ].weight;
+        const PI i1 = pt_data[ n1 ].index;
+
+        const Pt new_dir = v1 - v0;
+
+        auto n = norm_2_p2( new_dir );
+        auto s0 = sdot::dot( new_dir, v0 );
+        auto s1 = sdot::dot( new_dir, v1 );
+
+        auto new_dot = s0 + ( 1 + ( p0 - p1 ) / n ) / 2 * ( s1 - s0 );
+
+        res.cut( new_dir, new_dot, {
+            .global_dirac_index = i1,
+            .local_dirac_index = n1,
+            .dirac_position = v1,
+            .dirac_weight = w1,
+            .potential = p1
+        } );
+    } );
+
+    return res;
 }
 
 // UTP std::ostream &operator<<( std::ostream &os, const DTP &p )

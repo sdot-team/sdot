@@ -75,6 +75,7 @@ public:
     void                add_path          ( TensorView<const TF,2,Arch> path, PI num_bsp );
 
     void                for_each_cell     ( const auto &primitive, const auto &sorted_potentials, auto &&func );
+    auto                remake_cell       ( const auto &cell, const auto &primitive, const auto &sorted_potentials );
 
     friend std::ostream &operator<<       ( std::ostream &os, const Bsp &p ) { p.display_rec( os, 0 ); return os; }
 

@@ -72,7 +72,8 @@ class Cell:
         for face in self.faces:
             faces.append( len( face ) )
             faces += face
-        plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges=True )
+        if len( pts ):
+            plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges=True )
 
         if own_plotter:
             plotter.reset_camera()

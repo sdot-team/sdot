@@ -107,4 +107,5 @@ std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,ct_dim,Arch>& p 
 
 #include "Cell.cxx"
 
+#include "Cell_1D.h" // IWYU pragma: export
 #include "Cell_2D.h" // IWYU pragma: export

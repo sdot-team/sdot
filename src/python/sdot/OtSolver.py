@@ -1,6 +1,7 @@
 from .distributions.helpers.distribution_methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
 from .driver import driver, encode_base62, tensor_conv_for
 from .distributions.Distribution import Distribution
+from .LinearSolver import LinearSolver
 from .Polynomial import Polynomial
 from .Cell import Cell
 from .Bsp import Bsp
@@ -12,21 +13,51 @@ class OtSolver:
     """
     """
 
-    def __init__( self, bsp: Bsp, g: Distribution ):
+    def __init__( self, bsp: Bsp, g: Distribution, linear_solver: LinearSolver = None ):
         self.bsp = bsp
         self.g = g
 
         self.bindings = self._bindings()
-
+        self._linear_solver = linear_solver or LinearSolver()
 
     @property
     def nb_diracs( self ):
         return self.bsp.nb_points
 
-
     @property
     def dim( self ):
         return self.bsp.dim
+
+    def solve( self, sorted_potentials = None, max_iter = 100, error_tol = 1e-8 ):
+        if sorted_potentials is None:
+            sorted_potentials = driver.zeros( [ self.nb_diracs ] )
+
+        for num_iter in range( max_iter ):
+            old_sorted_potentials = sorted_potentials.copy()
+            for sub_iter in range( 10 ):
+                try:
+                    direction, error = self.linear_direction( sorted_potentials )
+                except RuntimeError:
+                    sorted_potentials = ( old_sorted_potentials + sorted_potentials ) / 2
+                    print( "bum" )
+                    continue
+                sorted_potentials += direction
+                break
+
+            ic( error )
+            if error < error_tol:
+                break
+
+
+    def linear_direction( self, sorted_potentials ):
+        m_rows, m_cols, m_vals, v_vals, error = self.bindings.system( self.bsp.items[ 0 ], sorted_potentials, *self._inputs() )
+        return self._linear_solver.solve( m_rows, m_cols, m_vals, v_vals, self.nb_diracs ), error
+
+
+    def search_dirs( self, sorted_potentials ):
+        res = [ numpy.zeros( [ self.nb_diracs ] ) for _ in range( 1 ) ]
+        self.bindings.get_search_dirs( res, self.bsp.items[ 0 ], sorted_potentials, *self._inputs() )
+        return res
 
 
     def search_dir( self, sorted_potentials ):
@@ -45,9 +76,9 @@ class OtSolver:
 
     def poly( self, sorted_potentials, search_dirs ) -> Polynomial:
         n = len( search_dirs )
-        res = numpy.zeros( [ 1 + n + n * n + n * n * n ] )
+        res = numpy.zeros( [ Polynomial.size_for( n, 3 ) ] )
         self.bindings.get_poly_3( res, self.bsp.items[ 0 ], sorted_potentials, search_dirs, *self._inputs() )
-        return Polynomial( 3, n, res )
+        return Polynomial( n, 3, res )
 
 
     def write_vtk( self, sorted_potentials, filename: str ):
@@ -88,6 +119,72 @@ class OtSolver:
 
         return binding_inputs
 
+    # def gc_eigen( ot_solver, pot, nb_to_keep=2, threshold=1e-10, use_eigs = False ):
+    #     kept_dirs = []  # directions A-orthogonales de l'itération précédente
+    #     for _ in range( 10 ):
+    #         old_pot = pot.copy()
+    #         for _ in range( 10 ):
+    #             try:
+    #                 z = [ ot_solver.search_dir( pot ) ]
+    #                 # z = ot_solver.search_dirs( pot )
+    #             except RuntimeError:
+    #                 pot = ( pot + old_pot ) / 2
+    #                 print( "bum" )
+    #                 continue
+
+    #             ic( numpy.linalg.norm( z[ 0 ] ) )
+
+    #             #
+    #             M_gs, V_gs = ot_solver.system( pot, z + kept_dirs )
+    #             # poly = ot_solver.poly( pot, z + kept_dirs )
+
+    #             X_gs = numpy.linalg.solve( M_gs, V_gs )
+    #             # X_gs = poly.truncate( 2 ).argmin()
+    #             for c, d in zip( X_gs, z + kept_dirs ):
+    #                 pot += c * d
+
+    #             # A-orthogonalise z contre les directions gardées (Gram-Schmidt en A-norme)
+    #             n_kept = len( kept_dirs )
+    #             coeffs = [ M_gs[ 0, i + 1 ] / M_gs[ i + 1, i + 1 ] for i in range( n_kept ) ]
+    #             for c, d in zip( coeffs, kept_dirs ):
+    #                 z[ 0 ] -= c * d
+
+    #             #
+    #             kept_dirs += z # .append( z )
+    #             while len( kept_dirs ) > nb_to_keep:
+    #                 kept_dirs.pop( 0 )
+
+    #             break
+
+    #     return pot
+
+    # def gc( ot_solver, pot ):
+    #     p = None   # direction conjuguée courante
+    #     zg = None  # z_prev · g_prev, pour beta
+
+    #     for _ in range( 10 ):
+    #         z = ot_solver.search_dir( pot )   # z = P⁻¹ g
+    #         print( numpy.linalg.norm( z ) )
+
+    #         # z · g via system — sert de numérateur pour alpha et beta
+    #         _, V = ot_solver.system( pot, [ z ] )
+    #         zg_new = V[ 0 ]
+
+    #         # direction conjuguée : p = z + beta * p_prev
+    #         if p is not None:
+    #             beta = zg_new / zg
+    #             p = z + beta * p
+    #         else:
+    #             p = z.copy()
+
+    #         # pas optimal : alpha = (z·g) / (p·A·p)
+    #         M, _ = ot_solver.system( pot, [ p ] )
+    #         alpha = zg_new / M[ 0, 0 ]
+    #         pot = pot - alpha * p
+
+    #         zg = zg_new
+
+    #     return pot
 
     def _bindings( self ):
         ct_dim = self.g.dim if self.g.dim <= 4 else -1
@@ -121,15 +218,15 @@ class OtSolver:
             }
 
             return driver.cpp_src( m, """
-                #include <sdot/support/TaylorScalar.h>
                 #include <sdot/support/vector_map.h>
                 #include <sdot/nanobind_wrappers.h>
+                #include <sdot/power_diagram.h>
+                SDOT_INCLUDES
+
                 #include <nanobind/stl/function.h>
                 #include <nanobind/stl/vector.h>
                 #include <nanobind/stl/string.h>
-                #include <sdot/geometry/Bsp.h>
-                #include <sdot/support/P.h>
-                SDOT_INCLUDES
+                #include <nanobind/stl/tuple.h>
 
                 namespace nb = nanobind;
                 using namespace sdot;
@@ -143,29 +240,24 @@ class OtSolver:
 
                 using BspType = Bsp<PI,TF,2,Arch>;
 
-                //
-                // void forward( FORWARD_ARGS ) {
-                //     FORWARD_TENSOR_CONV
-                //     ot_plan_1d_forward( f_positions, f_weights, PRIMITIVE_FUNC, distances, barycenters, potentials, cuts );
-                // }
+                void _get_search_dirs( std::vector<MF> &_search_dirs, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
+                    auto sorted_potentials = tensor_view_1( _sorted_potentials );
+                    auto search_dirs = vector_map( _search_dirs, []( MF af ) { return tensor_view_1( af ); } );
+                    FORWARD_TENSOR_CONV
+                    auto primitive = PRIMITIVE_FUNC;
+                    get_search_dirs( search_dirs, bsp, sorted_potentials, primitive );
+                }
 
-                void get_search_dir( MF _search_dir, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
+                void _get_search_dir( MF _search_dir, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     auto search_dir = tensor_view_1( _search_dir );
                     FORWARD_TENSOR_CONV
                     auto primitive = PRIMITIVE_FUNC;
-                    bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
-                        TF der = 0;
-                        TF measure = cell.for_each_cut_with_measure( [&]( const auto &cut, const TF cut_measure ) {
-                            if ( cut.info.global_dirac_index == PI( -1 ) )
-                                return;
-                            der += cut_measure / ( 2 * norm_2( cut.info.dirac_position - cell.info.dirac_position ) );
-                        } );
-                        search_dir[ cell.info.local_dirac_index ] = ( measure - cell.info.dirac_weight ) / der;
-                    } );
+
+                    get_search_dir( search_dir, bsp, sorted_potentials, primitive );
                 }
 
-                void get_system( MF _M, MF _V, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
+                void _get_system( MF _M, MF _V, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     auto search_dirs = vector_map( _search_dirs, []( AF af ) { return tensor_view_1( af ); } );
                     auto M = tensor_view_2( _M );
@@ -173,88 +265,63 @@ class OtSolver:
                     const PI n = V.size();
                     FORWARD_TENSOR_CONV
                     auto primitive = PRIMITIVE_FUNC;
-                    std::vector<TF> loc_ders( n );
-                    bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
-                        for( TF &d : loc_ders )
-                            d = 0;
-                        TF measure = cell.for_each_cut_with_measure( [&]( const auto &cut, const TF cut_measure ) {
-                            if ( cut.info.global_dirac_index == PI( -1 ) )
-                                return;
-                            const TF coeff = cut_measure / ( 2 * norm_2( cut.info.dirac_position - cell.info.dirac_position ) );
-                            for( PI r = 0; r < n; ++r )
-                                loc_ders[ r ] += ( search_dirs[ r ][ cell.info.local_dirac_index ] - search_dirs[ r ][ cut.info.local_dirac_index ] ) * coeff;
-                        } );
 
-                        for( PI r = 0; r < n; ++r ) {
-                            for( PI c = 0; c < n; ++c )
-                                M( r, c ) += loc_ders[ c ] * loc_ders[ r ];
-                            V[ r ] += ( measure - cell.info.dirac_weight ) * loc_ders[ r ];
-                        }
-                    } );
+                    get_system( M, V, bsp, sorted_potentials, search_dirs, primitive );
                 }
 
-                void get_poly_3( MF _poly, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
+                void _get_poly_3( MF _poly, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     auto search_dirs = vector_map( _search_dirs, []( AF af ) { return tensor_view_1( af ); } );
                     auto poly = tensor_view_1( _poly );
                     FORWARD_TENSOR_CONV
                     auto primitive = PRIMITIVE_FUNC;
-                    const PI order = 3;
 
-                    using Scalar = TaylorScalar<TF>; // ??
-                    std::vector<Scalar> coefficients( search_dirs.size() );
-                    for( PI i = 0; i < search_dirs.size(); ++i )
-                        coefficients[ i ] = Scalar::variable( search_dirs.size(), i );
-
-                    auto modified_potentials = [&]( PI index ) {
-                        Scalar res = sorted_potentials[ index ];
-                        for( PI i = 0; i < search_dirs.size(); ++i )
-                            res += search_dirs[ i ][ index ] * coefficients[ i ];
-                        return res;
-                    };
-
-                    Scalar res = 0;
-                    bsp.for_each_cell( primitive, modified_potentials, [&]( auto &cell ) {
-                        auto err = cell.measure() - cell.info.dirac_weight;
-                        res += err * err;
-                    } );
-
-                    PI i = 0;
-                    poly[ i++ ] = res.c0;
-                    for( TF v : res.c1 )
-                        poly[ i++ ] = v;
-                    for( TF v : res.c2 )
-                        poly[ i++ ] = v;
-                    for( TF v : res.c3 )
-                        poly[ i++ ] = v;
+                    get_poly_3( poly, bsp, sorted_potentials, search_dirs, primitive );
                 }
 
-                void for_each_cell( const std::function<void( BspType::Cell &cell )> &function, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
+                void _get_poly_4( MF _poly, BspType &bsp, AF _sorted_potentials, const std::vector<AF> &_search_dirs, FORWARD_ARGS ) {
+                    auto sorted_potentials = tensor_view_1( _sorted_potentials );
+                    auto search_dirs = vector_map( _search_dirs, []( AF af ) { return tensor_view_1( af ); } );
+                    auto poly = tensor_view_1( _poly );
+                    FORWARD_TENSOR_CONV
+                    auto primitive = PRIMITIVE_FUNC;
+
+                    get_poly_4( poly, bsp, sorted_potentials, search_dirs, primitive );
+                }
+
+                void _for_each_cell( const std::function<void( BspType::Cell &cell )> &function, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     FORWARD_TENSOR_CONV
                     auto primitive = PRIMITIVE_FUNC;
-                    bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
-                        function( cell );
-                    } );
+
+                    for_each_cell( bsp, function, sorted_potentials, primitive );
                 }
 
-                void write_vtk( std::string filename, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
+                void _write_vtk( std::string filename, BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
                     auto sorted_potentials = tensor_view_1( _sorted_potentials );
                     FORWARD_TENSOR_CONV
                     auto primitive = PRIMITIVE_FUNC;
-                    VtkOutput vo;
-                    bsp.for_each_cell( primitive, sorted_potentials, [&]( auto &cell ) {
-                        cell.display_vtk( vo );
-                    } );
-                    vo.save( filename );
+
+                    write_vtk( filename, bsp, sorted_potentials, primitive );
+                }
+
+                auto _system( BspType &bsp, AF _sorted_potentials, FORWARD_ARGS ) {
+                    auto sorted_potentials = tensor_view_1( _sorted_potentials );
+                    FORWARD_TENSOR_CONV
+                    auto primitive = PRIMITIVE_FUNC;
+
+                    return ot_system( bsp, sorted_potentials, primitive );
                 }
 
                 NB_MODULE( SDOT_BINDING_NAME, m ) {
-                    m.def( "get_search_dir", &get_search_dir );
-                    m.def( "for_each_cell", &for_each_cell );
-                    m.def( "get_system", &get_system );
-                    m.def( "get_poly_3", &get_poly_3 );
-                    m.def( "write_vtk", &write_vtk );
+                    m.def( "get_search_dirs", &_get_search_dirs );
+                    m.def( "get_search_dir", &_get_search_dir );
+                    m.def( "for_each_cell", &_for_each_cell );
+                    m.def( "get_system", &_get_system );
+                    m.def( "get_poly_3", &_get_poly_3 );
+                    m.def( "get_poly_4", &_get_poly_4 );
+                    m.def( "write_vtk", &_write_vtk );
+                    m.def( "system", &_system );
                 }
             """ )
 

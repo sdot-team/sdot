@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SimpleSquareMatrix.h"
+#include <cmath>
 
 namespace sdot {
 
@@ -30,6 +31,30 @@ UTP T DTP::determinant() const {
     for( PI r = 0; r < size(); ++r, sgn = -sgn )
         res += sgn * operator()( r, 0 ) * without_row_and_col( r, 0 ).determinant();
     return res;
+}
+
+UTP DTP DTP::cholesky() const {
+    const PI nd = size();
+    SimpleSquareMatrix L( nd );
+    for ( PI i = 0; i < nd; ++i )
+        for ( PI j = 0; j < nd; ++j )
+            L( i, j ) = T( 0 );
+
+    for ( PI j = 0; j < nd; ++j ) {
+        // diagonal
+        T s = operator()( j, j );
+        for ( PI k = 0; k < j; ++k ) s -= L( j, k ) * L( j, k );
+        L( j, j ) = std::sqrt( s );
+
+        // column below diagonal
+        const T inv_ljj = T( 1 ) / L( j, j );
+        for ( PI i = j + 1; i < nd; ++i ) {
+            T t = operator()( i, j );
+            for ( PI k = 0; k < j; ++k ) t -= L( i, k ) * L( j, k );
+            L( i, j ) = t * inv_ljj;
+        }
+    }
+    return L;
 }
 
 UTP DTP::Vec DTP::solve( const Vec &vec ) const {

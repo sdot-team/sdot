@@ -335,6 +335,22 @@ UTP TF DTP::for_each_cut_with_measure( auto &&f ) const {
     return sum / 2;
 }
 
+UTP auto DTP::measure( auto &&pos ) const {
+    using TR = DECAYED_TYPE_OF( pos( std::array<PI,3>{ 0, 0, 0 } )[ 0 ] );
+    const PI n = edges.size();
+    TR sum = 0;
+    for ( PI i = 0; i < n; ++i ) {
+        const PI n0 = edges[ ( i + n - 1 ) % n ].info.local_dirac_index;
+        const PI n1 = edges[ ( i         ) % n ].info.local_dirac_index;
+        const PI n2 = edges[ ( i + 1     ) % n ].info.local_dirac_index;
+
+        auto a = pos( std::array<PI,3>{ info.local_dirac_index, n0, n1 } );
+        auto b = pos( std::array<PI,3>{ info.local_dirac_index, n1, n2 } );
+        sum += a[ 0 ] * b[ 1 ] - b[ 0 ] * a[ 1 ];
+    }
+    return sum / 2;
+}
+
 UTP TF DTP::measure() const {
     const PI n = edges.size();
     TF sum = 0;
