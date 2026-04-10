@@ -212,7 +212,7 @@ UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix )
 UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potentials, auto &&func ) {
     using TR = DECAYED_TYPE_OF( TF( 0 ) + sorted_potentials( 0 ) );
 
-    sdot::Cell<TR,ct_dim,Arch> base_cell = primitive.template base_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
+    sdot::Cell<TR,ct_dim,Arch> base_cell = primitive.template englobing_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
 
     for( PI n0 = 0; n0 < pt_data.size(); ++n0 ) {
         const TR p0 = sorted_potentials( n0 );
@@ -265,7 +265,7 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
     const TR w0 = pt_data[ n0 ].weight;
     const PI i0 = pt_data[ n0 ].index;
 
-    sdot::Cell<TR,ct_dim,Arch> res = primitive.template base_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
+    sdot::Cell<TR,ct_dim,Arch> res = primitive.template englobing_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
     res.info.global_dirac_index = i0;
     res.info.local_dirac_index = n0;
     res.info.dirac_position = v0;
@@ -293,8 +293,8 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
         const Pt new_dir = v1 - v0;
 
         auto n = norm_2_p2( new_dir );
-        auto s0 = sdot::dot( new_dir, v0 );
-        auto s1 = sdot::dot( new_dir, v1 );
+        auto s0 = dot( new_dir, v0 );
+        auto s1 = dot( new_dir, v1 );
 
         auto new_dot = s0 + ( 1 + ( p0 - p1 ) / n ) / 2 * ( s1 - s0 );
 

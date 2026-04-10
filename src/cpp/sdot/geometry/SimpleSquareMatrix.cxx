@@ -16,6 +16,14 @@ UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> DTP::without_row_and_col
     return res;
 }
 
+UTP auto DTP::with_func( PI size, auto &&func ) {
+    SimpleSquareMatrix<T,ct_size,Arch> res( size );
+    for( PI r = 0; r < size; ++r )
+        for( PI c = 0; c < size; ++c )
+            res( r, c ) = func( r, c );
+    return res;
+}
+
 UTP DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
     SimpleSquareMatrix res = *this;
     for( PI r = 0; r < size(); ++r )

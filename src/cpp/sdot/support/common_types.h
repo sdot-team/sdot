@@ -27,7 +27,14 @@ inline static const char *type_name( CtType<FP32> ) { return "FP32"; }
 // ctor args
 struct Shape {};
 
+template<class TF> TF factorial( TF n ) {
+    TF res = 1;
+    for ( PI i = 2; i <= n; ++i )
+        res *= TF( i );
+    return res;
 }
+
+} // namespace sdot
 
 
 T_Up std::ostream &operator<<( std::ostream &os, const std::array<U,p> &v ) {

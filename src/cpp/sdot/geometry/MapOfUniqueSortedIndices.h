@@ -4,7 +4,7 @@
 // #include <tl/support/Displayer.h>
 // #include <tl/support/compare.h>
 // #include "VecForCapa.h"
-#include "Point.h"
+#include "../support/Point.h"
 #include <map>
 
 namespace sdot {

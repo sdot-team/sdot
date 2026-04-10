@@ -1,8 +1,8 @@
 #pragma once
 
 #include "RecursiveMapOfUniqueSortedIndices.h"
+#include "../support/PointFactory.h"
 #include "SimpleSquareMatrix.h"
-#include "PointFactory.h"
 #include "VtkOutput.h"
 
 namespace sdot {

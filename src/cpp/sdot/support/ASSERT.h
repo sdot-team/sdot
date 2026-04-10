@@ -19,4 +19,4 @@ auto __asserted( auto &&value, auto file, auto line, auto str ) {
 
 #define ASSERTED_POSITIVE( VALUE ) ( [&]( auto &&v ) { assert( v >= 0 ); return v; } )( VALUE )
 #define ASSERTED( VALUE ) __asserted( VALUE, __FILE__, __LINE__, #VALUE )
-#define ASSERT( COND ) ( [&]( bool v ) { if ( v ) return; std::cerr << __FILE__ << ":" << __LINE__ << ": condition not met: " #COND ";"; exit( 1 ); } )( bool( COND ) )
+#define ASSERT( COND ) ( [&]( bool v ) { if ( v ) return; std::cerr << __FILE__ << ":" << __LINE__ << ": condition not met: " #COND ";"; assert( 0 ); } )( bool( COND ) )

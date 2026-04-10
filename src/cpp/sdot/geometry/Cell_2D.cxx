@@ -197,7 +197,7 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, CutInfo cut_info ) {
     const PI old_vertices_size = edges.size();
     PI nb_out = 0;
     for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
-        TF sp = sdot::dot( cut_dir, edges[ n0 ].vertex_pos ) - cut_dot;
+        TF sp = dot( cut_dir, edges[ n0 ].vertex_pos ) - cut_dot;
         edges[ n0 ].vertex_dot = sp;
         nb_out += ( sp > 0 );
     }

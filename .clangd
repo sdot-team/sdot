@@ -1,5 +1,6 @@
 CompileFlags:
   Add:
+    - -I/Users/hugo.leclerc/.vfs_build/ext/Catch2/install/include
     - -fdiagnostics-absolute-paths
     - -std=c++23
     - -Wextra

@@ -1,6 +1,5 @@
 #pragma once
 
-// #include "../support/ASSERT.h"
 #include "Point.h"
 
 namespace sdot {

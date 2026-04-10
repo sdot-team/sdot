@@ -177,7 +177,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
     sps.resize( vertices.size() );
     PI nb_out = 0;
     for ( PI n0 = 0; n0 < old_vertices_size; ++n0 ) {
-        TF sp = sdot::dot( dir_cut, vertices[ n0 ].pos ) - sp_cut;
+        TF sp = dot( dir_cut, vertices[ n0 ].pos ) - sp_cut;
         nb_out += ( sp > 0 );
         sps[ n0 ] = sp;
     }
