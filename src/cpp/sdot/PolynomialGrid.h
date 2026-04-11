@@ -33,8 +33,8 @@ struct PolynomialGrid {
     TF                  knot                  ( PI d, PI index ) const;
     PI                  dim                   () const { return values.rank() - 1; }
 
-    static auto         simplex_facet_integral( std::span<Pt> vertices, const Polynomial &value ); ///<
-    static auto         simplex_integral      ( std::span<Pt> points, const Polynomial &value ); ///<
+    static auto         simplex_facet_integral( std::span<const Pt> vertices, const Polynomial &value ); ///<
+    static auto         simplex_integral      ( std::span<const Pt> points, const Polynomial &value ); ///<
     static auto         facet_integral        ( auto facet, const Polynomial &value ); ///<
     static auto         integral              ( auto cell, const Polynomial &value ); ///< cell is expected
 
@@ -79,8 +79,8 @@ private:
 };
 
 //
-template<int order,class T,int ct_dim,class Arch> auto polynomial_grid( CtInt<order>, TensorView<const T,ct_dim,Arch> values, TensorView<const T,2,Arch> bounds, const std::vector<TensorView<const T,1,Arch>> &knots ) {
-    return PolynomialGrid<T,ct_dim,order,Arch>{ values, bounds, knots };
+template<int order,class T,int v_rank,class Arch> auto polynomial_grid( CtInt<order>, TensorView<const T,v_rank,Arch> values, TensorView<const T,2,Arch> bounds, const std::vector<TensorView<const T,1,Arch>> &knots, bool normalize ) {
+    return PolynomialGrid<T,v_rank-1,order,Arch>{ values, bounds, knots, normalize };
 }
 
 } // namespace sdot

@@ -272,9 +272,9 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
     res.info.dirac_weight = w0;
     res.info.potential = w0;
 
-    cell.for_each_cut( [&]( const auto &dir, const auto &dot, const auto &cut_info ) {
+    cell.for_each_cut( [&]( const auto &cut_dir, const auto &cut_dot, const auto &cut_info ) {
         if ( cut_info.global_dirac_index == PI( -1 ) ) {
-            res.cut( dir, dot, {
+            res.cut( cut_dir, cut_dot, {
                 .global_dirac_index = cut_info.global_dirac_index,
                 .local_dirac_index = cut_info.local_dirac_index,
                 .dirac_position = cut_info.dirac_position,

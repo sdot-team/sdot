@@ -218,6 +218,10 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
             return cls.BatchItemVersion( **kw )
         setattr( cls, 'batch_item', batch_item )
 
+    # --- _axis_count_for -----------
+    if "_axis_count_for" not in vars( cls ):
+        setattr( cls, '_axis_count_for', _axis_count_for )
+
     # --- multidimensional_version -----------
     if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):
         def multidimensional_version( self ):
@@ -267,18 +271,77 @@ def _collect_attributes( cls, stop_classes = [] ):
     return res
 
 
-def _axis_count( distribution, axis_name ):
-    for name, field in _collect_attributes( type( distribution ) ):
-        if isinstance( field, TensorField ):
+def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
+    for tensor_name, tensor_field in _collect_attributes( type( distribution ) ):
+        if isinstance( tensor_field, TensorField ):
             # if we have a value for this tensor field (to get the shape)
-            value = distribution.__dict__.get( f'_{ name }' )
-            if value is not None:
+            tensor_value = distribution.__dict__.get( f'_{ tensor_name }' )
+            if tensor_value is not None:
                 # -> we can try to use the shape
-                res = field._get_axis_sizes( distribution, value, axis_name )
+                res = _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields_to_avoid )
                 if len( res ):
                     return res[ 0 ]
     return None
 
+
+def _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields_to_avoid ) -> list[ tuple[ int, ... ] | int ]:
+    if tensor_value is None:
+        return []
+
+    # count nb fields with "*"
+    nb_fields_with_mul = 0
+    for field_axis_name in tensor_field.axis_names:
+        nb_fields_with_mul += "*" in field_axis_name
+
+    # try
+    out = []
+    num_axis = 0
+    for field_axis_name in tensor_field.axis_names:
+        field_axis_name = field_axis_name.replace( ' ', '' )
+
+        if "," in field_axis_name:
+            lhs = field_axis_name.split( "," )[ 0 ]
+
+            if axis_name == lhs:
+                out.append( ( tensor_value.shape[ num_axis ], ) )
+            num_axis += 1
+            continue
+
+        if "+" in field_axis_name:
+            lhs, rhs = field_axis_name.split( "+" )
+            rhs = int( rhs )
+
+            if axis_name == lhs:
+                out.append( tensor_value.shape[ num_axis ] - rhs )
+            num_axis += 1
+            continue
+
+        if "*" in field_axis_name:
+            if nb_fields_with_mul > 1:
+                raise NotImplementedError( "handle tensors with multiple a * b axes" )
+
+            # ex shape * dim -> "shape", "dim"
+            name_shape, name_dim = map( str.strip, field_axis_name.split( "*" ) )
+
+            # want "dim"
+            dim = tensor_value.ndim - ( len( tensor_field.axis_names ) - 1 )
+            if axis_name == name_dim:
+                out.append( dim )
+
+            # want "shape"
+            if axis_name == name_shape:
+                res = [ tensor_value.shape[ num_axis + d ] for d in range( dim ) ]
+                out.append( tuple( res ) )
+
+            num_axis += dim
+            continue
+
+        if axis_name == field_axis_name:
+            out.append( tensor_value.shape[ num_axis ] )
+
+        num_axis += 1
+
+    return out
 
 
 def flat_tensor_list( distribution ) -> list:

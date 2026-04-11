@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../support/ASSERT.h"
-//#include "../support/P.h"
+#include "../support/TODO.h"
 #include "Cell_2D.h"
 
 namespace sdot {
@@ -302,6 +302,19 @@ UTP void DTP::cut( const Pt &cut_dir, TF cut_dot, CutInfo cut_info ) {
             edges.erase( edges.begin(), edges.begin() + n2 );
             edges.resize( old_vertices_size - diff );
         }
+    }
+}
+
+UTP void DTP::for_each_simplex( auto &&func ) const {
+    if ( edges.empty() )
+        return;
+
+    std::array<Pt,3> vertices;
+    vertices[ 0 ] = edges[ 0 ].vertex_pos;
+    for( PI i = 3; i <= edges.size(); ++i ) {
+        vertices[ 1 ] = edges[ i - 1 ].vertex_pos;
+        vertices[ 2 ] = edges[ i - 2 ].vertex_pos;
+        func( vertices );
     }
 }
 

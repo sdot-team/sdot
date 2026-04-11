@@ -4,6 +4,7 @@ from .distributions.PiecewiseConstantGrid import PiecewiseConstantGrid as Piecew
 from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions
 from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseAffineGrid
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
+from .distributions.PolynomialGrid import PolynomialGrid as PolynomialGrid
 from .distributions.Distribution import Distribution as Distribution
 
 from .distributions.helpers.distribution_methods import variants_of

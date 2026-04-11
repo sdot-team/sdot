@@ -193,8 +193,8 @@ class OtSolver:
 
     def _bindings( self ):
         ct_dim = self.g.dim if self.g.dim <= 4 else -1
-        p_func, g_func, includes = type( self.g ).BaseVersion.primitive_function( self.g )
-        dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+        p_func, includes = type( self.g ).BaseVersion.primitive_function( self.g, False )
+        dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func ] + includes ) ) }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
 
         def src_func():
             # inputs of backward_args and forward_args
@@ -218,7 +218,7 @@ class OtSolver:
                 # "BACKWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in backward_args ] ),
                 "FORWARD_ARGS": str.join( ", ", [ t + " _" + n for t, n, _ in forward_args ] ),
                 "PRIMITIVE_FUNC": p_func,
-                "PRIMITIVE_GRAD": g_func,
+                # "PRIMITIVE_GRAD": g_func,
                 "SDOT_INCLUDES": str.join( "\n", [ f"#include <{ include }>" for include in includes ] ),
             }
 

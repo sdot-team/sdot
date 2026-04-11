@@ -29,7 +29,7 @@ UTP auto DTP::grid_shape() const {
 UTP DTP::Polynomial DTP::polynomial( Pi position ) const {
     Polynomial res;
     for( PI d = 0; d < nb_coeffs; ++d )
-        res.coeffs[ d ] = values( position, d );
+        res.coeffs[ d ] = coeff_values * values( position, d );
     return res;
 }
 
@@ -91,7 +91,7 @@ UTP TF DTP::knot( PI d, PI index ) const {
     return TF( index ) / values.size( d );
 }
 
-UTP auto DTP::simplex_facet_integral( std::span<Pt> vertices, const Polynomial &value ) {
+UTP auto DTP::simplex_facet_integral( std::span<const Pt> vertices, const Polynomial &value ) {
     using namespace std;
 
     constexpr int ct_m = ( ct_dim >= 1 ? ct_dim - 1 : -1 );
@@ -150,7 +150,7 @@ UTP auto DTP::simplex_facet_integral( std::span<Pt> vertices, const Polynomial &
     return res;
 }
 
-UTP auto DTP::simplex_integral( std::span<Pt> vertices, const Polynomial &value ) {
+UTP auto DTP::simplex_integral( std::span<const Pt> vertices, const Polynomial &value ) {
     const PI n = vertices.size() - 1;
 
     // Jacobian J, row r = points[r+1] - points[0]
@@ -199,38 +199,30 @@ UTP auto DTP::simplex_integral( std::span<Pt> vertices, const Polynomial &value 
 }
 
 UTP auto DTP::facet_integral( auto facet, const Polynomial &value ) {
-    TF res = value.coeffs[ 0 ] * facet.measure();
     if ( order == 0 )
-        return res;
+        return value.coeffs[ 0 ] * facet.measure();
 
-    TODO;
+    TF res = 0;
+    facet.for_each_simplex( [&]( const auto &vertices ) {
+        res += simplex_facet_integral( vertices, value );
+    } );
+    return res;
 }
 
 UTP auto DTP::integral( auto cell, const Polynomial &value ) {
-    std::vector<Pt> points;
-    points.reserve( cell.nb_vertices() );
-    for ( const auto &v : cell.vertices )
-        points.push_back( v.pos );
-    return simplex_integral( points, value );
+    if ( order == 0 )
+        return value.coeffs[ 0 ] * cell.measure();
+
+    TF res = 0;
+    cell.for_each_simplex( [&]( const auto &vertices ) {
+        res += simplex_integral( vertices, value );
+    } );
+    return res;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 UTP void DTP::_for_each_piece( const auto &cell, const auto &func, auto beg, auto end, auto &cur, PI d ) const {
     if ( d == dim() ) {
-        func( cell, coeff_values * values[ cur ] );
+        func( cell, polynomial( cur ) );
         return;
     }
 

@@ -35,7 +35,8 @@ public:
     };
 
     struct Facet {
-        auto  measure() const { return norm_2( edges[ 1 ]->vertex_pos - edges[ 0 ]->vertex_pos ); }
+        void  for_each_simplex( auto &&func ) const { std::array<Pt,2> pts{ edges[ 0 ]->vertex_pos, edges[ 1 ]->vertex_pos }; func( pts ); }
+        auto  measure         () const { return norm_2( edges[ 1 ]->vertex_pos - edges[ 0 ]->vertex_pos ); }
 
         const Edge* edges[ 2 ];
         CutInfo     info;
@@ -50,6 +51,7 @@ public:
     static Cell     englobing_simplex             ( Pt center, TF radius, CellInfo cell_info = {}, CutInfo cut_info = {} );
     static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = {}, CutInfo cut_info = {} );
 
+    void            for_each_simplex              ( auto &&func ) const;
     void            for_each_vertex               ( auto &&func ) const;
     void            for_each_facet                ( auto &&func ) const; ///< func( Facet{ ... } )
     void            for_each_face                 ( auto &&func ) const;
