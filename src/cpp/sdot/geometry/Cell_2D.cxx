@@ -312,8 +312,8 @@ UTP void DTP::for_each_simplex( auto &&func ) const {
     std::array<Pt,3> vertices;
     vertices[ 0 ] = edges[ 0 ].vertex_pos;
     for( PI i = 3; i <= edges.size(); ++i ) {
-        vertices[ 1 ] = edges[ i - 1 ].vertex_pos;
-        vertices[ 2 ] = edges[ i - 2 ].vertex_pos;
+        vertices[ 1 ] = edges[ i - 2 ].vertex_pos;
+        vertices[ 2 ] = edges[ i - 1 ].vertex_pos;
         func( vertices );
     }
 }

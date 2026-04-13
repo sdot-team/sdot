@@ -1,4 +1,4 @@
-from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list
+from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list, to_tensor_list
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..driver import driver
 import jax.numpy as jnp
@@ -53,6 +53,10 @@ class JaxDriver:
             return jnp.float64
         raise RuntimeError( f"Unknown dtype { normalized_dtype }" )
 
+    @property
+    def array_type( self ):
+        return jax.Array
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )
@@ -106,6 +110,15 @@ class JaxDriver:
     def repeat( self, tensor, shape ):
         return jnp.tile( tensor, shape )
 
+    def stack( self, tensors, axis ):
+        return jnp.stack( tensors, axis=axis )
+
+    def linalg_solve( self, A, b ):
+        return jnp.linalg.solve( A, b )
+
+    def moveaxis( self, tensor, source, destination ):
+        return jnp.moveaxis( tensor, source, destination )
+
     def hstack( self, lst ):
         return jnp.hstack( lst )
 
@@ -113,6 +126,104 @@ class JaxDriver:
         return np.array( t )
         # if isinstance( t, list ):
         # return t.to_numpy()
+
+    def forward( self, forward_func, backward_func, out_shapes, *inputs ):
+        """ Generic differentiable wrapper using pure_callback (safe for C++/nanobind).
+            out_shapes    : list of shape tuples, e.g. [ (batch,), (batch, n, dim) ]
+            forward_func ( *np_outputs, *np_inputs    ) -> None  (fills np_outputs in-place)
+            backward_func( *np_grad_inputs, *np_outputs,
+                           *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
+            Mutable (output) arrays come first, matching the nanobind convention.
+        """
+        input_tensors = to_tensor_list( inputs )
+        np_dtype      = np.dtype( self.dtype )
+
+        fwd_shapes = tuple( jax.ShapeDtypeStruct( shape, np_dtype ) for shape in out_shapes )
+        bwd_shapes = tuple( jax.ShapeDtypeStruct( t.shape, np_dtype ) for t in input_tensors )
+
+        @jax.custom_vjp
+        def op( *jax_inputs ):
+            def fwd_cb( *cb_inputs ):
+                np_outputs = [ np.empty( shape, dtype = np_dtype ) for shape in out_shapes ]
+                forward_func( *np_outputs, *cb_inputs )
+                return tuple( np_outputs )
+            return jax.pure_callback( fwd_cb, fwd_shapes, *jax_inputs )
+
+        def op_fwd( *jax_inputs ):
+            outputs = op( *jax_inputs )
+            return outputs, ( *outputs, *jax_inputs )
+
+        def op_bwd( residuals, grad_outputs ):
+            n_out         = len( out_shapes )
+            out_residuals = residuals[ :n_out ]
+            in_residuals  = residuals[ n_out: ]
+
+            def bwd_cb( *cb_args ):
+                np_outs  = cb_args[ :n_out ]
+                np_grads = cb_args[ n_out : 2 * n_out ]
+                np_ins   = cb_args[ 2 * n_out: ]
+                np_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
+                backward_func( *np_grad_inputs, *np_outs, *np_grads, *np_ins )
+                return tuple( np_grad_inputs )
+
+            return jax.pure_callback( bwd_cb, bwd_shapes, *out_residuals, *grad_outputs, *in_residuals )
+
+        op.defvjp( op_fwd, op_bwd )
+        return op( *[ jnp.asarray( t, dtype = self.dtype, device = self.device ) for t in input_tensors ] )
+
+    def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
+        """ small helper to optimize `loss` wrt `params` using L-BFGS (via scipy.optimize).
+            - `params`  : JAX array or list of JAX arrays
+            - `on_iter` : optional callback( params, iter, grad_norm ) called each iteration
+            Returns the optimized params (same type as input).
+        """
+        import scipy.optimize
+
+        # support single array or list of arrays
+        is_list  = isinstance( params, ( list, tuple ) )
+        p_list   = list( params ) if is_list else [ params ]
+        shapes   = [ p.shape for p in p_list ]
+        sizes    = [ int( np.prod( s ) ) for s in shapes ]
+
+        def pack( arrays ):
+            return np.concatenate( [ np.array( a ).flatten() for a in arrays ] ).astype( np.float64 )
+
+        def unpack( x_flat ):
+            parts, offset = [], 0
+            for shape, size in zip( shapes, sizes ):
+                parts.append( jnp.asarray( x_flat[ offset : offset + size ].reshape( shape ), dtype = self.dtype, device = self.device ) )
+                offset += size
+            return parts
+
+        val_and_grad = jax.value_and_grad( lambda *ps: loss( list( ps ) if is_list else ps[ 0 ] ) )
+
+        iter_ref = [ 0 ]
+
+        def f_and_g( x_flat ):
+            ps        = unpack( x_flat )
+            val, grad = val_and_grad( *ps )
+            g_list    = grad if isinstance( grad, ( list, tuple ) ) else [ grad ]
+            return float( np.array( val ) ), pack( g_list )
+
+        def callback( x_flat ):
+            ps = unpack( x_flat )
+            if on_iter:
+                _, grad = val_and_grad( *ps )
+                g_list   = grad if isinstance( grad, ( list, tuple ) ) else [ grad ]
+                grad_norm = float( np.linalg.norm( pack( g_list ) ) )
+                on_iter( ps if is_list else ps[ 0 ], iter_ref[ 0 ], grad_norm )
+            iter_ref[ 0 ] += 1
+
+        result = scipy.optimize.minimize(
+            f_and_g, pack( p_list ),
+            method  = 'L-BFGS-B',
+            jac     = True,
+            callback = callback,
+            options  = { 'maxiter': max_iter, 'gtol': tol_grad },
+        )
+
+        final = unpack( result.x )
+        return final if is_list else final[ 0 ]
 
     def plan( self, bindings, f, g ):
         np_dtype = np.dtype( self.dtype )

@@ -6,6 +6,7 @@ from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseA
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 from .distributions.PolynomialGrid import PolynomialGrid as PolynomialGrid
 from .distributions.Distribution import Distribution as Distribution
+from .distributions.SplineGrid import SplineGrid as SplineGrid
 
 from .distributions.helpers.distribution_methods import variants_of
 

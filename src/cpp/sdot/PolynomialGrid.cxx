@@ -37,50 +37,49 @@ UTP TF DTP::piece_integral( Pi index, const Polynomial &pol ) const {
     if ( has_skew_or_rotation() )
         TODO;
 
-    // bounds and moments per axis
-    //   m0[d] = ∫ 1  dx  on [a,b] = b - a
-    //   m1[d] = ∫ x  dx  on [a,b] = (b² - a²) / 2
-    //   m2[d] = ∫ x² dx  on [a,b] = (b³ - a³) / 3
-    auto a  = pf.with_func( [&]( PI d ) { return knot( d, index[ d ]     ); } );
-    auto b  = pf.with_func( [&]( PI d ) { return knot( d, index[ d ] + 1 ); } );
-    auto m0 = pf.with_func( [&]( PI d ) { return b[ d ] - a[ d ]; } );
-    auto m1 = pf.with_func( [&]( PI d ) { return ( b[ d ] * b[ d ] - a[ d ] * a[ d ] ) / 2; } );
-    auto m2 = pf.with_func( [&]( PI d ) { return ( b[ d ] * b[ d ] * b[ d ] - a[ d ] * a[ d ] * a[ d ] ) / 3; } );
+    // Q_k basis: coefficient c corresponds to multi-index (p0,p1,...,p_{d-1})
+    // in lex order, each p_d in 0..order.
+    // ∫_{cell} x^p dx = ∏_d ∫_{a_d}^{b_d} x_d^{p_d} dx_d  = ∏_d m_{p_d}[d]
+    // where m_k[d] = (b_d^{k+1} - a_d^{k+1}) / (k+1)
 
-    // volume of the cell = ∏ m0[d]
-    TF vol = 1;
-    for( PI d = 0; d < dim(); ++d )
-        vol *= m0[ d ];
+    const PI n = dim();
 
-    TF res = 0;
-    PI c = 0;
-
-    // order 0: constant → ∫ 1 = vol
-    res += pol.coeffs[ c++ ] * vol;
-
-    // order 1: x_i → vol / m0[i] * m1[i]   (replace the i-th factor m0 by m1)
-    if constexpr ( order >= 1 ) {
-        for( PI i = 0; i < dim(); ++i )
-            res += pol.coeffs[ c++ ] * ( vol / m0[ i ] * m1[ i ] );
-    }
-
-    // order 2: x_i * x_j  (i ≤ j)
-    //   diagonal (i==j): replace m0[i] by m2[i]
-    //   off-diagonal:    replace m0[i] and m0[j] by m1[i] and m1[j]
-    if constexpr ( order >= 2 ) {
-        for( PI i = 0; i < dim(); ++i ) {
-            for( PI j = i; j < dim(); ++j ) {
-                TF integ = ( i == j )
-                    ? vol / m0[ i ] * m2[ i ]
-                    : vol / m0[ i ] / m0[ j ] * m1[ i ] * m1[ j ];
-                res += pol.coeffs[ c++ ] * integ;
-            }
+    // Per-axis moments m[d][k] = ∫_{a_d}^{b_d} x^k dx,  k = 0..order
+    Point<TF, ct_dim * ( order + 1 ), Arch> m;
+    for( PI d = 0; d < n; ++d ) {
+        const TF a = knot( d, index[ d ]     );
+        const TF b = knot( d, index[ d ] + 1 );
+        TF ak = a, bk = b;  // a^{k+1}, b^{k+1} starting at k=0 -> a^1, b^1
+        for ( PI k = 0; k <= PI( order ); ++k ) {
+            m[ d * ( order + 1 ) + k ] = ( bk - ak ) / TF( k + 1 );
+            ak *= a;
+            bk *= b;
         }
     }
 
-    if constexpr ( order >= 3 ) {
-        TODO;
+    // Iterate over all Q_k multi-indices in lex order
+    TF res = 0;
+    // use a stack-based counter
+    PI powers[ ct_dim >= 0 ? ct_dim : 1 ] = {};
+    for ( PI c = 0;; ++c ) {
+        // ∫ x^powers = ∏_d m[d][powers[d]]
+        TF integ = 1;
+        for ( PI d = 0; d < n; ++d )
+            integ *= m[ d * ( order + 1 ) + powers[ d ] ];
+        res += pol.coeffs[ c ] * integ;
+
+        // advance multi-index (lex, last axis fastest)
+        PI d = n;
+        while ( d-- ) {
+            if ( ++powers[ d ] <= PI( order ) )
+                break;
+            powers[ d ] = 0;
+
+            if ( d == 0 )
+                goto done;
+        }
     }
+    done:
 
     return res;
 }
@@ -110,42 +109,69 @@ UTP auto DTP::simplex_facet_integral( std::span<const Pt> vertices, const Polyno
     } );
     const TF A = sqrt( G.determinant() ) / factorial( m );
 
-    // coeff index
-    PI c = 0;
+    TF res = 0;
 
-    // order 0: ∫ 1 dS = A
-    TF res = value.coeffs[ c++ ] * A;
-
+    // Centroid in ambient R^n
+    Pt centroid( n );
     if constexpr ( order >= 1 ) {
-        // centroid of the facet in the ambient space R^n
-        Pt centroid( n );
         for ( const auto &p : vertices )
             centroid += p;
         centroid /= TF( m + 1 );
-
-        // order 1: ∫ x_i dS = A * centroid[i]  for all i ∈ 0..n-1
-        for ( PI i = 0; i < n; ++i )
-            res += value.coeffs[ c++ ] * ( A * centroid[ i ] );
-
-        if constexpr ( order >= 2 ) {
-            // order 2: ∫ x_i x_j dS = A/(m+1)/(m+2) * [ S_i*S_j + T_ij ]
-            //   S_i = (m+1)*centroid[i],  T_ij = Σ_k vertices[k][i]*vertices[k][j]
-            const TF fac = A / TF( m + 1 ) / TF( m + 2 );
-            for ( PI i = 0; i < n; ++i ) {
-                const TF Si = TF( m + 1 ) * centroid[ i ];
-                for ( PI j = i; j < n; ++j ) {
-                    const TF Sj = TF( m + 1 ) * centroid[ j ];
-                    TF Tij = 0;
-                    for ( const auto &p : vertices )
-                        Tij += p[ i ] * p[ j ];
-                    res += value.coeffs[ c++ ] * fac * ( Si * Sj + Tij );
-                }
-            }
-        }
     }
 
-    if constexpr ( order >= 3 )
-        TODO;
+    // Q_k multi-index iteration (same structure as simplex_integral)
+    PI powers[ ct_dim >= 0 ? ct_dim : 1 ] = {};
+    for ( PI c = 0;; ++c ) {
+        PI total = 0;
+        for ( PI d = 0; d < n; ++d )
+            total += powers[ d ];
+
+        TF integ = 0;
+        if ( total == 0 ) {
+            integ = A;
+        } else if ( total == 1 ) {
+            for ( PI d = 0; d < n; ++d ) {
+                if ( powers[ d ] == 1 ) {
+                    integ = A * centroid[ d ];
+                    break;
+                }
+            }
+        } else if ( total == 2 ) {
+            PI i = n, j = n;
+            for ( PI d = 0; d < n; ++d ) {
+                if ( powers[ d ] >= 1 ) {
+                    if ( i == n )
+                        i = d;
+                    else
+                        j = d;
+                }
+                if ( powers[ d ] == 2 )
+                    j = d;
+            }
+            if ( j == n )
+                j = i;
+            const TF Si = TF( m + 1 ) * centroid[ i ];
+            const TF Sj = TF( m + 1 ) * centroid[ j ];
+            TF Tij = 0;
+            for ( const auto &p : vertices )
+                Tij += p[ i ] * p[ j ];
+            integ = A / TF( m + 1 ) / TF( m + 2 ) * ( Si * Sj + Tij );
+        } else {
+            TODO;
+        }
+
+        res += value.coeffs[ c ] * integ;
+
+        PI d = n;
+        while ( d-- ) {
+            if ( ++powers[ d ] <= PI( order ) )
+                break;
+            powers[ d ] = 0;
+            if ( d == 0 )
+                goto done;
+        }
+    }
+    done:
 
     return res;
 }
@@ -153,47 +179,70 @@ UTP auto DTP::simplex_facet_integral( std::span<const Pt> vertices, const Polyno
 UTP auto DTP::simplex_integral( std::span<const Pt> vertices, const Polynomial &value ) {
     const PI n = vertices.size() - 1;
 
-    // Jacobian J, row r = points[r+1] - points[0]
-    // volume V = det(J) / n!   (positive since points are well-oriented)
+    // Volume via Jacobian determinant
     auto J = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( n, [&]( PI r, PI c ) { return vertices[ r + 1 ][ c ] - vertices[ 0 ][ c ]; } );
     const TF V = J.determinant() / factorial( n );
 
-    // coeff index
-    PI c = 0;
-
-    // order 0: ∫ 1 = V
-    TF res = value.coeffs[ c++ ] * V;
-
-    // order 1: ∫ x_i = V * centroid[i],   centroid = (1/(n+1)) * Σ_k points[k]
+    // Centroid for order-1 moments
+    Pt centroid( n );
     if constexpr ( order >= 1 ) {
-        Pt centroid( n );
         for ( const auto &p : vertices )
             centroid += p;
         centroid /= TF( n + 1 );
-
-        for ( PI i = 0; i < n; ++i )
-            res += value.coeffs[ c++ ] * ( V * centroid[ i ] );
-
-        // order 2: ∫ x_i x_j = V/(n+1)/(n+2) * [ S_i*S_j + T_ij ]
-        //   S_i = (n+1)*centroid[i]
-        //   T_ij = Σ_k points[k][i] * points[k][j]
-        if constexpr ( order >= 2 ) {
-            const TF fac = V / TF( n + 1 ) / TF( n + 2 );
-            for ( PI i = 0; i < n; ++i ) {
-                const TF Si = TF( n + 1 ) * centroid[ i ];
-                for ( PI j = i; j < n; ++j ) {
-                    const TF Sj = TF( n + 1 ) * centroid[ j ];
-                    TF Tij = 0;
-                    for ( const auto &p : vertices )
-                        Tij += p[ i ] * p[ j ];
-                    res += value.coeffs[ c++ ] * fac * ( Si * Sj + Tij );
-                }
-            }
-        }
     }
 
-    if constexpr ( order >= 3 )
-        TODO;
+    // Q_k basis: iterate multi-indices (p0,...,p_{d-1}), each in 0..order, lex order
+    // For a simplex, exact formulas exist only for the P_k basis.
+    // Here we use the Q_k monomials evaluated via the known simplex integrals:
+    //   ∫ x^p dV  (component-wise powers, not multi-linear in general)
+    // For order <= 1 this matches the P_k formula exactly.
+    // For order >= 2, cross terms x_i^a * x_j^b (a+b > 2) require higher-order simplex formulas.
+    TF res = 0;
+    PI c = 0;
+    PI powers[ ct_dim >= 0 ? ct_dim : 1 ] = {};
+    const PI dim_n = n;
+    for ( ;; ++c ) {
+        // Compute ∫_{simplex} ∏_d x_d^{powers[d]} dV
+        // Sum of all powers
+        PI total = 0;
+        for ( PI d = 0; d < dim_n; ++d ) total += powers[ d ];
+
+        TF integ = 0;
+        if ( total == 0 ) {
+            integ = V;
+        } else if ( total == 1 ) {
+            // ∫ x_i = V * centroid[i]
+            for ( PI d = 0; d < dim_n; ++d )
+                if ( powers[ d ] == 1 ) { integ = V * centroid[ d ]; break; }
+        } else if ( total == 2 ) {
+            // ∫ x_i x_j = V/(n+1)/(n+2) * [ S_i*S_j + T_ij ]
+            // (same formula for i==j and i!=j)
+            PI i = dim_n, j = dim_n;
+            for ( PI d = 0; d < dim_n; ++d ) {
+                if ( powers[ d ] >= 1 ) { if ( i == dim_n ) i = d; else j = d; }
+                if ( powers[ d ] == 2 ) { j = d; }  // x_i^2: both slots are d
+            }
+            if ( j == dim_n ) j = i;  // pure square
+            const TF Si = TF( n + 1 ) * centroid[ i ];
+            const TF Sj = TF( n + 1 ) * centroid[ j ];
+            TF Tij = 0;
+            for ( const auto &p : vertices ) Tij += p[ i ] * p[ j ];
+            integ = V / TF( n + 1 ) / TF( n + 2 ) * ( Si * Sj + Tij );
+        } else {
+            TODO;
+        }
+
+        res += value.coeffs[ c ] * integ;
+
+        // advance multi-index
+        PI d = dim_n;
+        while ( d-- ) {
+            if ( ++powers[ d ] <= PI( order ) ) break;
+            powers[ d ] = 0;
+            if ( d == 0 ) goto done;
+        }
+    }
+    done:
 
     return res;
 }

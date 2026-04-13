@@ -7,6 +7,7 @@ from .TensorField import TensorField, _axis_names
 from ...driver import driver
 
 from typing import TypeVar, Type
+import numpy
 
 _D = TypeVar( '_D', bound=Distribution )
 _T = TypeVar( '_T' )
@@ -342,6 +343,22 @@ def _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields
         num_axis += 1
 
     return out
+
+
+def to_tensor_list( obj ) -> list:
+    if isinstance( obj, ( tuple, list ) ):
+        res = []
+        for o in obj:
+            res += to_tensor_list( o )
+        return res
+
+    if isinstance( obj, numpy.ndarray ):
+        return [ driver.array( obj ) ]
+
+    if isinstance( obj, driver.array_type ):
+        return [ obj ]
+
+    raise RuntimeError( f"Unable to transform object of type { type( obj ) } to tensor list" )
 
 
 def flat_tensor_list( distribution ) -> list:

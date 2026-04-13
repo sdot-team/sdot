@@ -1,4 +1,4 @@
-from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list
+from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list, to_tensor_list
 from ..distributions.BatchOfDistributions import BatchOfDistributions
 from ..BatchOfOtPlans import BatchOfOtPlans
 # from ..driver import driver
@@ -47,6 +47,10 @@ class PyTorchDriver:
             return torch.float64
         raise RuntimeError( f"Unknown type { normalized_dtype }" )
 
+    @property
+    def array_type( self ):
+        return torch.Tensor
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )
@@ -63,7 +67,7 @@ class PyTorchDriver:
         """ make a rank 0 tensor """
         return self.tn( tensor, 0 )
 
-    def tn( self, tensor, ndim, name = None ):
+    def tn( self, tensor, ndim = None, name = None ):
         """ make a rank ndim tensor """
         if tensor is None:
             return tensor
@@ -92,6 +96,15 @@ class PyTorchDriver:
     def repeat( self, tensor, shape ):
         return tensor.repeat( shape )
 
+    def stack( self, tensors, axis ):
+        return torch.stack( tensors, dim=axis )
+
+    def linalg_solve( self, A, b ):
+        return torch.linalg.solve( A, b )
+
+    def moveaxis( self, tensor, source, destination ):
+        return torch.moveaxis( tensor, source, destination )
+
     def hstack( self, lst ):
         return torch.hstack( lst )
 
@@ -99,6 +112,64 @@ class PyTorchDriver:
         return np.array( t )
         # if isinstance( t, list ):
         # return t.to_numpy()
+
+    def forward( self, forward_func, backward_func, out_shapes, *inputs ):
+        """ Generic differentiable wrapper with explicit backward.
+            out_shapes    : list of shape tuples, e.g. [ (batch,), (batch, n, dim) ]
+            forward_func ( *np_outputs, *np_inputs    ) -> None  (fills np_outputs in-place)
+            backward_func( *np_grad_inputs, *np_outputs,
+                           *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
+            Mutable (output) arrays come first, matching the nanobind convention.
+        """
+        np_dtype      = { torch.float32: np.float32, torch.float64: np.float64 }[ self.dtype ]
+        input_tensors = to_tensor_list( inputs )
+        n_out         = len( out_shapes )
+
+        outer_self = self
+
+        class Func( torch.autograd.Function ):
+            @staticmethod
+            def forward( ctx, *t_inputs ):
+                np_inputs  = [ t.cpu().detach().numpy() for t in t_inputs ]
+                np_outputs = [ np.empty( shape, dtype = np_dtype ) for shape in out_shapes ]
+                forward_func( *np_outputs, *np_inputs )
+
+                t_outputs = [ torch.as_tensor( o, dtype = outer_self.dtype, device = outer_self.device ) for o in np_outputs ]
+                ctx.save_for_backward( *t_inputs, *t_outputs )
+                return tuple( t_outputs )
+
+            @staticmethod
+            def backward( ctx, *grad_outputs ):
+                saved      = ctx.saved_tensors
+                t_inputs   = saved[ :-n_out ]
+                t_outputs  = saved[ -n_out: ]
+
+                np_inputs      = [ t.cpu().detach().numpy() for t in t_inputs ]
+                np_outputs     = [ t.cpu().detach().numpy() for t in t_outputs ]
+                np_grads       = [ g.cpu().detach().numpy() for g in grad_outputs ]
+                np_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in t_inputs ]
+
+                backward_func( *np_grad_inputs, *np_outputs, *np_grads, *np_inputs )
+
+                return tuple( torch.as_tensor( g, dtype = outer_self.dtype, device = outer_self.device ) for g in np_grad_inputs )
+
+        return Func.apply( *input_tensors )
+
+
+    def array_conversion( self, value ):
+        """ Ensure that every array of value is of the right type """
+        if isinstance( value, self.array_type ):
+            return value
+        if isinstance( value, np.ndarray ):
+            return self.tn( value )
+        if isinstance( value, list ):
+            return [ self.array_conversion( v ) for v in value ]
+        if isinstance( value, tuple ):
+            return tuple( self.array_conversion( v ) for v in value )
+        if hasattr( value, "array_conversion" ):
+            return value.array_conversion()
+        raise NotImplementedError
+
 
     def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
         class SDOTFunction( torch.autograd.Function ):
@@ -143,41 +214,39 @@ class PyTorchDriver:
         assert isinstance( outputs, tuple )
         return BatchOfOtPlans( *outputs )
 
-    def optimize_using_lbfgs( self, loss, params, on_iter = None ):
-        """ small helper to optimize `loss` wrt `params` using lbfgs """
-        lbfgs = torch.optim.LBFGS( [ params ], history_size = 15, max_iter = 10 ) # , line_search_fn = "strong_wolfe"
+    def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
+        """ small helper to optimize `loss` wrt `params` using L-BFGS.
+            - `params`  : torch tensor or list of torch tensors
+            - `on_iter` : optional callback( params, iter, grad_norm ) called each iteration
+            Returns the optimized params (same type as input).
+        """
+        is_list = isinstance( params, ( list, tuple ) )
+        p_list  = list( params ) if is_list else [ params ]
+
+        for p in p_list:
+            p.requires_grad_( True )
+
+        lbfgs = torch.optim.LBFGS( p_list, history_size=15, max_iter=10 )
 
         def closure():
             lbfgs.zero_grad()
-            objective = loss( params )
+            objective = loss( p_list if is_list else p_list[ 0 ] )
             objective.backward()
             return objective
 
-        old_params = params.clone().detach()
-        tol_param = 1e-7  # Stabilité de la solution
-        tol_grad  = 1e-7  # Stabilité du gradient (proche du minimum)
-        for i in range( 50 ):
+        for i in range( max_iter ):
             lbfgs.step( closure )
 
-            if on_iter:
-                on_iter( params, i )
-
-            # --- CRITÈRES DE CONVERGENCE ---
             with torch.no_grad():
-                grad_norm = torch.norm( params.grad )
-                param_diff = torch.norm( params - old_params )
+                grad_norm = float( torch.norm( torch.stack( [ torch.norm( p.grad ) for p in p_list if p.grad is not None ] ) ) )
 
-                print(f"Itération {i:02d} | Grad Norm: {grad_norm.item():.2e} | Param Diff: {param_diff.item():.2e}")
+                if on_iter:
+                    on_iter( p_list if is_list else p_list[ 0 ], i, grad_norm )
 
-                # Test de sortie
                 if grad_norm < tol_grad:
-                    # print( "=> Convergence : Le gradient est quasiment nul." )
-                    break
-                if param_diff < tol_param:
-                    # print( "=> Convergence : La solution est stabilisée." )
                     break
 
-                old_params.copy_( params )
+        return p_list if is_list else p_list[ 0 ]
 
     def optimize_using_sgd( self, loss, params ):
         optimizer = torch.optim.SGD( [ params ] )
