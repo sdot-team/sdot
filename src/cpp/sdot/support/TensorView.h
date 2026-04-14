@@ -46,10 +46,26 @@ public:
     HD auto        begin             () const;
     HD auto        end               () const;
 
+    HD void        for_each_index    ( auto &&func, PI sub = 0 ) const;
+
     T_U auto       sum_along_axis_1  () const -> Tensor<U,1,Arch>;
     void           with_cpu_version  ( auto &&func ) const;
     auto           squeeze           ( PI axis, PI index = 0 ) const;
     HD auto        row               ( PI index ) const;
+
+    friend std::ostream &operator<<( std::ostream &os, const TensorView &p ) {
+        if constexpr( ct_rank == 0 )
+            return os << p();
+        else if constexpr ( ct_rank == 1 ) {
+            for( sdot::PI i = 0; i < p.size(); ++i )
+                os << ( i ? ", " : "" ) << p[ i ];
+            return os;
+        } else {
+            for( sdot::PI i = 0; i < p.size( 0 ); ++i )
+                os << "\n" << p.row( i );
+            return os;
+        }
+    }
 
 private:
     Strides        _strides;         ///< byte strides
@@ -58,9 +74,6 @@ private:
 };
 
 } // namespace sdot
-
-template<class T,int ct_rank>
-std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cpu> &p );
 
 #ifdef __CUDACC__
 template<class T,int ct_rank>

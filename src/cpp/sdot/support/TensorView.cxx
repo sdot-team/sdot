@@ -1,6 +1,7 @@
 #pragma once
 
 #include "StrideIterator.h"
+#include "PointFactory.h"
 #include "TensorView.h"
 #include "ASSERT.h"
 #include "TODO.h"
@@ -92,6 +93,22 @@ UTP auto DTP::squeeze( PI axis, PI index ) const {
 
 UTP auto DTP::row( PI index ) const {
     return squeeze( 0, index );
+}
+
+UTP void DTP::for_each_index( auto &&func, PI sub ) const {
+    PointFactory<PI,ct_rank,Arch> pf( rank() );
+    Point<PI,ct_rank,Arch> index = pf.zeros();
+    while ( true ) {
+        func( index );
+
+        PI n = rank() - 1;
+        while ( ++index[ n ] == size( n ) - sub ) {
+            if ( n == 0 )
+                return;
+            index[ n ] = 0;
+            --n;
+        }
+    }
 }
 
 UTP auto DTP::contiguous_strides( const Sizes &ext ) -> Strides {
@@ -190,20 +207,6 @@ UTP void DTP::with_cpu_version( auto &&func ) const {
 
 } // namespace sdot
 
-template<class T,int ct_rank>
-std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cpu> &p ) {
-    if constexpr( ct_rank == 0 )
-        return os << p();
-    else if constexpr ( ct_rank == 1 ) {
-        for( sdot::PI i = 0; i < p.size(); ++i )
-            os << ( i ? ", " : "" ) << p[ i ];
-        return os;
-    } else {
-        for( sdot::PI i = 0; i < p.size( 0 ); ++i )
-            os << "\n" << p.row( i );
-        return os;
-    }
-}
 
 #ifdef __CUDACC__
 template<class T,int ct_rank>

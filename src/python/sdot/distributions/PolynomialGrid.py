@@ -44,10 +44,10 @@ class PolynomialGrid( Distribution ):
             knots = [ list( driver.to_numpy( self.knots[ d ] ) ) for d in range( dim ) ]
             ind = [ max( 0, min( bisect_right( knots[ d ], key[ d ] ) - 1, len( knots[ d ] ) - 2 ) ) for d in range( dim ) ]
         else:
-            ind = [ max( 0, min( self.values.shape[ d ] - 2, int( floor( key[ d ] * self.values.shape[ d ] ) ) ) ) for d in range( dim ) ]
+            ind = [ max( 0, min( self.values.shape[ d ] - 1, int( key[ d ] ) ) ) for d in range( dim ) ]
 
         res = 0
-        for cpt, powers in enumerate( iproduct( range( self.order + 1 ), repeat=dim ) ):
+        for cpt, powers in enumerate( iproduct( range( self.order + 1 ), repeat = dim ) ):
             monomial = prod( key[ d ] ** powers[ d ] for d in range( dim ) )
             res += float( self.values[ *ind, cpt ] ) * monomial
         return res

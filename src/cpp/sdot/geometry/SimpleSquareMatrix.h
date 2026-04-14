@@ -30,6 +30,7 @@ public:
     T                  determinant             () const;
     SimpleSquareMatrix cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
     Vec                solve                   ( const Vec &vec ) const;
+    Vec                solve_ge                ( Vec b ) const;   ///< Gaussian elimination with partial pivoting; zero pivot → x[p]=0 (handles degenerate cells)
     PI                 size                    ( PI ) const { return size(); }
     PI                 size                    () const { return ct_size >= 0 ? ct_size : _size; }
 

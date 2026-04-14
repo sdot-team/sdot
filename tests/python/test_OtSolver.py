@@ -1,5 +1,6 @@
 import numpy
 import sdot
+from sdot.distributions.helpers.distribution_methods import to_tensor_list
 
 if __name__ == "__main__":
     numpy.random.seed( 0 )
@@ -14,15 +15,14 @@ if __name__ == "__main__":
     # ot_solver = sdot.OtSolver( sdot.Bsp( f.positions, f.weights ), g )
     # ot_solver.solve( verbose = 1 )
     # ot_solver.plot()
-    s = sdot.SplineGrid( [ [ 1, 2, 2 ], [ 10, 12, 12 ], [ 1, 2, 2 ], [ 10, 11, 11 ] ], knots = [
-        [ 0, 3, 4, 5 ],
-        [ 0, 3, 5 ],
-    ], continuity = 1 )
+    # s = sdot.SplineGrid( [ 1, 2, 1 ], knots = [ [ 0, 3, 4 ] ], continuity = 1 )
+    s = sdot.SplineGrid( [ [ 1, 2 ], [ 2, 2 ], [ 0, 1 ], [ 1, 2 ] ], continuity = 0 )
+    # s = sdot.SplineGrid( [ 1, 2, 1, 3 ], continuity = 0 )
     g = s.normalized_version()
 
-    xs = numpy.linspace( 0, 5, 100 )
     from matplotlib import pyplot
-    for y in numpy.linspace( 0, 5, 3 ):
+    xs = numpy.linspace( 0, 3, 100 )
+    for y in numpy.linspace( 0, 1, 5 ):
         ys = [ g[ x, y ] for x in xs ]
         pyplot.plot( xs, ys )
     pyplot.show()

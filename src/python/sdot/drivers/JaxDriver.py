@@ -135,8 +135,8 @@ class JaxDriver:
                            *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
             Mutable (output) arrays come first, matching the nanobind convention.
         """
-        input_tensors = to_tensor_list( inputs )
-        np_dtype      = np.dtype( self.dtype )
+        input_tensors, reversed_input_tensors = to_tensor_list( inputs )
+        np_dtype = np.dtype( self.dtype )
 
         fwd_shapes = tuple( jax.ShapeDtypeStruct( shape, np_dtype ) for shape in out_shapes )
         bwd_shapes = tuple( jax.ShapeDtypeStruct( t.shape, np_dtype ) for t in input_tensors )
@@ -145,7 +145,7 @@ class JaxDriver:
         def op( *jax_inputs ):
             def fwd_cb( *cb_inputs ):
                 np_outputs = [ np.empty( shape, dtype = np_dtype ) for shape in out_shapes ]
-                forward_func( *np_outputs, *cb_inputs )
+                forward_func( *np_outputs, *reversed_input_tensors( cb_inputs ) )
                 return tuple( np_outputs )
             return jax.pure_callback( fwd_cb, fwd_shapes, *jax_inputs )
 
@@ -159,11 +159,11 @@ class JaxDriver:
             in_residuals  = residuals[ n_out: ]
 
             def bwd_cb( *cb_args ):
-                np_outs  = cb_args[ :n_out ]
-                np_grads = cb_args[ n_out : 2 * n_out ]
-                np_ins   = cb_args[ 2 * n_out: ]
                 np_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
-                backward_func( *np_grad_inputs, *np_outs, *np_grads, *np_ins )
+                np_inputs = cb_args[ 2 * n_out: ]
+                np_grads = cb_args[ n_out : 2 * n_out ]
+                np_outs = cb_args[ :n_out ]
+                backward_func( *reversed_input_tensors( np_grad_inputs ), *np_outs, *np_grads, *reversed_input_tensors( np_inputs ) )
                 return tuple( np_grad_inputs )
 
             return jax.pure_callback( bwd_cb, bwd_shapes, *out_residuals, *grad_outputs, *in_residuals )

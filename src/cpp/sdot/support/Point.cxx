@@ -24,6 +24,15 @@ UTP DTP::Point( const auto &values ) requires( requires { values.size(); } ) : P
         content[ i ] = 0;
 }
 
+UTP DTP::Point( PI size, auto &&value ) {
+    if constexpr ( ct_size < 0 )
+        content.resize( size, value );
+    else
+        ASSERT( size == ct_size );
+    for( auto &v : content )
+        v = value;
+}
+
 UTP DTP::Point( PI size ) {
     if constexpr ( ct_size < 0 )
         content.resize( size );

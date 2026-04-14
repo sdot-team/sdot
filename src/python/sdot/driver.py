@@ -207,9 +207,9 @@ class DriverProxy:
             text = text.replace( k, str( v ) )
 
         bmap = {
-            "SDOT_NANOBIND_ARCH": self.normalized_device_type,
+            "SDOT_NANOBIND_ARCH": f"nanobind::device::{ self.normalized_device_type }",
             "SDOT_SCALAR_TYPE"  : self.normalized_dtype,
-            "SDOT_ARCH"         : self.normalized_device_type,
+            "SDOT_ARCH"         : str.capitalize( self.normalized_device_type ),
         }
         for k, v in bmap.items():
             text = text.replace( k, v )

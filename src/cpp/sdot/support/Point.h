@@ -22,6 +22,7 @@ public:
 
     T_U          Point                   ( const std::initializer_list<U> &values );
     /**/         Point                   ( const auto &values ) requires( requires { values.size(); } );
+    /**/         Point                   ( PI size, auto &&value );
     /**/         Point                   ( PI size = ct_size );
 
     T_Up         operator std::array<U,p>() const;

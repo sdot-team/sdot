@@ -345,20 +345,38 @@ def _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields
     return out
 
 
-def to_tensor_list( obj ) -> list:
+def to_tensor_list( obj ) -> tuple[ list, callable ]:
+    """ return
+     * the list of tensors contained in obj
+     * a callable that takes a list of tensors and return it in the original obj shape
+    """
     if isinstance( obj, ( tuple, list ) ):
-        res = []
+        tensor_list = []
+        callables = []
+        offsets = [ 0 ]
         for o in obj:
-            res += to_tensor_list( o )
-        return res
+            r, c = to_tensor_list( o )
+
+            offsets.append( offsets[ -1 ] + len( r ) )
+            callables.append( c )
+            tensor_list += r
+
+        def reverse( lst ):
+            items = []
+            for n, callable in enumerate( callables ):
+                items.append( callable( lst[ offsets[ n + 0 ] : offsets[ n + 1 ] ] ) )
+            return type( obj )( items )
+
+        return tensor_list, reverse
 
     if isinstance( obj, numpy.ndarray ):
-        return [ driver.array( obj ) ]
+        return [ driver.array( obj ) ], lambda lst: lst[ 0 ]
 
     if isinstance( obj, driver.array_type ):
-        return [ obj ]
+        return [ obj ], lambda lst: lst[ 0 ]
 
     raise RuntimeError( f"Unable to transform object of type { type( obj ) } to tensor list" )
+
 
 
 def flat_tensor_list( distribution ) -> list:

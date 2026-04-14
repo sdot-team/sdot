@@ -74,6 +74,42 @@ UTP DTP::Vec DTP::solve( const Vec &vec ) const {
     return res;
 }
 
+UTP DTP::Vec DTP::solve_ge( Vec b ) const {
+    const PI n = size();
+    SimpleSquareMatrix A = *this;
+
+    // forward elimination with partial pivoting
+    for ( PI p = 0; p < n; ++p ) {
+        PI pivot = p;
+        for ( PI r = p + 1; r < n; ++r )
+            if ( std::abs( A( r, p ) ) > std::abs( A( pivot, p ) ) )
+                pivot = r;
+        for ( PI c = p; c < n; ++c ) std::swap( A( p, c ), A( pivot, c ) );
+        std::swap( b[ p ], b[ pivot ] );
+
+        if ( A( p, p ) == T( 0 ) ) continue;  // zero pivot: degenerate row, leave as 0
+
+        const T inv = T( 1 ) / A( p, p );
+        for ( PI r = p + 1; r < n; ++r ) {
+            const T factor = A( r, p ) * inv;
+            for ( PI c = p + 1; c < n; ++c )
+                A( r, c ) -= factor * A( p, c );
+            b[ r ] -= factor * b[ p ];
+        }
+    }
+
+    // back substitution (x initialised to 0 so zero-pivot rows stay 0)
+    Vec x( n );
+    for ( PI i = 0; i < n; ++i ) x[ i ] = T( 0 );
+    for ( PI p = n; p-- > 0; ) {
+        if ( A( p, p ) == T( 0 ) ) continue;
+        T s = b[ p ];
+        for ( PI q = p + 1; q < n; ++q ) s -= A( p, q ) * x[ q ];
+        x[ p ] = s / A( p, p );
+    }
+    return x;
+}
+
 #undef UTP
 #undef DTP
 
