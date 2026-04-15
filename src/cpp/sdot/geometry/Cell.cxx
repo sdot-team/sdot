@@ -381,7 +381,7 @@ UTP void DTP::check_consistency( TF eps ) const {
 
         // check pos
         SimpleSquareMatrix<TF,ct_dim,Arch> m( dim() );
-        Point<TF,ct_dim,Arch> x = pf();
+        DsVec<TF,ct_dim,Arch> x = pf();
         for( PI r = 0; r < dim(); ++r ) {
             for( PI c = 0; c < dim(); ++c )
                 m( r, c ) = cuts[ v.cut_indices[ r ] ].dir[ c ];

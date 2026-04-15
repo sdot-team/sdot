@@ -67,7 +67,7 @@ UTP DTP DTP::cholesky() const {
 
 UTP DTP::Vec DTP::solve( const Vec &vec ) const {
     T d = determinant();
-    Vec res( size() );
+    Vec res( Size(), size() );
     T sgn = 1;
     for( PI c = 0; c < size(); ++c, sgn = -sgn )
         res[ c ] = with_replaced_col( c, vec ).determinant() / d;
@@ -99,12 +99,15 @@ UTP DTP::Vec DTP::solve_ge( Vec b ) const {
     }
 
     // back substitution (x initialised to 0 so zero-pivot rows stay 0)
-    Vec x( n );
-    for ( PI i = 0; i < n; ++i ) x[ i ] = T( 0 );
+    Vec x( Size(), n );
+    for ( PI i = 0; i < n; ++i )
+        x[ i ] = T( 0 );
     for ( PI p = n; p-- > 0; ) {
-        if ( A( p, p ) == T( 0 ) ) continue;
+        if ( A( p, p ) == T( 0 ) )
+            continue;
         T s = b[ p ];
-        for ( PI q = p + 1; q < n; ++q ) s -= A( p, q ) * x[ q ];
+        for ( PI q = p + 1; q < n; ++q )
+            s -= A( p, q ) * x[ q ];
         x[ p ] = s / A( p, p );
     }
     return x;

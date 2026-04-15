@@ -9,27 +9,28 @@ namespace sdot {
 template<class TF,class Arch,class _CellInfo,class _CutInfo>
 class Cell<TF,2,Arch,_CellInfo,_CutInfo> {
 public:
-    using               CellInfo = _CellInfo;
-    using               CutInfo  = _CutInfo;
+    using                CellInfo = _CellInfo;
+    using                CutInfo  = _CutInfo;
 
-    static constexpr PI ct_dim   = 2;
+    static constexpr int ct_dim   = 2;
+    static constexpr PI  dim      = 2;
 
-    using               Pt       = Point<TF,ct_dim,Arch>;
-    using               It       = Point<PI,ct_dim,Arch>;
-    using               VI       = std::vector<int>;
-    using               VF       = std::vector<TF>;
+    using                Pt       = DsVec<TF,ct_dim,Arch>;
+    using                It       = DsVec<PI,ct_dim,Arch>;
+    using                VI       = std::vector<int>;
+    using                VF       = std::vector<TF>;
 
     struct Edge {
         bool    outside_the_cut() const { return vertex_dot > 0; }
-        bool    inside_the_cut() const { return ! ( vertex_dot > 0 ); }
+        bool    inside_the_cut () const { return ! ( vertex_dot > 0 ); }
 
         // cut data
-        Pt      cut_dir;
+        Pt      cut_dir        = { Size(), 2 };
         TF      cut_dot;
-        CutInfo info;
+        CutInfo info           = { 2 };
 
         // vertex data
-        Pt      vertex_pos;
+        Pt      vertex_pos     = { Size(), 2 };
         TF      vertex_dot;
         bool    vertex_ext;
     };
@@ -44,12 +45,12 @@ public:
 
     using           Edges                         = std::vector<Edge>;
 
-    /**/            Cell                          ( int dim = ct_dim );
+    /**/            Cell                          ( PI dim = ct_dim );
 
-    static Cell     axis_aligned_hypercube        ( Pt p0, Pt p1, CellInfo cell_info = {}, CutInfo cut_info = {} );
-    static Cell     axis_aligned_simplex          ( int dim, TF length, CellInfo cell_info = {}, CutInfo cut_info = {} );
-    static Cell     englobing_simplex             ( Pt center, TF radius, CellInfo cell_info = {}, CutInfo cut_info = {} );
-    static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = {}, CutInfo cut_info = {} );
+    static Cell     axis_aligned_hypercube        ( Pt p0, Pt p1, CellInfo cell_info = { 2 }, CutInfo cut_info = { 2 } );
+    static Cell     axis_aligned_simplex          ( int dim, TF length, CellInfo cell_info = { 2 }, CutInfo cut_info = { 2 } );
+    static Cell     englobing_simplex             ( Pt center, TF radius, CellInfo cell_info = { 2 }, CutInfo cut_info = { 2 } );
+    static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = { 2 }, CutInfo cut_info = { 2 } );
 
     void            for_each_simplex              ( auto &&func ) const;
     void            for_each_vertex               ( auto &&func ) const;
@@ -67,7 +68,6 @@ public:
     PI              nb_vertices                   () const { return edges.size(); }
     Pt              min_pos                       ( Pt base_pt ) const;
     Pt              max_pos                       ( Pt base_pt ) const;
-    PI              dim                           () const { return ct_dim; }
 
     void            cut                           ( const Pt &cut_dir, TF cut_dot, CutInfo cut_info );
 

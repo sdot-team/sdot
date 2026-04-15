@@ -54,10 +54,17 @@ DTP::Tensor( std::span<U> l ) : Tensor( sdot::Shape(), { l.size() } ) {
 UTP DTP::Tensor( sdot::Shape, Extent ext ) : extent( ext ), strides( TV::contiguous_strides( ext ) ), storage( total_size( ext ) ) {
 }
 
-UTP DTP::Tensor() {
-    for( PI i = 0; i < ct_rank; ++i ) {
-        strides[ i ] = 0;
-        extent[ i ] = 0;
+UTP DTP::Tensor( Rank, PI rank ) : extent( Size(), rank, 0 ), strides( Size(), rank, 0 ), storage( 0 ) {
+}
+
+UTP template<class T2,int ct_rank2>
+DTP::Tensor( const TensorView<T2,ct_rank2,Arch> &src ) : Tensor( sdot::Shape(), src.sizes() ) {
+    if ( src.is_contiguous() ) {
+        std::copy( src.data(), src.data() + size(), data() );
+    } else {
+        src.for_each_index( [&]( const auto &idx ) {
+            view()( idx ) = src( idx );
+        } );
     }
 }
 
@@ -133,8 +140,17 @@ UTP auto DTP::squeeze( PI axis ) {
     return TV( *this ).squeeze( axis );
 }
 
+UTP typename DTP::Extent DTP::sizes() const {
+    return extent;
+}
+
 UTP bool DTP::empty() const {
-    return std::none_of( extent.begin(), extent.end(), []( auto a ) { return a != 0; } );
+    if ( rank() == 0 )
+        return false;
+    for ( PI i = 0; i < sizes().size(); ++i )
+        if ( extent[ i ] == 0 )
+            return true;
+    return false;
 }
 
 UTP PI DTP::size( PI d ) const {
@@ -142,8 +158,7 @@ UTP PI DTP::size( PI d ) const {
 }
 
 UTP PI DTP::size() const {
-    static_assert( ct_rank == 1 );
-    return size( 0 );
+    return total_size( extent );
 }
 
 UTP const T* DTP::data() const {

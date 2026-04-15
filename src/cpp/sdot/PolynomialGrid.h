@@ -1,6 +1,6 @@
 #pragma once
 
-#include "support/PointFactory.h"
+#include "support/DsVecFactory.h"
 #include "support/TensorView.h"
 #include "geometry/Cell.h"
 
@@ -11,17 +11,17 @@ namespace sdot {
 ///
 template<class TF,int ct_dim,int order,class Arch>
 struct PolynomialGrid {
-    static constexpr PI nb_coeffs             = std::pow( order + 1, ct_dim ); ///< Q_k: (order+1)^dim
-    using               PiFactory             = PointFactory<PI,ct_dim,Arch>;
-    using               PfFactory             = PointFactory<TF,ct_dim,Arch>;
+    static constexpr PI nb_coeffs             = pow_rec( order + 1, ct_dim ); ///< Q_k: (order+1)^dim
+    using               PiFactory             = DsVecFactory<PI,ct_dim,Arch>;
+    using               PfFactory             = DsVecFactory<TF,ct_dim,Arch>;
     using               Values                = TensorView<const TF,ct_dim+1,Arch>; ///< [ x, y, z, num_poly ]
     using               Bounds                = TensorView<const TF,2,Arch>;
     using               Knots                 = std::vector<TensorView<const TF,1,Arch>>;
-    using               Pp                    = Point<PI,ct_dim+1,Arch>;
-    using               Pi                    = Point<PI,ct_dim,Arch>;
-    using               Pt                    = Point<TF,ct_dim,Arch>;
+    using               Pp                    = DsVec<PI,ct_dim+1,Arch>;
+    using               Pi                    = DsVec<PI,ct_dim,Arch>;
+    using               Pt                    = DsVec<TF,ct_dim,Arch>;
 
-    struct              Polynomial            { Point<TF,nb_coeffs,Arch> coeffs; /** Q_k basis, lex multi-index (p0,p1,...) each in 0..order. Ex order=1 dim=2: 1 y x xy */ };
+    struct              Polynomial            { Polynomial() : coeffs( Size(), nb_coeffs ) {} DsVec<TF,nb_coeffs,Arch> coeffs; /** Q_k basis, lex multi-index (p0,p1,...) each in 0..order. Ex order=1 dim=2: 1 y x xy */ };
 
     /**/                PolynomialGrid        ( Values values, Bounds bounds, const Knots &knots, bool normalize );
 
@@ -74,8 +74,6 @@ private:
     Values       values;
     Bounds       bounds;
     Knots        knots;
-    PiFactory    pif;
-    PfFactory    pf;
 };
 
 //

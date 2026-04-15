@@ -13,19 +13,19 @@ public:
 
     static constexpr PI ct_dim   = 1;
 
-    using               Pt       = Point<TF,ct_dim,Arch>;
-    using               It       = Point<PI,ct_dim,Arch>;
+    using               Pt       = DsVec<TF,ct_dim,Arch>;
+    using               It       = DsVec<PI,ct_dim,Arch>;
     using               VI       = std::vector<int>;
     using               VF       = std::vector<TF>;
 
     struct Bound {
         // cut data
-        Pt      cut_dir;
+        Pt      cut_dir    = { Size(), 1 };
         TF      cut_dot;
-        CutInfo info;
+        CutInfo info       = { 1 };
 
         // vertex data
-        Pt      vertex_pos;
+        Pt      vertex_pos = { Size(), 1 };
         bool    vertex_ext;
     };
 
@@ -37,6 +37,8 @@ public:
     static Cell     axis_aligned_simplex          ( int dim, TF length, CellInfo cell_info = {}, CutInfo cut_info = {} );
     static Cell     englobing_simplex             ( Pt center, TF radius, CellInfo cell_info = {}, CutInfo cut_info = {} );
     static Cell     simplex                       ( int dim, std::span<Pt> points, CellInfo cell_info = {}, CutInfo cut_info = {} );
+
+    friend std::ostream& operator<<( std::ostream &os, const Cell &p ) { for ( const auto &v : p.bounds ) os << "\n  pos: " << v.vertex_pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot << " ext: " << v.vertex_ext; return os; }
 
     void            for_each_vertex               ( auto &&func ) const;
     //void          for_each_face                 ( auto &&func ) const;
@@ -59,8 +61,5 @@ public:
 };
 
 } // namespace sdot
-
-template<class TF,class Arch>
-std::ostream& operator<<( std::ostream& os, const sdot::Cell<TF,1,Arch> &p );
 
 #include "Cell_1D.cxx"

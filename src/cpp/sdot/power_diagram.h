@@ -188,7 +188,6 @@ auto ot_system( Bsp<AdditionalPtData,TF,ct_dim,Cpu> &bsp, TensorView<const TF,1,
         TF sum_der = 0;
         TF measure = 0;
         primitive.for_each_piece( cell, [&]( auto &piece, const auto &...piece_data ) {
-
             // facets
             piece.for_each_facet( [&]( const auto &facet ) {
                 if ( facet.info.global_dirac_index == PI( -1 ) )

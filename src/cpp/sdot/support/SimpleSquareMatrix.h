@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../support/Point.h"
+#include "../support/DsVec.h"
 
 namespace sdot {
 
@@ -8,41 +8,38 @@ namespace sdot {
 template<class T,int ct_size,class Arch>
 class SimpleSquareMatrix {
 public:
-    using       value_type              = T;
-    using       Content                 = Point<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
-    using       Vec                     = Point<T,ct_size,Arch>;
+    struct             EigenSystem             { DsVec<T,ct_size,Arch> values;   /* ascending order */ SimpleSquareMatrix<T,ct_size,Arch> vectors;  /* row i = eigenvector i */ };
+    using              value_type              = T;
+    using              Content                 = DsVec<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
+    using              Vec                     = DsVec<T,ct_size,Arch>;
 
-    /**/        SimpleSquareMatrix      ( PI size ) : content( size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/               SimpleSquareMatrix      ( PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
 
-    static auto with_func               ( PI size, auto &&func );
+    static auto        with_func               ( PI size, auto &&func );
 
-    const T&    operator()              ( PI r, PI c ) const { return content[ r * size() + c ]; }
-    T&          operator()              ( PI r, PI c ) { return content[ r * size() + c ]; }
+    const T&           operator()              ( PI r, PI c ) const { return _content[ r * size() + c ]; }
+    T&                 operator()              ( PI r, PI c ) { return _content[ r * size() + c ]; }
 
-    struct EigenSystem {
-        Point<T,ct_size,Arch>              values;   ///< eigenvalues, ascending order
-        SimpleSquareMatrix<T,ct_size,Arch> vectors;  ///< row i = eigenvector i
-    };
 
     auto               without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch>;
     auto               with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
     EigenSystem        eigen_system            () const;
     T                  determinant             () const;
     SimpleSquareMatrix cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
-    Vec                solve                   ( const Vec &vec ) const;
     Vec                solve_ge                ( Vec b ) const;   ///< Gaussian elimination with partial pivoting; zero pivot → x[p]=0 (handles degenerate cells)
+    Vec                solve                   ( const Vec &vec ) const;
     PI                 size                    ( PI ) const { return size(); }
     PI                 size                    () const { return ct_size >= 0 ? ct_size : _size; }
 
-    const T*           data                    () const { return content.data(); }
-    T*                 data                    () { return content.data(); }
+    const T*           data                    () const { return _content.data(); }
+    T*                 data                    () { return _content.data(); }
 
-    auto               begin                   () const { return content.begin(); }
-    auto               begin                   () { return content.begin(); }
-    auto               end                     () const { return content.end(); }
-    auto               end                     () { return content.end(); }
+    auto               begin                   () const { return _content.begin(); }
+    auto               begin                   () { return _content.begin(); }
+    auto               end                     () const { return _content.end(); }
+    auto               end                     () { return _content.end(); }
 
-    Content            content;
+    Content            _content;
     PI                 _size;
 };
 

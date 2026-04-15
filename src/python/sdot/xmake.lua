@@ -4,6 +4,7 @@
 
 add_rules( "mode.release", "mode.debug" )
 set_defaultmode( "release" )
+-- set_defaultmode( "debug" )
 
 -- ──────────────────────────── dépendances ────────────────────────────────────
 
@@ -55,6 +56,7 @@ target( os.getenv( "SDOT_BINDING_NAME" ) )
 
     -- nanobind recommends -fno-strict-aliasing
     add_cxxflags( "-fno-strict-aliasing" )
+    add_cxxflags( "-g3" )
     if is_mode("release") then
         add_defines("NB_COMPACT_ASSERTIONS")
     end

@@ -9,31 +9,31 @@ namespace sdot {
 #define UTP template<class TF,class Arch,class CellInfo,class CutInfo>
 #define DTP Cell<TF,2,Arch,CellInfo,CutInfo>
 
-UTP DTP::Cell( int actual_dim ) {
+UTP DTP::Cell( PI actual_dim ) : info( actual_dim ) {
     ASSERT( actual_dim == ct_dim );
     edges = {
         Edge{
-            .cut_dir = { 0, -1 },
+            .cut_dir = { Values(), 0, -1 },
             .cut_dot = 0,
-            .info = {},
+            .info = { 2 },
 
-            .vertex_pos = { 0, 0 },
+            .vertex_pos = { Values(), 0, 0 },
             .vertex_ext = 1
         },
         Edge{
-            .cut_dir = { 1, 1 },
+            .cut_dir = { Values(), 1, 1 },
             .cut_dot = 1,
-            .info = {},
+            .info = { 2 },
 
-            .vertex_pos = { 1, 0 },
+            .vertex_pos = { Values(), 1, 0 },
             .vertex_ext = 1
         },
         Edge{
-            .cut_dir = { -1, 0 },
+            .cut_dir = { Values(), -1, 0 },
             .cut_dot = 0,
-            .info = {},
+            .info = { 2 },
 
-            .vertex_pos = { 0, 1 },
+            .vertex_pos = { Values(), 0, 1 },
             .vertex_ext = 1
         }
     };
@@ -52,35 +52,35 @@ UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1, CellInfo cell_info, CutInfo c
     res.info = cell_info;
     res.edges = {
         Edge{
-            .cut_dir = { 0, -1 },
+            .cut_dir = { Values(), 0, -1 },
             .cut_dot = - p0[ 1 ],
             .info = cut_info,
 
-            .vertex_pos = { p0[ 0 ], p0[ 1 ] },
+            .vertex_pos = { Values(), p0[ 0 ], p0[ 1 ] },
             .vertex_ext = false
         },
         Edge{
-            .cut_dir = { 1, 0 },
+            .cut_dir = { Values(), 1, 0 },
             .cut_dot = p1[ 0 ],
             .info = cut_info,
 
-            .vertex_pos = { p1[ 0 ], p0[ 1 ] },
+            .vertex_pos = { Values(), p1[ 0 ], p0[ 1 ] },
             .vertex_ext = false
         },
         Edge{
-            .cut_dir = { 0, 1 },
+            .cut_dir = { Values(), 0, 1 },
             .cut_dot = p1[ 1 ],
             .info = cut_info,
 
-            .vertex_pos = { p1[ 0 ], p1[ 1 ] },
+            .vertex_pos = { Values(), p1[ 0 ], p1[ 1 ] },
             .vertex_ext = false
         },
         Edge{
-            .cut_dir = { -1, 0 },
+            .cut_dir = { Values(), -1, 0 },
             .cut_dot = - p0[ 0 ],
             .info = cut_info,
 
-            .vertex_pos = { p0[ 0 ], p1[ 1 ] },
+            .vertex_pos = { Values(), p0[ 0 ], p1[ 1 ] },
             .vertex_ext = false
         }
     };
@@ -309,7 +309,7 @@ UTP void DTP::for_each_simplex( auto &&func ) const {
     if ( edges.empty() )
         return;
 
-    std::array<Pt,3> vertices;
+    DsVec<Pt,3> vertices( Size(), 3, Size(), 2 );
     vertices[ 0 ] = edges[ 0 ].vertex_pos;
     for( PI i = 3; i <= edges.size(); ++i ) {
         vertices[ 1 ] = edges[ i - 2 ].vertex_pos;

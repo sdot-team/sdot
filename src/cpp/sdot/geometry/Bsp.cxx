@@ -181,7 +181,7 @@ UTP typename DTP::Cell DTP::make_new_cell( const Cell &base_cell, const Pt &spli
         TF sp = dot( pt_data[ beg ].position, split_dir );
         for( PI ind = beg + 1; ind < end; ++ind )
             sp = max( sp, dot( pt_data[ ind ].position, split_dir ) );
-        new_cell.cut( split_dir, sp, {} );
+        new_cell.cut( split_dir, sp, { dim } );
     };
 
     base_cell.for_each_cut( [&]( const Pt split_dir, TF, const auto & ) {
@@ -211,8 +211,9 @@ UTP void DTP::display_rec( std::ostream &os, PI node_index, std::string prefix )
 
 UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potentials, auto &&func ) {
     using TR = DECAYED_TYPE_OF( TF( 0 ) + sorted_potentials( 0 ) );
+    using NewCell = sdot::Cell<TR,ct_dim,Arch>;
 
-    sdot::Cell<TR,ct_dim,Arch> base_cell = primitive.template englobing_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
+    NewCell base_cell = primitive.template englobing_cell<TR>( dim, { dim }, { dim } );
 
     for( PI n0 = 0; n0 < pt_data.size(); ++n0 ) {
         const TR p0 = sorted_potentials( n0 );
@@ -220,7 +221,7 @@ UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potential
         const TR w0 = pt_data[ n0 ].weight;
         const PI i0 = pt_data[ n0 ].index;
 
-        sdot::Cell<TR,ct_dim,Arch> cell = base_cell;
+        NewCell cell = base_cell;
         cell.info.global_dirac_index = i0;
         cell.info.local_dirac_index = n0;
         cell.info.dirac_position = v0;
@@ -243,13 +244,14 @@ UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potential
 
             auto off = s0 + ( 1 + ( p0 - p1 ) / n ) / 2 * ( s1 - s0 );
 
-            cell.cut( dir, off, {
-                .global_dirac_index = i1,
-                .local_dirac_index = n1,
-                .dirac_position = v1,
-                .dirac_weight = w1,
-                .potential = p1
-            } );
+            typename NewCell::CutInfo ci( dim );
+            ci.global_dirac_index = i1;
+            ci.local_dirac_index = n1;
+            ci.dirac_position = v1;
+            ci.dirac_weight = w1;
+            ci.potential = p1;
+
+            cell.cut( dir, off, ci );
         }
 
         func( cell );
@@ -258,6 +260,7 @@ UTP void DTP::for_each_cell( const auto &primitive, const auto &sorted_potential
 
 UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &sorted_potentials ) {
     using TR = DECAYED_TYPE_OF( TF( 0 ) + sorted_potentials( 0 ) );
+    using NewCell = sdot::Cell<TR,ct_dim,Arch>;
 
     const PI n0 = cell.info.local_dirac_index;
     const TR p0 = sorted_potentials( n0 );
@@ -265,7 +268,7 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
     const TR w0 = pt_data[ n0 ].weight;
     const PI i0 = pt_data[ n0 ].index;
 
-    sdot::Cell<TR,ct_dim,Arch> res = primitive.template englobing_cell<TR>( dim, {}, { .global_dirac_index = PI( -1 ) } );
+    NewCell res = primitive.template englobing_cell<TR>( dim, { dim }, { dim } );
     res.info.global_dirac_index = i0;
     res.info.local_dirac_index = n0;
     res.info.dirac_position = v0;
@@ -274,13 +277,14 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
 
     cell.for_each_cut( [&]( const auto &cut_dir, const auto &cut_dot, const auto &cut_info ) {
         if ( cut_info.global_dirac_index == PI( -1 ) ) {
-            res.cut( cut_dir, cut_dot, {
-                .global_dirac_index = cut_info.global_dirac_index,
-                .local_dirac_index = cut_info.local_dirac_index,
-                .dirac_position = cut_info.dirac_position,
-                .dirac_weight = cut_info.dirac_weight,
-                .potential = cut_info.potential
-            } );
+            typename NewCell::CutInfo ci( dim );
+            ci.global_dirac_index = cut_info.global_dirac_index;
+            ci.local_dirac_index = cut_info.local_dirac_index;
+            ci.dirac_position = cut_info.dirac_position;
+            ci.dirac_weight = cut_info.dirac_weight;
+            ci.potential = cut_info.potential;
+
+            res.cut( cut_dir, cut_dot, ci );
             return;
         }
 
@@ -298,13 +302,14 @@ UTP auto DTP::remake_cell( const auto &cell, const auto &primitive, const auto &
 
         auto new_dot = s0 + ( 1 + ( p0 - p1 ) / n ) / 2 * ( s1 - s0 );
 
-        res.cut( new_dir, new_dot, {
-            .global_dirac_index = i1,
-            .local_dirac_index = n1,
-            .dirac_position = v1,
-            .dirac_weight = w1,
-            .potential = p1
-        } );
+        typename NewCell::CutInfo ci( dim );
+        ci.global_dirac_index = i1;
+        ci.local_dirac_index = n1;
+        ci.dirac_position = v1;
+        ci.dirac_weight = w1;
+        ci.potential = p1;
+
+        res.cut( new_dir, new_dot, ci );
     } );
 
     return res;

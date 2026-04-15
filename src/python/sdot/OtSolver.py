@@ -14,6 +14,13 @@ class OtSolver:
     """
 
     def __init__( self, bsp: Bsp, g: Distribution, linear_solver: LinearSolver = None ):
+        # normalize g
+        while True:
+            old_g = g
+            g = g.normalized_version()
+            if g == old_g:
+                break
+
         self.sorted_potentials = None
         self.bsp = bsp
         self.g = g
@@ -236,12 +243,12 @@ class OtSolver:
                 namespace nb = nanobind;
                 using namespace sdot;
 
-                using NA = nanobind::device::SDOT_NANOBIND_ARCH;
+                using NA = SDOT_NANOBIND_ARCH;
                 using TF = SDOT_SCALAR_TYPE;
 
                 using Arch = ArchFor<NA>::type;
-                using AF = nb::ndarray<const TF,NA>; // const array
-                using MF = nb::ndarray<TF,NA>; // mutable array
+                using AF = std::optional<nb::ndarray<const TF,NA>>; // const array
+                using MF = std::optional<nb::ndarray<TF,NA>>; // mutable array
 
                 using BspType = Bsp<PI,TF,2,Arch>;
 

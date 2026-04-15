@@ -19,8 +19,11 @@ class Bsp:
 
     """
 
-    def __init__( self, positions, weights, max_points_per_cell = 30, max_points_per_node = 1e6, normalize_weights = True ):
+    def __init__( self, positions, weights = None, max_points_per_cell = 30, max_points_per_node = 1e6, normalize_weights = True ):
         config = BspConfig( max_points_per_cell, max_points_per_node )
+
+        if weights is None:
+            weights = driver.ones( positions.shape[ 0 ] )
 
         # normalization of weights
         if normalize_weights:
@@ -116,7 +119,7 @@ class Bsp:
                 namespace nb = nanobind;
                 using namespace sdot;
 
-                using NA = nanobind::device::SDOT_NANOBIND_ARCH;
+                using NA = SDOT_NANOBIND_ARCH;
                 using TF = SDOT_SCALAR_TYPE;
 
                 using Arch = ArchFor<NA>::type;
@@ -172,8 +175,9 @@ class Bsp:
 
         # get the binding
         geometry_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "sdot" / "geometry"
+        support_dir = Path( __file__ ).parents[ 2 ] / "cpp" / "sdot" / "support"
         bnd = driver.import_bindings( dylib_name, src_func, [
-            geometry_dir / "SimpleSquareMatrix_eigen.cpp",
+            support_dir / "SimpleSquareMatrix_eigen.cpp",
             geometry_dir / "VtkOutput.cpp",
         ] )
 

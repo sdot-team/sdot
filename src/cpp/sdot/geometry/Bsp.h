@@ -1,7 +1,7 @@
 #pragma once
 
+#include "../support/SimpleSquareMatrix.h"
 #include "../support/TensorView.h"
-#include "SimpleSquareMatrix.h"
 #include "Cell.h"
 
 namespace sdot {
@@ -12,10 +12,10 @@ class Bsp {
 public:
     using Cell = sdot::Cell<TF,ct_dim,Arch>;  ///< cell
 
-    using Cm   = Point<TF,(ct_dim>=0?ct_dim*(ct_dim+1)/2:-1),Arch>; ///< covariance matrix
-    using Pd   = Point<TF,(ct_dim>=0?ct_dim+1:-1),Arch>; ///< point + 1 item
-    using Pf   = PointFactory<TF,ct_dim,Arch>; ///<
-    using Pt   = Point<TF,ct_dim,Arch>; ///< point
+    using Cm   = DsVec<TF,(ct_dim>=0?ct_dim*(ct_dim+1)/2:-1),Arch>; ///< covariance matrix
+    using Pd   = DsVec<TF,(ct_dim>=0?ct_dim+1:-1),Arch>; ///< point + 1 item
+    using Pf   = DsVecFactory<TF,ct_dim,Arch>; ///<
+    using Pt   = DsVec<TF,ct_dim,Arch>; ///< point
     using Ad   = AdditionalPtData; ///<
     using Ci   = std::array<PI,2>; ///< child indices
     using Sm   = std::array<TF,2>; ///< split maximums

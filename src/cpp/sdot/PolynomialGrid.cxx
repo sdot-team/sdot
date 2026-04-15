@@ -7,15 +7,15 @@ namespace sdot {
 #define UTP template<class TF,int ct_dim,int order,class Arch>
 #define DTP PolynomialGrid<TF,ct_dim,order,Arch>
 
-UTP DTP::PolynomialGrid( Values values, Bounds bounds, const Knots &knots, bool normalize ) : normalize( normalize ), values( values ), bounds( bounds ), knots( knots ), pif( values.rank() ), pf( values.rank() ) {
-    ASSERT( values.rank() == knots.size() + 1 );
-    ASSERT( values.size( knots.size() ) == nb_coeffs );
+UTP DTP::PolynomialGrid( Values values, Bounds bounds, const Knots &knots, bool normalize ) : normalize( normalize ), values( values ), bounds( bounds ), knots( knots ) {
+    ASSERT_EQ( values.rank(), knots.size() + 1 );
+    ASSERT_EQ( values.size( knots.size() ), nb_coeffs );
 
     // coeff_values
     coeff_values = 1;
     if ( normalize ) {
         TF measure = 0;
-        for_each_in_range( pif.zeros(), grid_shape(), [&]( const auto &index ) {
+        for_each_in_range( Pi::zeros( dim() ), grid_shape(), [&]( const auto &index ) {
             measure += piece_integral( index, polynomial( index ) );
         } );
         coeff_values = 1 / measure;
@@ -45,7 +45,7 @@ UTP TF DTP::piece_integral( Pi index, const Polynomial &pol ) const {
     const PI n = dim();
 
     // Per-axis moments m[d][k] = ∫_{a_d}^{b_d} x^k dx,  k = 0..order
-    Point<TF, ct_dim * ( order + 1 ), Arch> m;
+    DsVec<TF, ct_dim * ( order + 1 ), Arch> m( Size(), ct_dim * ( order + 1 ) );
     for( PI d = 0; d < n; ++d ) {
         const TF a = knot( d, index[ d ]     );
         const TF b = knot( d, index[ d ] + 1 );
@@ -112,7 +112,7 @@ UTP auto DTP::simplex_facet_integral( std::span<const Pt> vertices, const Polyno
     TF res = 0;
 
     // Centroid in ambient R^n
-    Pt centroid( n );
+    Pt centroid( Size(), n );
     if constexpr ( order >= 1 ) {
         for ( const auto &p : vertices )
             centroid += p;
@@ -184,7 +184,7 @@ UTP auto DTP::simplex_integral( std::span<const Pt> vertices, const Polynomial &
     const TF V = J.determinant() / factorial( n );
 
     // Centroid for order-1 moments
-    Pt centroid( n );
+    Pt centroid( Size(), n );
     if constexpr ( order >= 1 ) {
         for ( const auto &p : vertices )
             centroid += p;
@@ -278,8 +278,8 @@ UTP void DTP::_for_each_piece( const auto &cell, const auto &func, auto beg, aut
     for( PI v = beg[ d ]; v < end[ d ]; ++v ) {
         auto new_cell = cell;
 
-        new_cell.cut( pf.value_at( d, - 1 ), - knot( d, v + 0 ), {} );
-        new_cell.cut( pf.value_at( d, + 1 ), + knot( d, v + 1 ), {} );
+        new_cell.cut( Pt::value_at( dim(), d, - 1 ), - knot( d, v + 0 ), { dim() } );
+        new_cell.cut( Pt::value_at( dim(), d, + 1 ), + knot( d, v + 1 ), { dim() } );
 
         cur[ d ] = v;
         _for_each_piece( new_cell, func, beg, end, cur, d + 1 );
@@ -293,14 +293,14 @@ UTP void DTP::for_each_piece( const auto &cell, auto &&func ) const {
         TODO;
 
     // FP boundaries
-    const Pt mi = cell.min_pos( pf.ones() );
-    const Pt ma = cell.max_pos( pf.zeros() );
+    const Pt mi = cell.min_pos( Pt::ones( dim() ) );
+    const Pt ma = cell.max_pos( Pt::zeros( dim() ) );
     for( PI d = 0; d < dim(); ++d )
         if ( ma[ d ] <= mi[ d ] )
             return;
 
     // I boundaries
-    sdot::PointFactory<PI,ct_dim,Arch> pif( dim() );
+    sdot::DsVecFactory<PI,ct_dim,Arch> pif( dim() );
     auto b = pif.with_func( [&]( PI d ) { return floor( mi[ d ] * values.size( d ) ); } );
     auto e = pif.with_func( [&]( PI d ) { return ceil( ma[ d ] * values.size( d ) ); } );
 
@@ -312,7 +312,7 @@ UTP void DTP::for_each_piece( const auto &cell, auto &&func ) const {
 UTP T_U auto DTP::englobing_cell( PI /* dim */, typename Cell<U,ct_dim,Arch>::CellInfo cell_info, typename Cell<U,ct_dim,Arch>::CutInfo cut_info ) const -> Cell<U,ct_dim,Arch>{
     if ( ! bounds.empty() )
         TODO;
-    return Cell<U,ct_dim,Arch>::axis_aligned_hypercube( pf.zeros(), pf.ones(), cell_info, cut_info );
+    return Cell<U,ct_dim,Arch>::axis_aligned_hypercube( Pt::zeros( dim() ), Pt::ones( dim() ), cell_info, cut_info );
 }
 
 

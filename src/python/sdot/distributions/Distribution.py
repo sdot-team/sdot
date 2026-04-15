@@ -33,3 +33,6 @@ class Distribution:
     @property
     def tensors( self ) -> list:
         raise RuntimeError( f"To be redefined for { type( self ) }" )
+
+    def normalized_version( self ):
+        return self

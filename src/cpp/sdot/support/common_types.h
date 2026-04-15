@@ -25,13 +25,22 @@ inline static const char *type_name( CtType<FP64> ) { return "FP64"; }
 inline static const char *type_name( CtType<FP32> ) { return "FP32"; }
 
 // ctor args
+struct SizeAndCtorArgs {};
+struct Reserved {};
+struct Values {};
 struct Shape {};
+struct Rank {};
+struct Size {};
 
 template<class TF> TF factorial( TF n ) {
     TF res = 1;
     for ( PI i = 2; i <= n; ++i )
         res *= TF( i );
     return res;
+}
+
+template<class TF> constexpr TF pow_rec( TF v, PI n ) {
+    return n ? pow_rec( v, n - 1 ) * v : 1;
 }
 
 } // namespace sdot

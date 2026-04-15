@@ -1,7 +1,7 @@
 #pragma once
 
 #include "StrideIterator.h"
-#include "PointFactory.h"
+#include "DsVecFactory.h"
 #include "TensorView.h"
 #include "ASSERT.h"
 #include "TODO.h"
@@ -19,10 +19,10 @@ UTP DTP::TensorView( T *data, Sizes sizes, Strides strides ) : _strides( strides
 UTP DTP::TensorView( T *data, Sizes sizes ) : _strides( contiguous_strides( sizes ) ), _sizes( sizes ), _ptr( reinterpret_cast<Ptr>( data ) ) {
 }
 
-UTP DTP::TensorView( T *data, PI size ) : _sizes{ size }, _strides{ sizeof( T ) }, _ptr( reinterpret_cast<Ptr>( data ) ) {
+UTP DTP::TensorView( T *data, PI size ) : _sizes( Values(), size ), _strides( Values(), sizeof( T ) ), _ptr( reinterpret_cast<Ptr>( data ) ) {
 }
 
-UTP DTP::TensorView() : _strides( ct_rank >= 0 ? ct_rank : 0 ), _sizes( ct_rank >= 0 ? ct_rank : 0 ), _ptr( nullptr ) {
+UTP DTP::TensorView( Rank, PI rank ) : _strides( Size(), rank, 0 ), _sizes( Size(), rank, 0 ), _ptr( nullptr ) {
 }
 
 UTP T& DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
@@ -65,8 +65,29 @@ UTP PI DTP::size() const {
     return size( 0 );
 }
 
+UTP std::byte DTP::_sentinel{};
+
+UTP auto DTP::make_invalid( PI rank ) {
+    TensorView res( Rank(), rank );
+    res._ptr = reinterpret_cast<Ptr>( &_sentinel );
+    return res;
+}
+
+UTP bool DTP::is_invalid() const {
+    return _ptr == reinterpret_cast<const Ptr>( &_sentinel );
+}
+
+UTP bool DTP::is_valid() const {
+    return _ptr != reinterpret_cast<const Ptr>( &_sentinel );
+}
+
 UTP bool DTP::empty() const {
-    return rank() == 0 ? _ptr == nullptr : std::none_of( _sizes.begin(), _sizes.end(), []( auto a ) { return a != 0; } );
+    if ( rank() == 0 )
+        return _ptr == nullptr;
+    for ( PI i = 0; i < rank(); ++i )
+        if ( _sizes[ i ] == 0 )
+            return true;
+    return false;
 }
 
 UTP PI DTP::rank() const {
@@ -95,9 +116,32 @@ UTP auto DTP::row( PI index ) const {
     return squeeze( 0, index );
 }
 
+UTP auto DTP::unsqueeze() const {
+    // Append a trailing dimension of size 1.
+    // The stride for the new axis is sizeof(T): matches contiguous layout when the source is contiguous.
+    // For a size-1 axis the stride value is irrelevant for correctness, but we set it consistently.
+    constexpr int new_ct_rank = ct_rank >= 0 ? ct_rank + 1 : -1;
+    return TensorView<T,new_ct_rank,Arch>( data(), _sizes.with_pushed_value( PI( 1 ) ), _strides.with_pushed_value( SI( sizeof( T ) ) ) );
+}
+
+UTP bool DTP::is_contiguous() const {
+    // Check that strides match the standard row-major (C-order) contiguous layout.
+    SI expected = sizeof( T );
+    for ( int i = int( rank() ) - 1; i >= 0; --i ) {
+        if ( _strides[ i ] != expected )
+            return false;
+        expected *= SI( _sizes[ i ] );
+    }
+    return true;
+}
+
 UTP void DTP::for_each_index( auto &&func, PI sub ) const {
-    PointFactory<PI,ct_rank,Arch> pf( rank() );
-    Point<PI,ct_rank,Arch> index = pf.zeros();
+    DsVecFactory<PI,ct_rank,Arch> pf( rank() );
+    if ( rank() == 0 ) {
+        func( pf.zeros() );
+        return;
+    }
+    DsVec<PI,ct_rank,Arch> index = pf.zeros();
     while ( true ) {
         func( index );
 
@@ -112,10 +156,12 @@ UTP void DTP::for_each_index( auto &&func, PI sub ) const {
 }
 
 UTP auto DTP::contiguous_strides( const Sizes &ext ) -> Strides {
-    Strides s;
-    s[ ct_rank - 1 ] = sizeof( T );
-    for( int i = ct_rank - 2; i >= 0; --i )
-        s[ i ] = s[ i + 1 ] * ext[ i + 1 ];
+    Strides s( Size(), ext.size() );
+    if ( ext.size() ) {
+        s[ ext.size() - 1 ] = sizeof( T );
+        for( int i = int( ext.size() ) - 2; i >= 0; --i )
+            s[ i ] = s[ i + 1 ] * ext[ i + 1 ];
+    }
     return s;
 }
 

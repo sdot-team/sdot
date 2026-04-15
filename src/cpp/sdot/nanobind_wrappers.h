@@ -2,9 +2,13 @@
 
 #include "support/common_macros.h"
 #include "support/vector_map.h"
+#include "support/P.h"
 #include "support/TensorView.h"
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/vector.h>
 #include <nanobind/ndarray.h>
+#include <optional>
 
 namespace sdot {
 
@@ -17,10 +21,10 @@ template<> struct ArchFor<nanobind::device::cpu> { using type = Cpu; };
 template<> struct ArchFor<nanobind::device::cuda> { using type = Cuda; };
 #endif
 
-// to sdot type versions -------------------------------------------------------------------------------
+// to sdot type versions (non-optional) ---------------------------------------------------------------
 template<class TF,class TA>
 static auto tensor_view_1( const nanobind::ndarray<TF,TA> &v ) {
-    if ( v.ndim() != 1 || v.size() == 0 ) return TensorView<TF,1,typename ArchFor<TA>::type>{};
+    ASSERT( v.ndim() == 1 );
     std::array<SI,1> strides{ v.stride( 0 ) * SI( sizeof( TF ) ) };
     std::array<PI,1> extent { v.shape( 0 ) };
     return TensorView<TF,1,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
@@ -28,7 +32,7 @@ static auto tensor_view_1( const nanobind::ndarray<TF,TA> &v ) {
 
 template<class TF,class TA>
 static auto tensor_view_2( const nanobind::ndarray<TF,TA> &v ) {
-    if ( v.ndim() != 2 || v.size() == 0 ) return TensorView<TF,2,typename ArchFor<TA>::type>{};
+    ASSERT( v.ndim() == 2 );
     std::array<SI,2> strides{ v.stride( 0 ) * SI( sizeof( TF ) ), v.stride( 1 ) * SI( sizeof( TF ) ) };
     std::array<PI,2> extent { v.shape( 0 ), v.shape( 1 ) };
     return TensorView<TF,2,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
@@ -36,24 +40,44 @@ static auto tensor_view_2( const nanobind::ndarray<TF,TA> &v ) {
 
 template<class TF,class TA>
 static auto tensor_view_3( const nanobind::ndarray<TF,TA> &v ) {
-    if ( v.ndim() != 3 || v.size() == 0 ) return TensorView<TF,3,typename ArchFor<TA>::type>{};
+    ASSERT( v.ndim() == 3 );
     std::array<SI,3> strides{ v.stride( 0 ) * SI( sizeof( TF ) ), v.stride( 1 ) * SI( sizeof( TF ) ), v.stride( 2 ) * SI( sizeof( TF ) ) };
     std::array<PI,3> extent { v.shape( 0 ), v.shape( 1 ), v.shape( 2 ) };
     return TensorView<TF,3,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
 }
 
+// to sdot type versions (optional — None → invalid TensorView with _ptr==nullptr) --------------------
 template<class TF,class TA>
-static auto tensor_views_1( const std::vector<nanobind::ndarray<TF,TA>> &v ) {
+static auto tensor_view_1( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
+    using TV = TensorView<TF,1,typename ArchFor<TA>::type>;
+    return v ? tensor_view_1( *v ) : TV::make_invalid( 1 );
+}
+
+template<class TF,class TA>
+static auto tensor_view_2( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
+    using TV = TensorView<TF,2,typename ArchFor<TA>::type>;
+    return v ? tensor_view_2( *v ) : TV::make_invalid( 2 );
+}
+
+template<class TF,class TA>
+static auto tensor_view_3( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
+    using TV = TensorView<TF,3,typename ArchFor<TA>::type>;
+    return v ? tensor_view_3( *v ) : TV::make_invalid( 3 );
+}
+
+// vectors of views -----------------------------------------------------------------------------------
+template<class TF,class TA>
+static auto tensor_views_1( const std::vector<std::optional<nanobind::ndarray<TF,TA>>> &v ) {
     return vector_map( v, []( const auto &i ) { return tensor_view_1( i ); } );
 }
 
 template<class TF,class TA>
-static auto tensor_views_2( const std::vector<nanobind::ndarray<TF,TA>> &v ) {
+static auto tensor_views_2( const std::vector<std::optional<nanobind::ndarray<TF,TA>>> &v ) {
     return vector_map( v, []( const auto &i ) { return tensor_view_2( i ); } );
 }
 
 template<class TF,class TA>
-static auto tensor_views_3( const std::vector<nanobind::ndarray<TF,TA>> &v ) {
+static auto tensor_views_3( const std::vector<std::optional<nanobind::ndarray<TF,TA>>> &v ) {
     return vector_map( v, []( const auto &i ) { return tensor_view_3( i ); } );
 }
 

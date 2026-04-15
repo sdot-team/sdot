@@ -149,15 +149,15 @@ class Cell:
                         return ss.str();
                     } )
                     .def( "cut", []( CellType &self, const AF dir, TF dot ) {
-                        self.cut( to_Pt( dir ), dot, { } );
+                        self.cut( to_Pt( dir ), dot, { self.dim } );
                     } )
                     .def( "dim", []( CellType &self ) {
-                        return self.dim();
+                        return self.dim;
                     } )
                     .def( "vertices", []( const CellType &self ) {
-                        Tensor<TF,2,Cpu> res( Shape(), { self.nb_vertices(), self.dim() } );
+                        Tensor<TF,2,Cpu> res( Shape(), { Values(), self.nb_vertices(), self.dim } );
                         self.for_each_vertex( [&]( Pt pos, PI index ) {
-                            for( PI d = 0; d < self.dim(); ++d )
+                            for( PI d = 0; d < self.dim; ++d )
                                 res( index, d ) = pos[ d ];
                         } );
                         return to_ndarray_2d( res );

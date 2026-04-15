@@ -49,7 +49,7 @@ class SplineGrid( Distribution ):
         poly_coeffs_shapes = [ self.values.shape[ batch_version + d ] - 1 for d in range( dim ) ] + \
             [ PolynomialGrid.nb_coeffs_for( self.values.ndim, self.polynomial_order ) ]
 
-        poly_coeffs, = driver.forward( mod.forward, mod.backward, [ poly_coeffs_shapes ], self.values, self.frame or driver.t2([[]]), self.knots or [] )
+        poly_coeffs, = driver.forward( mod.forward, mod.backward, [ poly_coeffs_shapes ], self.values, self.frame, self.knots or [] )
 
         return PolynomialGrid( poly_coeffs, self.frame, self.knots )
 
@@ -72,8 +72,8 @@ def _src_poly_coeff_of_normalized_version( ct_dim, continuity ):
         using namespace sdot;
         using TF = SDOT_SCALAR_TYPE;
 
-        using AF = nb::ndarray<const TF,SDOT_NANOBIND_ARCH>;
-        using MF = nb::ndarray<TF,SDOT_NANOBIND_ARCH>;
+        using AF = std::optional<nb::ndarray<const TF,SDOT_NANOBIND_ARCH>>;
+        using MF = std::optional<nb::ndarray<TF,SDOT_NANOBIND_ARCH>>;
 
         NB_MODULE( SDOT_BINDING_NAME, m ) {
             m.def( "forward", []( MF _poly_coeffs, AF _values, AF _frame, const std::vector<AF> &_knots ) {

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../geometry/SimpleSquareMatrix.h"
-#include "../support/common_types.h"
-#include "../support/ASSERT.h"
-#include "../support/TODO.h"
+#include "SimpleSquareMatrix.h"
+#include "common_types.h"
+#include "ASSERT.h"
+#include "TODO.h"
 #include <vector>
 #include <random>
 #include <cmath>
@@ -95,7 +95,7 @@ struct TaylorScalar<TF,3> {
      */
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
         using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
-        using Vec = Point<TF, -1, Cpu>;
+        using Vec = DsVec<TF, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
         const PI nd = n();
@@ -108,14 +108,17 @@ struct TaylorScalar<TF,3> {
                 H( i, j ) = d2( i, j ) + d2( j, i );
 
         // ── quadratic minimiser x* = H^{-1}(-c1) ────────────────────────────
-        Vec neg_c1( nd );
-        for ( PI i = 0; i < nd; ++i ) neg_c1[ i ] = -c1[ i ];
+        Vec neg_c1( Size(), nd );
+        for ( PI i = 0; i < nd; ++i )
+            neg_c1[ i ] = -c1[ i ];
         Vec x_star = H.solve( neg_c1 );
 
         // ── f(x*) = c0 + ½ c1·x*  (since H x* = -c1) ───────────────────────
         TF f_star = c0;
-        for ( PI i = 0; i < nd; ++i ) f_star += TF(0.5) * c1[ i ] * x_star[ i ];
-        if ( f_star >= TF(0) ) return;   // polynomial is always non-negative
+        for ( PI i = 0; i < nd; ++i )
+            f_star += TF(0.5) * c1[ i ] * x_star[ i ];
+        if ( f_star >= TF(0) )
+            return;   // polynomial is always non-negative
 
         const TF r = std::sqrt( -TF(2) * f_star );
 
@@ -125,10 +128,11 @@ struct TaylorScalar<TF,3> {
         // normal of ellipsoid at boundary point parameterised by unit u:
         //   x(u) = x* + r L^{-T} u   =>   ∇f = H(x-x*) = r L u
         auto compute_Lu = [&]( const Vec &u ) {
-            Vec Lu( nd );
+            Vec Lu( Size(), nd );
             for ( PI i = 0; i < nd; ++i ) {
                 TF s = TF(0);
-                for ( PI k = 0; k <= i; ++k ) s += L( i, k ) * u[ k ];
+                for ( PI k = 0; k <= i; ++k )
+                    s += L( i, k ) * u[ k ];
                 Lu[ i ] = s;
             }
             return Lu;
@@ -137,15 +141,15 @@ struct TaylorScalar<TF,3> {
         // ── candidate unit directions on S^{n-1} ────────────────────────────
         std::vector<Vec> candidates;
         if ( nd == 1 ) {
-            Vec u1( 1 ), u2( 1 );
-            u1[ 0 ] = TF(  1 );
+            Vec u1( Size(), 1 ), u2( Size(), 1 );
+            u1[ 0 ] = TF( +1 );
             u2[ 0 ] = TF( -1 );
             candidates = { u1, u2 };
         } else if ( nd == 2 ) {
             constexpr TF pi2 = TF( 6.283185307179586 );
             for ( PI k = 0; k < n_cuts; ++k ) {
                 TF theta = pi2 * k / n_cuts;
-                Vec u( 2 );
+                Vec u( Size(), 2 );
                 u[ 0 ] = std::cos( theta );
                 u[ 1 ] = std::sin( theta );
                 candidates.push_back( u );
@@ -154,7 +158,7 @@ struct TaylorScalar<TF,3> {
             std::mt19937_64 rng( 0 );
             std::normal_distribution<double> nd_dist;
             for ( PI k = 0; k < n_cuts; ++k ) {
-                Vec u( nd );
+                Vec u( Size(), nd );
                 double norm = 0;
                 for ( PI d = 0; d < nd; ++d ) {
                     double v = nd_dist( rng );
@@ -171,15 +175,18 @@ struct TaylorScalar<TF,3> {
         for ( auto &u : candidates ) {
             Vec Lu = compute_Lu( u );
 
-            TF Lu_dot_xstar = TF(0);
-            for ( PI d = 0; d < nd; ++d ) Lu_dot_xstar += Lu[ d ] * x_star[ d ];
+            TF Lu_dot_xstar = TF( 0 );
+            for ( PI d = 0; d < nd; ++d )
+                Lu_dot_xstar += Lu[ d ] * x_star[ d ];
             const TF dot_val = -Lu_dot_xstar - r;   // (-Lu)·x(u) = -(Lu·x*) - r
 
-            if ( dot_val < TF(0) ) continue;   // would remove the origin
+            if ( dot_val < TF(0) )
+                continue; // would remove the origin
 
-            Pt dir( nd );
-            for ( PI d = 0; d < nd; ++d ) dir[ d ] = -Lu[ d ];
-            cell.cut( dir, dot_val, {} );
+            Pt dir( Size(), nd );
+            for ( PI d = 0; d < nd; ++d )
+                dir[ d ] = -Lu[ d ];
+            cell.cut( dir, dot_val, { nd } );
         }
     }
 
@@ -447,7 +454,7 @@ struct TaylorScalar<TF,4> {
     /// uses only c0, c1, d2 (order-2 quadratic approximation).
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
         using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
-        using Vec = Point<TF, -1, Cpu>;
+        using Vec = DsVec<TF, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
         const PI nd = n();

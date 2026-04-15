@@ -24,13 +24,21 @@ public:
     T_U         Tensor     ( std::initializer_list<U> l );
     /* */       Tensor     ( sdot::Shape, Extent ext );
     T_U         Tensor     ( std::span<U> l );
-    /* */       Tensor     ();
+    /* */       Tensor     ( Rank, PI rank );
+
+    /// Construct from any TensorView (possibly strided, possibly const-qualified element type).
+    /// Uses memcpy when source is contiguous, element-wise copy otherwise.
+    template<class T2,int ct_rank2>
+    /* */       Tensor     ( const TensorView<T2,ct_rank2,Arch> &src );
 
     CTV         view       () const;
     TV          view       ();
 
     operator    CTV        () const;
     operator    TV         ();
+
+    bool        is_invalid () const { return false; }
+
 
     const T&    operator() ( PI i0, PI i1, PI i2 ) const;
     const T&    operator() ( PI i0, PI i1 ) const;
@@ -51,10 +59,12 @@ public:
     auto        squeeze    ( PI axis ) const;
     auto        squeeze    ( PI axis );
 
+    Extent      sizes      () const;
     bool        empty      () const;
 
     PI          size       ( PI d ) const;
     PI          size       () const;
+    PI          rank       () const { return extent.size(); }
 
     const T*    data       () const;
     T*          data       ();

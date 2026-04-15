@@ -1,8 +1,8 @@
 #pragma once
 
 #include "RecursiveMapOfUniqueSortedIndices.h"
-#include "../support/PointFactory.h"
-#include "SimpleSquareMatrix.h"
+#include "../support/SimpleSquareMatrix.h"
+#include "../support/DsVecFactory.h"
 #include "VtkOutput.h"
 
 namespace sdot {
@@ -11,7 +11,9 @@ namespace sdot {
 //
 template<class TF,int ct_dim,class Arch>
 struct StdCellInfo {
-    using Pt  = Point<TF,ct_dim,Arch>;
+    using Pt  = DsVec<TF,ct_dim,Arch>;
+
+    /**/  StdCellInfo( PI dim ) : dirac_position( Size(), dim ) {}
 
     PI    global_dirac_index = PI( -1 );
     PI    local_dirac_index = PI( -1 );
@@ -32,10 +34,10 @@ public:
 
     using       FaceMap  = MapOfUniqueSortedIndices<(ct_dim>1?ct_dim-2:-1),PI,FaceCorr>;
     using       ItemMap  = RecursiveMapOfUniqueSortedIndices<ct_dim,PI,ItemCorr>;
-    using       PF       = PointFactory<TF,ct_dim,Arch>;
-    using       DF       = PointFactory<PI,ct_dim,Arch>;
-    using       Pt       = Point<TF,ct_dim,Arch>;
-    using       It       = Point<PI,ct_dim,Arch>;
+    using       PF       = DsVecFactory<TF,ct_dim,Arch>;
+    using       DF       = DsVecFactory<PI,ct_dim,Arch>;
+    using       Pt       = DsVec<TF,ct_dim,Arch>;
+    using       It       = DsVec<PI,ct_dim,Arch>;
     using       VF       = std::vector<TF>;
     using       VI       = std::vector<int>;
 

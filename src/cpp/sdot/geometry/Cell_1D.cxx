@@ -9,23 +9,23 @@ namespace sdot {
 #define UTP template<class TF,class Arch,class CellInfo,class CutInfo>
 #define DTP Cell<TF,1,Arch,CellInfo,CutInfo>
 
-UTP DTP::Cell( int actual_dim ) {
+UTP DTP::Cell( int actual_dim ) : info( 1 ) {
     ASSERT( actual_dim == ct_dim );
     bounds = {
         Bound{
-            .cut_dir = { -1 },
+            .cut_dir = { Values(), -1 },
             .cut_dot = 1,
-            .info = {},
+            .info = { 1 },
 
-            .vertex_pos = { -1 },
+            .vertex_pos = { Values(), -1 },
             .vertex_ext = 1
         },
         Bound{
-            .cut_dir = { +1 },
+            .cut_dir = { Values(), +1 },
             .cut_dot = 1,
-            .info = {},
+            .info = { 1 },
 
-            .vertex_pos = { +1 },
+            .vertex_pos = { Values(), +1 },
             .vertex_ext = 1
         },
     };
@@ -41,19 +41,19 @@ UTP DTP DTP::axis_aligned_hypercube( Pt p0, Pt p1, CellInfo cell_info, CutInfo c
     res.info = cell_info;
     res.bounds = {
         Bound{
-            .cut_dir = { -1 },
+            .cut_dir = { Values(), -1 },
             .cut_dot = - p0[ 0 ],
             .info = cut_info,
 
-            .vertex_pos = { p0[ 0 ] },
+            .vertex_pos = { Values(), p0[ 0 ] },
             .vertex_ext = false
         },
         Bound{
-            .cut_dir = { +1 },
+            .cut_dir = { Values(), +1 },
             .cut_dot = p1[ 0 ],
             .info = cut_info,
 
-            .vertex_pos = { p1[ 0 ] },
+            .vertex_pos = { Values(), p1[ 0 ] },
             .vertex_ext = false
         },
     };
@@ -117,9 +117,3 @@ UTP TF DTP::measure() const {
 
 } // namespace sdot
 
-template<class TF,class Arch>
-std::ostream& operator<<( std::ostream &os, const sdot::Cell<TF,1,Arch> &p ) {
-    for ( const auto &v : p.bounds )
-        os << "\n  pos: " << v.vertex_pos << " dir: " << v.cut_dir << " dot: " << v.cut_dot << " ext: " << v.vertex_ext;
-    return os;
-}

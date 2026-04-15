@@ -404,7 +404,7 @@ def tensor_conv_for( type, name, rank ):
         tt = "const TF"
         if "MF" in type:
             tt = "TF"
-        return f"std::vector<TensorView<{ tt },{ rank },Arch>> { name }( _{ name }.size() ); for( PI i = 0; i < _{ name }.size(); ++i ) { name }[ i ] = tensor_view_{ rank }( _{ name }[ i ] );"
+        return f"auto { name } = tensor_views_{ rank }( _{ name } );"
 
     return f"auto { name } = tensor_view_{ rank }( _{ name } );"
 

@@ -375,6 +375,9 @@ def to_tensor_list( obj ) -> tuple[ list, callable ]:
     if isinstance( obj, driver.array_type ):
         return [ obj ], lambda lst: lst[ 0 ]
 
+    if obj is None:
+        return [], lambda lst: None
+
     raise RuntimeError( f"Unable to transform object of type { type( obj ) } to tensor list" )
 
 
@@ -389,13 +392,13 @@ def flat_tensor_list( distribution ) -> list:
                     res.append( item )
             else:
                 for _ in range( getattr( distribution, a_data.main_axis_name ) ):
-                    res.append( driver.empty( [] ) )
+                    res.append( None )
         if isinstance( a_data, TensorField ):
             v = getattr( distribution, a_name )
             if v is not None:
                 res.append( v )
             else:
-                res.append( driver.empty( [] ) )
+                res.append( None )
     return res
 
 def unflat_tensor_list( distribution, out: list, inp: list ):
