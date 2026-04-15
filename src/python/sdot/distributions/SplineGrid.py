@@ -1,11 +1,11 @@
-from sdot.distributions.helpers.distribution_methods import TensorField, ListOfTensorFields, generate_distribution_methods, Distribution, driver
+from sdot.object_with_tensors._methods import TensorField, ListOfTensorFields, object_with_tensors, Distribution, driver
 # from itertools import product as iproduct
 from .PolynomialGrid import PolynomialGrid
 from typing import TYPE_CHECKING
 # import numpy as np
 
 
-@generate_distribution_methods
+@object_with_tensors
 class SplineGrid( Distribution ):
     """
     values      : tensor[ x, y, z, ... ]

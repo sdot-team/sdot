@@ -265,14 +265,14 @@ void _spline_grid_to_polynomial_coeffs_forward( CtInt<0> /* batch_version */, Ct
 
             for ( PI p = 0; p < nb_prev; ++p ) {
                 in_idx[ dim ] = p;
-                for ( PI i = 0; i < N;  ++i ) { in_idx[ d ] = i; v_line[ i ] = cur.view()( in_idx ); }
+                for ( PI i = 0; i < N;  ++i ) { in_idx[ d ] = i; v_line[ i ] = cur( in_idx ); }
 
                 Spline1d<TF>::values_to_coeffs( c_line, v_line, x[ d ] );
 
                 for ( PI i = 0; i < Ni; ++i ) {
                     out_idx[ d ] = i;
                     const TF cq[4] = { c_line[i].c0, c_line[i].c1, c_line[i].c2, c_line[i].c3 };
-                    for ( PI q = 0; q < 4; ++q ) { out_idx[ dim ] = p * 4 + q; nxt.view()( out_idx ) = cq[ q ]; }
+                    for ( PI q = 0; q < 4; ++q ) { out_idx[ dim ] = p * 4 + q; nxt( out_idx ) = cq[ q ]; }
                 }
             }
         } );
@@ -280,8 +280,8 @@ void _spline_grid_to_polynomial_coeffs_forward( CtInt<0> /* batch_version */, Ct
         cur = std::move( nxt );
     }
 
-    cur.view().for_each_index( [&]( const auto &idx ) {
-        poly_coeffs( idx ) = cur.view()( idx );
+    cur.for_each_index( [&]( const auto &idx ) {
+        poly_coeffs( idx ) = cur( idx );
     } );
 }
 
@@ -322,12 +322,12 @@ void _spline_grid_to_polynomial_coeffs_backward( CtInt<0> /* batch_version */, C
                 for ( PI j = d+1; j < dim; ++j ) { in_idx[j] = cs[j-1]; out_idx[j] = cs[j-1]; }
                 for ( PI p = 0; p < nb_prev; ++p ) {
                     in_idx[ dim ] = p;
-                    for ( PI i = 0; i < N; ++i ) { in_idx[ d ] = i; v_line[ i ] = fwd[ d ].view()( in_idx ); }
+                    for ( PI i = 0; i < N; ++i ) { in_idx[ d ] = i; v_line[ i ] = fwd[ d ]( in_idx ); }
                     Spline1d<TF>::values_to_coeffs( c_line, v_line, x[ d ] );
                     for ( PI i = 0; i < N - 1; ++i ) {
                         out_idx[ d ] = i;
                         const TF cq[4] = { c_line[i].c0, c_line[i].c1, c_line[i].c2, c_line[i].c3 };
-                        for ( PI q = 0; q < 4; ++q ) { out_idx[ dim ] = p * 4 + q; fwd[ d + 1 ].view()( out_idx ) = cq[ q ]; }
+                        for ( PI q = 0; q < 4; ++q ) { out_idx[ dim ] = p * 4 + q; fwd[ d + 1 ]( out_idx ) = cq[ q ]; }
                     }
                 }
             } );
@@ -360,10 +360,10 @@ void _spline_grid_to_polynomial_coeffs_backward( CtInt<0> /* batch_version */, C
 
                     for ( PI i = 0; i < Ni; ++i ) {
                         out_idx[ d ] = i;
-                        out_idx[ dim ] = p*4+0; g_c_line[i].c0 = g_cur.view()( out_idx );
-                        out_idx[ dim ] = p*4+1; g_c_line[i].c1 = g_cur.view()( out_idx );
-                        out_idx[ dim ] = p*4+2; g_c_line[i].c2 = g_cur.view()( out_idx );
-                        out_idx[ dim ] = p*4+3; g_c_line[i].c3 = g_cur.view()( out_idx );
+                        out_idx[ dim ] = p*4+0; g_c_line[i].c0 = g_cur( out_idx );
+                        out_idx[ dim ] = p*4+1; g_c_line[i].c1 = g_cur( out_idx );
+                        out_idx[ dim ] = p*4+2; g_c_line[i].c2 = g_cur( out_idx );
+                        out_idx[ dim ] = p*4+3; g_c_line[i].c3 = g_cur( out_idx );
                     }
 
                     std::fill( g_v_line.begin(), g_v_line.end(), TF( 0 ) );
@@ -373,7 +373,7 @@ void _spline_grid_to_polynomial_coeffs_backward( CtInt<0> /* batch_version */, C
                     in_idx[ dim ] = p;
                     for ( PI i = 0; i < N; ++i ) {
                         in_idx[ d ] = i;
-                        g_prev.view()( in_idx ) += g_v_line[ i ];
+                        g_prev( in_idx ) += g_v_line[ i ];
                         grad_frame( 0,     d ) += g_x_line[ i ];
                         grad_frame( d + 1, d ) += g_x_line[ i ] * knots[ d ][ i ];
                         grad_knots[ d ][ i ]   += g_x_line[ i ] * frame( d + 1, d );
@@ -386,7 +386,7 @@ void _spline_grid_to_polynomial_coeffs_backward( CtInt<0> /* batch_version */, C
 
         // g_cur has shape (N0,..,N_{dim-1}, 1); propagate to grad_values
         values.for_each_index( [&]( const auto &idx ) {
-            grad_values( idx ) += g_cur.view()( idx.with_pushed_value( 0 ) );
+            grad_values( idx ) += g_cur( idx.with_pushed_value( 0 ) );
         } );
     } else {
         throw std::runtime_error( "Only continuity=1 is supported for now" );

@@ -1,4 +1,4 @@
-from sdot.distributions.helpers.distribution_methods import flat_tensor_list
+from sdot.object_with_tensors._methods import flat_tensor_list
 from icecream.builtins import install
 import numpy
 import sdot

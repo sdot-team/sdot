@@ -1,4 +1,4 @@
-from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list, to_tensor_list
+# from sdot.object_with_tensors._methods import unflatten_args, flat_tensor_list, to_tensor_list
 from ..BatchOfOtPlans import BatchOfOtPlans
 from ..driver import driver
 import jax.numpy as jnp
@@ -57,6 +57,10 @@ class JaxDriver:
     def array_type( self ):
         return jax.Array
 
+    @property
+    def int_type( self ):
+        return jnp.int64
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )
@@ -73,15 +77,25 @@ class JaxDriver:
         """ make a rank 0 tensor """
         return self.tn( tensor, 0 )
 
-    def tn( self, tensor, ndim, name = None ):
+    def tn( self, tensor, ndim, name = None, dtype = None ):
         """ make a rank ndim tensor """
         if tensor is None:
             return tensor
-        res = jnp.asarray( tensor, dtype = self.dtype, device = self.device )
+
+        if dtype is None or dtype is float:
+            dtype = self.dtype
+        elif dtype is int:
+            dtype = self.int_type
+        else:
+            raise NotImplementedError( f"for { dtype }" )
+
+        res = jnp.asarray( tensor, dtype = dtype, device = self.device )
+
         if ndim is not None and res.ndim != ndim:
             if name is not None:
                 raise IndexError( f"expecting for field '{ name }' a { ndim }d tensor, but { res.ndim }d was provided." )
             raise IndexError( f"expecting a { ndim }d tensor, but { res.ndim }d was provided." )
+
         return res
 
     def i1( self, tensor ):
@@ -101,8 +115,8 @@ class JaxDriver:
     def linspace( self, a, b, n ):
         return jnp.linspace( a, b, n, dtype = self.dtype, device = self.device )
 
-    def empty( self, shape ):
-        return jnp.zeros( shape, dtype = self.dtype, device = self.device )
+    def empty( self, shape, dtype = None ):
+        return jnp.zeros( shape, dtype = dtype or self.dtype, device = self.device )
 
     def expand_dims( self, tensor, index ):
         return jnp.expand_dims( tensor, index )
@@ -225,76 +239,76 @@ class JaxDriver:
         final = unpack( result.x )
         return final if is_list else final[ 0 ]
 
-    def plan( self, bindings, f, g ):
-        np_dtype = np.dtype( self.dtype )
+    # def plan( self, bindings, f, g ):
+    #     np_dtype = np.dtype( self.dtype )
 
-        input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
-        dirac_xs = input_tensors[ 0 ]
+    #     input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
+    #     dirac_xs = input_tensors[ 0 ]
 
-        batch_size = dirac_xs.shape[ 0 ]
-        nb_diracs  = dirac_xs.shape[ 1 ]
-        dim        = dirac_xs.shape[ 2 ]
+    #     batch_size = dirac_xs.shape[ 0 ]
+    #     nb_diracs  = dirac_xs.shape[ 1 ]
+    #     dim        = dirac_xs.shape[ 2 ]
 
-        fwd_shapes = (
-            jax.ShapeDtypeStruct( ( batch_size, ),                self.dtype ),
-            jax.ShapeDtypeStruct( ( batch_size, nb_diracs, dim ), self.dtype ),
-            jax.ShapeDtypeStruct( ( batch_size, nb_diracs ),      self.dtype ),
-            jax.ShapeDtypeStruct( ( batch_size, nb_diracs, 2 ),   self.dtype ),
-        )
-        bwd_shapes = tuple(
-            jax.ShapeDtypeStruct( t.shape, t.dtype ) for t in input_tensors
-        )
+    #     fwd_shapes = (
+    #         jax.ShapeDtypeStruct( ( batch_size, ),                self.dtype ),
+    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs, dim ), self.dtype ),
+    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs ),      self.dtype ),
+    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs, 2 ),   self.dtype ),
+    #     )
+    #     bwd_shapes = tuple(
+    #         jax.ShapeDtypeStruct( t.shape, t.dtype ) for t in input_tensors
+    #     )
 
-        @jax.custom_vjp
-        def sdot_op( *inputs ):
-            def fwd_cb( *jax_inputs ):
-                np_inputs = [ np.asarray( x ) for x in jax_inputs ]
+    #     @jax.custom_vjp
+    #     def sdot_op( *inputs ):
+    #         def fwd_cb( *jax_inputs ):
+    #             np_inputs = [ np.asarray( x ) for x in jax_inputs ]
 
-                distances   = np.empty( ( batch_size, ),                dtype = np_dtype )
-                barycenters = np.empty( ( batch_size, nb_diracs, dim ), dtype = np_dtype )
-                potentials  = np.empty( ( batch_size, nb_diracs ),      dtype = np_dtype )
-                cuts        = np.empty( ( batch_size, nb_diracs, 2 ),   dtype = np_dtype )
+    #             distances   = np.empty( ( batch_size, ),                dtype = np_dtype )
+    #             barycenters = np.empty( ( batch_size, nb_diracs, dim ), dtype = np_dtype )
+    #             potentials  = np.empty( ( batch_size, nb_diracs ),      dtype = np_dtype )
+    #             cuts        = np.empty( ( batch_size, nb_diracs, 2 ),   dtype = np_dtype )
 
-                binding_inputs = unflatten_args( f, g, np_inputs )
-                bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
-                return distances, barycenters, potentials, cuts
-            return jax.pure_callback( fwd_cb, fwd_shapes, *inputs )
+    #             binding_inputs = unflatten_args( f, g, np_inputs )
+    #             bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
+    #             return distances, barycenters, potentials, cuts
+    #         return jax.pure_callback( fwd_cb, fwd_shapes, *inputs )
 
-        def sdot_op_fwd( *inputs ):
-            outputs = sdot_op( *inputs )
-            residuals = ( outputs[ 0 ], outputs[ 1 ], outputs[ 2 ], outputs[ 3 ], *inputs )
-            return outputs, residuals
+    #     def sdot_op_fwd( *inputs ):
+    #         outputs = sdot_op( *inputs )
+    #         residuals = ( outputs[ 0 ], outputs[ 1 ], outputs[ 2 ], outputs[ 3 ], *inputs )
+    #         return outputs, residuals
 
-        def sdot_op_bwd( residuals, grads ):
-            distances, barycenters, potentials, cuts = residuals[ 0 ], residuals[ 1 ], residuals[ 2 ], residuals[ 3 ]
-            saved_inputs = residuals[ 4: ]
-            grad_distances, grad_barycenters, grad_potentials, grad_cuts = grads
+    #     def sdot_op_bwd( residuals, grads ):
+    #         distances, barycenters, potentials, cuts = residuals[ 0 ], residuals[ 1 ], residuals[ 2 ], residuals[ 3 ]
+    #         saved_inputs = residuals[ 4: ]
+    #         grad_distances, grad_barycenters, grad_potentials, grad_cuts = grads
 
-            def bwd_cb( *jax_args ):
-                np_args = [ np.asarray( x ) for x in jax_args ]
+    #         def bwd_cb( *jax_args ):
+    #             np_args = [ np.asarray( x ) for x in jax_args ]
 
-                # Order in pure_callback call below: distances, barycenters, potentials, cuts, *saved_inputs, grad_distances, ...
-                np_dist, np_bary, np_pot, np_cuts = np_args[ 0 ], np_args[ 1 ], np_args[ 2 ], np_args[ 3 ]
-                n_in = len( input_tensors )
-                np_inputs = np_args[ 4 : 4 + n_in ]
-                np_grad_out = np_args[ 4 + n_in : ] # grad_distances, grad_barycenters, grad_potentials, grad_cuts
+    #             # Order in pure_callback call below: distances, barycenters, potentials, cuts, *saved_inputs, grad_distances, ...
+    #             np_dist, np_bary, np_pot, np_cuts = np_args[ 0 ], np_args[ 1 ], np_args[ 2 ], np_args[ 3 ]
+    #             n_in = len( input_tensors )
+    #             np_inputs = np_args[ 4 : 4 + n_in ]
+    #             np_grad_out = np_args[ 4 + n_in : ] # grad_distances, grad_barycenters, grad_potentials, grad_cuts
 
-                flat_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
+    #             flat_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
 
-                binding_inputs = unflatten_args( f, g, np_inputs )
-                binding_grad_inputs = unflatten_args( f, g, flat_grad_inputs )
+    #             binding_inputs = unflatten_args( f, g, np_inputs )
+    #             binding_grad_inputs = unflatten_args( f, g, flat_grad_inputs )
 
-                # bindings.backward expects: inputs..., distances, barycenters, potentials, cuts, grad_outputs..., grad_inputs...
-                bindings.backward( *binding_inputs, np_dist, np_bary, np_pot, np_cuts, *np_grad_out, *binding_grad_inputs )
+    #             # bindings.backward expects: inputs..., distances, barycenters, potentials, cuts, grad_outputs..., grad_inputs...
+    #             bindings.backward( *binding_inputs, np_dist, np_bary, np_pot, np_cuts, *np_grad_out, *binding_grad_inputs )
 
-                return tuple( flat_grad_inputs )
+    #             return tuple( flat_grad_inputs )
 
-            return jax.pure_callback(
-                bwd_cb, bwd_shapes,
-                distances, barycenters, potentials, cuts, *saved_inputs,
-                grad_distances, grad_barycenters, grad_potentials, grad_cuts
-            )
+    #         return jax.pure_callback(
+    #             bwd_cb, bwd_shapes,
+    #             distances, barycenters, potentials, cuts, *saved_inputs,
+    #             grad_distances, grad_barycenters, grad_potentials, grad_cuts
+    #         )
 
-        sdot_op.defvjp( sdot_op_fwd, sdot_op_bwd )
+    #     sdot_op.defvjp( sdot_op_fwd, sdot_op_bwd )
 
-        return BatchOfOtPlans( *sdot_op( *input_tensors ) )
+    #     return BatchOfOtPlans( *sdot_op( *input_tensors ) )

@@ -1,5 +1,5 @@
-from .distributions.helpers.distribution_methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
-from .driver import driver, encode_base62, tensor_conv_for
+from sdot.object_with_tensors._methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
+from .driver import driver, tensor_conv_for
 from .distributions.Distribution import Distribution
 from .LinearSolver import LinearSolver
 from .Polynomial import Polynomial

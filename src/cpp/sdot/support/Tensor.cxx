@@ -116,6 +116,13 @@ UTP T& DTP::operator()() {
     return *reinterpret_cast<T *>( bytes() );
 }
 
+UTP const T& DTP::operator()( const auto &indices ) const { return CTV( *this )( indices ); }
+UTP T&       DTP::operator()( const auto &indices )       { return TV(  *this )( indices ); }
+
+UTP void DTP::for_each_index( auto &&func, PI sub ) const { CTV( *this ).for_each_index( FORWARD( func ), sub ); }
+UTP auto DTP::unsqueeze()     const { return CTV( *this ).unsqueeze(); }
+UTP bool DTP::is_contiguous() const { return CTV( *this ).is_contiguous(); }
+
 UTP const T& DTP::operator[]( PI i0 ) const {
     return *reinterpret_cast<const T *>( bytes() + i0 * strides[ 0 ] );
 }

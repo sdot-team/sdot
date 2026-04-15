@@ -1,9 +1,4 @@
-from pathlib import Path
-import importlib
-import textwrap
-import inspect
-import hashlib
-import struct
+from typing import TYPE_CHECKING
 import numpy
 import sys
 import os
@@ -38,6 +33,26 @@ class DriverProxy:
         * SDOT_DTYPE
     """
 
+    if TYPE_CHECKING:
+        def t3( self, tensor ): ...
+        def t2( self, tensor ): ...
+        def t1( self, tensor ): ...
+        def t0( self, tensor ): ...
+        def tn( self, tensor, ndim = None, name = None, dtype = None ): ...
+        def zeros( self, shape ): ...
+        def ones( self, shape ): ...
+        def linspace( self, a, b, n ): ...
+        def empty( self, shape, dtype = None ): ...
+        def expand_dims( self, tensor, index ): ...
+        def repeat( self, tensor, shape ): ...
+        def stack( self, tensors, axis ): ...
+        def linalg_solve( self, A, b ): ...
+        def moveaxis( self, tensor, source, destination ): ...
+        def hstack( self, lst ): ...
+        def forward( self, forward_func, backward_func, out_shapes, *inputs ): ...
+        array_type: type
+        int_type: type
+
     def __init__( self ):
         self.prefered_frameworks = [ 'jax', 'torch' ]
 
@@ -45,7 +60,6 @@ class DriverProxy:
         self._user_device = None
         self._user_dtype = None
 
-        self._dylib_cache = {}
         self._instance = None
 
         if d := os.getenv( "SDOT_FRAMEWORK" ):
@@ -195,135 +209,6 @@ class DriverProxy:
         return getattr( self._instance, name )
 
     # ---------------------------------- helpers ----------------------------------
-    def cpp_src( self, repl: dict[str,any], text: str ):
-        """Dedent a triple-quoted C++ source string and prepend a #line directive
-        pointing back to the Python file/line where the call was made, so that
-        compiler errors link directly to the Python source.
-        """
-
-        text = textwrap.dedent( text ).lstrip( "\n" )
-
-        for k, v in repl.items():
-            text = text.replace( k, str( v ) )
-
-        bmap = {
-            "SDOT_NANOBIND_ARCH": f"nanobind::device::{ self.normalized_device_type }",
-            "SDOT_SCALAR_TYPE"  : self.normalized_dtype,
-            "SDOT_ARCH"         : str.capitalize( self.normalized_device_type ),
-        }
-        for k, v in bmap.items():
-            text = text.replace( k, v )
-
-        #
-        frame = inspect.currentframe().f_back
-        filename = frame.f_code.co_filename.replace( "\\", "/" )
-        lineno   = frame.f_lineno + 1   # +1: content starts on the line after the opening """
-        return f'#line { lineno } "{ filename }"\n' + text
-
-    def import_bindings( self, dylib_name: str, src_func = None, src_paths: list[ Path ] = [] ) -> any:
-        # in the cache ?
-        if dylib_name in self._dylib_cache:
-            return self._dylib_cache[ dylib_name ]
-
-        # the dylib already exists ?
-        full_name = "sdot.bindings." + dylib_name
-        if "SDOT_BUILD" not in os.environ or int( os.environ[ "SDOT_BUILD" ] ) == 0:
-            try:
-                return importlib.import_module( full_name )
-            except ( ImportError, SystemError ):
-                pass
-
-        # else, make the source, compile
-        self.compile_binding_for( dylib_name, src_func, src_paths )
-
-        # and try again to import it
-        importlib.invalidate_caches()
-        res = importlib.import_module( full_name )
-        self._dylib_cache[ dylib_name ] = res
-        return res
-
-    def compile_binding_for( self, dylib_name: str, src_func, src_paths: list[ Path ] ):
-        import subprocess
-        import sysconfig
-        import nanobind
-        import shutil
-        import sys
-        import os
-        import re
-
-        #
-        from ._cache import bindings_cache_dir
-
-        project_root = Path( __file__ ).absolute().parents[ 3 ]
-
-        # dir for the .so
-        dylib_dir = bindings_cache_dir()
-
-        # dir for the generated sources
-        src_dir = dylib_dir / "src" / dylib_name
-        src_dir.mkdir( parents = True, exist_ok = True )
-
-        # nanobind paths
-        nanobind_include_dir = nanobind.include_dir()
-        nanobind_ext_include = os.path.join( os.path.dirname( nanobind_include_dir ), "ext", "robin_map", "include" )
-        nanobind_source = os.path.join( nanobind.source_dir(), "nb_combined.cpp" )
-        python_include = sysconfig.get_path( "include" )
-
-        # make the source text
-        txt = src_func()
-        txt = txt.replace( "SDOT_BINDING_NAME", dylib_name )
-
-        # file extension
-        ext = ".cpp"
-        if self.normalized_device_type == "cuda":
-            ext = ".cu"
-
-        # store the source text
-        bnd_path = src_dir / ( "binding" + ext )
-        bnd_path.write_text( txt )
-
-        # find the xmake utility
-        xmake = shutil.which( "xmake" )
-        if xmake is None:
-            raise RuntimeError( "xmake introuvable dans PATH — installez-le (https://xmake.io)" )
-
-        # check xmake version
-        xmake_version = subprocess.run( [ xmake, "--version" ], capture_output = True, env = { "NO_COLOR": "1" } )
-        xmake_number = re.search( r"(\d+.\d+.\d+)", xmake_version.stdout.decode() ).group( 1 )
-        if tuple( map( int, xmake_number.split( "." ) ) ) < ( 3, 0, 8 ):
-            raise RuntimeError( f"we need xmake to be at least version 3.0.8 (found version '{ xmake_number }'). Consider making a xmake update (-> will probably instal it in ~/.local/bin)" )
-
-        #
-        defines = [
-            f"SDOT_NANOBIND_ARCH={ self.normalized_device_type }",
-            f"SDOT_SCALAR_TYPE={ driver.normalized_dtype }",
-            f"SDOT_ARCH={ self.normalized_device_type }",
-        ]
-
-        #
-        env = {
-            **os.environ,
-            "SDOT_BINDING_NAME"      : dylib_name,
-            "SDOT_SRC_INCLUDE"       : str( project_root / "src" / "cpp" ),
-            "SDOT_OUTPUT_DIR"        : str( dylib_dir ),
-            "SDOT_SRC_FILES"         : str.join( ",", map( str, [ bnd_path ] + src_paths ) ),
-            "SDOT_DEFINES"           : str.join( ",", defines ),
-            "SDOT_ARCH"              : self.normalized_device_type,
-            "SDOT_NANOBIND_INC"      : str( nanobind_include_dir ),
-            "SDOT_NANOBIND_SRC"      : str( nanobind_source ),
-            "SDOT_ROBIN_MAP_INC"     : str( nanobind_ext_include ),
-            "SDOT_PYTHON_INC"        : str( python_include ),
-            "PATH"                   : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
-        }
-        sdot_dir = Path( __file__ ).parent
-        def run( cmd ):
-            out = subprocess.run( cmd, cwd = dylib_dir, env = env )
-            if out.returncode:
-                sys.exit( out.returncode )
-        run( [ xmake, "f", "-P", str( sdot_dir ), "-y", "--require=yes" ] )
-        run( [ xmake, "-P", str( sdot_dir ) ] )
-
-    # ---------------------------------- helpers ----------------------------------
     def _normalized_framework_for( self, name ) -> str:
         # ensure lowercase str
         if not isinstance( name, str ):
@@ -390,39 +275,20 @@ class DriverProxy:
         self._instance = Driver( self.normalized_dtype, self.normalized_device )
 
 
-def encode_base62( s: str, length: int = 11 ) -> str:
-    chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    h = struct.unpack( '>Q', hashlib.sha256( s.encode() ).digest()[ :8 ] )[ 0 ]
-    res = []
-    for _ in range( length ):
-        res.append( chars[ h % 62 ] )
-        h //= 62
-    return ''.join( reversed( res ) )
+# def add_buid_path():
+#     """
+#     Helper to add path to `build` directory content. Can be used when files are in the base repository (not installed e.g. via `pip -e`)
+#     """
+#     from pathlib import Path
+#     import sdot
 
-def tensor_conv_for( type, name, rank ):
-    if "vector" in type:
-        tt = "const TF"
-        if "MF" in type:
-            tt = "TF"
-        return f"auto { name } = tensor_views_{ rank }( _{ name } );"
-
-    return f"auto { name } = tensor_view_{ rank }( _{ name } );"
+#     _build_path = Path( __file__ ).absolute().parents[ 3 ] / "build" / "src" / "python" / "sdot"
+#     if _build_path.exists() and str( _build_path ) not in sdot.__path__:
+#         sdot.__path__.append( str( _build_path ) )
 
 
-def add_buid_path():
-    """
-    Helper to add path to `build` directory content. Can be used when files are in the base repository (not installed e.g. via `pip -e`)
-    """
-    from pathlib import Path
-    import sdot
-
-    _build_path = Path( __file__ ).absolute().parents[ 3 ] / "build" / "src" / "python" / "sdot"
-    if _build_path.exists() and str( _build_path ) not in sdot.__path__:
-        sdot.__path__.append( str( _build_path ) )
-
-
-# add path to dylibs in `build` (needed by the drivers)
-add_buid_path()
+# # add path to dylibs in `build` (needed by the drivers)
+# add_buid_path()
 
 # start with an unknown driver instance
 driver = DriverProxy()

@@ -1,7 +1,6 @@
-from ..distributions.helpers.distribution_methods import unflatten_args, flat_tensor_list, to_tensor_list
-from ..distributions.BatchOfDistributions import BatchOfDistributions
-from ..BatchOfOtPlans import BatchOfOtPlans
-# from ..driver import driver
+# from sdot.object_with_tensors._methods import unflatten_args, flat_tensor_list, to_tensor_list
+# from ..distributions.BatchOfDistributions import BatchOfDistributions
+# from ..BatchOfOtPlans import BatchOfOtPlans
 import numpy as np
 import torch
 
@@ -51,6 +50,10 @@ class PyTorchDriver:
     def array_type( self ):
         return torch.Tensor
 
+    @property
+    def int_type( self ):
+        return torch.int64
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )
@@ -67,15 +70,25 @@ class PyTorchDriver:
         """ make a rank 0 tensor """
         return self.tn( tensor, 0 )
 
-    def tn( self, tensor, ndim = None, name = None ):
+    def tn( self, tensor, ndim = None, name = None, dtype = None ):
         """ make a rank ndim tensor """
         if tensor is None:
             return tensor
-        res = torch.as_tensor( tensor, dtype = self.dtype, device = self.device )
+
+        if dtype is None or dtype is float:
+            dtype = self.dtype
+        elif dtype is int:
+            dtype = self.int_type
+        else:
+            raise NotImplementedError( f"for { dtype }" )
+
+        res = torch.as_tensor( tensor, dtype = dtype, device = self.device )
+
         if ndim is not None and res.ndim != ndim:
             if name is not None:
                 raise IndexError( f"expecting for field '{ name }' a { ndim }d tensor, but { res.ndim }d was provided." )
             raise IndexError( f"expecting a { ndim }d tensor, but { res.ndim }d was provided." )
+
         return res
 
     def zeros( self, shape ):
@@ -171,48 +184,48 @@ class PyTorchDriver:
         raise NotImplementedError
 
 
-    def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
-        class SDOTFunction( torch.autograd.Function ):
-            @staticmethod
-            def forward( ctx, dirac_xs, *args ):
-                # get constants
-                batch_size = dirac_xs.shape[ 0 ]
-                nb_diracs = dirac_xs.shape[ 1 ]
-                dim = dirac_xs.shape[ 2 ]
+    # def plan( self, bindings, f: BatchOfDistributions, g: BatchOfDistributions ):
+    #     class SDOTFunction( torch.autograd.Function ):
+    #         @staticmethod
+    #         def forward( ctx, dirac_xs, *args ):
+    #             # get constants
+    #             batch_size = dirac_xs.shape[ 0 ]
+    #             nb_diracs = dirac_xs.shape[ 1 ]
+    #             dim = dirac_xs.shape[ 2 ]
 
-                # room for the outputs
-                barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
-                potentials = self.empty( [ batch_size, nb_diracs ] )
-                distances = self.empty( [ batch_size ] )
-                cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
+    #             # room for the outputs
+    #             barycenters = self.empty( [ batch_size, nb_diracs, dim ] )
+    #             potentials = self.empty( [ batch_size, nb_diracs ] )
+    #             distances = self.empty( [ batch_size ] )
+    #             cuts = self.empty( [ batch_size, nb_diracs, 2 ] )
 
-                # arguments as expected by the binding
-                binding_inputs = unflatten_args( f, g, [ dirac_xs ] + list( args ) )
+    #             # arguments as expected by the binding
+    #             binding_inputs = unflatten_args( f, g, [ dirac_xs ] + list( args ) )
 
-                # call the C++ procedure
-                bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
+    #             # call the C++ procedure
+    #             bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
 
-                ctx.save_for_backward( dirac_xs, *args, distances, barycenters, potentials, cuts )
+    #             ctx.save_for_backward( dirac_xs, *args, distances, barycenters, potentials, cuts )
 
-                return distances, barycenters, potentials, cuts
+    #             return distances, barycenters, potentials, cuts
 
-            @staticmethod
-            def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
-                # get room for the output gradients
-                flat_grad_outputs = [ self.empty( arg.shape ) for arg in ctx.saved_tensors[ :-4 ] ]
+    #         @staticmethod
+    #         def backward( ctx, grad_distance, grad_barycenters, grad_potentials, grad_cuts ):
+    #             # get room for the output gradients
+    #             flat_grad_outputs = [ self.empty( arg.shape ) for arg in ctx.saved_tensors[ :-4 ] ]
 
-                # arguments as expected by the binding
-                binding_grad_outputs = unflatten_args( f, g, flat_grad_outputs )
-                binding_inputs = unflatten_args( f, g, ctx.saved_tensors[ :-4 ] )
+    #             # arguments as expected by the binding
+    #             binding_grad_outputs = unflatten_args( f, g, flat_grad_outputs )
+    #             binding_inputs = unflatten_args( f, g, ctx.saved_tensors[ :-4 ] )
 
-                bindings.backward( *binding_inputs, *ctx.saved_tensors[ -4: ], grad_distance, grad_barycenters, grad_potentials, grad_cuts, *binding_grad_outputs )
+    #             bindings.backward( *binding_inputs, *ctx.saved_tensors[ -4: ], grad_distance, grad_barycenters, grad_potentials, grad_cuts, *binding_grad_outputs )
 
-                return tuple( flat_grad_outputs )
+    #             return tuple( flat_grad_outputs )
 
-        input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
-        outputs = SDOTFunction.apply( *input_tensors )
-        assert isinstance( outputs, tuple )
-        return BatchOfOtPlans( *outputs )
+    #     input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
+    #     outputs = SDOTFunction.apply( *input_tensors )
+    #     assert isinstance( outputs, tuple )
+    #     return BatchOfOtPlans( *outputs )
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
         """ small helper to optimize `loss` wrt `params` using L-BFGS.

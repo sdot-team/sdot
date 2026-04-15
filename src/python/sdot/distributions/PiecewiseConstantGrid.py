@@ -1,7 +1,7 @@
-from sdot.distributions.helpers.distribution_methods import generate_distribution_methods
+from sdot.object_with_tensors._methods import object_with_tensors
 from .SplineGrid import SplineGrid
 
-@generate_distribution_methods
+@object_with_tensors
 class PiecewiseConstantGrid( SplineGrid ):
     """
     SplineGrid with order = 0

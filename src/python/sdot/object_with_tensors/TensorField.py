@@ -1,5 +1,5 @@
-from ..BatchOfDistributions import BatchOfDistributions
-from ...driver import driver
+# from ..BatchOfDistributions import BatchOfDistributions
+from ..driver import driver
 
 from typing import Self, overload
 from inspect import signature
@@ -27,10 +27,11 @@ class TensorField:
     When we set a TensorField, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
     """
 
-    def __init__( self, *axis_names: str ):
+    def __init__( self, *axis_names: str, dtype = None ):
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = []
         self.axis_names = axis_names
+        self.dtype = dtype
         self.name = None
 
     def __set_name__( self, distribution, name ):
@@ -76,7 +77,7 @@ class TensorField:
             return
 
         # make the tensor
-        tensor = driver.tn( value, _rank( distribution, self.axis_names ), self.name )
+        tensor = driver.tn( value, _rank( distribution, self.axis_names ), self.name, self.dtype )
 
         # check the dimensions
         for axis_name in _axis_names( self.axis_names ):

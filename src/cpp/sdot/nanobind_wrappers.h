@@ -23,10 +23,18 @@ template<> struct ArchFor<nanobind::device::cuda> { using type = Cuda; };
 
 // to sdot type versions (non-optional) ---------------------------------------------------------------
 template<class TF,class TA>
+static auto tensor_view_0( const nanobind::ndarray<TF,TA> &v ) {
+    ASSERT( v.ndim() == 0 );
+    std::array<SI,0> strides{};
+    std::array<PI,0> extent{};
+    return TensorView<TF,0,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
+}
+
+template<class TF,class TA>
 static auto tensor_view_1( const nanobind::ndarray<TF,TA> &v ) {
     ASSERT( v.ndim() == 1 );
     std::array<SI,1> strides{ v.stride( 0 ) * SI( sizeof( TF ) ) };
-    std::array<PI,1> extent { v.shape( 0 ) };
+    std::array<PI,1> extent{ v.shape( 0 ) };
     return TensorView<TF,1,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
 }
 
@@ -34,7 +42,7 @@ template<class TF,class TA>
 static auto tensor_view_2( const nanobind::ndarray<TF,TA> &v ) {
     ASSERT( v.ndim() == 2 );
     std::array<SI,2> strides{ v.stride( 0 ) * SI( sizeof( TF ) ), v.stride( 1 ) * SI( sizeof( TF ) ) };
-    std::array<PI,2> extent { v.shape( 0 ), v.shape( 1 ) };
+    std::array<PI,2> extent{ v.shape( 0 ), v.shape( 1 ) };
     return TensorView<TF,2,typename ArchFor<TA>::type>( (TF *)v.data(), extent, strides );
 }
 
@@ -47,6 +55,12 @@ static auto tensor_view_3( const nanobind::ndarray<TF,TA> &v ) {
 }
 
 // to sdot type versions (optional — None → invalid TensorView with _ptr==nullptr) --------------------
+template<class TF,class TA>
+static auto tensor_view_0( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
+    using TV = TensorView<TF,0,typename ArchFor<TA>::type>;
+    return v ? tensor_view_0( *v ) : TV::make_invalid( 1 );
+}
+
 template<class TF,class TA>
 static auto tensor_view_1( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
     using TV = TensorView<TF,1,typename ArchFor<TA>::type>;

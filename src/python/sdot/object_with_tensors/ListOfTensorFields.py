@@ -1,6 +1,6 @@
 from .TensorField import GenericTensor, _rank
 from typing import Self, overload
-from ...driver import driver
+from ..driver import driver
 
 class ListOfTensorFields:
     """

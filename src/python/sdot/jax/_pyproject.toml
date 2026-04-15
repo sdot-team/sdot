@@ -1,9 +1,0 @@
-[build-system]
-requires = ["setuptools>=61.0", "nanobind>=2.0.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "sdot_jax_cpp"
-version = "0.0.1"
-description = "W2 distance JAX extension"
-dependencies = ["jax", "jaxlib", "nanobind"]

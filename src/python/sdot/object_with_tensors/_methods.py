@@ -1,19 +1,16 @@
-from ..BatchOfDistributions import BatchOfDistributions
-from ..Distribution import Distribution
-
 from .ListOfTensorFields import ListOfTensorFields
 from .TensorField import TensorField, _axis_names
 
-from ...driver import driver
+from ..driver import driver
 
 from typing import TypeVar, Type
-import numpy
+# import numpy
 
-_D = TypeVar( '_D', bound=Distribution )
+_D = TypeVar( '_D' ) # , bound=Distribution
 _T = TypeVar( '_T' )
 
 
-def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
+def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     """
     Class decorator that auto-generates boilerplate for Distribution and
     BatchOfDistributions subclasses based on their attribute declarations
@@ -41,8 +38,6 @@ def generate_distribution_methods( cls: type[ _T ] ) -> type[ _T ]:
                 return driver.ones(self.nb_points)
 
     """
-    assert issubclass( cls, Distribution )
-
     # fields
     fields = _collect_attributes( cls )
 
@@ -99,11 +94,12 @@ def _make_variant( cls, fields, batch_version : int, unidimensional_version : in
     if unidimensional_version:
         class_name += "1d"
 
-    parent = Distribution
-    if batch_version:
-        parent = BatchOfDistributions
+    # parents = ( Distribution, )
+    # if batch_version:
+    #     parents = ( BatchOfDistributions, )
+    parents = ()
 
-    res = type( class_name, ( parent, ), { '__annotations__': { "pouet": int } } )
+    res = type( class_name, parents, { '__annotations__': { "pouet": int } } )
     for class_name, field in fields:
         new_field = field
 
@@ -345,77 +341,77 @@ def _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields
     return out
 
 
-def to_tensor_list( obj ) -> tuple[ list, callable ]:
-    """ return
-     * the list of tensors contained in obj
-     * a callable that takes a list of tensors and return it in the original obj shape
-    """
-    if isinstance( obj, ( tuple, list ) ):
-        tensor_list = []
-        callables = []
-        offsets = [ 0 ]
-        for o in obj:
-            r, c = to_tensor_list( o )
+# def to_tensor_list( obj ) -> tuple[ list, callable ]:
+#     """ return
+#      * the list of tensors contained in obj
+#      * a callable that takes a list of tensors and return it in the original obj shape
+#     """
+#     if isinstance( obj, ( tuple, list ) ):
+#         tensor_list = []
+#         callables = []
+#         offsets = [ 0 ]
+#         for o in obj:
+#             r, c = to_tensor_list( o )
 
-            offsets.append( offsets[ -1 ] + len( r ) )
-            callables.append( c )
-            tensor_list += r
+#             offsets.append( offsets[ -1 ] + len( r ) )
+#             callables.append( c )
+#             tensor_list += r
 
-        def reverse( lst ):
-            items = []
-            for n, callable in enumerate( callables ):
-                items.append( callable( lst[ offsets[ n + 0 ] : offsets[ n + 1 ] ] ) )
-            return type( obj )( items )
+#         def reverse( lst ):
+#             items = []
+#             for n, callable in enumerate( callables ):
+#                 items.append( callable( lst[ offsets[ n + 0 ] : offsets[ n + 1 ] ] ) )
+#             return type( obj )( items )
 
-        return tensor_list, reverse
+#         return tensor_list, reverse
 
-    if isinstance( obj, numpy.ndarray ):
-        return [ driver.array( obj ) ], lambda lst: lst[ 0 ]
+#     if isinstance( obj, numpy.ndarray ):
+#         return [ driver.array( obj ) ], lambda lst: lst[ 0 ]
 
-    if isinstance( obj, driver.array_type ):
-        return [ obj ], lambda lst: lst[ 0 ]
+#     if isinstance( obj, driver.array_type ):
+#         return [ obj ], lambda lst: lst[ 0 ]
 
-    if obj is None:
-        return [], lambda lst: None
+#     if obj is None:
+#         return [], lambda lst: None
 
-    raise RuntimeError( f"Unable to transform object of type { type( obj ) } to tensor list" )
-
-
-
-def flat_tensor_list( distribution ) -> list:
-    res = []
-    for a_name, a_data in _collect_attributes( type( distribution ) ):
-        if isinstance( a_data, ListOfTensorFields ):
-            v = getattr( distribution, a_name )
-            if v is not None:
-                for item in v:
-                    res.append( item )
-            else:
-                for _ in range( getattr( distribution, a_data.main_axis_name ) ):
-                    res.append( None )
-        if isinstance( a_data, TensorField ):
-            v = getattr( distribution, a_name )
-            if v is not None:
-                res.append( v )
-            else:
-                res.append( None )
-    return res
-
-def unflat_tensor_list( distribution, out: list, inp: list ):
-    for _, a_data in _collect_attributes( type( distribution ) ):
-        if isinstance( a_data, ListOfTensorFields ):
-            loc = []
-            for _ in range( getattr( distribution, a_data.main_axis_name ) ):
-                loc.append( inp.pop( 0 ) )
-            out.append( loc )
-        if isinstance( a_data, TensorField ):
-            out.append( inp.pop( 0 ) )
+#     raise RuntimeError( f"Unable to transform object of type { type( obj ) } to tensor list" )
 
 
-def unflatten_args( f, g, args ):
-    """ Convert a flat list of tensors to the structured list expected by the C++ binding. """
-    res = []
-    inp = list( args )
-    unflat_tensor_list( f, res, inp )
-    unflat_tensor_list( g, res, inp )
-    return res
+
+# def flat_tensor_list( distribution ) -> list:
+#     res = []
+#     for a_name, a_data in _collect_attributes( type( distribution ) ):
+#         if isinstance( a_data, ListOfTensorFields ):
+#             v = getattr( distribution, a_name )
+#             if v is not None:
+#                 for item in v:
+#                     res.append( item )
+#             else:
+#                 for _ in range( getattr( distribution, a_data.main_axis_name ) ):
+#                     res.append( None )
+#         if isinstance( a_data, TensorField ):
+#             v = getattr( distribution, a_name )
+#             if v is not None:
+#                 res.append( v )
+#             else:
+#                 res.append( None )
+#     return res
+
+# def unflat_tensor_list( distribution, out: list, inp: list ):
+#     for _, a_data in _collect_attributes( type( distribution ) ):
+#         if isinstance( a_data, ListOfTensorFields ):
+#             loc = []
+#             for _ in range( getattr( distribution, a_data.main_axis_name ) ):
+#                 loc.append( inp.pop( 0 ) )
+#             out.append( loc )
+#         if isinstance( a_data, TensorField ):
+#             out.append( inp.pop( 0 ) )
+
+
+# def unflatten_args( f, g, args ):
+#     """ Convert a flat list of tensors to the structured list expected by the C++ binding. """
+#     res = []
+#     inp = list( args )
+#     unflat_tensor_list( f, res, inp )
+#     unflat_tensor_list( g, res, inp )
+#     return res

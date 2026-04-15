@@ -1,6 +1,6 @@
-from .distributions.helpers.distribution_methods import _collect_attributes
-from .distributions.helpers.ListOfTensorFields import ListOfTensorFields
-from .distributions.helpers.TensorField import TensorField
+from sdot.object_with_tensors._methods import _collect_attributes
+from sdot.object_with_tensors.ListOfTensorFields import ListOfTensorFields
+from sdot.object_with_tensors.TensorField import TensorField
 
 from .distributions.BatchOfDistributions import BatchOfDistributions
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
@@ -12,7 +12,7 @@ from .OtPlan1d import OtPlan1d
 from .OtPlan import OtPlan
 from .Bsp import Bsp
 
-from .driver import driver, encode_base62, tensor_conv_for
+from .driver import driver, tensor_conv_for
 
 from typing import TYPE_CHECKING
 
@@ -86,7 +86,7 @@ def _ot_plan_nd( batch_of_f : BatchOfDistributions, batch_of_g : BatchOfDistribu
     return BatchOfOtPlans( distances, barycenters, potentials, cuts )
 
 def solve_nd( bindings, bsp : Bsp, g : Distribution ):
-    from .distributions.helpers.distribution_methods import flat_tensor_list, unflat_tensor_list
+    from sdot.object_with_tensors._methods import flat_tensor_list, unflat_tensor_list
     flatten_g_content = flat_tensor_list( g )
 
     assert len( bsp.items ) == 1

@@ -50,6 +50,10 @@ public:
     T&          operator() ( PI i0 );
     T&          operator() ();
 
+    /// DsVec-based access (forwards to TensorView)
+    const T&    operator() ( const auto &indices ) const;
+    T&          operator() ( const auto &indices );
+
     const T&    operator[] ( PI i0 ) const;
     T&          operator[] ( PI i0 );
 
@@ -58,6 +62,11 @@ public:
 
     auto        squeeze    ( PI axis ) const;
     auto        squeeze    ( PI axis );
+
+    /// TensorView methods forwarded so callers don't need .view()
+    void        for_each_index  ( auto &&func, PI sub = 0 ) const;
+    auto        unsqueeze       () const;
+    bool        is_contiguous   () const;
 
     Extent      sizes      () const;
     bool        empty      () const;
