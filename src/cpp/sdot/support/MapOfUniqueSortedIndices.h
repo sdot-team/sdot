@@ -4,25 +4,42 @@
 // #include <tl/support/Displayer.h>
 // #include <tl/support/compare.h>
 // #include "VecForCapa.h"
-#include "../support/DsVec.h"
+#include "DsVec.h"
 #include <map>
 
 namespace sdot {
+
+struct IntWithOffset {
+    bool operator!() const { return value < offset; }
+    operator PI64 () const { return value - offset; }
+
+    void operator=( PI64 v ) { value = offset + v; }
+
+    PI64  offset;
+    PI64& value;
+};
+
 /**
  * map[ Vec<PII>(...) ] => ... where items in Vec<PII>(...) are strictly increasing
  *
  * This version is for the generic case (it uses std::map which may be slow).
 */
-template<int s,class Arch,class PII=PI32,class PIO=PI32>
+template<class InputInt,int ct_dim,class Arch>
 class MapOfUniqueSortedIndices {
 public:
-    void  prepare_for( PII /*max_PI_value*/ ) { values.clear(); }
+    /**/  MapOfUniqueSortedIndices( PI /* dim */ ) {}
 
-    PIO&  operator[] ( const std::span<PII> &a ) { auto iter = values.find( a ); if ( iter == values.end() ) iter = values.insert( iter, { a, {} } ); return iter->second; }
-    PIO&  operator() ( const DsVec<PII,s+1,Arch> &a, PI ind_to_remove ) { return operator[]( a.without_index( ind_to_remove ) ); }
+    void  prepare_for             ( InputInt /*max_PI_value*/, PI64 /* max_output_value */ ) { values.clear(); }
+
+    IntWithOffset operator[] ( const DsVec<InputInt,-1,Arch> &key ) {
+        auto iter = values.find( key );
+        if ( iter == values.end() )
+            iter = values.insert( iter, { key, 0 } );
+        return { 1, iter->second };
+    }
 
 private:
-    using Map        = std::map<DsVec<PII,s,Arch>,PIO,Arch>;
+    using Map        = std::map<DsVec<InputInt,-1,Arch>,PI64>;
 
     Map   values;    ///<
 };

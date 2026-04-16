@@ -12,9 +12,8 @@ _T = TypeVar( '_T' )
 
 def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     """
-    Class decorator that auto-generates boilerplate for Distribution and
-    BatchOfDistributions subclasses based on their attribute declarations
-    (notably TensorField ones).
+    Class decorator that auto-generates boilerplate for classes with TensorField or ListOfTensorFields
+    based on their attribute declarations
 
     Fields with a ``default_<name>(self)`` method in the class will use that
     method when the field value is None.
@@ -29,8 +28,8 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
 
     Usage::
 
-        @generate_distribution_methods
-        class MyDist(Distribution):
+        @object_with_tensors
+        class MyDist:
             positions = TensorField("nb_points", "dim")
             weights   = TensorField("nb_points")
 

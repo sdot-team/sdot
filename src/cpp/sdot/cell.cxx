@@ -273,7 +273,7 @@ UTP void DTP::cut( const Pt& dir_cut, TF sp_cut, PI id ) {
             cut_index = cut_corr[ cut_index ];
 }
 
-UTP void DTP::_add_measure_rec( TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, const auto &cut_indices, PI prev_vertex_index ) const {
+UTP void DTP::_add_measure_rec( const DTP &cell, TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, const auto &cut_indices, PI prev_vertex_index ) const {
     using namespace std;
 
     if ( cut_indices.size() == 0 ) {
@@ -284,19 +284,19 @@ UTP void DTP::_add_measure_rec( TF &res, SimpleSquareMatrix<TF,ct_dim,Arch> &M, 
     PI c = cut_indices.size();
     for( PI ind_to_remove = 0; ind_to_remove < c; ++ind_to_remove ) {
         auto new_cut_indices = cut_indices.without_index( ind_to_remove );
-        ItemCorr &ic = item_map[ new_cut_indices ];
-        if ( ic.vertex_index_plus_curr_op_id < curr_op_id ) {
-            ic.vertex_index_plus_curr_op_id = curr_op_id + prev_vertex_index;
+        auto ic = item_map[ new_cut_indices ];
+        if ( ! ic ) {
+            ic = prev_vertex_index;
             continue;
         }
 
-        const PI next_vertex_index = ic.vertex_index_plus_curr_op_id - curr_op_id;
+        const PI next_vertex_index = ic;
         if ( next_vertex_index == prev_vertex_index )
             return;
 
         // fill the corresponding column
         for( int d = 0; d < dim(); ++d )
-            M( d, c - 1 ) = vertices[ next_vertex_index ].pos[ d ] - vertices[ prev_vertex_index ].pos[ d ];
+            M( d, c - 1 ) = vertices( next_vertex_index, d ) - vertices( prev_vertex_index, d );
 
         // recursion
         _add_measure_rec( res, M, new_cut_indices, next_vertex_index );

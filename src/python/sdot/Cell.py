@@ -1,8 +1,12 @@
-from sdot.object_with_tensors._methods import TensorField, object_with_tensors
-from .cpp_binding import cpp_binding
+from sdot.object_with_tensors import object_with_tensors, TensorField
+from .cpp_binding import cpp_binding, Output, Return
 from typing import TYPE_CHECKING
 from .driver import driver
-from .CtInt import CtInt
+# from .CtInt import CtInt
+
+# constant
+INFINITE = -2
+BOUNDARY = -1
 
 
 @object_with_tensors
@@ -12,9 +16,12 @@ class Cell:
     """
 
     large_vertex_positions = TensorField( "vertex_capacity", "dim" )
+    large_vertex_inds = TensorField( "vertex_capacity", "dim", dtype = int ) # sorted cut indices for each vertex
+    large_edge_links = TensorField( "vertex_capacity", "2", dtype = int )
     large_cut_planes = TensorField( "cut_capacity", "dim + 1" )
     large_cut_ids = TensorField( "cut_capacity", dtype = int )
 
+    is_fully_closed = TensorField( dtype = int )
     nb_vertices = TensorField( dtype = int )
     nb_cuts = TensorField( dtype = int )
 
@@ -24,14 +31,27 @@ class Cell:
         dim: int
 
 
-    def __init__( self, dim ):
-        self.large_vertex_positions = driver.empty( [ 32, dim ] )
-        self.large_cut_planes = driver.empty( [ 32, dim + 1 ] )
-        self.large_cut_ids = driver.empty( [ 32 ], dtype = driver.int_type )
+    def __init__( self, dim, ctor = None ):
+        vertex_capacity = 32
+        cut_capacity = 32
+
+        self.large_vertex_positions = driver.empty( [ vertex_capacity, dim ] )
+        self.large_vertex_inds = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
+        self.large_edge_links = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
+        self.large_cut_planes = driver.empty( [ cut_capacity, dim + 1 ] )
+        self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.int_type )
+        self.is_fully_closed = 0
         self.nb_vertices = 0
         self.nb_cuts = 0
 
-        cpp_binding( "make_empty_cell", "sdot/cell.h" )( self )
+        if ctor is None:
+            cpp_binding( "make_empty_cell", "sdot/cell/Cell.h" )( Output( self ) )
+        else:
+            ctor( self )
+
+    @staticmethod
+    def aligned_simplex( dim, bnd = BOUNDARY ):
+        return Cell( dim, lambda cell: cpp_binding( "make_aligned_simplex", "sdot/cell/Cell.h" )( Output( cell ), bnd ) )
 
     @property
     def vertex_positions( self ):
@@ -48,6 +68,10 @@ class Cell:
     @property
     def cut_ids( self ):
         return self.cut_ids[ : self.nb_cuts, : ]
+
+    @property
+    def measure( self ):
+        return cpp_binding( "measure", "sdot/cell/measure.h" )( Return( driver.empty( [] ) ), self )
 
     def cpp_class_name( self ):
         return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"

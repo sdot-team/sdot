@@ -3,7 +3,8 @@
 -- ==================================================================
 
 add_rules("mode.release", "mode.debug")
-set_defaultmode("release")
+-- set_defaultmode("release")
+set_defaultmode("debug")
 
 -- ──────────────────────────── helpers ─────────────────────────────────────────
 
@@ -34,6 +35,7 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
         add_defines("NB_COMPACT_ASSERTIONS")
     else
         set_symbols("debug")
+        add_cxxflags("-g3")
     end
 
     -- CUDA specificities

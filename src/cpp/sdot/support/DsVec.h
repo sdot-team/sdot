@@ -92,12 +92,12 @@ public:
     using        serialize               = zpp::bits::members<1>;
     #endif
 
+    friend std::ostream &operator<<      ( std::ostream &os, const DsVec &p ) { for( sdot::PI i = 0; i < p.size(); ++i ) os << ( i ? ", " : "" ) << p[ i ]; return os; }
+
     Content      content;
 };
 
 
 } // namespace sdot
-
-T_TdA std::ostream &operator<<( std::ostream &os, const sdot::DsVec<T,d,A> &p );
 
 #include "DsVec.cxx" // IWYU pragma: export

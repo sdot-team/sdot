@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
+#include <utility>
+
 #include "ASSERT.h"
 #include "DsVec.h"
-#include <utility>
 
 namespace sdot {
 
@@ -124,7 +126,7 @@ UTP template<class U> DTP::operator std::vector<U>() const {
 }
 
 UTP DTP::operator std::span<T>() const {
-    return std::span<T>( const_cast<T *>( content.data() ), content.size() );
+    return std::span<T>( const_cast<T *>( data() ), size() );
 }
 
 UTP const T& DTP::operator[]( PI index ) const {
@@ -136,11 +138,11 @@ UTP T& DTP::operator[]( PI index ) {
 }
 
 UTP bool DTP::operator<( const std::span<T> &that ) const {
-    return operator std::span<T>() < that.data;
+    return std::ranges::lexicographical_compare( operator std::span<T>(), that );
 }
 
 UTP bool DTP::operator<( const DsVec &that ) const {
-    return operator std::span<T>() < that.content.operator std::span<T>();
+    return std::ranges::lexicographical_compare( operator std::span<T>(), that.operator std::span<T>() );
 }
 
 UTP DTP DTP::with_func( PI size, auto &&func ) {
@@ -225,9 +227,3 @@ UTP PI DTP::arg_max() const {
 
 } // namespace sdot
 
-template<class T,int dim,class Arch>
-std::ostream &operator<<( std::ostream &os, const sdot::DsVec<T,dim,Arch> &p ) {
-    for( sdot::PI i = 0; i < p.size(); ++i )
-        os << ( i ? ", " : "" ) << p[ i ];
-    return os;
-}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>  // IWYU pragma: export
+
 #define T_TdA template<class T,int d,class A>
 #define T_Up  template<class U,std::size_t p>
 #define T_TA  template<class T,class A>

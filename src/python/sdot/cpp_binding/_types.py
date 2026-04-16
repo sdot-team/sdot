@@ -1,24 +1,29 @@
 """Type helpers: map Python objects to C++ class names and nanobind argument lists."""
 from ..driver import driver
+from .Output import Output
+from .Return import Return
 
-def cpp_class_name_for( arg ) -> str:
+def cpp_class_name_for( obj ) -> str:
     # common types
-    if isinstance( arg, int ):
+    if isinstance( obj, int ):
         return "SI"
 
-    if isinstance( arg, float ):
+    if isinstance( obj, float ):
         return driver.normalized_dtype
 
-    if isinstance( arg, driver.array_type ):
-        if arg.dtype == driver.int_type:
+    if isinstance( obj, driver.array_type ):
+        if obj.dtype == driver.int_type:
             return "MI"
         else:
             return "MF"
 
-    if hasattr( arg, "cpp_class_name" ):
-        return arg.cpp_class_name()
+    if isinstance( obj, ( Output, Return ) ):
+        return cpp_class_name_for( obj.value )
 
-    raise NotImplementedError( f"cpp_class_name_for: no mapping for { type(arg) }" )
+    if hasattr( obj, "cpp_class_name" ):
+        return obj.cpp_class_name()
+
+    raise NotImplementedError( f"cpp_class_name_for: no mapping for { type(obj) }" )
 
 
 def to_standard_objects( obj ) -> list:
@@ -33,6 +38,9 @@ def to_standard_objects( obj ) -> list:
     if hasattr( obj, "to_standard_objects" ):
         return obj.to_standard_objects()
 
+    if isinstance( obj, ( Output, Return ) ):
+        return to_standard_objects( obj.value )
+
     # else, get attributes
     out = []
     for name, _ in _collect_attributes( obj ):
@@ -46,6 +54,9 @@ def from_standard_objects( obj, arg_names ):
 
     if isinstance( obj, ( driver.array_type ) ):
         return f"tensor_view_{ obj.ndim }( { arg_names.pop( 0 ) } )"
+
+    if isinstance( obj, ( Output, Return ) ):
+        return from_standard_objects( obj.value, arg_names )
 
     largs = []
     for name, _ in _collect_attributes( obj ):
@@ -73,3 +84,4 @@ def _collect_attributes( obj ):
                 res.append( ( name, value ) )
 
     return res
+
