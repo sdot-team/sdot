@@ -21,9 +21,11 @@ class CppBinding:
                 if isinstance( arg, Return ):
                     res = arg.value
 
-            func( *fargs )
+            output = func( *fargs )
 
-            return res
+            if output is None:
+                return res
+            return output
 
 
     def __call__( self, func_name, includes: str | list[ str ] = [] ):

@@ -1,4 +1,6 @@
 """Type helpers: map Python objects to C++ class names and nanobind argument lists."""
+from ..object_with_tensors.ListOfTensorFields import ListOfTensorFields
+from ..object_with_tensors.TensorField import TensorField
 from ..driver import driver
 from .Output import Output
 from .Return import Return
@@ -11,7 +13,7 @@ def cpp_class_name_for( obj ) -> str:
     if isinstance( obj, float ):
         return driver.normalized_dtype
 
-    if isinstance( obj, driver.array_type ):
+    if isinstance( obj, ( driver.array_type, TensorField ) ):
         if obj.dtype == driver.int_type:
             return "MI"
         else:
@@ -26,13 +28,33 @@ def cpp_class_name_for( obj ) -> str:
     raise NotImplementedError( f"cpp_class_name_for: no mapping for { type(obj) }" )
 
 
-def to_standard_objects( obj ) -> list:
+def to_standard_objects( obj, attr = None ) -> list[ tuple[ any, str ] ]:
     """Decompose *arg* into the flat list of nanobind-compatible Python objects
-    that represent it on the binding boundary."""
+    that represent it on the binding boundary.
 
-    # common types
-    if isinstance( obj, ( int, float, driver.array_type ) ):
-        return [ obj ]
+    attr can be used to get class TensorField, ... which have get __get__ method
+    """
+    if attr is None:
+        attr = obj
+
+    if isinstance( attr, TensorField ):
+        if attr.dtype == int:
+            return [ ( obj, "MI" ) ]
+        return [ ( obj, "MI" ) ]
+
+    if isinstance( attr, ListOfTensorFields ):
+        raise NotImplementedError
+
+    if isinstance( obj, int ):
+        return [ ( obj, "SI" ) ]
+
+    if isinstance( obj, float ):
+        return [ ( obj, "TF" ) ]
+
+    if isinstance( obj, driver.array_type ):
+        if obj.dtype == driver.int_type:
+            return [ ( obj, "MI" ) ]
+        return [ ( obj, "MI" ) ]
 
     # method to_standard_objects
     if hasattr( obj, "to_standard_objects" ):
@@ -41,27 +63,39 @@ def to_standard_objects( obj ) -> list:
     if isinstance( obj, ( Output, Return ) ):
         return to_standard_objects( obj.value )
 
+    if obj is None:
+        return []
+
     # else, get attributes
     out = []
-    for name, _ in _collect_attributes( obj ):
-        out += to_standard_objects( getattr( obj, name ) )
+    for name, attr in _collect_attributes( obj ):
+        out += to_standard_objects( getattr( obj, name ), attr )
     return out
 
 
-def from_standard_objects( obj, arg_names ):
+def from_standard_objects( obj, arg_names, attr = None ):
+    if attr is None:
+        attr = obj
+
+    if isinstance( attr, TensorField ):
+        return f"tensor_view_{ attr.ndim }( { arg_names.pop( 0 ) } )"
+
+    if isinstance( attr, ListOfTensorFields ):
+        raise NotImplementedError
+
     if isinstance( obj, ( int, float ) ):
         return arg_names.pop( 0 )
 
-    if isinstance( obj, ( driver.array_type ) ):
+    if isinstance( obj, driver.array_type ):
         return f"tensor_view_{ obj.ndim }( { arg_names.pop( 0 ) } )"
 
     if isinstance( obj, ( Output, Return ) ):
         return from_standard_objects( obj.value, arg_names )
 
     largs = []
-    for name, _ in _collect_attributes( obj ):
-        largs.append( from_standard_objects( getattr( obj, name ), arg_names ) )
-    return f"{ cpp_class_name_for( obj ) }( { str.join( ", ", largs )  } )"
+    for name, attr in _collect_attributes( obj ):
+        largs.append( from_standard_objects( getattr( obj, name ), arg_names, attr ) )
+    return f"{ cpp_class_name_for( obj ) }( { str.join( ", ", largs ) } )"
 
 
 def _collect_attributes( obj ):

@@ -16,38 +16,66 @@ class Cell:
     """
 
     large_vertex_positions = TensorField( "vertex_capacity", "dim" )
-    large_vertex_inds = TensorField( "vertex_capacity", "dim", dtype = int ) # sorted cut indices for each vertex
-    large_edge_links = TensorField( "vertex_capacity", "2", dtype = int )
+    large_vertex_indices = TensorField( "vertex_capacity", "dim", dtype = int ) # vertex index -> sorted cut indices
+    large_edge_indices = TensorField( "edge_capacity", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
     large_cut_planes = TensorField( "cut_capacity", "dim + 1" )
     large_cut_ids = TensorField( "cut_capacity", dtype = int )
 
     is_fully_closed = TensorField( dtype = int )
     nb_vertices = TensorField( dtype = int )
+    nb_edges = TensorField( dtype = int )
     nb_cuts = TensorField( dtype = int )
 
     if TYPE_CHECKING:
         vertex_capacity: int
+        edge_capacity: int
         cut_capacity: int
         dim: int
 
 
     def __init__( self, dim, ctor = None ):
         vertex_capacity = 32
+        edge_capacity = 32
         cut_capacity = 32
 
         self.large_vertex_positions = driver.empty( [ vertex_capacity, dim ] )
-        self.large_vertex_inds = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
-        self.large_edge_links = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
         self.large_cut_planes = driver.empty( [ cut_capacity, dim + 1 ] )
         self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.int_type )
+
         self.is_fully_closed = 0
         self.nb_vertices = 0
         self.nb_cuts = 0
+
+        if dim != 2:
+            self.large_vertex_indices = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
+            self.large_edge_indices = driver.empty( [ edge_capacity, dim + 1 ], dtype = driver.int_type )
+            self.nb_edges = 0
 
         if ctor is None:
             cpp_binding( "make_empty_cell", "sdot/cell/Cell.h" )( Output( self ) )
         else:
             ctor( self )
+
+    @staticmethod
+    def aligned_hypercube( min_coords_or_dim = None, max_coords = None, dim = None, bnd = BOUNDARY ):
+        if isinstance( min_coords_or_dim, int ):
+            assert max_coords is None
+            assert dim is None
+            min_coords = driver.zeros( [ min_coords_or_dim ] )
+            dim = min_coords_or_dim
+        elif min_coords_or_dim is None:
+            assert dim is not None
+            min_coords = driver.zeros( [ dim ] )
+        else:
+            dim = min_coords_or_dim.size
+            min_coords = driver.array( min_coords_or_dim )
+
+        if max_coords is None:
+            max_coords = driver.ones( [ dim ] )
+        else:
+            max_coords = driver.array( max_coords )
+
+        return Cell( dim, lambda cell: cpp_binding( "make_aligned_hypercube", "sdot/cell/Cell.h" )( Output( cell ), min_coords, max_coords, bnd ) )
 
     @staticmethod
     def aligned_simplex( dim, bnd = BOUNDARY ):
@@ -60,6 +88,22 @@ class Cell:
         return self.large_vertex_positions[ : self.nb_vertices, : ]
 
     @property
+    def vertex_indices( self ):
+        if self.dim == 2:
+            raise NotImplementedError
+        if self.large_vertex_indices is None:
+            return None
+        return self.large_vertex_indices[ : self.nb_vertices, : ]
+
+    @property
+    def edge_indices( self ):
+        if self.dim == 2:
+            raise NotImplementedError
+        if self.large_edge_indices is None:
+            return None
+        return self.large_edge_indices[ : self.nb_edges, : ]
+
+    @property
     def cut_planes( self ):
         if self.large_cut_planes is None:
             return None
@@ -70,84 +114,63 @@ class Cell:
         return self.cut_ids[ : self.nb_cuts, : ]
 
     @property
+    def faces( self ) -> list:
+        res = cpp_binding( "faces", "sdot/cell/faces.h" )( self )
+        assert res is not None
+        return res
+
+    @property
     def measure( self ):
         return cpp_binding( "measure", "sdot/cell/measure.h" )( Return( driver.empty( [] ) ), self )
+
+    def cut( self, cut_dir, cut_off = None, cut_id = BOUNDARY ):
+        cut_dir = driver.t1( cut_dir )
+        if cut_off is not None:
+            cut_off = driver.t0( cut_off )
+            cut_dir = driver.hstack( [ cut_dir, driver.expand_dims( cut_off, 0 ) ] )
+        cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_dir, cut_id )
 
     def cpp_class_name( self ):
         return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"
 
-    #     self._bindings = None
+    def plot( self, plotter = None, offset = None ):
+        import pyvista
 
-    #     if instance is not None:
-    #         self._instance = instance
-    #         dim = instance.dim()
-    #     else:
-    #         self._instance = None
-    #         if dim is not None:
-    #             self._checked_instance( dim )
+        # use our own plotter ?
+        if plotter is None:
+            plotter = pyvista.Plotter( theme = pyvista.plotting.themes.DarkTheme() )
+            if self.dim == 2:
+                plotter.view_xy()
+            self.plot( plotter, offset )
+            plotter.reset_camera()
+            plotter.show()
+            return
 
+        #
+        pts = self.vertex_positions # [ num_vertex, dim ]
+        if pts is None:
+            return
 
-    # @staticmethod
-    # def axis_aligned_hypercube( min_max ):
-    #     min_max = driver.array( min_max )
-    #     dim = min_max.shape[ 1 ]
+        #
+        dim = pts.shape[ 1 ]
+        if dim < 3:
+            pts = driver.hstack( [ pts ] + [ driver.zeros( [ pts.shape[ 0 ], 1 ] ) ] * ( 3 - dim ) )
+        elif dim > 3:
+            pts = pts[ :, :3 ]
 
-    #     res = Cell()
-    #     res._instance = res._checked_bindings( dim ).axis_aligned_hypercube( min_max )
+        #
+        if offset is not None:
+            offset = driver.array( offset )
+            assert offset is not None
+            pts += offset
 
-    #     return res
-
-    # def cut( self, dir, dot: float, id = 0 ):
-    #     dir = driver.array( dir )
-    #     assert dir.ndim == 1
-
-    #     self._checked_instance( dir.shape[ 0 ] ).cut( dir, dot, id )
-
-    # @property
-    # def cuts( self ):
-    #     return self._checked_instance( None ).cuts()
-
-    # @property
-    # def faces( self ):
-    #     return self._checked_instance( None ).faces()
-
-    # @property
-    # def vertices( self ):
-    #     """
-    #     position of vertices (tensor[ num_vertex, dim ])
-    #     """
-    #     return self._checked_instance( None ).vertices()
-
-    # def plot( self, plotter = None, offset = None ):
-    #     import pyvista
-
-    #     pts = self.vertices # [ num_vertex, dim ]
-    #     dim = pts.shape[ 1 ]
-
-    #     own_plotter = plotter is None
-    #     if own_plotter:
-    #         plotter = pyvista.Plotter( theme = pyvista.plotting.themes.DarkTheme() )
-    #         if dim == 2:
-    #             plotter.view_xy()
-
-    #     if dim < 3:
-    #         pts = driver.hstack( [ pts ] + [ driver.zeros( [ pts.shape[ 0 ], 1 ] ) ] * ( 3 - dim ) )
-    #     elif dim > 3:
-    #         pts = pts[ :, :3 ]
-
-    #     if offset:
-    #         pts += driver.array( offset )
-
-    #     faces = []
-    #     for face in self.faces:
-    #         faces.append( len( face ) )
-    #         faces += face
-    #     if len( pts ):
-    #         plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges=True )
-
-    #     if own_plotter:
-    #         plotter.reset_camera()
-    #         plotter.show()
+        #
+        faces = []
+        for face in self.faces:
+            faces.append( len( face ) )
+            faces += face
+        if pts.shape[ 0 ]:
+            plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges = True )
 
 
     # def __repr__( self ) -> str:

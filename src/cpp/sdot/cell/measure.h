@@ -17,21 +17,20 @@ namespace sdot {
 /// fan triangulation.  The 2D case is handled with the shoelace formula.
 template<class TF, int ct_dim, class Arch>
 void measure( auto &res, const Cell<TF,ct_dim,Arch> &cell ) {
-    using TR = std::remove_cvref_t<decltype( cell.vertex_positions( 0, 0 ) )>;
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
 
-    if ( !cell.is_fully_closed() ) {
-        res() = std::numeric_limits<TR>::infinity();
+    // infinite cell
+    if ( ! cell.is_fully_closed() ) {
+        res() = std::numeric_limits<TF>::infinity();
         return;
     }
 
-    const PI dim      = cell.dim();
-    const PI nb_verts = cell.nb_vertices();
-
-    // ── 2D: shoelace formula ─────────────────────────────────────────────────
+    // 2D: shoelace formula
     if ( dim == 2 ) {
-        TR sum = 0;
-        for ( PI i = 0; i < nb_verts; ++i ) {
-            const PI j = ( i + 1 ) % nb_verts;
+        TF sum = 0;
+        for ( PI i = 0; i < nb_vertices; ++i ) {
+            const PI j = ( i + 1 ) % nb_vertices;
             sum += cell.vertex_positions( i, 0 ) * cell.vertex_positions( j, 1 )
                  - cell.vertex_positions( j, 0 ) * cell.vertex_positions( i, 1 );
         }
@@ -39,7 +38,7 @@ void measure( auto &res, const Cell<TF,ct_dim,Arch> &cell ) {
         return;
     }
 
-    // ── general d: fan triangulation ─────────────────────────────────────────
+    // nD: fan triangulation
     SimpleSquareMatrix<TF,ct_dim,Arch> M( dim );
     TF sum = 0;
 

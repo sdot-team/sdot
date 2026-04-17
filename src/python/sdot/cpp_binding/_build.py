@@ -122,8 +122,8 @@ def get_module_for( func_list: list ):
         arg_decl = []
         num_cpp_arg = 0
         for arg in func.args:
-            for std_obj in to_standard_objects( arg ):
-                arg_decl.append( f"{ cpp_class_name_for( std_obj ) } arg_{ num_cpp_arg }" )
+            for _, cpp_class_name in to_standard_objects( arg ):
+                arg_decl.append( f"{ cpp_class_name } arg_{ num_cpp_arg }" )
                 num_cpp_arg += 1
 
         # beg def

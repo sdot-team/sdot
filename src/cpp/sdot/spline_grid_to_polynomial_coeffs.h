@@ -20,7 +20,8 @@ struct StdKnots {
 template<class TF,class Arch>
 auto default_frame( PI dim ) {
     Tensor<TF,2,Arch> res( Shape(), { Values(), dim + 1, dim } );
-    for( PI i = 0; i < dim; ++i ) res( 0, i ) = 0;
+    for( PI i = 0; i < dim; ++i )
+        res( 0, i ) = 0;
     for( PI r = 0; r < dim; ++r )
         for( PI i = 0; i < dim; ++i )
             res( r + 1, i ) = ( r == i );

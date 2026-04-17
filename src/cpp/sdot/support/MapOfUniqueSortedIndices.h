@@ -29,7 +29,7 @@ class MapOfUniqueSortedIndices {
 public:
     /**/  MapOfUniqueSortedIndices( PI /* dim */ ) {}
 
-    void  prepare_for             ( InputInt /*max_PI_value*/, PI64 /* max_output_value */ ) { values.clear(); }
+    void  prepare_for             ( InputInt /*max_input_value*/, PI64 /* max_output_value */ ) { values.clear(); }
 
     IntWithOffset operator[] ( const DsVec<InputInt,-1,Arch> &key ) {
         auto iter = values.find( key );
