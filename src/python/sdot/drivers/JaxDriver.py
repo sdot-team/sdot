@@ -61,6 +61,9 @@ class JaxDriver:
     def int_type( self ):
         return jnp.int64
 
+    def is_int_dtype( self, dtype ):
+        return jnp.issubdtype( dtype, jnp.integer )
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )

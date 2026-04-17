@@ -2,6 +2,7 @@
 
 #include "../support/SimpleSquareMatrix.h"
 #include "../support/TensorView.h"
+#include "../support/P.h"
 
 // #define SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
 
@@ -44,8 +45,7 @@ UTP void make_aligned_simplex( DTP &cell, SI cut_id ) {
 
     cell.is_fully_closed() = cut_id != DTP::INFINITE;
     cell.nb_vertices() = nb_vertices;
-    if ( dim != 2 )
-        cell.nb_edges() = nb_edges;
+    cell.nb_edges() = nb_edges;
     cell.nb_cuts() = nb_cuts;
 
     // vertex_positions
@@ -98,6 +98,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
 
     cell.is_fully_closed() = cut_id != DTP::INFINITE;
     cell.nb_vertices() = nb_vertices;
+    cell.nb_edges() = dim * ( PI( 1 ) << ( dim - 1 ) );
     cell.nb_cuts() = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
@@ -134,7 +135,6 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
             cell.cut_ids( k ) = cut_id;
 
         #ifdef SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
-        cell.nb_edges() = 4;
         for ( PI k = 0; k < 4; ++k ) {
             const PI k1 = ( k + 1 ) % 4, kp = ( k + 3 ) % 4;
             cell.edge_indices( k, 0 ) = k;
@@ -147,8 +147,6 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
 
         return;
     }
-
-    cell.nb_edges() = dim * ( PI( 1 ) << ( dim - 1 ) );
 
     // vertex_positions: origin + sum of selected axes; vertex_indices: cut 2b or 2b+1 per axis
     for ( PI k = 0; k < nb_vertices; ++k ) {

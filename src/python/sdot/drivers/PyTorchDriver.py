@@ -54,6 +54,12 @@ class PyTorchDriver:
     def int_type( self ):
         return torch.int64
 
+    _INT_DTYPES = frozenset( [ torch.int8, torch.int16, torch.int32, torch.int64,
+                                torch.uint8, torch.uint16, torch.uint32, torch.uint64 ] )
+
+    def is_int_dtype( self, dtype ):
+        return dtype in PyTorchDriver._INT_DTYPES
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )

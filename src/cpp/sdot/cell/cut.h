@@ -171,6 +171,7 @@ void apply_cut_corr( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws
 template<class TF, int ct_dim, class Arch>
 void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWorkspace<TF,Arch> &ws ) {
     const PI nb = cell.nb_vertices();
+    P( cut_plane );
 
     // find int→out (n0) and out→int (n2) transitions
     PI n0 = 0, n2 = 0;
@@ -260,9 +261,10 @@ void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWor
         cell.nb_cuts() = new_nb;
     }
 
-    #ifdef SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
     const PI new_nb = cell.nb_vertices();
     cell.nb_edges() = new_nb;
+
+    #ifdef SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
     for ( PI k0 = 0; k0 < new_nb; ++k0 ) {
         const PI k1 = ( k0 + 1 ) % new_nb;
         const PI kp = ( k0 + new_nb - 1 ) % new_nb;
@@ -278,8 +280,7 @@ void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWor
 void clear_cell( auto &cell, PI dim ) {
     cell.is_fully_closed() = 1;
     cell.nb_vertices() = 0;
-    if ( dim != 2 )
-        cell.nb_edges() = 0;
+    cell.nb_edges() = 0;
     cell.nb_cuts() = 0;
 }
 

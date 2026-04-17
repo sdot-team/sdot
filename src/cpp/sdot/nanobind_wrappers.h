@@ -2,11 +2,11 @@
 
 #include "support/common_macros.h"
 #include "support/vector_map.h"
-#include "support/P.h"
 #include "support/TensorView.h"
-#include <nanobind/nanobind.h>
+
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/vector.h>
+#include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <optional>
 
@@ -58,7 +58,7 @@ static auto tensor_view_3( const nanobind::ndarray<TF,TA> &v ) {
 template<class TF,class TA>
 static auto tensor_view_0( const std::optional<nanobind::ndarray<TF,TA>> &v ) {
     using TV = TensorView<TF,0,typename ArchFor<TA>::type>;
-    return v ? tensor_view_0( *v ) : TV::make_invalid( 1 );
+    return v ? tensor_view_0( *v ) : TV::make_invalid( 0 );
 }
 
 template<class TF,class TA>

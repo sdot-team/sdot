@@ -17,7 +17,7 @@ class CppBinding:
             fargs = []
             res = None
             for arg in args:
-                fargs += to_standard_objects( arg )
+                fargs += [ val for val, _ in to_standard_objects( arg ) ]
                 if isinstance( arg, Return ):
                     res = arg.value
 

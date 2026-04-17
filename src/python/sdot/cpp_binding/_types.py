@@ -14,10 +14,9 @@ def cpp_class_name_for( obj ) -> str:
         return driver.normalized_dtype
 
     if isinstance( obj, ( driver.array_type, TensorField ) ):
-        if obj.dtype == driver.int_type:
+        if driver.is_int_dtype( obj.dtype ):
             return "MI"
-        else:
-            return "MF"
+        return "MF"
 
     if isinstance( obj, ( Output, Return ) ):
         return cpp_class_name_for( obj.value )
@@ -40,7 +39,9 @@ def to_standard_objects( obj, attr = None ) -> list[ tuple[ any, str ] ]:
     if isinstance( attr, TensorField ):
         if attr.dtype == int:
             return [ ( obj, "MI" ) ]
-        return [ ( obj, "MI" ) ]
+        if attr.dtype is not None:
+            raise NotImplementedError( f"to_standard_objects with dtype = { attr.dtype }" )
+        return [ ( obj, "MF" ) ]
 
     if isinstance( attr, ListOfTensorFields ):
         raise NotImplementedError
@@ -52,9 +53,9 @@ def to_standard_objects( obj, attr = None ) -> list[ tuple[ any, str ] ]:
         return [ ( obj, "TF" ) ]
 
     if isinstance( obj, driver.array_type ):
-        if obj.dtype == driver.int_type:
+        if driver.is_int_dtype( obj.dtype ):
             return [ ( obj, "MI" ) ]
-        return [ ( obj, "MI" ) ]
+        return [ ( obj, "MF" ) ]
 
     # method to_standard_objects
     if hasattr( obj, "to_standard_objects" ):

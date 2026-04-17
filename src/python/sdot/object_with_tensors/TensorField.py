@@ -34,6 +34,13 @@ class TensorField:
         self.dtype = dtype
         self.name = None
 
+    @property
+    def ndim( self ):
+        for axis_name in self.axis_names:
+            if "*" in axis_name:
+                raise NotImplementedError
+        return len( self.axis_names )
+
     def __set_name__( self, distribution, name ):
         self.name = name
 

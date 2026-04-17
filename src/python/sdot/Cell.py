@@ -3,6 +3,7 @@ from .cpp_binding import cpp_binding, Output, Return
 from typing import TYPE_CHECKING
 from .driver import driver
 # from .CtInt import CtInt
+import numpy
 
 # constant
 INFINITE = -2
@@ -44,12 +45,12 @@ class Cell:
 
         self.is_fully_closed = 0
         self.nb_vertices = 0
+        self.nb_edges = 0
         self.nb_cuts = 0
 
         if dim != 2:
             self.large_vertex_indices = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
             self.large_edge_indices = driver.empty( [ edge_capacity, dim + 1 ], dtype = driver.int_type )
-            self.nb_edges = 0
 
         if ctor is None:
             cpp_binding( "make_empty_cell", "sdot/cell/Cell.h" )( Output( self ) )
@@ -90,17 +91,26 @@ class Cell:
     @property
     def vertex_indices( self ):
         if self.dim == 2:
-            raise NotImplementedError
+            nb = int( self.nb_vertices )
+            k = numpy.arange( nb )
+            kp = ( k + nb - 1 ) % nb
+            return numpy.stack( [ numpy.minimum( k, kp ), numpy.maximum( k, kp ) ], axis = 1 )
+
         if self.large_vertex_indices is None:
             return None
+
         return self.large_vertex_indices[ : self.nb_vertices, : ]
 
     @property
     def edge_indices( self ):
         if self.dim == 2:
-            raise NotImplementedError
+            nb = int( self.nb_vertices )
+            k = numpy.arange( nb )
+            return numpy.stack( [ k, ( k + 1 ) % nb, k ], axis = 1 )
+
         if self.large_edge_indices is None:
             return None
+
         return self.large_edge_indices[ : self.nb_edges, : ]
 
     @property
@@ -123,12 +133,12 @@ class Cell:
     def measure( self ):
         return cpp_binding( "measure", "sdot/cell/measure.h" )( Return( driver.empty( [] ) ), self )
 
-    def cut( self, cut_dir, cut_off = None, cut_id = BOUNDARY ):
-        cut_dir = driver.t1( cut_dir )
+    def cut( self, cut_dir_or_plane, cut_off = None, cut_id = BOUNDARY ):
+        cut_plane = driver.t1( cut_dir_or_plane )
         if cut_off is not None:
             cut_off = driver.t0( cut_off )
-            cut_dir = driver.hstack( [ cut_dir, driver.expand_dims( cut_off, 0 ) ] )
-        cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_dir, cut_id )
+            cut_plane = driver.hstack( [ cut_dir_or_plane, driver.expand_dims( cut_off, 0 ) ] )
+        cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_plane, cut_id )
 
     def cpp_class_name( self ):
         return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"
