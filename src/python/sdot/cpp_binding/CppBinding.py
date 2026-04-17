@@ -1,6 +1,8 @@
-from ._types import to_standard_objects
-from ._func  import get_func_for
+from ._types import to_standard_objects, diffentiable_tensors_of
+from ._func  import get_func_for, get_forward_and_backward_for
+from ..driver import driver
 from .Return  import Return
+from .Output  import Output
 
 
 class CppBinding:
@@ -12,16 +14,30 @@ class CppBinding:
             self.includes = includes
 
         def __call__( self, *args ):
-            func = get_func_for( self.func_name, args, self.includes )
-
+            output_tensors = []
+            input_tensors = []
             fargs = []
             res = None
             for arg in args:
                 fargs += [ val for val, _ in to_standard_objects( arg ) ]
+
+                # return with reservation
                 if isinstance( arg, Return ):
                     res = arg.value
 
-            output = func( *fargs )
+                # diffentiable tensors
+                if isinstance( arg, Output ):
+                    output_tensors += diffentiable_tensors_of( arg )
+                else:
+                    input_tensors += diffentiable_tensors_of( arg )
+
+
+            if driver.any_requires_grad( input_tensors ):
+                fwd, bwd = get_forward_and_backward_for( self.func_name, args, self.includes, input_tensors, output_tensors )
+                output = driver.forward( fwd, bwd, fargs, input_tensors, output_tensors )
+            else:
+                func = get_func_for( self.func_name, args, self.includes )
+                output = func( *fargs )
 
             if output is None:
                 return res

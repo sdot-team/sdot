@@ -9,7 +9,7 @@ Both ultimately call ``_compile(dylib_name, src_paths, device_type)`` after the
 source file has been written to the build cache.
 """
 
-from ._types import cpp_class_name_for, to_standard_objects, from_standard_objects
+from ._types import cpp_class_name, to_standard_objects, from_standard_objects
 from ._util import encode_base62
 
 from pathlib import Path
@@ -33,7 +33,7 @@ class CppFunc:
         self.args = args
 
     def key( self ) -> str:
-        res = str.join( "_", [ self.name ] + list( map( cpp_class_name_for, self.args ) ) + list( self.includes ) )
+        res = str.join( "_", [ self.name ] + list( map( cpp_class_name, self.args ) ) + list( self.includes ) )
         res = res.replace( "<", "_" )
         res = res.replace( ">", "_" )
         res = res.replace( "/", "_" )
@@ -75,7 +75,7 @@ def get_module_for( func_list: list ):
     """
     # lazy import avoids circular dependency: driver.py → _build.py → driver.py
     from ..driver import driver
-    from ._types import cpp_class_name_for, to_standard_objects
+    from ._types import cpp_class_name, to_standard_objects
 
     dylib_name = str.join( "__", [ func.key() for func in func_list ] )
     if len( dylib_name ) > 40:

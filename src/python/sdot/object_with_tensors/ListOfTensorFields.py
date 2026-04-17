@@ -6,32 +6,33 @@ class ListOfTensorFields:
     """
     """
 
-    def __init__( self, main_axis_name : str, tensor_axis_names : list[ str ] ):
+    def __init__( self, main_axis_name : str, tensor_axis_names : list[ str ], dtype = None ):
         self.tensor_axis_names = tensor_axis_names
         self.main_axis_name = main_axis_name
+        self.dtype = dtype
         self.name = None
 
-    def __set_name__( self, distribution, name ):
+    def __set_name__( self, enclosing, name ):
         self.name = name
 
     # overloads for typing
     @overload
-    def __get__( self, distribution: None, _type: type ) -> Self: ...
+    def __get__( self, enclosing: None, _type: type ) -> Self: ...
     @overload
-    def __get__( self, distribution: object, _type: type ) -> GenericTensor: ...
+    def __get__( self, enclosing: object, _type: type ) -> GenericTensor: ...
 
-    def __get__( self, distribution, _type = None ):
+    def __get__( self, enclosing, _type = None ):
         # not in a Distribution ?
-        if distribution is None:
+        if enclosing is None:
             return self
 
         # we have a value ?
-        value = distribution.__dict__.get( f'_{ self.name }' )
+        value = enclosing.__dict__.get( f'_{ self.name }' )
         if value is not None:
             return value
 
         # we have a default method ?
-        default_method = getattr( type( distribution ), f'default_{ self.name }', None )
+        default_method = getattr( type( enclosing ), f'default_{ self.name }', None )
         if default_method is not None:
             raise NotImplementedError
             #     # make the new value
@@ -50,19 +51,19 @@ class ListOfTensorFields:
         # not found :(
         return None
 
-    def __set__( self, distribution, values ):
+    def __set__( self, enclosing, values ):
         if values is None:
             return
 
         # check the size
         curr = len( values )
-        size = getattr( distribution, self.main_axis_name )
+        size = getattr( enclosing, self.main_axis_name )
         if size is not None:
             if curr != size:
                 raise RuntimeError( f"list used to define the '{ self.name }' attribute is of a wrong size: expecting { size } ('{ self.main_axis_name }' axis), provided tensor len is { curr }" )
 
         # make the tensor list
-        tensors = [ driver.tn( value, _rank( distribution, self.tensor_axis_names ), self.name ) for value in values ]
+        tensors = [ driver.tn( value, _rank( enclosing, self.tensor_axis_names ), self.name ) for value in values ]
 
         # TODO # check the dimensions
         # for axis_name in _names( self.axis_names ):
@@ -74,12 +75,24 @@ class ListOfTensorFields:
         #                 raise RuntimeError( f"tensor used to define the '{ self.name }' attribute is not of the correct size along the '{ axis_name }' axis (expecting { size }, provided tensor shape - minus offset - is { curr })" )
 
         # register the tensor list
-        distribution.__dict__[ f'_{ self.name }' ] = tensors
+        enclosing.__dict__[ f'_{ self.name }' ] = tensors
 
-    def _rank( self, distribution ):
-        return _rank( distribution, self.tensor_axis_names )
+    def _rank( self, enclosing ):
+        return _rank( enclosing, self.tensor_axis_names )
 
-    def _get_axis_sizes( self, distribution, v, axis_name ) -> list[ tuple[ int, ... ] | int ]:
+    # def cpp_class_name( self ):
+    #     if driver.is_int_dtype( self.dtype ):
+    #         return "std::vector<MI>"
+    #     return "std::vector<MF>"
+
+    # def to_standard_objects( self, obj ):
+    #     raise NotImplementedError
+
+    # def from_standard_objects( self, obj, arg_names ):
+    #     #return f"tensor_view_{ self.ndim }( { arg_names.pop( 0 ) } )"
+    #     raise NotImplementedError
+
+    def _get_axis_sizes( self, enclosing, v, axis_name ) -> list[ tuple[ int, ... ] | int ]:
         raise NotImplementedError
         # # nb fields with "*"
         # nb_fields_with_mul = 0

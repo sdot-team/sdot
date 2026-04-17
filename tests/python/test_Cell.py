@@ -1,6 +1,5 @@
 from sdot.Cell import Cell
 from icecream import ic
-
 # import faulthandler
 # faulthandler.enable()
 
@@ -16,14 +15,17 @@ from icecream import ic
 #     ic( c.measure )
 
 def test_cell_2D():
+    import torch
+
     c = Cell.aligned_hypercube( 2 )
-    c.cut( [ 1, 0 ], 0.3 )
+
+    # c.cut( [ 1, 0 ], 0.3 )
     ic( c.vertex_positions )
-    ic( c.vertex_indices )
-    ic( c.edge_indices )
-    ic( c.cut_planes )
-    ic( c.measure )
-    ic( c.faces )
+    # ic( c.vertex_indices )
+    # ic( c.edge_indices )
+    # ic( c.cut_planes )
+    # ic( c.measure )
+    # ic( c.faces )
 
     c.plot()
 

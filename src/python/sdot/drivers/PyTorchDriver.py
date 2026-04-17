@@ -1,6 +1,3 @@
-# from sdot.object_with_tensors._methods import unflatten_args, flat_tensor_list, to_tensor_list
-# from ..distributions.BatchOfDistributions import BatchOfDistributions
-# from ..BatchOfOtPlans import BatchOfOtPlans
 import numpy as np
 import torch
 
@@ -60,6 +57,9 @@ class PyTorchDriver:
     def is_int_dtype( self, dtype ):
         return dtype in PyTorchDriver._INT_DTYPES
 
+    def any_requires_grad( self, tensors ) -> bool:
+        return any( t.requires_grad for t in tensors )
+
     def t3( self, tensor ):
         """ make a rank 3 tensor """
         return self.tn( tensor, 3 )
@@ -97,17 +97,17 @@ class PyTorchDriver:
 
         return res
 
-    def zeros( self, shape ):
-        return torch.zeros( shape, dtype = self.dtype, device = self.device )
+    def zeros( self, shape, dtype = None ):
+        return torch.zeros( shape, dtype = dtype or self.dtype, device = self.device )
 
-    def ones( self, shape ):
-        return torch.ones( shape, dtype = self.dtype, device = self.device )
+    def ones( self, shape, dtype = None ):
+        return torch.ones( shape, dtype = dtype or self.dtype, device = self.device )
 
-    def linspace( self, a, b, n ):
-        return torch.linspace( a, b, n, dtype = self.dtype, device = self.device )
+    def linspace( self, a, b, n, dtype = None ):
+        return torch.linspace( a, b, n, dtype = dtype or self.dtype, device = self.device )
 
-    def empty( self, shape ):
-        return torch.zeros( shape, dtype = self.dtype, device = self.device )
+    def empty( self, shape, dtype = None ):
+        return torch.zeros( shape, dtype = dtype or self.dtype, device = self.device )
 
     def expand_dims( self, tensor, index ):
         return tensor.unsqueeze( index )
@@ -132,7 +132,7 @@ class PyTorchDriver:
         # if isinstance( t, list ):
         # return t.to_numpy()
 
-    def forward( self, forward_func, backward_func, out_shapes, *inputs ):
+    def forward( self, forward_func: callable, backward_func: callable, args: list, input_tensors: list, output_tensors: list ):
         """ Generic differentiable wrapper with explicit backward.
             out_shapes    : list of shape tuples, e.g. [ (batch,), (batch, n, dim) ]
             forward_func ( *np_outputs, *np_inputs    ) -> None  (fills np_outputs in-place)
@@ -140,37 +140,19 @@ class PyTorchDriver:
                            *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
             Mutable (output) arrays come first, matching the nanobind convention.
         """
-        np_dtype      = { torch.float32: np.float32, torch.float64: np.float64 }[ self.dtype ]
-        input_tensors = to_tensor_list( inputs )
-        n_out         = len( out_shapes )
-
-        outer_self = self
+        driver = self
 
         class Func( torch.autograd.Function ):
             @staticmethod
-            def forward( ctx, *t_inputs ):
-                np_inputs  = [ t.cpu().detach().numpy() for t in t_inputs ]
-                np_outputs = [ np.empty( shape, dtype = np_dtype ) for shape in out_shapes ]
-                forward_func( *np_outputs, *np_inputs )
-
-                t_outputs = [ torch.as_tensor( o, dtype = outer_self.dtype, device = outer_self.device ) for o in np_outputs ]
-                ctx.save_for_backward( *t_inputs, *t_outputs )
-                return tuple( t_outputs )
+            def forward( ctx, *tensor_inputs ):
+                forward_func( *args )
+                return tuple( output_tensors )
 
             @staticmethod
             def backward( ctx, *grad_outputs ):
-                saved      = ctx.saved_tensors
-                t_inputs   = saved[ :-n_out ]
-                t_outputs  = saved[ -n_out: ]
-
-                np_inputs      = [ t.cpu().detach().numpy() for t in t_inputs ]
-                np_outputs     = [ t.cpu().detach().numpy() for t in t_outputs ]
-                np_grads       = [ g.cpu().detach().numpy() for g in grad_outputs ]
-                np_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in t_inputs ]
-
-                backward_func( *np_grad_inputs, *np_outputs, *np_grads, *np_inputs )
-
-                return tuple( torch.as_tensor( g, dtype = outer_self.dtype, device = outer_self.device ) for g in np_grad_inputs )
+                grad_inputs = [ driver.empty( input.shape ) for input in input_tensors ]
+                backward_func( *args, *grad_inputs, *grad_outputs )
+                return tuple( grad_inputs )
 
         return Func.apply( *input_tensors )
 

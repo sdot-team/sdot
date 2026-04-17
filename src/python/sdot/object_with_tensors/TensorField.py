@@ -1,4 +1,4 @@
-# from ..BatchOfDistributions import BatchOfDistributions
+from .UndefinedTensor import UndefinedTensor
 from ..driver import driver
 
 from typing import Self, overload
@@ -41,43 +41,43 @@ class TensorField:
                 raise NotImplementedError
         return len( self.axis_names )
 
-    def __set_name__( self, distribution, name ):
+    def __set_name__( self, enclosing, name ):
         self.name = name
 
     # overloads for typing
     @overload
-    def __get__( self, distribution: None, _type: type ) -> Self: ...
+    def __get__( self, enclosing: None, _type: type ) -> Self: ...
     @overload
-    def __get__( self, distribution: object, _type: type ) -> GenericTensor: ...
+    def __get__( self, enclosing: object, _type: type ) -> GenericTensor: ...
 
-    def __get__( self, distribution, _type = None ):
+    def __get__( self, enclosing, _type = None ):
         # not in a Distribution ?
-        if distribution is None:
+        if enclosing is None:
             return self
 
         # we have a value ?
-        value = distribution.__dict__.get( f'_{ self.name }' )
+        value = enclosing.__dict__.get( f'_{ self.name }' )
         if value is not None:
             return value
 
         # we have a default method ?
-        default_method = getattr( type( distribution ), f'default_{ self.name }', None )
+        default_method = getattr( type( enclosing ), f'default_{ self.name }', None )
         if default_method is not None:
             # make the new value
             sig = signature( default_method )
             if len( sig.parameters ) == 2:
-                value = default_method( distribution, isinstance( distribution, BatchOfDistributions ) )
+                value = default_method( enclosing, isinstance( enclosing, BatchOfDistributions ) )
             else:
-                value = default_method( distribution )
+                value = default_method( enclosing )
 
             # register it
-            self.__set__( distribution, value )
+            self.__set__( enclosing, value )
 
             # return the normalized value
-            return distribution.__dict__[ f'_{ self.name }' ]
+            return enclosing.__dict__[ f'_{ self.name }' ]
 
-        # not foud :(
-        return None
+        # not found :(
+        return UndefinedTensor( _shape( self, enclosing ), self.dtype )
 
     def __set__( self, distribution, value ):
         if value is None:
@@ -97,6 +97,23 @@ class TensorField:
 
         # register the tensor
         distribution.__dict__[ f'_{ self.name }' ] = tensor
+
+    # def cpp_class_name( self ):
+    #     if driver.is_int_dtype( self.dtype ):
+    #         return "MI"
+    #     return "MF"
+
+    # def to_standard_objects( self, obj ):
+    #     if self.dtype == int:
+    #         return [ ( obj, "MI" ) ]
+
+    #     if self.dtype is not None:
+    #         raise NotImplementedError( f"to_standard_objects with dtype = { self.dtype }" )
+
+    #     return [ ( obj, "MF" ) ]
+
+    # def from_standard_objects( self, obj, arg_names ):
+    #     return f"tensor_view_{ self.ndim }( { arg_names.pop( 0 ) } )"
 
     def _rank( self, distribution ):
         return _rank( distribution, self.axis_names )
@@ -119,6 +136,34 @@ def _rank( distribution, base_axis_names ):
         res += 1
 
     return res
+
+
+def _shape( field, enclosing ):
+    res = []
+    for axis_name in field.axis_names:
+        axis_name = axis_name.replace( ' ', '' )
+        if "*" in axis_name:
+            # _, axis = axis_name.split( "*" )
+            # axis_size = getattr( enclosing, axis )
+            # if axis_size is None:
+            #     return None
+
+            # assert isinstance( axis_size, int )
+            # res += axis_size
+            # continue
+            raise NotImplementedError
+
+        if "+" in axis_name:
+            lhs, rhs = axis_name.split( "+" )
+            rhs = int( rhs )
+
+            res.append( getattr( enclosing, lhs ) + rhs )
+            continue
+
+        res.append( getattr( enclosing, axis_name ) )
+
+    return res
+
 
 def _axis_names( axis_names: tuple[ str, ... ] ) -> list[ str ]:
     res = []

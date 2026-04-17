@@ -1,6 +1,3 @@
-# from sdot.object_with_tensors._methods import unflatten_args, flat_tensor_list, to_tensor_list
-from ..BatchOfOtPlans import BatchOfOtPlans
-from ..driver import driver
 import jax.numpy as jnp
 import numpy as np
 import jax
@@ -63,6 +60,9 @@ class JaxDriver:
 
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
+
+    def any_requires_grad( self, tensors ) -> bool:
+        return True
 
     def t3( self, tensor ):
         """ make a rank 3 tensor """
@@ -152,7 +152,8 @@ class JaxDriver:
                            *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
             Mutable (output) arrays come first, matching the nanobind convention.
         """
-        input_tensors, reversed_input_tensors = to_tensor_list( inputs )
+        input_tensors = list( inputs )
+        reversed_input_tensors = list
         np_dtype = np.dtype( self.dtype )
 
         fwd_shapes = tuple( jax.ShapeDtypeStruct( shape, np_dtype ) for shape in out_shapes )

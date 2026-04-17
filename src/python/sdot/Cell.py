@@ -76,7 +76,17 @@ class Cell:
         else:
             max_coords = driver.array( max_coords )
 
-        return Cell( dim, lambda cell: cpp_binding( "make_aligned_hypercube", "sdot/cell/Cell.h" )( Output( cell ), min_coords, max_coords, bnd ) )
+        diff = max_coords - min_coords
+        diag = driver.array( numpy.eye( dim ) ) * diff
+        frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
+
+        return Cell.hypercube( frame, bnd = bnd )
+
+    @staticmethod
+    def hypercube( frame, bnd = BOUNDARY ):
+        frame = driver.array( frame )
+        assert frame is not None
+        return Cell( frame.shape[ 1 ], lambda cell: cpp_binding( "make_hypercube", "sdot/cell/Cell.h" )( Output( cell ), frame, bnd ) )
 
     @staticmethod
     def aligned_simplex( dim, bnd = BOUNDARY ):

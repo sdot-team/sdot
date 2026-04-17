@@ -198,10 +198,11 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     }
 }
 
-UTP void make_aligned_hypercube( DTP &cell, const auto &min_coords, const auto &max_coords, SI cut_id ) {
-    auto frame = [&]( auto r, auto c ) { return min_coords[ c ] + ( r == c + 1 ) * ( max_coords[ c ] - min_coords[ c ] ); };
-    make_hypercube( cell, frame, cut_id );
+// grad_inputs, *grad_outputs
+UTP void make_hypercube_backward( DTP &cell, const auto &frame, SI cut_id, const auto &grad_inp_frame, const auto &grad_out_cut_planes, const auto &grad_out_vertex_positions ) {
+    TODO;
 }
+
 
 #undef UTP2
 #undef DTP2
