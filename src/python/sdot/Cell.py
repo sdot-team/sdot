@@ -68,8 +68,8 @@ class Cell:
             assert dim is not None
             min_coords = driver.zeros( [ dim ] )
         else:
-            dim = min_coords_or_dim.size
             min_coords = driver.array( min_coords_or_dim )
+            dim = min_coords.shape[ 0 ]
 
         if max_coords is None:
             max_coords = driver.ones( [ dim ] )
@@ -140,7 +140,7 @@ class Cell:
         return res
 
     @property
-    def measure( self ):
+    def measure( self ) -> any:
         return cpp_binding( "measure", "sdot/cell/measure.h" )( Return( driver.empty( [] ) ), self )
 
     def cut( self, cut_dir_or_plane, cut_off = None, cut_id = BOUNDARY ):

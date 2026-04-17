@@ -198,9 +198,59 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     }
 }
 
-// grad_inputs, *grad_outputs
-UTP void make_hypercube_backward( DTP &cell, const auto &frame, SI cut_id, const auto &grad_inp_frame, const auto &grad_out_cut_planes, const auto &grad_out_vertex_positions ) {
-    TODO;
+UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_id*/, const auto &grad_inp_frame, const auto &grad_out_cut_planes, const auto &grad_out_vertex_positions ) {
+    const PI dim = cell.dim();
+
+    if ( dim == 2 ) {
+        // --- vertex positions → frame ---
+        const PI bitmasks[ 4 ] = { 0, 1, 3, 2 };
+        for ( PI k = 0; k < 4; ++k ) {
+            for ( PI d = 0; d < 2; ++d ) {
+                const TF gvp = grad_out_vertex_positions( k, d );
+                grad_inp_frame( 0, d ) += gvp;
+                if ( ( bitmasks[ k ] >> 0 ) & 1 ) grad_inp_frame( 1, d ) += gvp;
+                if ( ( bitmasks[ k ] >> 1 ) & 1 ) grad_inp_frame( 2, d ) += gvp;
+            }
+        }
+
+        // recover r0, r1 stored in cut_planes by the forward
+        const TF r0_0 =  cell.cut_planes( 1, 0 ), r0_1 =  cell.cut_planes( 1, 1 );
+        const TF r1_0 = -cell.cut_planes( 0, 0 ), r1_1 = -cell.cut_planes( 0, 1 );
+
+        // --- cut planes → G_r0, G_r1, G_d0, G_d1 ---
+        const TF G_r0_0 = grad_out_cut_planes( 1, 0 ) - grad_out_cut_planes( 3, 0 );
+        const TF G_r0_1 = grad_out_cut_planes( 1, 1 ) - grad_out_cut_planes( 3, 1 );
+        const TF G_d0   = grad_out_cut_planes( 1, 2 ) - grad_out_cut_planes( 3, 2 );
+        const TF G_r1_0 = grad_out_cut_planes( 2, 0 ) - grad_out_cut_planes( 0, 0 );
+        const TF G_r1_1 = grad_out_cut_planes( 2, 1 ) - grad_out_cut_planes( 0, 1 );
+        const TF G_d1   = grad_out_cut_planes( 2, 2 ) - grad_out_cut_planes( 0, 2 );
+
+        // --- d0, d1 = r·origin → frame(0,:) ---
+        grad_inp_frame( 0, 0 ) += G_d0 * r0_0 + G_d1 * r1_0;
+        grad_inp_frame( 0, 1 ) += G_d0 * r0_1 + G_d1 * r1_1;
+
+        // --- total gradient through d0, d1 adds to G_r ---
+        const TF tG_r0_0 = G_r0_0 + G_d0 * frame( 0, 0 );
+        const TF tG_r0_1 = G_r0_1 + G_d0 * frame( 0, 1 );
+        const TF tG_r1_0 = G_r1_0 + G_d1 * frame( 0, 0 );
+        const TF tG_r1_1 = G_r1_1 + G_d1 * frame( 0, 1 );
+
+        // grad_FT via  grad_FT = −(FT^{−T}·tG_r) ⊗ r^T
+        // FT^{−T} has r0, r1 as rows; grad_frame(1+c, r) = grad_FT[r,c]
+        const TF p0 = r0_0 * tG_r0_0 + r0_1 * tG_r0_1;
+        const TF q0 = r1_0 * tG_r0_0 + r1_1 * tG_r0_1;
+        const TF p1 = r0_0 * tG_r1_0 + r0_1 * tG_r1_1;
+        const TF q1 = r1_0 * tG_r1_0 + r1_1 * tG_r1_1;
+
+        grad_inp_frame( 1, 0 ) += -p0 * r0_0 - p1 * r1_0;
+        grad_inp_frame( 1, 1 ) += -q0 * r0_0 - q1 * r1_0;
+        grad_inp_frame( 2, 0 ) += -p0 * r0_1 - p1 * r1_1;
+        grad_inp_frame( 2, 1 ) += -q0 * r0_1 - q1 * r1_1;
+
+        return;
+    }
+
+    TODO; // nD
 }
 
 

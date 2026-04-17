@@ -141,11 +141,12 @@ class PyTorchDriver:
             Mutable (output) arrays come first, matching the nanobind convention.
         """
         driver = self
+        output = []
 
         class Func( torch.autograd.Function ):
             @staticmethod
             def forward( ctx, *tensor_inputs ):
-                forward_func( *args )
+                output.append( forward_func( *args ) )
                 return tuple( output_tensors )
 
             @staticmethod
@@ -154,7 +155,8 @@ class PyTorchDriver:
                 backward_func( *args, *grad_inputs, *grad_outputs )
                 return tuple( grad_inputs )
 
-        return Func.apply( *input_tensors )
+        Func.apply( *input_tensors )
+        return output[ 0 ]
 
 
     def array_conversion( self, value ):

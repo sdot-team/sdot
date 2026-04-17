@@ -26,11 +26,10 @@ class CppBinding:
                     res = arg.value
 
                 # diffentiable tensors
-                if isinstance( arg, Output ):
+                if isinstance( arg, Output ) or isinstance( arg, Return ):
                     output_tensors += diffentiable_tensors_of( arg )
                 else:
                     input_tensors += diffentiable_tensors_of( arg )
-
 
             if driver.any_requires_grad( input_tensors ):
                 fwd, bwd = get_forward_and_backward_for( self.func_name, args, self.includes, input_tensors, output_tensors )

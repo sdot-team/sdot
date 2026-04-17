@@ -53,4 +53,23 @@ void measure( auto &res, const Cell<TF,ct_dim,Arch> &cell ) {
     res() = sum / factorial( dim );
 }
 
+template<class TF, int ct_dim, class Arch>
+void measure_backward( const auto &/*res_measure*/, const Cell<TF,ct_dim,Arch> &cell, auto &grad_vertex_positions, auto &/*grad_cut_planes*/, const auto &grad_out_measure ) {
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
+
+    if ( dim == 2 ) {
+        const TF g = grad_out_measure() / 2;
+        for ( PI k = 0; k < nb_vertices; ++k ) {
+            const PI kp = ( k + 1 ) % nb_vertices;
+            const PI km = ( k + nb_vertices - 1 ) % nb_vertices;
+            grad_vertex_positions( k, 0 ) += g * ( cell.vertex_positions( kp, 1 ) - cell.vertex_positions( km, 1 ) );
+            grad_vertex_positions( k, 1 ) += g * ( cell.vertex_positions( km, 0 ) - cell.vertex_positions( kp, 0 ) );
+        }
+        return;
+    }
+
+    TODO; // nD: gradient via fan triangulation
+}
+
 } // namespace sdot
