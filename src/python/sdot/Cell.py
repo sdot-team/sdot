@@ -94,8 +94,7 @@ class Cell:
 
     @property
     def vertex_positions( self ):
-        if self.large_vertex_positions is None:
-            return None
+        assert self.large_vertex_positions is not None
         return self.large_vertex_positions[ : self.nb_vertices, : ]
 
     @property
@@ -147,7 +146,7 @@ class Cell:
         cut_plane = driver.t1( cut_dir_or_plane )
         if cut_off is not None:
             cut_off = driver.t0( cut_off )
-            cut_plane = driver.hstack( [ cut_dir_or_plane, driver.expand_dims( cut_off, 0 ) ] )
+            cut_plane = driver.hstack( [ cut_plane, driver.expand_dims( cut_off, 0 ) ] )
         cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_plane, cut_id )
 
     def cpp_class_name( self ):

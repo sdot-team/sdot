@@ -263,18 +263,6 @@ void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWor
 
     const PI new_nb = cell.nb_vertices();
     cell.nb_edges() = new_nb;
-
-    #ifdef SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
-    for ( PI k0 = 0; k0 < new_nb; ++k0 ) {
-        const PI k1 = ( k0 + 1 ) % new_nb;
-        const PI kp = ( k0 + new_nb - 1 ) % new_nb;
-        cell.edge_indices( k0, 0 ) = k0;
-        cell.edge_indices( k0, 1 ) = k1;
-        cell.edge_indices( k0, 2 ) = k0;
-        cell.vertex_indices( k0, 0 ) = std::min( kp, k0 );
-        cell.vertex_indices( k0, 1 ) = std::max( kp, k0 );
-    }
-    #endif
 }
 
 void clear_cell( auto &cell, PI dim ) {

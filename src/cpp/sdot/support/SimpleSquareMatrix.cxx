@@ -113,6 +113,34 @@ UTP DTP::Vec DTP::solve_ge( Vec b ) const {
     return x;
 }
 
+UTP DTP DTP::inverse() const {
+    const PI n = size();
+    SimpleSquareMatrix A = *this;
+    SimpleSquareMatrix inv = with_func( n, []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
+
+    for ( PI p = 0; p < n; ++p ) {
+        // partial pivot
+        PI pivot = p;
+        for ( PI r = p + 1; r < n; ++r )
+            if ( std::abs( A( r, p ) ) > std::abs( A( pivot, p ) ) )
+                pivot = r;
+        for ( PI c = 0; c < n; ++c ) std::swap( A( p, c ), A( pivot, c ) );
+        for ( PI c = 0; c < n; ++c ) std::swap( inv( p, c ), inv( pivot, c ) );
+
+        if ( A( p, p ) == T(0) ) continue;
+
+        const T inv_diag = T(1) / A( p, p );
+        for ( PI c = 0; c < n; ++c ) { A( p, c ) *= inv_diag; inv( p, c ) *= inv_diag; }
+
+        for ( PI r = 0; r < n; ++r ) {
+            if ( r == p ) continue;
+            const T f = A( r, p );
+            for ( PI c = 0; c < n; ++c ) { A( r, c ) -= f * A( p, c ); inv( r, c ) -= f * inv( p, c ); }
+        }
+    }
+    return inv;
+}
+
 #undef UTP
 #undef DTP
 

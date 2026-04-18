@@ -17,3 +17,7 @@ class Output:
     def diffentiable_tensors( self ):
         from ._types import diffentiable_tensors_of
         return diffentiable_tensors_of( self.value )
+
+    def write_back_diffentiable_tensors( self, tensors_iter ):
+        from ._types import write_back_diffentiable_tensors
+        write_back_diffentiable_tensors( self.value, tensors_iter )

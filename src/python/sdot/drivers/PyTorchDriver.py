@@ -132,31 +132,40 @@ class PyTorchDriver:
         # if isinstance( t, list ):
         # return t.to_numpy()
 
-    def forward( self, forward_func: callable, backward_func: callable, args: list, input_tensors: list, output_tensors: list ):
-        """ Generic differentiable wrapper with explicit backward.
-            out_shapes    : list of shape tuples, e.g. [ (batch,), (batch, n, dim) ]
-            forward_func ( *np_outputs, *np_inputs    ) -> None  (fills np_outputs in-place)
-            backward_func( *np_grad_inputs, *np_outputs,
-                           *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
-            Mutable (output) arrays come first, matching the nanobind convention.
+    def to_standard_objects( self, obj ):
+        if isinstance( obj, torch.Tensor ):
+            if self.is_int_dtype( obj.dtype ):
+                return [ ( obj, "MI" ) ]
+            return [ ( obj, "MF" ) ]
+        return None
+
+    def forward( self, forward_func: callable, backward_func: callable, args: list, input_tensors: list, _output_args: list, output_tensors: list ):
+        """Differentiable wrapper.
+            forward_func ( *args ) -> None  (fills output_tensors in-place)
+            backward_func( *args, *grad_inputs, *grad_outputs ) -> None  (fills grad_inputs in-place)
         """
-        driver = self
-        output = []
+        _driver = self
+        _output = []
 
         class Func( torch.autograd.Function ):
             @staticmethod
-            def forward( ctx, *tensor_inputs ):
-                output.append( forward_func( *args ) )
+            def forward( ctx, *_ ):
+                _output.append( forward_func( *args ) )
                 return tuple( output_tensors )
 
             @staticmethod
             def backward( ctx, *grad_outputs ):
-                grad_inputs = [ driver.empty( input.shape ) for input in input_tensors ]
+                grad_inputs = [ _driver.zeros( t.shape ) for t in input_tensors ]
                 backward_func( *args, *grad_inputs, *grad_outputs )
                 return tuple( grad_inputs )
 
         Func.apply( *input_tensors )
-        return output[ 0 ]
+        return _output[ 0 ]
+
+        # tracked = Func.apply( *input_tensors )
+        # if not output_tensors:
+        #     return None
+        # return tracked[ 0 ] if len( output_tensors ) == 1 else tracked
 
 
     def array_conversion( self, value ):
@@ -253,7 +262,7 @@ class PyTorchDriver:
 
     def optimize_using_sgd( self, loss, params ):
         optimizer = torch.optim.SGD( [ params ] )
-        for _ in range( 20 ):
+        for _ in range( 2000 ):
             l = loss( params )
             print( l )
             optimizer.zero_grad()

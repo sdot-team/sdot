@@ -28,6 +28,7 @@ public:
     SimpleSquareMatrix cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
     Vec                solve_ge                ( Vec b ) const;   ///< Gaussian elimination with partial pivoting; zero pivot → x[p]=0 (handles degenerate cells)
     Vec                solve                   ( const Vec &vec ) const;
+    SimpleSquareMatrix inverse                 () const;  ///< Gauss-Jordan on [A | I]; zero pivot row → identity row in result
     PI                 size                    ( PI ) const { return size(); }
     PI                 size                    () const { return ct_size >= 0 ? ct_size : _size; }
 

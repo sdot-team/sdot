@@ -4,8 +4,6 @@
 #include "../support/TensorView.h"
 #include "../support/P.h"
 
-// #define SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
-
 namespace sdot {
 
 ///
@@ -36,6 +34,16 @@ struct Cell {
 
 #define UTP template<class TF,int ct_dim,class Arch>
 #define DTP Cell<TF,ct_dim,Arch>
+
+void test_alac( auto &out, const auto &inp ) {
+    out() = inp() * inp();
+}
+
+void test_alac_backward( auto &/* out */, const auto &inp, auto &grad_inp, const auto &grad_out ) {
+    grad_inp() = 2 * grad_out() * inp();
+}
+
+
 
 UTP void make_aligned_simplex( DTP &cell, SI cut_id ) {
     const PI dim = cell.vertex_positions.size( 1 );
@@ -106,76 +114,46 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
         return TF( frame( 1 + c, r ) );
     } );
 
-    if ( dim == 2 ) {
-        // vertices CCW: bitmasks {0,1,3,2} → (0,0),(1,0),(1,1),(0,1)
-        const PI bitmasks[ 4 ] = { 0, 1, 3, 2 };
-        for ( PI k = 0; k < 4; ++k ) {
-            for ( PI d = 0; d < 2; ++d ) {
-                TF pos = frame( 0, 0 );
-                if ( ( bitmasks[k] >> 0 ) & 1 )
-                    pos += frame( 1, d );
-                if ( ( bitmasks[k] >> 1 ) & 1 )
-                    pos += frame( 2, d );
-                cell.vertex_positions( k, d ) = pos;
-            }
-        }
-
-        // rows of F^{-1} and dot products with origin
-        const auto r0 = FT.solve_ge( DsVec<TF,ct_dim,Arch>::with_func( 2, []( PI i ) { return TF( i == 0 ? 1 : 0 ); } ) );
-        const auto r1 = FT.solve_ge( DsVec<TF,ct_dim,Arch>::with_func( 2, []( PI i ) { return TF( i == 1 ? 1 : 0 ); } ) );
-        const TF d0 = r0[ 0 ] * frame( 0, 0 ) + r0[ 1 ] * frame( 0, 1 );
-        const TF d1 = r1[ 0 ] * frame( 0, 0 ) + r1[ 1 ] * frame( 0, 1 );
-
-        // cut k = edge k→(k+1)%4: lower_y, upper_x, upper_y, lower_x
-        cell.cut_planes( 0, 0 ) = - r1[ 0 ]; cell.cut_planes( 0, 1 ) = - r1[ 1 ]; cell.cut_planes( 0, 2 ) = - d1;
-        cell.cut_planes( 1, 0 ) = + r0[ 0 ]; cell.cut_planes( 1, 1 ) = + r0[ 1 ]; cell.cut_planes( 1, 2 ) = + d0 + 1;
-        cell.cut_planes( 2, 0 ) = + r1[ 0 ]; cell.cut_planes( 2, 1 ) = + r1[ 1 ]; cell.cut_planes( 2, 2 ) = + d1 + 1;
-        cell.cut_planes( 3, 0 ) = - r0[ 0 ]; cell.cut_planes( 3, 1 ) = - r0[ 1 ]; cell.cut_planes( 3, 2 ) = - d0;
-        for ( PI k = 0; k < 4; ++k )
-            cell.cut_ids( k ) = cut_id;
-
-        #ifdef SDOT_KEEP_FULL_CELL_INFO_FOR_2D_CASE
-        for ( PI k = 0; k < 4; ++k ) {
-            const PI k1 = ( k + 1 ) % 4, kp = ( k + 3 ) % 4;
-            cell.edge_indices( k, 0 ) = k;
-            cell.edge_indices( k, 1 ) = k1;
-            cell.edge_indices( k, 2 ) = k;
-            cell.vertex_indices( k, 0 ) = std::min( kp, k );
-            cell.vertex_indices( k, 1 ) = std::max( kp, k );
-        }
-        #endif
-
-        return;
-    }
-
     // vertex_positions: origin + sum of selected axes; vertex_indices: cut 2b or 2b+1 per axis
+    const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
     for ( PI k = 0; k < nb_vertices; ++k ) {
+        const PI l = ( dim != 2 ? k : vertex_ordering_2D[ k ] );
         for ( PI d = 0; d < dim; ++d ) {
             TF pos = frame( 0, d );
             for ( PI b = 0; b < dim; ++b )
                 if ( ( k >> b ) & 1 )
                     pos += frame( 1 + b, d );
-            cell.vertex_positions( k, d ) = pos;
+            cell.vertex_positions( l, d ) = pos;
         }
-        for ( PI b = 0; b < dim; ++b )
-            cell.vertex_indices( k, b ) = 2 * b + ( ( k >> b ) & 1 );
+    }
+
+    // vertex_indices
+    if ( dim >= 2 ) {
+        for ( PI k = 0; k < nb_vertices; ++k )
+            for ( PI b = 0; b < dim; ++b )
+                cell.vertex_indices( k, b ) = 2 * b + ( ( k >> b ) & 1 );
     }
 
     // edge_indices: edges in direction b, from vertex k (bit b=0) to k|(1<<b)
-    for ( PI b = 0, e = 0; b < dim; ++b ) {
-        for ( PI k = 0; k < nb_vertices; ++k ) {
-            if ( ( k >> b ) & 1 ) continue;
-            cell.edge_indices( e, 0 ) = k;
-            cell.edge_indices( e, 1 ) = k | ( PI( 1 ) << b );
-            for ( PI d = 0, col = 2; d < dim; ++d ) {
-                if ( d == b ) continue;
-                cell.edge_indices( e, col++ ) = 2 * d + ( ( k >> d ) & 1 );
+    if ( dim >= 2 ) {
+        for ( PI b = 0, e = 0; b < dim; ++b ) {
+            for ( PI k = 0; k < nb_vertices; ++k ) {
+                if ( ( k >> b ) & 1 )
+                    continue;
+                cell.edge_indices( e, 0 ) = k;
+                cell.edge_indices( e, 1 ) = k | ( PI( 1 ) << b );
+                for ( PI d = 0, col = 2; d < dim; ++d ) {
+                    if ( d == b )
+                        continue;
+                    cell.edge_indices( e, col++ ) = 2 * d + ( ( k >> d ) & 1 );
+                }
+                ++e;
             }
-            ++e;
         }
     }
 
     // cut planes: row d of F^{-1} via shared FT
+    const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
         auto e_d = DsVec<TF,ct_dim,Arch>::with_func( dim, [d]( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
@@ -186,71 +164,80 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
         for ( PI c = 0; c < dim; ++c )
             row_dot_origin += row[ c ] * frame( 0, c );
 
+        const PI r0 = ( dim != 2 ? 2 * d + 0 : cut_ordering_2D[ 2 * d + 0 ] );
         for ( PI c = 0; c < dim; ++c )
-            cell.cut_planes( 2 * d, c ) = -row[ c ];
-        cell.cut_planes( 2 * d, dim ) = -row_dot_origin;
-        cell.cut_ids( 2 * d ) = cut_id;
+            cell.cut_planes( r0, c ) = -row[ c ];
+        cell.cut_planes( r0, dim ) = -row_dot_origin;
+        cell.cut_ids( r0 ) = cut_id;
 
+        const PI r1 = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
         for ( PI c = 0; c < dim; ++c )
-            cell.cut_planes( 2 * d + 1, c ) = row[ c ];
-        cell.cut_planes( 2 * d + 1, dim ) = row_dot_origin + 1;
-        cell.cut_ids( 2 * d + 1 ) = cut_id;
+            cell.cut_planes( r1, c ) = row[ c ];
+        cell.cut_planes( r1, dim ) = row_dot_origin + 1;
+        cell.cut_ids( r1 ) = cut_id;
     }
 }
 
-UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_id*/, const auto &grad_inp_frame, const auto &grad_out_cut_planes, const auto &grad_out_vertex_positions ) {
+UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_id*/, auto &grad_inp_frame, const auto &grad_out_vertex_positions, const auto &grad_out_cut_planes ) {
     const PI dim = cell.dim();
+    const PI nb_vertices = PI(1) << dim;
 
-    if ( dim == 2 ) {
-        // --- vertex positions → frame ---
-        const PI bitmasks[ 4 ] = { 0, 1, 3, 2 };
-        for ( PI k = 0; k < 4; ++k ) {
-            for ( PI d = 0; d < 2; ++d ) {
-                const TF gvp = grad_out_vertex_positions( k, d );
-                grad_inp_frame( 0, d ) += gvp;
-                if ( ( bitmasks[ k ] >> 0 ) & 1 ) grad_inp_frame( 1, d ) += gvp;
-                if ( ( bitmasks[ k ] >> 1 ) & 1 ) grad_inp_frame( 2, d ) += gvp;
-            }
+    // R = FT^{-1} (same FT as in forward)
+    const auto FT = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
+        return TF( frame( 1 + c, r ) );
+    } );
+    const auto R = FT.inverse();
+
+    // --- vertex positions backward ---
+    const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
+    for ( PI k = 0; k < nb_vertices; ++k ) {
+        const PI l = ( dim != 2 ? k : vertex_ordering_2D[ k ] );
+        for ( PI d_coord = 0; d_coord < dim; ++d_coord ) {
+            const TF g = grad_out_vertex_positions( l, d_coord );
+            grad_inp_frame( 0, d_coord ) += g;
+            for ( PI b = 0; b < dim; ++b )
+                if ( ( k >> b ) & 1 )
+                    grad_inp_frame( 1 + b, d_coord ) += g;
         }
-
-        // recover r0, r1 stored in cut_planes by the forward
-        const TF r0_0 =  cell.cut_planes( 1, 0 ), r0_1 =  cell.cut_planes( 1, 1 );
-        const TF r1_0 = -cell.cut_planes( 0, 0 ), r1_1 = -cell.cut_planes( 0, 1 );
-
-        // --- cut planes → G_r0, G_r1, G_d0, G_d1 ---
-        const TF G_r0_0 = grad_out_cut_planes( 1, 0 ) - grad_out_cut_planes( 3, 0 );
-        const TF G_r0_1 = grad_out_cut_planes( 1, 1 ) - grad_out_cut_planes( 3, 1 );
-        const TF G_d0   = grad_out_cut_planes( 1, 2 ) - grad_out_cut_planes( 3, 2 );
-        const TF G_r1_0 = grad_out_cut_planes( 2, 0 ) - grad_out_cut_planes( 0, 0 );
-        const TF G_r1_1 = grad_out_cut_planes( 2, 1 ) - grad_out_cut_planes( 0, 1 );
-        const TF G_d1   = grad_out_cut_planes( 2, 2 ) - grad_out_cut_planes( 0, 2 );
-
-        // --- d0, d1 = r·origin → frame(0,:) ---
-        grad_inp_frame( 0, 0 ) += G_d0 * r0_0 + G_d1 * r1_0;
-        grad_inp_frame( 0, 1 ) += G_d0 * r0_1 + G_d1 * r1_1;
-
-        // --- total gradient through d0, d1 adds to G_r ---
-        const TF tG_r0_0 = G_r0_0 + G_d0 * frame( 0, 0 );
-        const TF tG_r0_1 = G_r0_1 + G_d0 * frame( 0, 1 );
-        const TF tG_r1_0 = G_r1_0 + G_d1 * frame( 0, 0 );
-        const TF tG_r1_1 = G_r1_1 + G_d1 * frame( 0, 1 );
-
-        // grad_FT via  grad_FT = −(FT^{−T}·tG_r) ⊗ r^T
-        // FT^{−T} has r0, r1 as rows; grad_frame(1+c, r) = grad_FT[r,c]
-        const TF p0 = r0_0 * tG_r0_0 + r0_1 * tG_r0_1;
-        const TF q0 = r1_0 * tG_r0_0 + r1_1 * tG_r0_1;
-        const TF p1 = r0_0 * tG_r1_0 + r0_1 * tG_r1_1;
-        const TF q1 = r1_0 * tG_r1_0 + r1_1 * tG_r1_1;
-
-        grad_inp_frame( 1, 0 ) += -p0 * r0_0 - p1 * r1_0;
-        grad_inp_frame( 1, 1 ) += -q0 * r0_0 - q1 * r1_0;
-        grad_inp_frame( 2, 0 ) += -p0 * r0_1 - p1 * r1_1;
-        grad_inp_frame( 2, 1 ) += -q0 * r0_1 - q1 * r1_1;
-
-        return;
     }
 
-    TODO; // nD
+    // --- cut planes backward ---
+    // tG_R[d,j] = total gradient w.r.t. R[d,j] = row d of F^{-1}
+    const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
+    SimpleSquareMatrix<TF,ct_dim,Arch> tG_R( dim );
+    for ( PI d = 0; d < dim; ++d ) {
+        const PI r0 = ( dim != 2 ? 2 * d     : cut_ordering_2D[ 2 * d     ] );
+        const PI r1 = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
+
+        const TF G_d = grad_out_cut_planes( r1, dim ) - grad_out_cut_planes( r0, dim );
+
+        // gradient to origin via d_d = R[d,:] · origin
+        for ( PI c = 0; c < dim; ++c )
+            grad_inp_frame( 0, c ) += G_d * R( d, c );
+
+        // tG_R[d,j] = direct gradient from ±R[d,j] in cut_planes + G_d * origin[j]
+        for ( PI j = 0; j < dim; ++j )
+            tG_R( d, j ) = ( grad_out_cut_planes( r1, j ) - grad_out_cut_planes( r0, j ) )
+                         + G_d * frame( 0, j );
+    }
+
+    // grad_FT = -R^T · tG_R · R^T,  i.e. grad_frame(1+c, r) = grad_FT[r,c] = -Σ_d R[d,r] · M[d,c]
+    // where M[d,c] = tG_R[d,:] · R[c,:]
+    SimpleSquareMatrix<TF,ct_dim,Arch> M( dim );
+    for ( PI d = 0; d < dim; ++d )
+        for ( PI c = 0; c < dim; ++c ) {
+            TF m = 0;
+            for ( PI j = 0; j < dim; ++j )
+                m += tG_R( d, j ) * R( c, j );
+            M( d, c ) = m;
+        }
+    for ( PI c = 0; c < dim; ++c )
+        for ( PI r = 0; r < dim; ++r ) {
+            TF g = 0;
+            for ( PI d = 0; d < dim; ++d )
+                g -= R( d, r ) * M( d, c );
+            grad_inp_frame( 1 + c, r ) += g;
+        }
 }
 
 

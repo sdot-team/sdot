@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import jax.core as jax_core
 import numpy as np
 import jax
 
@@ -52,7 +53,7 @@ class JaxDriver:
 
     @property
     def array_type( self ):
-        return jax.Array
+        return ( jax.Array, jax_core.Tracer )
 
     @property
     def int_type( self ):
@@ -144,50 +145,111 @@ class JaxDriver:
         # if isinstance( t, list ):
         # return t.to_numpy()
 
-    def forward( self, forward_func, backward_func, out_shapes, *inputs ):
-        """ Generic differentiable wrapper using pure_callback (safe for C++/nanobind).
-            out_shapes    : list of shape tuples, e.g. [ (batch,), (batch, n, dim) ]
-            forward_func ( *np_outputs, *np_inputs    ) -> None  (fills np_outputs in-place)
-            backward_func( *np_grad_inputs, *np_outputs,
-                           *np_grad_outputs, *np_inputs ) -> None  (fills np_grad_inputs in-place)
-            Mutable (output) arrays come first, matching the nanobind convention.
-        """
-        input_tensors = list( inputs )
-        reversed_input_tensors = list
-        np_dtype = np.dtype( self.dtype )
+    def to_standard_objects( self, obj ):
+        if isinstance( obj, jax.Array ):
+            if self.is_int_dtype( obj.dtype ):
+                return [ ( obj, "MI" ) ]
+            return [ ( obj, "MF" ) ]
+        # if isinstance( obj, jax_core.Tracer ):
+        #     if self.is_int_dtype( obj.dtype ):
+        #         return [ ( obj., "MI" ) ]
+        #     return [ ( obj, "MF" ) ]
+        return None
 
-        fwd_shapes = tuple( jax.ShapeDtypeStruct( shape, np_dtype ) for shape in out_shapes )
-        bwd_shapes = tuple( jax.ShapeDtypeStruct( t.shape, np_dtype ) for t in input_tensors )
+    def forward( self, forward_func, backward_func, fargs, input_tensors, output_args, output_tensors ):
+        """Differentiable wrapper using pure_callback (safe for C++/nanobind).
+            forward_func ( *fargs ) -> None  (fills output_tensors in-place via C++)
+            backward_func( *fargs, *grad_inputs, *grad_outputs ) -> None
+            New JAX arrays are written back into output_args via write_back_diffentiable_tensors.
+        """
+        np_dtype = np.dtype( self.dtype )
+        n_out = len( output_tensors )
+
+        # id-based mapping: which farg belongs to output_tensors / input_tensors / other JAX array
+        out_id = { id( t ): i for i, t in enumerate( output_tensors ) }
+        in_id = { id( t ): i for i, t in enumerate( input_tensors ) }
+
+        def build_np_fargs( np_outputs, np_inputs ):
+            result = []
+            for a in fargs:
+                if isinstance( a, ( jax.Array, jax_core.Tracer ) ) or id( a ) in out_id or id( a ) in in_id:
+                    i_out = out_id.get( id( a ) )
+                    i_in = in_id.get( id( a ) )
+                    if i_out is not None:
+                        result.append( np_outputs[ i_out ] )
+                    elif i_in is not None:
+                        result.append( np_inputs[ i_in ] )
+                    else:
+                        result.append( np.asarray( a ) )  # int / static tensors
+                elif hasattr( a, "shape" ): # UndefinedTensor
+                    shape = [ ( s if s is not None else 0 ) for s in a.shape ]
+                    result.append( np.zeros( shape, dtype = a.dtype or np_dtype ) )
+                else:
+                    result.append( a )
+            return result
+
+        out_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in output_tensors )
+        inp_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in input_tensors )
 
         @jax.custom_vjp
         def op( *jax_inputs ):
-            def fwd_cb( *cb_inputs ):
-                np_outputs = [ np.empty( shape, dtype = np_dtype ) for shape in out_shapes ]
-                forward_func( *np_outputs, *reversed_input_tensors( cb_inputs ) )
+            def fwd_cb( *np_inputs ):
+                from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+                np_outputs = [ np.empty( t.shape, dtype = t.dtype ) for t in out_shapes ]
+                # We need to map UndefinedTensor to None for the nanobind call
+                call_args = []
+                for a in build_np_fargs( np_outputs, list( np_inputs ) ):
+                    if isinstance( a, UndefinedTensor ):
+                        call_args.append( None )
+                    else:
+                        call_args.append( np.asarray( a ) )
+                forward_func( *call_args )
                 return tuple( np_outputs )
-            return jax.pure_callback( fwd_cb, fwd_shapes, *jax_inputs )
+            return jax.pure_callback( fwd_cb, out_shapes, *jax_inputs )
 
         def op_fwd( *jax_inputs ):
             outputs = op( *jax_inputs )
             return outputs, ( *outputs, *jax_inputs )
 
         def op_bwd( residuals, grad_outputs ):
-            n_out         = len( out_shapes )
-            out_residuals = residuals[ :n_out ]
-            in_residuals  = residuals[ n_out: ]
+            jax_outputs = residuals[ :n_out ]
+            jax_inputs  = residuals[ n_out: ]
 
             def bwd_cb( *cb_args ):
-                np_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
-                np_inputs = cb_args[ 2 * n_out: ]
-                np_grads = cb_args[ n_out : 2 * n_out ]
-                np_outs = cb_args[ :n_out ]
-                backward_func( *reversed_input_tensors( np_grad_inputs ), *np_outs, *np_grads, *reversed_input_tensors( np_inputs ) )
+                from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+                np_outputs      = list( cb_args[ :n_out ] )
+                np_grad_outputs = list( cb_args[ n_out : 2 * n_out ] )
+                np_inputs       = list( cb_args[ 2 * n_out: ] )
+                np_grad_inputs  = [ np.zeros( t.shape, dtype = t.dtype ) for t in inp_shapes ]
+                
+                # We need to map UndefinedTensor to None for the nanobind call
+                call_args = []
+                for a in build_np_fargs( np_outputs, np_inputs ):
+                    if isinstance( a, UndefinedTensor ):
+                        call_args.append( None )
+                    else:
+                        call_args.append( np.asarray( a ) )
+                        
+                backward_func( *call_args, *np_grad_inputs, *np_grad_outputs )
                 return tuple( np_grad_inputs )
 
-            return jax.pure_callback( bwd_cb, bwd_shapes, *out_residuals, *grad_outputs, *in_residuals )
+            return jax.pure_callback( bwd_cb, inp_shapes,
+                                      *jax_outputs, *grad_outputs, *jax_inputs )
 
         op.defvjp( op_fwd, op_bwd )
-        return op( *[ jnp.asarray( t, dtype = self.dtype, device = self.device ) for t in input_tensors ] )
+
+        jax_inputs  = [ jnp.asarray( t, dtype = getattr( t, "dtype", self.dtype ) or self.dtype, device = self.device ) for t in input_tensors ]
+        new_outputs = op( *jax_inputs )
+
+        # write new JAX arrays back into Output/Return objects (JAX arrays are immutable)
+        new_tuple   = new_outputs if isinstance( new_outputs, tuple ) else ( new_outputs, )
+        tracked_iter = iter( new_tuple )
+        for arg in output_args:
+            arg.write_back_diffentiable_tensors( tracked_iter )
+
+        if n_out == 0:
+            return None
+        return new_tuple[ 0 ] if n_out == 1 else new_tuple
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
         """ small helper to optimize `loss` wrt `params` using L-BFGS (via scipy.optimize).

@@ -2,6 +2,7 @@
 from ..driver import driver
 from .Output import Output
 from .Return import Return
+from ..object_with_tensors.UndefinedTensor import UndefinedTensor
 
 
 def cpp_class_name( obj ) -> str:
@@ -42,7 +43,8 @@ def to_standard_objects( obj ) -> list[ tuple[ any, str ] ]:
     if isinstance( obj, float ):
         return [ ( obj, "TF" ) ]
 
-    if isinstance( obj, driver.array_type ):
+    conv = driver.to_standard_objects( obj )
+    if conv:
         if driver.is_int_dtype( obj.dtype ):
             return [ ( obj, "MI" ) ]
         return [ ( obj, "MF" ) ]
@@ -77,25 +79,63 @@ def diffentiable_tensors_of( obj ) -> list:
     return out
 
 
-def from_standard_objects( obj, arg_names ):
+def write_back_diffentiable_tensors( obj, tensors_iter ) -> None:
+    """Set float-tensor attributes of *obj* from *tensors_iter*, mirroring diffentiable_tensors_of."""
+    if callable( getattr( obj, "write_back_diffentiable_tensors", None ) ):
+        obj.write_back_diffentiable_tensors( tensors_iter )
+        return
+
+    if isinstance( obj, driver.array_type ):
+        if not driver.is_int_dtype( obj.dtype ):
+            next( tensors_iter, None )  # consume; standalone tensors can't be re-assigned here
+        return
+
+    if isinstance( obj, ( int, float ) ) or obj is None:
+        return
+
+    for name, _ in _collect_attributes( obj ):
+        attr = getattr( obj, name )
+        if isinstance( attr, driver.array_type ):
+            if not driver.is_int_dtype( attr.dtype ):
+                setattr( obj, name, next( tensors_iter ) )
+        elif isinstance( attr, UndefinedTensor ):
+            if not driver.is_int_dtype( attr.dtype ):
+                setattr( obj, name, next( tensors_iter ) )
+        else:
+            write_back_diffentiable_tensors( attr, tensors_iter )
+
+
+def from_standard_objects( obj, arg_names, use_view = False ):
     # method to_standard_objects
     if callable( getattr( obj, "from_standard_objects", None ) ):
-        return obj.from_standard_objects( obj, arg_names )
+        return obj.from_standard_objects( obj, arg_names, use_view = use_view )
 
     # std objects
     if isinstance( obj, ( int, float ) ):
         return arg_names.pop( 0 )
 
     if isinstance( obj, driver.array_type ):
-        return f"tensor_view_{ obj.ndim }( { arg_names.pop( 0 ) } )"
+        name = arg_names.pop( 0 )
+        if use_view:
+            return name
+        return f"tensor_view_{ obj.ndim }( { name } )"
+
+    if isinstance( obj, UndefinedTensor ):
+        name = arg_names.pop( 0 )
+        if use_view:
+            return name
+        # In normal nanobind calls, MI/MF are std::optional<nb::ndarray>.
+        # We pass None from Python, which becomes std::nullopt.
+        # But we need to call tensor_view_N on it.
+        return f"tensor_view_{ obj.ndim }( { name } )"
 
     if isinstance( obj, ( Output, Return ) ):
-        return from_standard_objects( obj.value, arg_names )
+        return from_standard_objects( obj.value, arg_names, use_view = use_view )
 
     # else, get attributes
     largs = []
     for name, _ in _collect_attributes( obj ):
-        largs.append( from_standard_objects( getattr( obj, name ), arg_names ) )
+        largs.append( from_standard_objects( getattr( obj, name ), arg_names, use_view = use_view ) )
     return f"{ cpp_class_name( obj ) }( { str.join( ", ", largs ) } )"
 
 
