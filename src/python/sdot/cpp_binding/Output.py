@@ -10,9 +10,9 @@ class Output:
         from ._types import cpp_class_name
         return cpp_class_name( self.value )
 
-    def to_standard_objects( self ):
-        from ._types import to_standard_objects
-        return to_standard_objects( self.value )
+    def to_nanobind_compatible_objects( self ):
+        from ._types import to_nanobind_compatible_objects
+        return to_nanobind_compatible_objects( self.value )
 
     def diffentiable_tensors( self ):
         from ._types import diffentiable_tensors_of

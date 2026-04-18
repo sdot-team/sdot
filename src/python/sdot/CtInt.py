@@ -9,5 +9,5 @@ class CtInt:
     def cpp_class_name( self ):
         return f"CtInt<{ self.value }>"
 
-    def to_standard_objects( self ):
+    def to_nanobind_compatible_objects( self ):
         return []

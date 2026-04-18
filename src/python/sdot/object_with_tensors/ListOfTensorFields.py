@@ -85,10 +85,10 @@ class ListOfTensorFields:
     #         return "std::vector<MI>"
     #     return "std::vector<MF>"
 
-    # def to_standard_objects( self, obj ):
+    # def to_nanobind_compatible_objects( self, obj ):
     #     raise NotImplementedError
 
-    # def from_standard_objects( self, obj, arg_names ):
+    # def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names ):
     #     #return f"tensor_view_{ self.ndim }( { arg_names.pop( 0 ) } )"
     #     raise NotImplementedError
 

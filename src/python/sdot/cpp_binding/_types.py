@@ -26,15 +26,15 @@ def cpp_class_name( obj ) -> str:
     raise NotImplementedError( f"cpp_class_name_for: no mapping for { type( obj ) }" )
 
 
-def to_standard_objects( obj ) -> list[ tuple[ any, str ] ]:
+def to_nanobind_compatible_objects( obj ) -> list[ tuple[ any, str ] ]:
     """Decompose *arg* into the flat list of nanobind-compatible Python objects
     that represent it on the binding boundary.
 
     """
 
-    # method to_standard_objects
-    if callable( getattr( obj, "to_standard_objects", None ) ):
-        return obj.to_standard_objects()
+    # method to_nanobind_compatible_objects
+    if callable( getattr( obj, "to_nanobind_compatible_objects", None ) ):
+        return obj.to_nanobind_compatible_objects()
 
     # std objects
     if isinstance( obj, int ):
@@ -43,7 +43,8 @@ def to_standard_objects( obj ) -> list[ tuple[ any, str ] ]:
     if isinstance( obj, float ):
         return [ ( obj, "TF" ) ]
 
-    conv = driver.to_standard_objects( obj )
+    # driver
+    conv = driver.to_nanobind_compatible_objects( obj )
     if conv:
         if driver.is_int_dtype( obj.dtype ):
             return [ ( obj, "MI" ) ]
@@ -55,7 +56,7 @@ def to_standard_objects( obj ) -> list[ tuple[ any, str ] ]:
     # else, get attributes
     out = []
     for name, _ in _collect_attributes( obj ):
-        out += to_standard_objects( getattr( obj, name ) )
+        out += to_nanobind_compatible_objects( getattr( obj, name ) )
     return out
 
 
@@ -105,10 +106,10 @@ def write_back_diffentiable_tensors( obj, tensors_iter ) -> None:
             write_back_diffentiable_tensors( attr, tensors_iter )
 
 
-def from_standard_objects( obj, arg_names, use_view = False ):
-    # method to_standard_objects
-    if callable( getattr( obj, "from_standard_objects", None ) ):
-        return obj.from_standard_objects( obj, arg_names, use_view = use_view )
+def cpp_assembly_from_nanobind_compatible_objects( obj, arg_names, use_view = False ):
+    # method to_nanobind_compatible_objects
+    if callable( getattr( obj, "cpp_assembly_from_nanobind_compatible_objects", None ) ):
+        return obj.cpp_assembly_from_nanobind_compatible_objects( obj, arg_names, use_view = use_view )
 
     # std objects
     if isinstance( obj, ( int, float ) ):
@@ -120,22 +121,13 @@ def from_standard_objects( obj, arg_names, use_view = False ):
             return name
         return f"tensor_view_{ obj.ndim }( { name } )"
 
-    if isinstance( obj, UndefinedTensor ):
-        name = arg_names.pop( 0 )
-        if use_view:
-            return name
-        # In normal nanobind calls, MI/MF are std::optional<nb::ndarray>.
-        # We pass None from Python, which becomes std::nullopt.
-        # But we need to call tensor_view_N on it.
-        return f"tensor_view_{ obj.ndim }( { name } )"
-
     if isinstance( obj, ( Output, Return ) ):
-        return from_standard_objects( obj.value, arg_names, use_view = use_view )
+        return cpp_assembly_from_nanobind_compatible_objects( obj.value, arg_names, use_view = use_view )
 
     # else, get attributes
     largs = []
     for name, _ in _collect_attributes( obj ):
-        largs.append( from_standard_objects( getattr( obj, name ), arg_names, use_view = use_view ) )
+        largs.append( cpp_assembly_from_nanobind_compatible_objects( getattr( obj, name ), arg_names, use_view = use_view ) )
     return f"{ cpp_class_name( obj ) }( { str.join( ", ", largs ) } )"
 
 

@@ -152,6 +152,11 @@ class Cell:
     def cpp_class_name( self ):
         return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"
 
+    @classmethod
+    def cpp_class_name_for( cls, **kwargs ):
+        dim = kwargs.get( 'dim', -1 )
+        return f"Cell<TF,{ dim },Cpu>"
+
     def plot( self, plotter = None, offset = None ):
         import pyvista
 

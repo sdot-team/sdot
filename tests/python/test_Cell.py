@@ -30,7 +30,7 @@ def test_cell_2D():
     c.plot()
 
 def test_cell_2D_diff():
-    # import torch
+    import torch
 
     def loss( scale ):
         min_pos = sdot.driver.zeros( [ 2 ] )

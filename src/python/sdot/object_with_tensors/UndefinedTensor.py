@@ -1,4 +1,4 @@
-from ..driver import driver
+# from ..driver import driver
 
 class UndefinedTensor:
     def __init__( self, shape, dtype ):
@@ -18,12 +18,12 @@ class UndefinedTensor:
 
         return "MF"
 
-    def to_standard_objects( self ):
+    def to_nanobind_compatible_objects( self ):
         if self.dtype == int:
             return [ ( self, "MI" ) ]
 
         if self.dtype is not None:
-            raise NotImplementedError( f"to_standard_objects with dtype = { self.dtype }" )
+            raise NotImplementedError( f"to_nanobind_compatible_objects with dtype = { self.dtype }" )
 
         return [ ( self, "MF" ) ]
 
@@ -32,7 +32,7 @@ class UndefinedTensor:
             return []
         return [ self ]
 
-    def from_standard_objects( self, obj, arg_names, use_view = False ):
+    def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names, use_view = False ):
         name = arg_names.pop( 0 )
         if use_view:
             return name

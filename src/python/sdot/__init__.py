@@ -11,7 +11,7 @@
 # from sdot.object_with_tensors._methods import variants_of
 
 # cpp bindings
-from .cpp_binding import cpp_binding as cpp_binding, Return as Return, Output as Output
+from .cpp_binding import cpp_binding as cpp_binding, Return as Return, Output as Output, Tensor as Tensor
 from .CtInt import CtInt as CtInt
 
 

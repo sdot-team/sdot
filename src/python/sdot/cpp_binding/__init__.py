@@ -17,8 +17,10 @@ Env variables
 * SDOT_CACHE_DIR: where to place the generated sources and dylibs
 """
 
-from .Output import Output as Output
-from .Return import Return as Return
+from .Output  import Output  as Output
+from .Return  import Return  as Return
+from .Mutable import Mutable as Mutable
+from .Tensor  import Tensor  as Tensor
 from .CppBinding import CppBinding
 
 

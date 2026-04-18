@@ -1,4 +1,4 @@
-from ._types import to_standard_objects, diffentiable_tensors_of, write_back_diffentiable_tensors
+from ._types import to_nanobind_compatible_objects, diffentiable_tensors_of
 from ._func  import get_func_for, get_forward_and_backward_for
 from ..driver import driver
 from .Return  import Return
@@ -20,7 +20,7 @@ class CppBinding:
             fargs = []
             res = None
             for arg in args:
-                fargs += [ val for val, _ in to_standard_objects( arg ) ]
+                fargs += [ val for val, _ in to_nanobind_compatible_objects( arg ) ]
 
                 if isinstance( arg, Return ):
                     res = arg.value

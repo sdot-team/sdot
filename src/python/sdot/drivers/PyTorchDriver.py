@@ -132,7 +132,7 @@ class PyTorchDriver:
         # if isinstance( t, list ):
         # return t.to_numpy()
 
-    def to_standard_objects( self, obj ):
+    def to_nanobind_compatible_objects( self, obj ):
         if isinstance( obj, torch.Tensor ):
             if self.is_int_dtype( obj.dtype ):
                 return [ ( obj, "MI" ) ]

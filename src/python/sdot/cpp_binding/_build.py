@@ -9,7 +9,7 @@ Both ultimately call ``_compile(dylib_name, src_paths, device_type)`` after the
 source file has been written to the build cache.
 """
 
-from ._types import cpp_class_name, to_standard_objects, from_standard_objects
+from ._types import cpp_class_name, to_nanobind_compatible_objects, cpp_assembly_from_nanobind_compatible_objects
 from ._util import encode_base62
 
 from pathlib import Path
@@ -75,10 +75,9 @@ def get_module_for( func_list: list ):
     """
     # lazy import avoids circular dependency: driver.py → _build.py → driver.py
     from ..driver import driver
-    from ._types import cpp_class_name, to_standard_objects
-    from .Output import Output
-    from .Return import Return
-    from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+    # from ._types import cpp_class_name, to_nanobind_compatible_objects
+    # from .Output import Output
+    # from .Return import Return
 
     dylib_name = str.join( "__", [ func.key() for func in func_list ] )
     if len( dylib_name ) > 40:
@@ -121,7 +120,7 @@ def get_module_for( func_list: list ):
     code += f"using NbArch = nanobind::device::{ driver.normalized_device_type };\n"
     code += "using Arch = ArchFor<NbArch>::type;\n"
     code += f"using TF = { driver.normalized_dtype };\n"
-    code += f"using MI = std::optional<nb::ndarray<SI, NbArch>>;\n"
+    code += "using MI = std::optional<nb::ndarray<SI, NbArch>>;\n"
     code += "using MF = std::optional<nb::ndarray<TF, NbArch>>;\n"
     code += "\n"
 
@@ -129,7 +128,7 @@ def get_module_for( func_list: list ):
         arg_decl = []
         num_cpp_arg = 0
         for arg in func.args:
-            for _, cpp_class_name in to_standard_objects( arg ):
+            for _, cpp_class_name in to_nanobind_compatible_objects( arg ):
                 arg_decl.append( f"{ cpp_class_name } arg_{ num_cpp_arg }" )
                 num_cpp_arg += 1
 
@@ -140,8 +139,8 @@ def get_module_for( func_list: list ):
         arg_names = [ f"arg_{ n }" for n in range( num_cpp_arg ) ]
         for n, arg in enumerate( func.args ):
             # Handle UndefinedTensor in normal nanobind calls by allowing optional ndarray to be nullopt
-            # from_standard_objects(arg, arg_names) for UndefinedTensor uses its ndim
-            code += f"    auto cpp_arg_{ n } = { from_standard_objects( arg, arg_names ) };\n"
+            # cpp_assembly_from_nanobind_compatible_objects(arg, arg_names) for UndefinedTensor uses its ndim
+            code += f"    auto cpp_arg_{ n } = { cpp_assembly_from_nanobind_compatible_objects( arg, arg_names ) };\n"
 
         # call
         code += f"    return { func.name }( { str.join( ', ', [ f"cpp_arg_{ n }" for n in range( len( func.args ) ) ] ) } );\n"
@@ -149,105 +148,103 @@ def get_module_for( func_list: list ):
         # end def
         code += "}\n"
 
-    if driver.normalized_framework == "jax":
-        for func in func_list:
-            # 1. Separate outputs and inputs to match JAX FFI expected signature: (results..., args..., attrs...)
-            jax_results = []
-            num_res = 0
-            for arg in func.args:
-                if isinstance( arg, ( Output, Return ) ):
-                    for val, cpp_type in to_standard_objects( arg ):
-                        if cpp_type in [ "MI", "MF" ]:
-                            jax_results.append( f"ffi::Result<ffi::AnyBuffer> res_{ num_res }" )
-                            num_res += 1
-            
-            jax_args = []
-            num_arg = 0
-            for arg in func.args:
-                if not isinstance( arg, ( Output, Return ) ):
-                    for val, cpp_type in to_standard_objects( arg ):
-                        if cpp_type in [ "MI", "MF" ]:
-                            jax_args.append( f"ffi::AnyBuffer arg_{ num_arg }" )
-                        elif cpp_type == "SI":
-                            jax_args.append( f"int64_t arg_{ num_arg }" )
-                        elif cpp_type == "TF":
-                            jax_args.append( f"double arg_{ num_arg }" )
-                        num_arg += 1
+    # if driver.normalized_framework == "jax":
+    #     for func in func_list:
+    #         # 1. Separate outputs and inputs to match JAX FFI expected signature: (results..., args..., attrs...)
+    #         jax_results = []
+    #         num_res = 0
+    #         for arg in func.args:
+    #             if isinstance( arg, ( Output, Return ) ):
+    #                 for val, cpp_type in to_nanobind_compatible_objects( arg ):
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         jax_results.append( f"ffi::Result<ffi::AnyBuffer> res_{ num_res }" )
+    #                         num_res += 1
 
-            code += f"static ffi::Error jax_ffi_{ func.name }( { str.join( ', ', jax_results + jax_args ) } ) {{\n"
-            
-            # 2. Convert JAX FFI buffers to sdot::TensorView and scalars to values
-            num_res = 0
-            num_arg = 0
-            all_v_names = []
-            for arg in func.args:
-                for val, cpp_type in to_standard_objects( arg ):
-                    if isinstance( arg, ( Output, Return ) ):
-                        if cpp_type in [ "MI", "MF" ]:
-                            st = "SI" if cpp_type == "MI" else "TF"
-                            rank = getattr( val, "ndim", -1 )
-                            code += f"    auto v_res_{ num_res } = JAX_FFI_Buffer_To_TensorView<{ st }, { rank }, Cpu>::get( res_{ num_res } );\n"
-                            all_v_names.append( f"v_res_{ num_res }" )
-                            num_res += 1
-                    else:
-                        if cpp_type in [ "MI", "MF" ]:
-                            st = "SI" if cpp_type == "MI" else "TF"
-                            rank = getattr( val, "ndim", -1 )
-                            code += f"    auto v_arg_{ num_arg } = JAX_FFI_Buffer_To_TensorView<{ st }, { rank }, Cpu>::get( arg_{ num_arg } );\n"
-                            all_v_names.append( f"v_arg_{ num_arg }" )
-                            num_arg += 1
-                        elif cpp_type == "SI":
-                            code += f"    int64_t v_arg_{ num_arg } = arg_{ num_arg };\n"
-                            all_v_names.append( f"v_arg_{ num_arg }" )
-                            num_arg += 1
-                        elif cpp_type == "TF":
-                            code += f"    double v_arg_{ num_arg } = arg_{ num_arg };\n"
-                            all_v_names.append( f"v_arg_{ num_arg }" )
-                            num_arg += 1
+    #         jax_args = []
+    #         num_arg = 0
+    #         for arg in func.args:
+    #             if not isinstance( arg, ( Output, Return ) ):
+    #                 for val, cpp_type in to_nanobind_compatible_objects( arg ):
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         jax_args.append( f"ffi::AnyBuffer arg_{ num_arg }" )
+    #                     elif cpp_type == "SI":
+    #                         jax_args.append( f"int64_t arg_{ num_arg }" )
+    #                     elif cpp_type == "TF":
+    #                         jax_args.append( f"double arg_{ num_arg }" )
+    #                     num_arg += 1
 
-            # 3. Call the actual C++ function with reconstructed objects
-            cpp_call_args = []
-            for i, arg in enumerate( func.args ):
-                expr = from_standard_objects( arg, all_v_names, use_view = True )
-                if isinstance( arg, ( Output, Return ) ):
-                    code += f"    auto c_arg_{ i } = { expr };\n"
-                    cpp_call_args.append( f"c_arg_{ i }" )
-                else:
-                    cpp_call_args.append( expr )
-            
-            code += f"    { func.name }( { str.join( ', ', cpp_call_args ) } );\n"
-            code += "    return ffi::Error::Success();\n"
-            code += "}\n"
+    #         code += f"static ffi::Error jax_ffi_{ func.name }( { str.join( ', ', jax_results + jax_args ) } ) {{\n"
 
-            # 4. Define the JAX FFI handler
-            code += f"XLA_FFI_DEFINE_HANDLER( jax_handler_{ func.name }, jax_ffi_{ func.name }, ffi::Ffi::Bind()"
-            for arg in func.args:
-                if isinstance( arg, ( Output, Return ) ):
-                    for val, cpp_type in to_standard_objects( arg ):
-                        if cpp_type in [ "MI", "MF" ]:
-                            code += ".Ret<ffi::AnyBuffer>()"
-            num_attr = 0
-            for arg in func.args:
-                if not isinstance( arg, ( Output, Return ) ):
-                    for val, cpp_type in to_standard_objects( arg ):
-                        if cpp_type in [ "MI", "MF" ]:
-                            code += ".Arg<ffi::AnyBuffer>()"
-                        elif cpp_type == "SI":
-                            code += f".Attr<int64_t>( \"a{ num_attr }\" )"
-                            num_attr += 1
-                        elif cpp_type == "TF":
-                            code += f".Attr<double>( \"a{ num_attr }\" )"
-                            num_attr += 1
-            code += " );\n"
+    #         # 2. Convert JAX FFI buffers to sdot::TensorView and scalars to values
+    #         num_res = 0
+    #         num_arg = 0
+    #         all_v_names = []
+    #         for arg in func.args:
+    #             for val, cpp_type in to_nanobind_compatible_objects( arg ):
+    #                 if isinstance( arg, ( Output, Return ) ):
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         st = "SI" if cpp_type == "MI" else "TF"
+    #                         rank = getattr( val, "ndim", -1 )
+    #                         code += f"    auto v_res_{ num_res } = JAX_FFI_Buffer_To_TensorView<{ st }, { rank }, Cpu>::get( res_{ num_res } );\n"
+    #                         all_v_names.append( f"v_res_{ num_res }" )
+    #                         num_res += 1
+    #                 else:
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         st = "SI" if cpp_type == "MI" else "TF"
+    #                         rank = getattr( val, "ndim", -1 )
+    #                         code += f"    auto v_arg_{ num_arg } = JAX_FFI_Buffer_To_TensorView<{ st }, { rank }, Cpu>::get( arg_{ num_arg } );\n"
+    #                         all_v_names.append( f"v_arg_{ num_arg }" )
+    #                         num_arg += 1
+    #                     elif cpp_type == "SI":
+    #                         code += f"    int64_t v_arg_{ num_arg } = arg_{ num_arg };\n"
+    #                         all_v_names.append( f"v_arg_{ num_arg }" )
+    #                         num_arg += 1
+    #                     elif cpp_type == "TF":
+    #                         code += f"    double v_arg_{ num_arg } = arg_{ num_arg };\n"
+    #                         all_v_names.append( f"v_arg_{ num_arg }" )
+    #                         num_arg += 1
 
+    #         # 3. Call the actual C++ function with reconstructed objects
+    #         cpp_call_args = []
+    #         for i, arg in enumerate( func.args ):
+    #             expr = cpp_assembly_from_nanobind_compatible_objects( arg, all_v_names, use_view = True )
+    #             if isinstance( arg, ( Output, Return ) ):
+    #                 code += f"    auto c_arg_{ i } = { expr };\n"
+    #                 cpp_call_args.append( f"c_arg_{ i }" )
+    #             else:
+    #                 cpp_call_args.append( expr )
 
+    #         code += f"    { func.name }( { str.join( ', ', cpp_call_args ) } );\n"
+    #         code += "    return ffi::Error::Success();\n"
+    #         code += "}\n"
+
+    #         # 4. Define the JAX FFI handler
+    #         code += f"XLA_FFI_DEFINE_HANDLER( jax_handler_{ func.name }, jax_ffi_{ func.name }, ffi::Ffi::Bind()"
+    #         for arg in func.args:
+    #             if isinstance( arg, ( Output, Return ) ):
+    #                 for val, cpp_type in to_nanobind_compatible_objects( arg ):
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         code += ".Ret<ffi::AnyBuffer>()"
+    #         num_attr = 0
+    #         for arg in func.args:
+    #             if not isinstance( arg, ( Output, Return ) ):
+    #                 for val, cpp_type in to_nanobind_compatible_objects( arg ):
+    #                     if cpp_type in [ "MI", "MF" ]:
+    #                         code += ".Arg<ffi::AnyBuffer>()"
+    #                     elif cpp_type == "SI":
+    #                         code += f".Attr<int64_t>( \"a{ num_attr }\" )"
+    #                         num_attr += 1
+    #                     elif cpp_type == "TF":
+    #                         code += f".Attr<double>( \"a{ num_attr }\" )"
+    #                         num_attr += 1
+    #         code += " );\n"
 
 
     code += f"NB_MODULE( { dylib_name }, m ) {{\n"
     for func in func_list:
         code += f"    m.def( \"{ func.name }\", &_{ func.name } );\n"
-        if driver.normalized_framework == "jax":
-            code += f"    m.def( \"jax_capsule_{ func.name }\", []() {{ return nb::capsule( const_cast<void *>( static_cast<const void *>( &jax_handler_{ func.name } ) ), \"xla_ffi_handler\" ); }} );\n"
+        # if driver.normalized_framework == "jax":
+        #     code += f"    m.def( \"jax_capsule_{ func.name }\", []() {{ return nb::capsule( const_cast<void *>( static_cast<const void *>( &jax_handler_{ func.name } ) ), \"xla_ffi_handler\" ); }} );\n"
     code += "}\n"
 
     ext = ".cu" if driver.normalized_device_type == "cuda" else ".cpp"
