@@ -10,7 +10,7 @@ source file has been written to the build cache.
 """
 
 from ._types import cpp_class_name, to_nanobind_compatible_objects, cpp_assembly_from_nanobind_compatible_objects
-from ._util import encode_base62
+from sdot.drivers.compilation.encode_base_62 import encode_base62
 
 from pathlib import Path
 

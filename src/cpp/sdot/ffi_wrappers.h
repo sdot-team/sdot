@@ -7,8 +7,8 @@
 ///   auto tv = ffi_tv<TF,2>( arg_0 );   // ffi::Buffer<ffi::DataType::F64> → TensorView<TF,2,Cpu>
 ///   auto tv = ffi_tv<TF,1>( *res_0 );  // dereference Result<Buffer> first
 
-#include "support/jax_ffi.h"
 #include "support/TensorView.h"
+#include "support/jax_ffi.h"
 
 namespace sdot {
 

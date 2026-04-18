@@ -12,7 +12,7 @@ to the C++ function.
 """
 
 from ._build import _compile, _try_import, force_build, _module_name
-from ._util  import encode_base62
+from sdot.drivers.compilation.encode_base_62  import encode_base62
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -144,10 +144,18 @@ def _generate_source( func_name: str, includes: list[ str ], arg_specs: list[ Ff
     lines += _generate_handler( func_name, arg_specs )
     lines.append( "" )
 
+    # --- backward handler ---
+    lines += _generate_bwd_handler( func_name, arg_specs )
+    lines.append( "" )
+
     # --- nanobind module ---
     lines.append( f"NB_MODULE( { module_name }, m ) {{" )
     lines.append( f"    m.def( \"fwd_capsule\", []() {{" )
     lines.append( f"        return nb::capsule( reinterpret_cast<void*>( &fwd_handler_{ func_name } )," )
+    lines.append( f"                            \"xla._CUSTOM_CALL_TARGET\" );" )
+    lines.append( f"    }} );" )
+    lines.append( f"    m.def( \"bwd_capsule\", []() {{" )
+    lines.append( f"        return nb::capsule( reinterpret_cast<void*>( &bwd_handler_{ func_name } )," )
     lines.append( f"                            \"xla._CUSTOM_CALL_TARGET\" );" )
     lines.append( f"    }} );" )
     lines.append( "}" )
@@ -303,6 +311,202 @@ def _generate_handler( func_name: str, arg_specs: list[ FfiArgSpec ] ) -> list[ 
     # do NOT include .To(...) here.
     bind_str = "ffi::Ffi::Bind()" + "".join( bind_chain )
     lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( fwd_handler_{ func_name }, impl_fwd_{ func_name }," )
+    lines.append( f"    { bind_str } );" )
+
+    return lines
+
+
+def _generate_bwd_handler( func_name: str, arg_specs: list[ FfiArgSpec ] ) -> list[ str ]:
+    """Generate backward XLA FFI handler for ``func_name_backward``.
+
+    C++ convention (matches test_alac_backward pattern):
+        func_name_backward( same_fwd_cpp_args..., grad_inputs..., grad_outputs... )
+
+    XLA FFI inputs (Arg):
+        1. All output buffers of forward (mutable out + return obj + return tensor) — reconstruct same objects
+        2. All plain array input buffers (saved from forward)
+        3. All scalar 0-d buffers (same as forward)
+        4. Grad outputs: one float buffer per float forward output
+
+    XLA FFI outputs (Ret):
+        grad inputs: one float buffer per float forward input
+                     (float mutable buffers + float plain array buffers)
+    """
+    mutable_specs   = [ s for s in arg_specs if s.kind == 'mutable' ]
+    ret_obj_specs   = [ s for s in arg_specs if s.kind == 'return_obj' ]
+    ret_tn_specs    = [ s for s in arg_specs if s.kind == 'return_tensor' ]
+    array_specs     = [ s for s in arg_specs if s.kind == 'array' ]
+    sint_specs      = [ s for s in arg_specs if s.kind == 'scalar_int' ]
+    sflt_specs      = [ s for s in arg_specs if s.kind == 'scalar_float' ]
+
+    param_decls  = []
+    bind_chain   = []
+    body         = []
+    n_arg = 0
+    n_res = 0
+
+    # --- Arg 1: mutable output buffers (post-forward, reconstruct same objects) ---
+    mut_out_buf_names = []
+    for spec in mutable_specs:
+        names = []
+        for buf in spec.buffers:
+            name = f"arg_{ n_arg }"
+            param_decls.append( f"ffi::AnyBuffer { name }" )
+            bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+            names.append( name )
+            n_arg += 1
+        mut_out_buf_names.append( names )
+
+    # --- Arg 2: return_obj output buffers ---
+    ret_obj_buf_names = []
+    for spec in ret_obj_specs:
+        names = []
+        for buf in spec.buffers:
+            name = f"arg_{ n_arg }"
+            param_decls.append( f"ffi::AnyBuffer { name }" )
+            bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+            names.append( name )
+            n_arg += 1
+        ret_obj_buf_names.append( names )
+
+    # --- Arg 3: return_tensor output buffers ---
+    ret_tn_buf_names = []
+    for spec in ret_tn_specs:
+        name = f"arg_{ n_arg }"
+        param_decls.append( f"ffi::AnyBuffer { name }" )
+        bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+        ret_tn_buf_names.append( name )
+        n_arg += 1
+
+    # --- Arg 4: plain array input buffers ---
+    arr_buf_names = []
+    for spec in array_specs:
+        name = f"arg_{ n_arg }"
+        param_decls.append( f"ffi::AnyBuffer { name }" )
+        bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+        arr_buf_names.append( name )
+        n_arg += 1
+
+    # --- Arg 5: scalar 0-d buffers ---
+    sc_buf_names = []
+    for spec in sint_specs:
+        name = f"arg_{ n_arg }"
+        param_decls.append( f"ffi::AnyBuffer { name }" )
+        bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+        sc_buf_names.append( ( name, 'int64_t' ) )
+        n_arg += 1
+    for spec in sflt_specs:
+        name = f"arg_{ n_arg }"
+        param_decls.append( f"ffi::AnyBuffer { name }" )
+        bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+        sc_buf_names.append( ( name, 'double' ) )
+        n_arg += 1
+
+    # --- Arg 6: grad outputs (float forward outputs, same order as fwd out_shapes) ---
+    # Order: float mutable out buffers, float return_obj out, float return_tensor out
+    grad_out_buf_names = []
+    for spec in mutable_specs:
+        for buf in spec.buffers:
+            if buf.dtype == 'float':
+                name = f"arg_{ n_arg }"
+                param_decls.append( f"ffi::AnyBuffer { name }" )
+                bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+                grad_out_buf_names.append( ( name, buf ) )
+                n_arg += 1
+    for spec in ret_obj_specs:
+        for buf in spec.buffers:
+            if buf.dtype == 'float':
+                name = f"arg_{ n_arg }"
+                param_decls.append( f"ffi::AnyBuffer { name }" )
+                bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+                grad_out_buf_names.append( ( name, buf ) )
+                n_arg += 1
+    for spec in ret_tn_specs:
+        for buf in spec.buffers:
+            if buf.dtype == 'float':
+                name = f"arg_{ n_arg }"
+                param_decls.append( f"ffi::AnyBuffer { name }" )
+                bind_chain.append( ".Arg<ffi::AnyBuffer>()" )
+                grad_out_buf_names.append( ( name, buf ) )
+                n_arg += 1
+
+    # --- Ret: grad inputs (float mutable in + float array in, same order as fwd input_arrays) ---
+    grad_in_res_names = []
+    for spec in mutable_specs:
+        for buf in spec.buffers:
+            if buf.dtype == 'float':
+                name = f"res_{ n_res }"
+                param_decls.append( f"ffi::Result<ffi::AnyBuffer> { name }" )
+                bind_chain.append( ".Ret<ffi::AnyBuffer>()" )
+                grad_in_res_names.append( ( name, buf ) )
+                n_res += 1
+    for spec in array_specs:
+        for buf in spec.buffers:
+            if buf.dtype == 'float':
+                name = f"res_{ n_res }"
+                param_decls.append( f"ffi::Result<ffi::AnyBuffer> { name }" )
+                bind_chain.append( ".Ret<ffi::AnyBuffer>()" )
+                grad_in_res_names.append( ( name, buf ) )
+                n_res += 1
+
+    # --- body: reconstruct same C++ objects as forward (from saved output buffers) ---
+    cpp_call_args = []
+
+    for i, ( spec, names ) in enumerate( zip( mutable_specs, mut_out_buf_names ) ):
+        views = _buf_exprs( spec, names, deref=False )
+        vname = f"cpp_mut_{ i }"
+        body.append( f"    auto { vname } = { _ctor_expr( spec, views ) };" )
+        cpp_call_args.append( vname )
+
+    for i, ( spec, names ) in enumerate( zip( ret_obj_specs, ret_obj_buf_names ) ):
+        views = _buf_exprs( spec, names, deref=False )
+        vname = f"cpp_ret_{ i }"
+        body.append( f"    auto { vname } = { _ctor_expr( spec, views ) };" )
+        cpp_call_args.append( vname )
+
+    for i, ( spec, aname ) in enumerate( zip( ret_tn_specs, ret_tn_buf_names ) ):
+        buf  = spec.buffers[ 0 ]
+        vname = f"cpp_rtn_{ i }"
+        body.append( f"    auto { vname } = ffi_tv<{ _dtype_cpp( buf.dtype ) },{ buf.ndim }>( { aname } );" )
+        cpp_call_args.append( vname )
+
+    for i, ( spec, aname ) in enumerate( zip( array_specs, arr_buf_names ) ):
+        buf  = spec.buffers[ 0 ]
+        vname = f"cpp_arr_{ i }"
+        body.append( f"    auto { vname } = ffi_tv<{ _dtype_cpp( buf.dtype ) },{ buf.ndim }>( { aname } );" )
+        cpp_call_args.append( vname )
+
+    for i, ( aname, ctype ) in enumerate( sc_buf_names ):
+        vname = f"cpp_sc_{ i }"
+        body.append( f"    { ctype } { vname } = *reinterpret_cast<const { ctype }*>( { aname }.untyped_data() );" )
+        cpp_call_args.append( vname )
+
+    # grad inputs (Ret) — C++ writes into these
+    for i, ( rname, buf ) in enumerate( grad_in_res_names ):
+        vname = f"cpp_gin_{ i }"
+        body.append( f"    auto { vname } = ffi_tv<{ _dtype_cpp( buf.dtype ) },{ buf.ndim }>( *{ rname } );" )
+        cpp_call_args.append( vname )
+
+    # grad outputs (Arg) — C++ reads these
+    for i, ( aname, buf ) in enumerate( grad_out_buf_names ):
+        vname = f"cpp_gout_{ i }"
+        body.append( f"    auto { vname } = ffi_tv<{ _dtype_cpp( buf.dtype ) },{ buf.ndim }>( { aname } );" )
+        cpp_call_args.append( vname )
+
+    # call backward
+    body.append( f"    { func_name }_backward( { ', '.join( cpp_call_args ) } );" )
+    body.append( "    return ffi::Error::Success();" )
+
+    # --- assemble ---
+    lines = []
+    sig = ", ".join( param_decls )
+    lines.append( f"static ffi::Error impl_bwd_{ func_name }( { sig } ) {{" )
+    lines += body
+    lines.append( "}" )
+    lines.append( "" )
+
+    bind_str = "ffi::Ffi::Bind()" + "".join( bind_chain )
+    lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( bwd_handler_{ func_name }, impl_bwd_{ func_name }," )
     lines.append( f"    { bind_str } );" )
 
     return lines

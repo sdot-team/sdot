@@ -17,5 +17,14 @@ class Return:
     """
     def __init__( self, return_type, *args, **kwargs ):
         self.return_type = return_type
-        self.type_args   = args
         self.type_kwargs = kwargs
+        self.type_args   = args
+
+    def cpp_class_name( self ):
+        if self.return_type is float:
+            return "TF"
+
+        if self.return_type is int:
+            return "PI"
+
+        return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )

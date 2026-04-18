@@ -11,7 +11,10 @@
 # from sdot.object_with_tensors._methods import variants_of
 
 # cpp bindings
-from .cpp_binding import cpp_binding as cpp_binding, Return as Return, Output as Output, Tensor as Tensor
+# from .cpp_binding import cpp_binding as cpp_binding, Return as Return, Output as Output, Tensor as Tensor
+from .drivers.compilation.Mutable import Mutable as Mutable
+from .drivers.compilation.Return import Return as Return
+from .drivers.compilation.Tensor import Tensor as Tensor
 from .CtInt import CtInt as CtInt
 
 

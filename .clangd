@@ -1,7 +1,10 @@
 CompileFlags:
   Add:
+    - -I/Users/hugo.leclerc/.mamba/envs/vfs/lib/python3.13/site-packages/nanobind/include
+    - -I/Users/hugo.leclerc/.mamba/envs/vfs/lib/python3.13/site-packages/jaxlib/include
     - -I/Users/hugo.leclerc/.vfs_build/ext/Catch2/install/include
     - -I/Users/hugo.leclerc/sdot_with_interfaces/src/cpp
+    - -Isrc/cpp
     - -fdiagnostics-absolute-paths
     - -std=c++23
     - -Wextra

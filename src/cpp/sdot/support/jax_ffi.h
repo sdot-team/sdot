@@ -1,6 +1,6 @@
 #pragma once
 
-#include "xla/ffi/api/ffi.h"
+#include <xla/ffi/api/ffi.h>
 #include "TensorView.h"
 #include <optional>
 #include <numeric>
@@ -20,7 +20,7 @@ struct JAX_FFI_Buffer_To_TensorView<T, Rank, Cpu> {
         for (int i = 0; i < (int)r; ++i) {
             sizes[i] = buffer.dimensions()[i];
         }
-        
+
         // JAX FFI doesn't seem to have strides in this version, assuming contiguous
         return TensorView<T, Rank, Cpu>(reinterpret_cast<T*>(buffer.untyped_data()), sizes);
     }

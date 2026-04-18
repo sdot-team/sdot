@@ -1,8 +1,8 @@
 from ._types import to_nanobind_compatible_objects, diffentiable_tensors_of
 from ._func  import get_func_for, get_forward_and_backward_for
 from ..driver import driver
-from .Return  import Return
-from .Output  import Output
+from sdot.drivers.compilation.Return  import Return
+from sdot.drivers.compilation.Output  import Output
 
 
 class CppBinding:

@@ -26,12 +26,14 @@ def test_driver():
 if __name__ == "__main__":
     import jax
 
-    mod = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), 18 )
-    ic( mod )
-    # def loss( x ):
-    #     return sdot.driver.forward( mod.forward, mod.backward, [ [ 1 ] ], x - 3 )[ 0 ].sum()
+    # input = sdot.driver.t0( 18 )
+    # mod = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), input )
+    # ic( mod )
 
-    # x = sdot.driver.t1( [ 10 ] )
-    # r = sdot.driver.optimize_using_lbfgs( loss, x )
-    # ic( r )
+    def loss( x ):
+        return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2  )
+
+    x = sdot.driver.t0( 10 )
+    r = sdot.driver.optimize_using_lbfgs( loss, x )
+    ic( r )
     # ic( x )

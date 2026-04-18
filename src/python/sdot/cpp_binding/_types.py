@@ -1,7 +1,7 @@
 """Type helpers: map Python objects to C++ class names and nanobind argument lists."""
 from ..driver import driver
-from .Output import Output
-from .Return import Return
+from sdot.drivers.compilation.Output import Output
+from sdot.drivers.compilation.Return import Return
 from ..object_with_tensors.UndefinedTensor import UndefinedTensor
 
 

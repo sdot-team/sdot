@@ -1,7 +1,9 @@
-import jax.numpy as jnp
 import jax.core as jax_core
+import jax.numpy as jnp
 import numpy as np
+import importlib
 import jax
+import re
 
 map_of_plan_methods = {}
 
@@ -156,100 +158,100 @@ class JaxDriver:
         #     return [ ( obj, "MF" ) ]
         return None
 
-    def forward( self, forward_func, backward_func, fargs, input_tensors, output_args, output_tensors ):
-        """Differentiable wrapper using pure_callback (safe for C++/nanobind).
-            forward_func ( *fargs ) -> None  (fills output_tensors in-place via C++)
-            backward_func( *fargs, *grad_inputs, *grad_outputs ) -> None
-            New JAX arrays are written back into output_args via write_back_diffentiable_tensors.
-        """
-        np_dtype = np.dtype( self.dtype )
-        n_out = len( output_tensors )
+    # def forward( self, forward_func, backward_func, fargs, input_tensors, output_args, output_tensors ):
+    #     """Differentiable wrapper using pure_callback (safe for C++/nanobind).
+    #         forward_func ( *fargs ) -> None  (fills output_tensors in-place via C++)
+    #         backward_func( *fargs, *grad_inputs, *grad_outputs ) -> None
+    #         New JAX arrays are written back into output_args via write_back_diffentiable_tensors.
+    #     """
+    #     np_dtype = np.dtype( self.dtype )
+    #     n_out = len( output_tensors )
 
-        # id-based mapping: which farg belongs to output_tensors / input_tensors / other JAX array
-        out_id = { id( t ): i for i, t in enumerate( output_tensors ) }
-        in_id = { id( t ): i for i, t in enumerate( input_tensors ) }
+    #     # id-based mapping: which farg belongs to output_tensors / input_tensors / other JAX array
+    #     out_id = { id( t ): i for i, t in enumerate( output_tensors ) }
+    #     in_id = { id( t ): i for i, t in enumerate( input_tensors ) }
 
-        def build_np_fargs( np_outputs, np_inputs ):
-            result = []
-            for a in fargs:
-                if isinstance( a, ( jax.Array, jax_core.Tracer ) ) or id( a ) in out_id or id( a ) in in_id:
-                    i_out = out_id.get( id( a ) )
-                    i_in = in_id.get( id( a ) )
-                    if i_out is not None:
-                        result.append( np_outputs[ i_out ] )
-                    elif i_in is not None:
-                        result.append( np_inputs[ i_in ] )
-                    else:
-                        result.append( np.asarray( a ) )  # int / static tensors
-                elif hasattr( a, "shape" ): # UndefinedTensor
-                    shape = [ ( s if s is not None else 0 ) for s in a.shape ]
-                    result.append( np.zeros( shape, dtype = a.dtype or np_dtype ) )
-                else:
-                    result.append( a )
-            return result
+    #     def build_np_fargs( np_outputs, np_inputs ):
+    #         result = []
+    #         for a in fargs:
+    #             if isinstance( a, ( jax.Array, jax_core.Tracer ) ) or id( a ) in out_id or id( a ) in in_id:
+    #                 i_out = out_id.get( id( a ) )
+    #                 i_in = in_id.get( id( a ) )
+    #                 if i_out is not None:
+    #                     result.append( np_outputs[ i_out ] )
+    #                 elif i_in is not None:
+    #                     result.append( np_inputs[ i_in ] )
+    #                 else:
+    #                     result.append( np.asarray( a ) )  # int / static tensors
+    #             elif hasattr( a, "shape" ): # UndefinedTensor
+    #                 shape = [ ( s if s is not None else 0 ) for s in a.shape ]
+    #                 result.append( np.zeros( shape, dtype = a.dtype or np_dtype ) )
+    #             else:
+    #                 result.append( a )
+    #         return result
 
-        out_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in output_tensors )
-        inp_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in input_tensors )
+    #     out_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in output_tensors )
+    #     inp_shapes = tuple( jax.ShapeDtypeStruct( t.shape, getattr( t, "dtype", self.dtype ) or self.dtype ) for t in input_tensors )
 
-        @jax.custom_vjp
-        def op( *jax_inputs ):
-            def fwd_cb( *np_inputs ):
-                from ..object_with_tensors.UndefinedTensor import UndefinedTensor
-                np_outputs = [ np.empty( t.shape, dtype = t.dtype ) for t in out_shapes ]
-                # We need to map UndefinedTensor to None for the nanobind call
-                call_args = []
-                for a in build_np_fargs( np_outputs, list( np_inputs ) ):
-                    if isinstance( a, UndefinedTensor ):
-                        call_args.append( None )
-                    else:
-                        call_args.append( np.asarray( a ) )
-                forward_func( *call_args )
-                return tuple( np_outputs )
-            return jax.pure_callback( fwd_cb, out_shapes, *jax_inputs )
+    #     @jax.custom_vjp
+    #     def op( *jax_inputs ):
+    #         def fwd_cb( *np_inputs ):
+    #             from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+    #             np_outputs = [ np.empty( t.shape, dtype = t.dtype ) for t in out_shapes ]
+    #             # We need to map UndefinedTensor to None for the nanobind call
+    #             call_args = []
+    #             for a in build_np_fargs( np_outputs, list( np_inputs ) ):
+    #                 if isinstance( a, UndefinedTensor ):
+    #                     call_args.append( None )
+    #                 else:
+    #                     call_args.append( np.asarray( a ) )
+    #             forward_func( *call_args )
+    #             return tuple( np_outputs )
+    #         return jax.pure_callback( fwd_cb, out_shapes, *jax_inputs )
 
-        def op_fwd( *jax_inputs ):
-            outputs = op( *jax_inputs )
-            return outputs, ( *outputs, *jax_inputs )
+    #     def op_fwd( *jax_inputs ):
+    #         outputs = op( *jax_inputs )
+    #         return outputs, ( *outputs, *jax_inputs )
 
-        def op_bwd( residuals, grad_outputs ):
-            jax_outputs = residuals[ :n_out ]
-            jax_inputs  = residuals[ n_out: ]
+    #     def op_bwd( residuals, grad_outputs ):
+    #         jax_outputs = residuals[ :n_out ]
+    #         jax_inputs  = residuals[ n_out: ]
 
-            def bwd_cb( *cb_args ):
-                from ..object_with_tensors.UndefinedTensor import UndefinedTensor
-                np_outputs      = list( cb_args[ :n_out ] )
-                np_grad_outputs = list( cb_args[ n_out : 2 * n_out ] )
-                np_inputs       = list( cb_args[ 2 * n_out: ] )
-                np_grad_inputs  = [ np.zeros( t.shape, dtype = t.dtype ) for t in inp_shapes ]
+    #         def bwd_cb( *cb_args ):
+    #             from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+    #             np_outputs      = list( cb_args[ :n_out ] )
+    #             np_grad_outputs = list( cb_args[ n_out : 2 * n_out ] )
+    #             np_inputs       = list( cb_args[ 2 * n_out: ] )
+    #             np_grad_inputs  = [ np.zeros( t.shape, dtype = t.dtype ) for t in inp_shapes ]
 
-                # We need to map UndefinedTensor to None for the nanobind call
-                call_args = []
-                for a in build_np_fargs( np_outputs, np_inputs ):
-                    if isinstance( a, UndefinedTensor ):
-                        call_args.append( None )
-                    else:
-                        call_args.append( np.asarray( a ) )
+    #             # We need to map UndefinedTensor to None for the nanobind call
+    #             call_args = []
+    #             for a in build_np_fargs( np_outputs, np_inputs ):
+    #                 if isinstance( a, UndefinedTensor ):
+    #                     call_args.append( None )
+    #                 else:
+    #                     call_args.append( np.asarray( a ) )
 
-                backward_func( *call_args, *np_grad_inputs, *np_grad_outputs )
-                return tuple( np_grad_inputs )
+    #             backward_func( *call_args, *np_grad_inputs, *np_grad_outputs )
+    #             return tuple( np_grad_inputs )
 
-            return jax.pure_callback( bwd_cb, inp_shapes,
-                                      *jax_outputs, *grad_outputs, *jax_inputs )
+    #         return jax.pure_callback( bwd_cb, inp_shapes,
+    #                                   *jax_outputs, *grad_outputs, *jax_inputs )
 
-        op.defvjp( op_fwd, op_bwd )
+    #     op.defvjp( op_fwd, op_bwd )
 
-        jax_inputs  = [ jnp.asarray( t, dtype = getattr( t, "dtype", self.dtype ) or self.dtype, device = self.device ) for t in input_tensors ]
-        new_outputs = op( *jax_inputs )
+    #     jax_inputs  = [ jnp.asarray( t, dtype = getattr( t, "dtype", self.dtype ) or self.dtype, device = self.device ) for t in input_tensors ]
+    #     new_outputs = op( *jax_inputs )
 
-        # write new JAX arrays back into Output/Return objects (JAX arrays are immutable)
-        new_tuple   = new_outputs if isinstance( new_outputs, tuple ) else ( new_outputs, )
-        tracked_iter = iter( new_tuple )
-        for arg in output_args:
-            arg.write_back_diffentiable_tensors( tracked_iter )
+    #     # write new JAX arrays back into Output/Return objects (JAX arrays are immutable)
+    #     new_tuple   = new_outputs if isinstance( new_outputs, tuple ) else ( new_outputs, )
+    #     tracked_iter = iter( new_tuple )
+    #     for arg in output_args:
+    #         arg.write_back_diffentiable_tensors( tracked_iter )
 
-        if n_out == 0:
-            return None
-        return new_tuple[ 0 ] if n_out == 1 else new_tuple
+    #     if n_out == 0:
+    #         return None
+    #     return new_tuple[ 0 ] if n_out == 1 else new_tuple
 
     @property
     def normalized_dtype( self ):
@@ -268,11 +270,6 @@ class JaxDriver:
     def array( self, data ):
         return jnp.asarray( data, dtype = self.dtype, device = self.device )
 
-    # ------------------------------------------------------------------
-    # XLA FFI call — the new path
-    # ------------------------------------------------------------------
-
-    _ffi_registered: set = set()
 
     def call( self, func_name: str, includes: str | list[ str ], *args ):
         """Call a C++ function via JAX XLA FFI.
@@ -281,142 +278,300 @@ class JaxDriver:
           - Mutable(obj)               — read+write; obj arrays reassigned after call
           - Return(Type, **kwargs)     — produces a new object or tensor
           - plain JAX array            — read-only input
-          - int / float                — scalar XLA attribute
+          - int / float / str / ...    — scalar XLA attribute
         """
-        from ..cpp_binding._jax_ffi_build import get_ffi_module, FfiArgSpec, BufferSpec
-        from ..cpp_binding._util          import encode_base62
-        from ..cpp_binding.Mutable        import Mutable
-        from ..cpp_binding.Return         import Return
-        from ..cpp_binding.Tensor         import Tensor
-        from ..object_with_tensors.TensorField import TensorField
-        from ..object_with_tensors._methods    import _collect_attributes
-        import jax.ffi
-
         if isinstance( includes, str ):
             includes = [ includes ]
 
-        arg_specs      : list[ FfiArgSpec ]                  = []
-        input_arrays   : list                                 = []
-        out_descriptors: list[ tuple ]                        = []  # (kind, type_or_obj, kwargs, n_bufs)
-        out_shapes     : list[ jax.ShapeDtypeStruct ]         = []
+        module = self.get_ffi_module( func_name, includes, args )
 
+        raise NotImplementedError
+
+        # from ..cpp_binding._jax_ffi_build import get_ffi_module, FfiArgSpec, BufferSpec
+        # from ..cpp_binding._util          import encode_base62
+        # from sdot.drivers.compilation.Mutable        import Mutable
+        # from sdot.drivers.compilation.Return         import Return
+        # from sdot.drivers.compilation.Tensor         import Tensor
+        # from ..object_with_tensors.TensorField import TensorField
+        # from ..object_with_tensors._methods    import _collect_attributes
+        # import jax.ffi
+
+
+        # arg_specs      : list[ FfiArgSpec ]                  = []
+        # input_arrays   : list                                 = []
+        # out_descriptors: list[ tuple ]                        = []  # (kind, type_or_obj, kwargs, n_bufs)
+        # out_shapes     : list[ jax.ShapeDtypeStruct ]         = []
+
+        # for arg in args:
+        #     if isinstance( arg, Mutable ):
+        #         obj    = arg.value
+        #         fields = [ (n, f) for n, f in _collect_attributes( type( obj ) )
+        #                    if isinstance( f, TensorField ) ]
+        #         bufs   = []
+        #         for fname, _ in fields:
+        #             val = obj.__dict__.get( f'_{ fname }' )
+        #             if val is None:
+        #                 val = getattr( obj, fname )
+        #             jdtype = val.dtype
+        #             dtype_s = 'int' if self.is_int_dtype( jdtype ) else 'float'
+        #             bufs.append( BufferSpec( ndim = val.ndim, dtype = dtype_s ) )
+        #             input_arrays.append( val )
+        #             out_shapes.append( jax.ShapeDtypeStruct( val.shape, jdtype ) )
+
+        #         n_bufs  = len( bufs )
+        #         ctor_fn = getattr( type( obj ), 'cpp_class_name_for', None )
+        #         if ctor_fn is None:
+        #             raise RuntimeError( f"{ type( obj ).__name__ } needs a cpp_class_name_for(**kwargs) classmethod" )
+        #         cpp_ctor = ctor_fn() + "( " + ", ".join( [ "%s" ] * n_bufs ) + " )"
+        #         arg_specs.append( FfiArgSpec( kind='mutable', buffers=bufs, cpp_ctor=cpp_ctor ) )
+        #         out_descriptors.append( ( 'mutable', obj, fields, n_bufs ) )
+
+        #     elif isinstance( arg, Return ):
+        #         rtype  = arg.return_type
+        #         kwargs = arg.type_kwargs
+
+        #         # get specs: list of (name, shape, dtype)
+        #         if callable( getattr( rtype, 'output_specs', None ) ):
+        #             specs = rtype.output_specs( self, **kwargs )
+        #         else:
+        #             from ..cpp_binding._xla_protocol import output_specs as _default_output_specs
+        #             specs = _default_output_specs( rtype, self, **kwargs )
+
+        #         bufs = []
+        #         for _, shape, sdtype in specs:
+        #             if sdtype is int or sdtype is jnp.int64 or sdtype is jnp.int32:
+        #                 jdtype  = self.int_type
+        #                 dtype_s = 'int'
+        #             else:
+        #                 jdtype  = self.dtype
+        #                 dtype_s = 'float'
+        #             bufs.append( BufferSpec( ndim = len( shape ), dtype = dtype_s ) )
+        #             out_shapes.append( jax.ShapeDtypeStruct( tuple( shape ), jdtype ) )
+
+        #         if rtype is Tensor:
+        #             arg_specs.append( FfiArgSpec( kind='return_tensor', buffers=bufs ) )
+        #             out_descriptors.append( ( 'return_tensor', None, kwargs, len( bufs ) ) )
+        #         else:
+        #             ctor_fn = getattr( rtype, 'cpp_class_name_for', None )
+        #             if ctor_fn is None:
+        #                 raise RuntimeError( f"{ rtype.__name__ } needs a cpp_class_name_for(**kwargs) classmethod" )
+        #             cpp_ctor = ctor_fn( **kwargs ) + "( " + ", ".join( [ "%s" ] * len( bufs ) ) + " )"
+        #             arg_specs.append( FfiArgSpec( kind='return_obj', buffers=bufs, cpp_ctor=cpp_ctor ) )
+        #             out_descriptors.append( ( 'return_obj', rtype, kwargs, len( bufs ) ) )
+
+        #     elif isinstance( arg, ( jax.Array, jax_core.Tracer ) ):
+        #         dtype_s = 'int' if self.is_int_dtype( arg.dtype ) else 'float'
+        #         arg_specs.append( FfiArgSpec(
+        #             kind='array',
+        #             buffers=[ BufferSpec( ndim=arg.ndim, dtype=dtype_s ) ]
+        #         ) )
+        #         input_arrays.append( arg )
+
+        #     elif isinstance( arg, int ):
+        #         arg_specs.append( FfiArgSpec( kind='scalar_int' ) )
+        #         input_arrays.append( jnp.asarray( arg, dtype=jnp.int64, device=self.device ) )
+
+        #     elif isinstance( arg, float ):
+        #         arg_specs.append( FfiArgSpec( kind='scalar_float' ) )
+        #         input_arrays.append( jnp.asarray( arg, dtype=self.dtype, device=self.device ) )
+
+        #     else:
+        #         raise RuntimeError( f"driver.call: unsupported argument type { type( arg ) }" )
+
+        # # --- get/compile FFI module ---
+        # module = get_ffi_module( func_name, includes, arg_specs )
+
+        # # --- register FFI targets (once per spec) ---
+        # spec_key   = encode_base62( str( [ s.__dict__ for s in arg_specs ] ) )
+        # fwd_target = f"sdot_fwd_{ func_name }_{ spec_key }"
+        # bwd_target = f"sdot_bwd_{ func_name }_{ spec_key }"
+        # if fwd_target not in JaxDriver._ffi_registered:
+        #     jax.ffi.register_ffi_target( fwd_target, module.fwd_capsule(), platform='cpu' )
+        #     jax.ffi.register_ffi_target( bwd_target, module.bwd_capsule(), platform='cpu' )
+        #     JaxDriver._ffi_registered.add( fwd_target )
+
+        # # --- indices of float inputs (get gradients) and float outputs (produce cotangents) ---
+        # float_in_idx  = [ i for i, a in enumerate( input_arrays )  if not self.is_int_dtype( a.dtype ) ]
+        # float_out_idx = [ i for i, s in enumerate( out_shapes )     if not self.is_int_dtype( s.dtype ) ]
+
+        # # Backward output shapes: grad for each float input
+        # bwd_out_shapes = [ out_shapes[ i ] for i in float_out_idx ] + \
+        #                  [ jax.ShapeDtypeStruct( input_arrays[ i ].shape, input_arrays[ i ].dtype )
+        #                    for i in float_in_idx ]
+
+        # n_fwd_out = len( out_shapes )
+
+        # # --- custom_vjp wrapper ---
+        # @jax.custom_vjp
+        # def ffi_op( *jax_inputs ):
+        #     raw = jax.ffi.ffi_call( fwd_target, out_shapes )( *jax_inputs )
+        #     return raw if isinstance( raw, ( list, tuple ) ) else ( raw, )
+
+        # def ffi_op_fwd( *jax_inputs ):
+        #     outputs = ffi_op( *jax_inputs )
+        #     return outputs, ( *outputs, *jax_inputs )   # residuals
+
+        # def ffi_op_bwd( residuals, g ):
+        #     saved_outputs = residuals[ :n_fwd_out ]
+        #     saved_inputs  = residuals[ n_fwd_out: ]
+
+        #     # grad outputs: the cotangents for float forward outputs
+        #     g_float = tuple( g[ i ] for i in float_out_idx )
+
+        #     # backward inputs: saved_out + saved_in + grad_out
+        #     bwd_in = ( *saved_outputs, *saved_inputs, *g_float )
+
+        #     raw_grads = jax.ffi.ffi_call( bwd_target, bwd_out_shapes )( *bwd_in )
+        #     if not isinstance( raw_grads, ( list, tuple ) ):
+        #         raw_grads = ( raw_grads, )
+
+        #     # First entries are grad_mutable_float, rest are grad_array_float
+        #     # Map back to full input size with None for int inputs
+        #     grad_iter = iter( raw_grads )
+        #     all_grads: list = [ None ] * len( input_arrays )
+        #     for i in float_in_idx:
+        #         all_grads[ i ] = next( grad_iter )
+        #     return tuple( all_grads )
+
+        # ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd )
+
+        # # --- execute ---
+        # raw = ffi_op( *input_arrays )
+        # if not isinstance( raw, ( list, tuple ) ):
+        #     raw = ( raw, )
+        # out_iter = iter( raw )
+
+        # # --- assign outputs ---
+        # results = []
+        # for desc in out_descriptors:
+        #     kind = desc[ 0 ]
+        #     if kind == 'mutable':
+        #         _, obj, fields, n = desc
+        #         for fname, _ in fields:
+        #             obj.__dict__[ f'_{ fname }' ] = next( out_iter )
+
+        #     elif kind == 'return_tensor':
+        #         _, _, kwargs, n = desc
+        #         arrs = [ next( out_iter ) for _ in range( n ) ]
+        #         results.append( arrs[ 0 ] if n == 1 else tuple( arrs ) )
+
+        #     elif kind == 'return_obj':
+        #         _, rtype, kwargs, n = desc
+        #         arrs = [ next( out_iter ) for _ in range( n ) ]
+        #         if callable( getattr( rtype, 'from_outputs', None ) ):
+        #             results.append( rtype.from_outputs( arrs, **kwargs ) )
+        #         else:
+        #             from ..cpp_binding._xla_protocol import from_outputs as _default_from_outputs
+        #             results.append( _default_from_outputs( rtype, arrs, **kwargs ) )
+
+        # if len( results ) == 0:
+        #     return None
+        # return results[ 0 ] if len( results ) == 1 else tuple( results )
+
+    def cpp_class_name( self, obj ):
+        if isinstance( obj, jax_core.Tracer ):
+            if self.is_int_dtype( obj.dtype ):
+                return "MI"
+            return "MF"
+        return None
+
+    def as_nanobind_compatible_args( self, obj ):
+        if isinstance( obj, jax_core.Tracer ):
+            if self.is_int_dtype( obj.dtype ):
+                return [ ( obj, "MI" ) ]
+            return [ ( obj, "MF" ) ]
+        return None
+
+    _ffi_registered: dict = {}
+    def get_ffi_module( self, func_name: str, includes: list[ str ], args ):
+        # get signature
+        from .compilation.cpp_class_name import cpp_class_name
+        signature_items = [ func_name ]
         for arg in args:
-            if isinstance( arg, Mutable ):
-                obj    = arg.value
-                fields = [ (n, f) for n, f in _collect_attributes( type( obj ) )
-                           if isinstance( f, TensorField ) ]
-                bufs   = []
-                for fname, _ in fields:
-                    val = obj.__dict__.get( f'_{ fname }' )
-                    if val is None:
-                        val = getattr( obj, fname )
-                    jdtype = val.dtype
-                    dtype_s = 'int' if self.is_int_dtype( jdtype ) else 'float'
-                    bufs.append( BufferSpec( ndim = val.ndim, dtype = dtype_s ) )
-                    input_arrays.append( val )
-                    out_shapes.append( jax.ShapeDtypeStruct( val.shape, jdtype ) )
+            signature_items.append( cpp_class_name( arg ) )
+        signature_items += includes
 
-                n_bufs  = len( bufs )
-                ctor_fn = getattr( type( obj ), 'cpp_class_name_for', None )
-                if ctor_fn is None:
-                    raise RuntimeError( f"{ type( obj ).__name__ } needs a cpp_class_name_for(**kwargs) classmethod" )
-                cpp_ctor = ctor_fn() + "( " + ", ".join( [ "%s" ] * n_bufs ) + " )"
-                arg_specs.append( FfiArgSpec( kind='mutable', buffers=bufs, cpp_ctor=cpp_ctor ) )
-                out_descriptors.append( ( 'mutable', obj, fields, n_bufs ) )
+        # module name
+        from .compilation.encode_base_62 import encode_base_62
+        module_name = re.sub(r'[^\w]', '_', str.join( "__", signature_items ) )
+        if len( module_name ) > 40:
+            module_name = module_name[ : 40 - 11 ] + encode_base_62( module_name[ 40 - 11: ] )
 
-            elif isinstance( arg, Return ):
-                rtype  = arg.return_type
-                kwargs = arg.type_kwargs
+        # already loaded ?
+        if module_name in JaxDriver._ffi_registered:
+            return JaxDriver._ffi_registered[ module_name ]
 
-                # get specs: list of (name, shape, dtype)
-                if callable( getattr( rtype, 'output_specs', None ) ):
-                    specs = rtype.output_specs( self, **kwargs )
-                else:
-                    from ..cpp_binding._xla_protocol import output_specs as _default_output_specs
-                    specs = _default_output_specs( rtype, self, **kwargs )
+        # else, try to load it from the disk
+        from .compilation.force_build import force_build
+        if not force_build():
+            try:
+                return importlib.import_module( "sdot.generated_files." + module_name )
+            except ( ImportError, SystemError ):
+                return None
 
-                bufs = []
-                for _, shape, sdtype in specs:
-                    if sdtype is int or sdtype is jnp.int64 or sdtype is jnp.int32:
-                        jdtype  = self.int_type
-                        dtype_s = 'int'
-                    else:
-                        jdtype  = self.dtype
-                        dtype_s = 'float'
-                    bufs.append( BufferSpec( ndim = len( shape ), dtype = dtype_s ) )
-                    out_shapes.append( jax.ShapeDtypeStruct( tuple( shape ), jdtype ) )
+        # else, make the dylib
+        self._make_dylib( func_name, includes, args, module_name )
 
-                if rtype is Tensor:
-                    arg_specs.append( FfiArgSpec( kind='return_tensor', buffers=bufs ) )
-                    out_descriptors.append( ( 'return_tensor', None, kwargs, len( bufs ) ) )
-                else:
-                    ctor_fn = getattr( rtype, 'cpp_class_name_for', None )
-                    if ctor_fn is None:
-                        raise RuntimeError( f"{ rtype.__name__ } needs a cpp_class_name_for(**kwargs) classmethod" )
-                    cpp_ctor = ctor_fn( **kwargs ) + "( " + ", ".join( [ "%s" ] * len( bufs ) ) + " )"
-                    arg_specs.append( FfiArgSpec( kind='return_obj', buffers=bufs, cpp_ctor=cpp_ctor ) )
-                    out_descriptors.append( ( 'return_obj', rtype, kwargs, len( bufs ) ) )
+        # try again to load it from the disk
+        return importlib.import_module( "sdot.generated_files." + module_name )
 
-            elif isinstance( arg, ( jax.Array, jax_core.Tracer ) ):
-                dtype_s = 'int' if self.is_int_dtype( arg.dtype ) else 'float'
-                arg_specs.append( FfiArgSpec(
-                    kind='array',
-                    buffers=[ BufferSpec( ndim=arg.ndim, dtype=dtype_s ) ]
-                ) )
-                input_arrays.append( arg )
+    def _make_dylib( self, func_name: str, includes: list[ str ], args, module_name ):
+        # include list
+        std_includes = [
+            "sdot/nanobind_wrappers.h",
+            "sdot/ffi_wrappers.h",
 
-            elif isinstance( arg, int ):
-                arg_specs.append( FfiArgSpec( kind='scalar_int' ) )
-                input_arrays.append( jnp.asarray( arg, dtype=jnp.int64, device=self.device ) )
+            "nanobind/stl/optional.h",
+            "nanobind/stl/vector.h",
+            "nanobind/nanobind.h",
+        ]
 
-            elif isinstance( arg, float ):
-                arg_specs.append( FfiArgSpec( kind='scalar_float' ) )
-                input_arrays.append( jnp.asarray( arg, dtype=self.dtype, device=self.device ) )
+        # declaration
+        lines = []
+        for include in std_includes + includes:
+            lines.append( f"#include <{ include }>" )
+        lines.append( "" )
+        lines.append( "namespace ffi = xla::ffi;" )
+        lines.append( "namespace nb = nanobind;" )
+        lines.append( "using namespace sdot;" )
+        lines.append( "" )
+        lines.append( f"using TF = { self.normalized_dtype };" )
+        lines.append( "" )
 
-            else:
-                raise RuntimeError( f"driver.call: unsupported argument type { type( arg ) }" )
+        # --- forward handler ---
+        lines += self._handler_source( func_name, args )
+        lines.append( "" )
 
-        # --- get/compile FFI module ---
-        module = get_ffi_module( func_name, includes, arg_specs )
+        # --- backward handler ---
+        lines += self._handler_source( func_name + "_backward", args, True )
+        lines.append( "" )
 
-        # --- register FFI target (once per target name) ---
-        target = f"sdot_{ func_name }_{ encode_base62( str( [ s.__dict__ for s in arg_specs ] ) ) }"
-        if target not in JaxDriver._ffi_registered:
-            jax.ffi.register_ffi_target( target, module.fwd_capsule(), platform='cpu' )
-            JaxDriver._ffi_registered.add( target )
+        # --- nanobind module ---
+        lines.append( f"NB_MODULE( { module_name }, m ) {{" )
+        lines.append( "    m.def( \"fwd_capsule\", []() {" )
+        lines.append( "        return nb::capsule( reinterpret_cast<void*>( &fwd_handler_{ func_name } )," )
+        lines.append( "                            \"xla._CUSTOM_CALL_TARGET\" );" )
+        lines.append( "    } );" )
+        lines.append( "    m.def( \"bwd_capsule\", []() {" )
+        lines.append( "        return nb::capsule( reinterpret_cast<void*>( &bwd_handler_{ func_name } )," )
+        lines.append( "                            \"xla._CUSTOM_CALL_TARGET\" );" )
+        lines.append( "    } );" )
+        lines.append( "}" )
 
-        # --- call ---
-        raw = jax.ffi.ffi_call( target, out_shapes )( *input_arrays )
-        if not isinstance( raw, ( list, tuple ) ):
-            raw = ( raw, )
-        out_iter = iter( raw )
+        #
+        from .compilation.make_dylib_from_source import make_dylib_from_source
+        make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-        # --- assign outputs ---
-        results = []
-        for desc in out_descriptors:
-            kind = desc[ 0 ]
-            if kind == 'mutable':
-                _, obj, fields, n = desc
-                for fname, _ in fields:
-                    obj.__dict__[ f'_{ fname }' ] = next( out_iter )
 
-            elif kind == 'return_tensor':
-                _, _, kwargs, n = desc
-                arrs = [ next( out_iter ) for _ in range( n ) ]
-                results.append( arrs[ 0 ] if n == 1 else tuple( arrs ) )
+    def _handler_source( self, func_name: str, args: list, add_backward = False ) -> list[ str ]:
+        from .compilation.as_nanobind_compatible_args import as_nanobind_compatible_args
+        for arg in args:
+            for value, type_name in as_nanobind_compatible_args( arg ):
+                ic( value, type_name )
 
-            elif kind == 'return_obj':
-                _, rtype, kwargs, n = desc
-                arrs = [ next( out_iter ) for _ in range( n ) ]
-                if callable( getattr( rtype, 'from_outputs', None ) ):
-                    results.append( rtype.from_outputs( arrs, **kwargs ) )
-                else:
-                    from ..cpp_binding._xla_protocol import from_outputs as _default_from_outputs
-                    results.append( _default_from_outputs( rtype, arrs, **kwargs ) )
+        lines = [ "pouet2000" ]
+        return lines
 
-        if len( results ) == 0:
-            return None
-        return results[ 0 ] if len( results ) == 1 else tuple( results )
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
         """ small helper to optimize `loss` wrt `params` using L-BFGS (via scipy.optimize).
