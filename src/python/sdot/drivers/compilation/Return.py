@@ -28,3 +28,13 @@ class Return:
             return "PI"
 
         return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
+
+    def from_jax_ffi_compatible_args( self, flat_arg_iterator ):
+        return self.return_type.from_jax_ffi_compatible_args( flat_arg_iterator, *self.type_args, **self.type_kwargs )
+
+    def as_jax_ffi_compatible_args( self ):
+        return self.return_type.as_jax_ffi_compatible_rets( *self.type_args, **self.type_kwargs )
+
+    def make_fake_instance( self ):
+        return self.return_type.make_fake_instance( *self.type_args, **self.type_kwargs )
+

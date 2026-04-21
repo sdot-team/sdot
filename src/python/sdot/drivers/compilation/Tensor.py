@@ -1,3 +1,5 @@
+from ...driver import driver
+
 
 class Tensor:
     """Sentinel type for returning a raw array from driver.call.
@@ -11,16 +13,16 @@ class Tensor:
 
     @staticmethod
     def cpp_class_name_for( shape, dtype = None ):
-        if dtype is int:
-            return "MI"
-        if dtype is not None:
-            raise NotImplementedError
-        return "MF"
+        return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
 
-    @classmethod
-    def output_specs( cls, drv, shape=(), dtype=float ):
-        return [ ( '', list( shape ), dtype ) ]
+    @staticmethod
+    def as_jax_ffi_compatible_rets( shape, dtype = None ):
+        return [ ( None, f"Ret<xla::ffi::Buffer<{ driver.cpp_ffi_type_name( dtype ) }>>", f"xla::ffi::ResultBuffer<{ driver.cpp_ffi_type_name( dtype ) }>" ) ]
 
-    @classmethod
-    def from_outputs( cls, arrays, shape=(), dtype=float ):
-        return arrays[ 0 ]
+    @staticmethod
+    def from_jax_ffi_compatible_args( flat_arg_iterator, shape, dtype = None ):
+        return f"tensor_view( CtInt<{ len( shape ) }>(), { next( flat_arg_iterator ) } )"
+
+    @staticmethod
+    def make_fake_instance( shape, dtype = None ):
+        return driver.empty( shape, dtype = dtype )

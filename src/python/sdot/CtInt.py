@@ -11,3 +11,5 @@ class CtInt:
 
     def to_nanobind_compatible_objects( self ):
         return []
+
+    # .Attr<float>("eps")
