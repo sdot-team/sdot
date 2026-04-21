@@ -25,7 +25,7 @@ def test_driver():
 if __name__ == "__main__":
     import jax
 
-    x = [ sdot.driver.t0( 10 ) ]
+    x = [ 5 ]
     sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Mutable( x ) )
     ic( x )
 

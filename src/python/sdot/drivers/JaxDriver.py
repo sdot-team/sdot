@@ -104,8 +104,6 @@ class JaxDriver:
             dtype = self.dtype
         elif dtype is int:
             dtype = self.int_type
-        else:
-            raise NotImplementedError( f"for { dtype }" )
 
         res = jnp.asarray( tensor, dtype = dtype, device = self.device )
 
@@ -345,9 +343,9 @@ class JaxDriver:
         if dtype == jnp.float64:
             return "xla::ffi::F64"
         if dtype == jnp.int32:
-            return "xla::ffi::I32"
+            return "xla::ffi::S32"
         if dtype == jnp.int64:
-            return "xla::ffi::I64"
+            return "xla::ffi::S64"
 
         raise NotImplementedError( f"for dtype { dtype }" )
 
@@ -361,9 +359,9 @@ class JaxDriver:
             return "FP64"
 
         if dtype == jnp.int32:
-            return "PI32"
+            return "SI32"
         if dtype == jnp.int64:
-            return "PI64"
+            return "SI64"
 
         raise NotImplementedError( f"for dtype { dtype }" )
 

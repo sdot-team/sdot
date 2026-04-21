@@ -1,7 +1,8 @@
 #include <sdot/support/P.h>
 
 void test_alac( auto &out ) {
-    std::get<0>( out )() += 17;
+    std::get<0>( out ) += 17;
+    P( std::get<0>( out ) );
 }
 
 // void test_alac( auto &out_a, const auto &inp, auto &out_b ) {
