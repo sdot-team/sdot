@@ -22,11 +22,12 @@ def test_driver():
     import torch
     assert sdot.driver.dtype == torch.float32
 
-
 if __name__ == "__main__":
     import jax
 
-    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), sdot.driver.t0( 10 ), sdot.Return( sdot.Tensor, [] ) ) )
+    x = [ sdot.driver.t0( 10 ) ]
+    sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Mutable( x ) )
+    ic( x )
 
     # def loss( x ):
     #     return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2  )

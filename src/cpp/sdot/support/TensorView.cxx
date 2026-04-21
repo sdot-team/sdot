@@ -25,6 +25,14 @@ UTP DTP::TensorView( T *data, PI size ) : _sizes( Values(), size ), _strides( Va
 UTP DTP::TensorView( Rank, PI rank ) : _strides( Size(), rank, 0 ), _sizes( Size(), rank, 0 ), _ptr( nullptr ) {
 }
 
+UTP void DTP::operator=( const TensorView<const T,ct_rank,Arch> &that ) {
+    if ( is_contiguous() ) {
+        std::memcpy( data(), that.data(), sizeof( T ) * total_size() );
+        return;
+    }
+    TODO;
+}
+
 UTP T& DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
     if ( indices.size() )
         return operator()( indices[ 0 ], indices.without_index( 0 ), rem... );
@@ -58,6 +66,13 @@ UTP DTP::Sizes DTP::sizes() const {
 
 UTP PI DTP::size( PI d ) const {
     return _sizes[ d ];
+}
+
+UTP PI DTP::total_size() const {
+    PI res = 1;
+    for( PI d = 0; d < rank(); ++d )
+        res *= size( d );
+    return res;
 }
 
 UTP PI DTP::size() const {

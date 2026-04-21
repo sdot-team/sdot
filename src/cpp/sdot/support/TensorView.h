@@ -17,13 +17,14 @@ public:
     using          Sizes             = DsVec<PI,ct_rank,Arch>;
     using          Ptr               = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
 
-    static HD auto make_invalid            ( PI rank = ct_rank ); ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
+    static HD auto make_invalid      ( PI rank = ct_rank ); ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
     HD             TensorView        ( T *data, Sizes sizes, Strides strides );
     HD             TensorView        ( T *data, Sizes sizes );
     HD             TensorView        ( T *data, PI size );
     HD             TensorView        ( Rank, PI rank );
 
+    HD void        operator=         ( const TensorView<const T,ct_rank,Arch> &that );
 
     HD T&          operator()        ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
     HD T&          operator()        ( PI index, auto ...rem ) const;
@@ -35,6 +36,7 @@ public:
     HD Strides     strides           () const;
     HD SI          stride            ( PI d ) const;
 
+    HD PI          total_size        () const;
     HD bool        is_invalid        () const; ///<
     HD bool        is_valid          () const; ///< false iff constructed from None/nullopt (_ptr == nullptr)
     HD bool        empty             () const;
@@ -51,8 +53,8 @@ public:
 
     HD void        for_each_index    ( auto &&func, PI sub = 0 ) const;
 
-    HD auto        unsqueeze         () const; ///< append a trailing dimension of size 1 (preserves strides)
     HD bool        is_contiguous     () const; ///< true iff strides match row-major contiguous layout
+    HD auto        unsqueeze         () const; ///< append a trailing dimension of size 1 (preserves strides)
 
     T_U auto       sum_along_axis_1  () const -> Tensor<U,1,Arch>;
     void           with_cpu_version  ( auto &&func ) const;

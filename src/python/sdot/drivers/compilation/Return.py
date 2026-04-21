@@ -29,14 +29,11 @@ class Return:
 
         return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
 
-    def from_jax_ffi_compatible_args( self, flat_arg_iterator ):
-        return self.return_type.from_jax_ffi_compatible_args( flat_arg_iterator, *self.type_args, **self.type_kwargs )
-
-    def as_jax_ffi_compatible_args( self ):
+    def as_jax_ffi_compatible_args( self, driver ):
         return self.return_type.as_jax_ffi_compatible_rets( *self.type_args, **self.type_kwargs )
 
-    def make_fake_instance( self ):
+    def make_fake_instance( self, driver ):
         return self.return_type.make_fake_instance( *self.type_args, **self.type_kwargs )
 
-    def as_jax_ffi_compatible_specs( self ):
-        return self.return_type.as_jax_ffi_compatible_specs( *self.type_args, **self.type_kwargs )
+    def cpp_assembly_from_jax_ffi_compatible_args( self, driver, flat_arg_iterator ):
+        return self.return_type.cpp_assembly_from_jax_ffi_compatible_args( flat_arg_iterator, *self.type_args, **self.type_kwargs )

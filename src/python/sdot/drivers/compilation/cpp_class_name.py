@@ -8,6 +8,9 @@ def cpp_class_name( obj ):
     if isinstance( obj, int ):
         return "SI"
 
+    if isinstance( obj, ( list, tuple ) ):
+        return f"std::tuple<{ str.join( ", ", [ cpp_class_name( v ) for v in obj ] ) }>"
+
     # method
     if callable( getattr( obj, "cpp_class_name", None ) ):
         return obj.cpp_class_name()
