@@ -17,7 +17,13 @@ class Tensor:
 
     @staticmethod
     def as_jax_ffi_compatible_rets( shape, dtype = None ):
-        return [ ( None, f"Ret<xla::ffi::Buffer<{ driver.cpp_ffi_type_name( dtype ) }>>", f"xla::ffi::ResultBuffer<{ driver.cpp_ffi_type_name( dtype ) }>" ) ]
+        import jax
+        return [ ( jax.ShapeDtypeStruct( shape, dtype or driver.dtype ), f"Ret<xla::ffi::Buffer<{ driver.cpp_ffi_type_name( dtype ) }>>", f"xla::ffi::ResultBuffer<{ driver.cpp_ffi_type_name( dtype ) }>" ) ]
+
+    @staticmethod
+    def as_jax_ffi_compatible_specs( shape, dtype = None ):
+        import jax
+        return [ jax.ShapeDtypeStruct( shape, dtype or driver.dtype ) ]
 
     @staticmethod
     def from_jax_ffi_compatible_args( flat_arg_iterator, shape, dtype = None ):

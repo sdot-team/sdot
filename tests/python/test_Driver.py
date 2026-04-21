@@ -26,7 +26,7 @@ def test_driver():
 if __name__ == "__main__":
     import jax
 
-    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), sdot.driver.t0( 10 ) ) )
+    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), sdot.driver.t0( 10 ), sdot.Return( sdot.Tensor, [] ) ) )
 
     # def loss( x ):
     #     return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2  )

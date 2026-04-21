@@ -38,3 +38,5 @@ class Return:
     def make_fake_instance( self ):
         return self.return_type.make_fake_instance( *self.type_args, **self.type_kwargs )
 
+    def as_jax_ffi_compatible_specs( self ):
+        return self.return_type.as_jax_ffi_compatible_specs( *self.type_args, **self.type_kwargs )

@@ -294,20 +294,25 @@ class JaxDriver:
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, args )
-        self._register_ffi_target( module_name, func_name, includes, args )
+        self._register_ffi_target( module_name, func_name, includes, args, False )
 
-        # arg list
+        # arg list (conversion to jax ffi compatible values, inputs then outputs)
         from .compilation.as_jax_ffi_compatible_args import as_jax_ffi_compatible_args
+        from .compilation.Mutable import Mutable
         from .compilation.Return import Return
-        jax_args = []
+        output_args = []
+        input_args = []
         for arg in args:
-            if isinstance( arg, Return ):
-                continue
-            for jax_arg, _, _ in as_jax_ffi_compatible_args( arg ):
-                jax_args.append( jax_arg )
+            if isinstance( arg, Mutable ):
+                raise NotImplementedError
+            elif isinstance( arg, Return ):
+                output_args += arg.as_jax_ffi_compatible_specs()
+            else:
+                for input_arg, _, _ in as_jax_ffi_compatible_args( arg ):
+                    input_args.append( input_arg )
 
-        func = jax.ffi.ffi_call( module_name, jax.ShapeDtypeStruct( [], self.dtype ) )
-        return func( *jax_args )
+        func = jax.ffi.ffi_call( module_name, output_args )
+        return func( *input_args )
 
     def cpp_ffi_type_name( self, dtype ):
         if dtype is None or dtype is float:
@@ -447,7 +452,7 @@ class JaxDriver:
         lines.append( "  return nb::capsule( reinterpret_cast<void *>( fn ), \"xla._CUSTOM_CALL_TARGET\" );" )
         lines.append( "}" )
         lines.append( "" )
-        lines.append( f"NB_MODULE( { module_name } , m ) {{" )
+        lines.append( f"NB_MODULE( { module_name }, m ) {{" )
         lines.append( f"  m.def( \"{ func_name }\", []() {{ return EncapsulateFfiCall( binding_{ func_name } ); }} );" )
         if make_backward_binding:
             lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
@@ -491,48 +496,73 @@ class JaxDriver:
 
             # input => get the gradients
             # On veut en effet prendre la liste des tenseurs, mais il faut faire un ReturnInstance
-            for obj, _, _ in as_jax_ffi_compatible_args( arg.make_fake_instance() ):
-                if isinstance( obj, ( jax_core.Tracer, jax.Array ) ):
-                    if self.is_int_dtype( obj.dtype ):
-                        continue
-                    res.append( ReturnAs( obj ) )
+            # for obj, _, _ in as_jax_ffi_compatible_args( arg.make_fake_instance() ):
+            #     if isinstance( obj, ( jax_core.Tracer, jax.Array ) ):
+            #         if self.is_int_dtype( obj.dtype ):
+            #             continue
+            #         # res.append( ReturnAs( obj ) )
 
         return res
 
     def _handler_source( self, module_name: str, func_name: str, args: list ) -> list[ str ]:
         from sdot.drivers.compilation.from_jax_ffi_compatible_args import from_jax_ffi_compatible_args
         from .compilation.as_jax_ffi_compatible_args import as_jax_ffi_compatible_args
+        from .compilation.Mutable import Mutable
+        from .compilation.Return import Return
 
         #
         lines = []
 
-        # start impl: declaration
-        num_arg = 0
-        impl_args = []
-        for arg in args:
-            for _, _, cpp_type in as_jax_ffi_compatible_args( arg ):
-                impl_args.append( f"{ cpp_type } arg_{ num_arg }" )
-                num_arg += 1
-        lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", impl_args ) } ) {{" )
+        # start impl: declaration. Split between inputs then outputs
+        output_arg_decls = []
+        output_arg_names = []
+        input_arg_decls = []
+        input_arg_names = []
+        for arg in args: # inputs
+            if isinstance( arg, Mutable ):
+                raise NotImplementedError
+            elif isinstance( arg, Return ):
+                for _, _, cpp_type in as_jax_ffi_compatible_args( arg ):
+                    arg_name = f"out_{ len( output_arg_names ) }"
+                    output_arg_names.append( arg_name )
+                    output_arg_decls.append( f"{ cpp_type } { arg_name }" )
+            else:
+                for _, _, cpp_type in as_jax_ffi_compatible_args( arg ):
+                    arg_name = f"inp_{ len( input_arg_names ) }"
+                    input_arg_names.append( arg_name )
+                    input_arg_decls.append( f"{ cpp_type } { arg_name }" )
+        lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", input_arg_decls + output_arg_decls ) } ) {{" )
 
-        # asembly to C++ objects
-        cpp_args = [ f"arg_{ num_arg }" for num_arg in range( len( impl_args ) ) ]
-        cpp_args_iter = iter( cpp_args )
+        # assembly of the C++ objects (inputs the outputs)
+        output_args_iter = iter( output_arg_names )
+        input_args_iter = iter( input_arg_names )
         for num_cpp_obj, arg in enumerate( args ):
-            lines.append( f"    auto obj_{ num_cpp_obj } = { from_jax_ffi_compatible_args( arg, cpp_args_iter ) };" )
+            if isinstance( arg, Mutable ):
+                raise NotImplementedError
+            elif isinstance( arg, Return ):
+                lines.append( f"    auto cpp_assembly_{ num_cpp_obj } = { from_jax_ffi_compatible_args( arg, output_args_iter ) };" )
+            else:
+                lines.append( f"    auto cpp_assembly_{ num_cpp_obj } = { from_jax_ffi_compatible_args( arg, input_args_iter ) };" )
 
         # call the function
-        lines.append( f"    { func_name }( { str.join( ", ", [ f"obj_{ num_cpp_obj }" for num_cpp_obj, _ in enumerate( args ) ] ) } );" )
+        lines.append( f"    { func_name }( { str.join( ", ", [ f"cpp_assembly_{ num_cpp_obj }" for num_cpp_obj in range( len( args ) ) ] ) } );" )
 
         # end impl
         lines.append( "    return xla::ffi::Error::Success();" )
         lines.append( "}" )
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
-        bind_chain = [ "xla::ffi::Ffi::Bind()" ]
+        output_bind_chain = []
+        input_bind_chain = []
         for arg in args:
             for _, bind_type, _ in as_jax_ffi_compatible_args( arg ):
-                bind_chain.append( bind_type + "()" )
+                if isinstance( arg, Mutable ):
+                    raise NotImplementedError
+                elif isinstance( arg, Return ):
+                    output_bind_chain.append( bind_type + "()" )
+                else:
+                    input_bind_chain.append( bind_type + "()" )
+        bind_chain = [ "xla::ffi::Ffi::Bind()" ] + input_bind_chain + output_bind_chain
         lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( ".", bind_chain ) } );" )
 
         return lines
