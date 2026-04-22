@@ -26,7 +26,8 @@ def test_alac_grad():
     from jax._src import test_util as jtu
 
     def f( x ):
-        return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", ret = sdot.Return( sdot.Tensor, [] ), inp = x )
+        res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", o0 = sdot.Return( sdot.Tensor, [] ), i0 = x, o1 = sdot.Return( sdot.Tensor, [] ), i1 = x )
+        return res[ 0 ]
 
     x = sdot.driver.t0( 3.0 )
     jtu.check_grads( f, ( x, ), order=1, modes=[ "rev" ] )

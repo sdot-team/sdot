@@ -35,6 +35,6 @@ class Tensor:
         except StopIteration:
             return driver.empty( [ 0 ] * len( shape ), dtype = dtype )
 
-    # @staticmethod
-    # def fake_instance( driver, shape, dtype = None ):
-    #     return driver.empty( shape, dtype = dtype )
+    @staticmethod
+    def fake_instance( driver, shape, dtype = None ):
+        return driver.empty( shape, dtype = dtype )

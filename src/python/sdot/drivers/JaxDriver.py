@@ -4,6 +4,8 @@ from .compilation.cpp_class_name import cpp_class_name
 from .compilation.Mutable import Mutable
 from .compilation.Return import Return
 from .compilation.Tensor import Tensor
+from jax._src.custom_derivatives import CustomVJPPrimal
+from jax._src import ad_util
 import jax.core as jax_core
 import jax.numpy as jnp
 import importlib
@@ -205,33 +207,66 @@ class JaxDriver:
         #   L'assemblage des objets Python se fait en dehors
         flat_inputs, flat_specs, non_differentiable_inputs, validity_tensor = self._flat_args( args )
 
-        @jax.custom_vjp
-        def ffi_op( flat_inputs ):
+        def _call_ffi( actual_values ):
             func = jax.ffi.ffi_call( module_name, flat_specs )
-            ret = func( *flat_inputs, *non_differentiable_inputs, validity_tensor )
+            ret = func( *actual_values, *non_differentiable_inputs, validity_tensor )
             if isinstance( ret, ( tuple, list ) ):
                 return tuple( ret )
             return ( ret, )
 
-        def ffi_op_fwd( flat_inputs ):
-            flat_outputs = ffi_op( flat_inputs )
-            return flat_outputs, ( list( flat_inputs ), list( flat_outputs ) )
+        @jax.custom_vjp
+        def ffi_op( flat_inputs ):
+            return _call_ffi( flat_inputs )
 
-        def ffi_op_bwd( residuals, grad_of_the_outputs ):
+        def ffi_op_fwd( flat_inputs ):
+            # With symbolic_zeros=True, JAX wraps each input in CustomVJPPrimal(value, perturbed)
+            actual_values = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in flat_inputs )
+            flat_outputs = _call_ffi( actual_values )
+            return flat_outputs, ( list( actual_values ), list( flat_outputs ) )
+
+        def ffi_op_bwd( residuals, grads_of_the_outputs ):
             flat_inputs_res, flat_outputs_res = residuals
 
-            if not isinstance( grad_of_the_outputs, ( tuple, list ) ):
-                grad_of_the_outputs = ( grad_of_the_outputs, )
-            grad_of_the_outputs = list( grad_of_the_outputs )
+            if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
+                grads_of_the_outputs = ( grads_of_the_outputs, )
 
-            backward_args = self._make_backwarg_args_instance( args, flat_outputs_res + grad_of_the_outputs, list( flat_inputs_res ), )
-            bwd_flat_inputs, bwd_flat_specs, bwd_non_differentiable_inputs, bwd_validity_tensor = self._flat_args( backward_args )
+            # new_grads_of_the_outputs
+            new_size = ( len( flat_inputs_res ) + len( non_differentiable_inputs ) + len( flat_outputs_res ) + len( grads_of_the_outputs ) + 63 ) // 64
+            pos_in_new_validity_tensor = len( flat_inputs_res ) + len( non_differentiable_inputs ) + len( flat_outputs_res )
+            new_validity_tensor = self.to_numpy( validity_tensor )
+            new_validity_tensor.resize( [ new_size ] )
+            new_grads_of_the_outputs = []
+            for grad in grads_of_the_outputs:
+                if isinstance( grad, ad_util.SymbolicZero ):
+                    new_grads_of_the_outputs.append( self.empty( [ 0 ] * len( grad.shape ), dtype = grad.dtype ) )
+                else:
+                    new_grads_of_the_outputs.append( grad )
+                    new_validity_tensor[ pos_in_new_validity_tensor // 64 ] |= ( 1 << ( pos_in_new_validity_tensor % 64 ) )
+                pos_in_new_validity_tensor += 1
+
+            # validity for the returned grads. For now we say that we want the grad for each input
+            for _ in range( len( flat_inputs_res ) ):
+                new_validity_tensor[ pos_in_new_validity_tensor // 64 ] |= ( 1 << ( pos_in_new_validity_tensor % 64 ) )
+                pos_in_new_validity_tensor += 1
+
+            # grads to get
+            bwd_flat_specs = []
+            for obj in flat_inputs_res:
+                bwd_flat_specs.append( jax.ShapeDtypeStruct( obj.shape, obj.dtype ) )
 
             bwd_func = jax.ffi.ffi_call( module_name + "_backward", bwd_flat_specs )
-            output = bwd_func( *bwd_flat_inputs, *bwd_non_differentiable_inputs, bwd_validity_tensor )
+            output = bwd_func(
+                *flat_inputs_res,
+                *non_differentiable_inputs,
+                *flat_outputs_res,
+                *new_grads_of_the_outputs,
+                new_validity_tensor
+            )
+
             return ( tuple( output ), )
 
-        ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd )
+
+        ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
 
         # --- appel ---
         flat_outs = ffi_op( tuple( flat_inputs ) )
@@ -344,6 +379,13 @@ class JaxDriver:
         if callable( getattr( obj, "as_jax_ffi_compatible_args", None ) ):
             return obj.as_jax_ffi_compatible_args( self, str )
 
+        #
+        if isinstance( obj, ad_util.SymbolicZero ):
+            dtype = self._cpp_ffi_type_name( obj.dtype )
+            differentiable = not self.is_int_dtype( obj.dtype )
+            obj = self.empty( [ 0 ] * len( obj.shape ), dtype = obj.dtype )
+            return [ JaxFfiCompatibleItem( obj, name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>", differentiable ) ]
+
         # jax arrays
         if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
             dtype = self._cpp_ffi_type_name( obj.dtype )
@@ -385,11 +427,17 @@ class JaxDriver:
         if callable( getattr( obj, "as_jax_ffi_compatible_rets", None ) ):
             return obj.as_jax_ffi_compatible_rets( self, name )
 
+        #
+        if isinstance( obj, ad_util.SymbolicZero ):
+            dtype = self._cpp_ffi_type_name( obj.dtype )
+            differentiable = not self.is_int_dtype( obj.dtype )
+            return [ JaxFfiCompatibleItem( jax.ShapeDtypeStruct( obj.shape, obj.dtype ), name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>", differentiable ) ]
+
         # arrays
         if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
             dtype = self._cpp_ffi_type_name( obj.dtype )
             differentiable = not self.is_int_dtype( obj.dtype )
-            return [ JaxFfiCompatibleItem( obj, name, True, f"Ret<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::ResultBuffer<{ dtype }>", differentiable ) ]
+            return [ JaxFfiCompatibleItem( jax.ShapeDtypeStruct( obj.shape, obj.dtype ), name, True, f"Ret<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::ResultBuffer<{ dtype }>", differentiable ) ]
 
         # std objects
         if isinstance( obj, float ):
@@ -585,51 +633,34 @@ class JaxDriver:
         from .compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-    def _make_backwarg_args_instance( self, args: dict, output_list = [], flat_inputs_values = None ) -> dict:
-        """ make a (fake) list of args that can be used to compile the backward version """
-        output_iter = iter( output_list )
-        flat_inputs_iter = iter( flat_inputs_values ) if flat_inputs_values is not None else None
+    def _make_backwarg_args_instance( self, args: dict ) -> dict:
+        """ make a (fake) list of args that can be used to compile the backward version
 
+        """
         # transformation of the forward args. Everything becomes an input. Object with several tensors become tuples
         res = {}
+        input_names = []
+        output_names = []
         for arg_name, arg_data in args.items():
             if isinstance( arg_data, Return ):
-                res[ arg_name ] = arg_data.python_assembly_from_jax_ffi_compatible_args( self, output_iter )
+                res[ arg_name ] = arg_data.fake_instance( self )
+                output_names.append( arg_name )
             elif isinstance( arg_data, Mutable ):
-                if flat_inputs_iter is not None:
-                    n = len( self.as_jax_ffi_compatible_args( arg_data.value, "" ) )
-                    vals = [ next( flat_inputs_iter ) for _ in range( n ) ]
-                    res[ arg_name ] = vals[ 0 ] if n == 1 else vals
-                else:
-                    res[ arg_name ] = arg_data.value
+                res[ arg_name ] = arg_data.value
+                output_names.append( arg_name )
+                input_names.append( arg_name )
             else:
-                if flat_inputs_iter is not None:
-                    n = len( self.as_jax_ffi_compatible_args( arg_data, "" ) )
-                    vals = [ next( flat_inputs_iter ) for _ in range( n ) ]
-                    res[ arg_name ] = vals[ 0 ] if n == 1 else vals
-                else:
-                    res[ arg_name ] = arg_data
+                res[ arg_name ] = arg_data
+                input_names.append( arg_name )
 
-        # gradients -> flat list of tensors, with Return() if it was an input value
-        for arg_name, arg_data, has_input, has_output in self._with_hio( args ):
-            if has_input:
-                for farg in self.as_jax_ffi_compatible_args( arg_data, f"grad_inp_{ arg_name }" ):
-                    if isinstance( farg.value, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
-                        if self.is_int_dtype( farg.value.dtype ):
-                            continue
-                        res[ farg.name ] = Return( Tensor, farg.value.shape, farg.value.dtype )
-                    else:
-                        raise NotImplementedError
+        # gradient of outputs
+        for arg_name in output_names:
+            res[ f"grad_out_{ arg_name }" ] = res[ arg_name ]
 
-            if has_output:
-                grad_out = arg_data.python_assembly_from_jax_ffi_compatible_args( self, output_iter )
-                for farg in self.as_jax_ffi_compatible_args( grad_out, f"grad_out_{ arg_name }" ):
-                    if isinstance( farg.value, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
-                        if self.is_int_dtype( farg.value.dtype ):
-                            continue
-                        res[ farg.name ] = farg.value
-                    else:
-                        raise NotImplementedError
+        # gradient of inputs
+        for arg_name in input_names:
+            arg = res[ arg_name ]
+            res[ f"grad_inp_{ arg_name }" ] = Return( Tensor, arg.shape, arg.dtype )
 
         return res
 
