@@ -4,9 +4,8 @@ void test_alac( auto &out, const auto &inp ) {
     out() = inp() * inp();
 }
 
-// void test_alac_backward( auto &out, const auto &inp, auto &grad_out, const auto &grad_inp ) {
-void test_alac_backward( auto &out, const auto &inp, auto... ) {
-    // grad_inp() = 2 * grad_out() * inp();
-    // P( out(), inp(), grad_out(), grad_inp() );
+void test_alac_backward( const auto &/*ret*/, const auto &inp, const auto &grad_out_ret, auto &grad_inp_inp ) {
+    if ( ! grad_inp_inp.is_valid() ) return;
+    grad_inp_inp() = 2 * grad_out_ret() * inp();
 }
 

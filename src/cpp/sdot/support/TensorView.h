@@ -24,7 +24,7 @@ public:
     HD             TensorView        ( T *data, PI size );
     HD             TensorView        ( Rank, PI rank );
 
-    HD void        operator=         ( const TensorView<const T,ct_rank,Arch> &that );
+    HD void        get_data_from     ( const TensorView<const T,ct_rank,Arch> &that );
 
     HD T&          operator()        ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
     HD T&          operator()        ( PI index, auto ...rem ) const;

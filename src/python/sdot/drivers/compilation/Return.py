@@ -36,13 +36,13 @@ class Return:
     def as_jax_ffi_compatible_args( self, driver, name ):
         return self.return_type.as_jax_ffi_compatible_rets( driver, name, *self.type_args, **self.type_kwargs )
 
-    def fake_instance( self, driver ):
-        """ make a fake instance to help find how to compile a function with a value that comes from a return """
-        # special method ?
-        if callable( getattr( self.return_type, "fake_instance", None ) ):
-            return self.return_type.fake_instance( driver, *self.type_args, **self.type_kwargs )
-        # call ctor
-        return self.return_type( *self.type_args, **self.type_kwargs )
+    # def fake_instance( self, driver ):
+    #     """ make a fake instance to help find how to compile a function with a value that comes from a return """
+    #     # special method ?
+    #     if callable( getattr( self.return_type, "fake_instance", None ) ):
+    #         return self.return_type.fake_instance( driver, *self.type_args, **self.type_kwargs )
+    #     # call ctor
+    #     return self.return_type( *self.type_args, **self.type_kwargs )
 
     def cpp_assembly_from_jax_ffi_compatible_args( self, driver, flat_arg_iterator, pos_in_validity_bits: list[ int ] ):
         return self.return_type.cpp_assembly_from_jax_ffi_compatible_args( flat_arg_iterator, pos_in_validity_bits, *self.type_args, **self.type_kwargs )
