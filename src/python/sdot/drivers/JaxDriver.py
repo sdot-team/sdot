@@ -668,7 +668,14 @@ class JaxDriver:
         #
         lines = []
 
-        # start impl: declaration. Split between inputs and outputs
+        # make a structure with the names
+        lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( rargs ) ) ] ) }>" )
+        lines.append( f"struct Parameters_{ func_name } {{" )
+        for n, ( rarg_name, rarg_data, has_input, has_output ) in enumerate( JaxDriver._with_hio( rargs ) ):
+            lines.append( f"    T{ n } { rarg_name };" )
+        lines.append( "};" )
+
+        # Split between inputs and outputs
         output_arg_decls = []
         input_arg_decls = []
         for rarg_name, rarg_data, has_input, has_output in JaxDriver._with_hio( rargs ):
@@ -678,8 +685,9 @@ class JaxDriver:
             if has_output:
                 for farg in self.as_jax_ffi_compatible_rets( rarg_data, "out_" + rarg_name ):
                     output_arg_decls.append( f"{ farg.cpp_type } { farg.name }" )
-
         input_arg_decls.append( "xla::ffi::Buffer<xla::ffi::DataType::U64> validity_mask_buffer" )
+
+        # start impl: declaration. Split between inputs and outputs
         lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", input_arg_decls + output_arg_decls ) } ) {{" )
 
         # read the validity_mask
@@ -699,7 +707,10 @@ class JaxDriver:
                 lines.append( f"    auto { rarg_name } = { self.cpp_assembly_from_jax_ffi_compatible_args( rarg_data, f"inp_{ rarg_name }", pos_in_validity_bits ) };" )
 
         # call the function
-        lines.append( f"    { func_name }( { str.join( ", ", [ arg_name for arg_name in rargs.keys() ] ) } );" )
+        lines.append( f"    { func_name }( Parameters_{ func_name }{{" )
+        for rarg_name, _ in rargs.items():
+            lines.append( f"        .{ rarg_name } = std::move( { rarg_name } )," )
+        lines.append( "} );" )
 
         # end impl
         lines.append( "    return xla::ffi::Error::Success();" )
