@@ -37,3 +37,11 @@ class UndefinedTensor:
         if use_view:
             return name
         return f"tensor_view_{ self.ndim }( { name } )"
+
+    def as_jax_ffi_compatible_args( self, driver, name ) -> list[ tuple[ any, str, bool, str, str ] ]:
+        dtype = driver._cpp_ffi_type_name( self.dtype )
+        return [ ( driver.empty( [ 0 ] * self.ndim, dtype = self.dtype ), name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>" ) ]
+
+    def as_jax_ffi_compatible_rets( self, driver, name ) -> list[ tuple[ any, str, bool, str, str ] ]:
+        dtype = driver._cpp_ffi_type_name( self.dtype )
+        return [ ( driver._jax_shape_out( self.shape, self.dtype ), name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>" ) ]

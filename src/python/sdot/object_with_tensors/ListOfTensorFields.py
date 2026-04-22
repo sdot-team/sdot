@@ -88,7 +88,7 @@ class ListOfTensorFields:
     # def to_nanobind_compatible_objects( self, obj ):
     #     raise NotImplementedError
 
-    # def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names ):
+    # def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names, pos_in_validity_bits: list[ int ] ):
     #     #return f"tensor_view_{ self.ndim }( { arg_names.pop( 0 ) } )"
     #     raise NotImplementedError
 

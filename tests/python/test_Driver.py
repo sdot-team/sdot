@@ -22,17 +22,30 @@ def test_driver():
     import torch
     assert sdot.driver.dtype == torch.float32
 
+def test_alac_grad():
+    from jax._src import test_util as jtu
+
+    def f( x ):
+        return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x )
+
+    x = sdot.driver.t0( 3.0 )
+    jtu.check_grads( f, ( x, ), order=1, modes=[ "rev" ] )
+
+
+# import jax
+
+# def loss( x ):
+#     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2  )
+#     ic( res )
+#     return res.item()
+
+# x = sdot.driver.t0( 10 )
+# # ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2 ) )
+# r = sdot.driver.optimize_using_lbfgs( loss, x )
+# ic( x )
+# ic( r )
 if __name__ == "__main__":
-    import jax
+    # test_alac_grad()
 
-    x = [ 5 ]
-    sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Mutable( x ) )
-    ic( x )
-
-    # def loss( x ):
-    #     return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x - 2  )
-
-    # x = sdot.driver.t0( 10 )
-    # r = sdot.driver.optimize_using_lbfgs( loss, x )
-    # ic( r )
-    # # ic( x )
+    x = sdot.driver.t0( 3.0 )
+    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x ) )

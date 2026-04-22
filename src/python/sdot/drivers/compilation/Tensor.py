@@ -1,5 +1,3 @@
-from ...driver import driver
-
 
 class Tensor:
     """Sentinel type for returning a raw array from driver.call.
@@ -13,17 +11,25 @@ class Tensor:
 
     @staticmethod
     def cpp_class_name_for( shape, dtype = None ):
+        from ...driver import driver
         return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
 
     @staticmethod
-    def as_jax_ffi_compatible_rets( shape, dtype = None ):
+    def as_jax_ffi_compatible_rets( driver, name, shape, dtype = None ) -> list[ tuple[ any, str, bool, str, str ] ]:
         import jax
-        return [ ( jax.ShapeDtypeStruct( shape, dtype or driver.dtype ), f"Ret<xla::ffi::Buffer<{ driver.cpp_ffi_type_name( dtype ) }>>", f"xla::ffi::ResultBuffer<{ driver.cpp_ffi_type_name( dtype ) }>" ) ]
+        dn = driver._cpp_ffi_type_name( dtype or driver.dtype )
+        return [ ( jax.ShapeDtypeStruct( shape, dtype or driver.dtype ), name, True, f"Ret<xla::ffi::Buffer<{ dn }>>", f"xla::ffi::ResultBuffer<{ dn }>" ) ]
 
     @staticmethod
-    def cpp_assembly_from_jax_ffi_compatible_args( flat_arg_iterator, shape, dtype = None ):
-        return f"tensor_view( CtInt<{ len( shape ) }>(), { next( flat_arg_iterator ) } )"
+    def cpp_assembly_from_jax_ffi_compatible_args( name, pos_in_validity_bits, shape, dtype = None ):
+        p = pos_in_validity_bits[ 0 ]
+        pos_in_validity_bits[ 0 ] += 1
+        return f"tensor_view( CtInt<{ len( shape ) }>(), { name }, validity_mask[ { p // 64 } ] & { 1 << ( p % 64 ) } )"
 
     @staticmethod
-    def make_fake_instance( shape, dtype = None ):
+    def python_assembly_from_jax_ffi_compatible_args( driver, flat_arg_iterator, shape, dtype = None ):
+        return next( flat_arg_iterator )
+
+    @staticmethod
+    def fake_instance( driver, shape, dtype = None ):
         return driver.empty( shape, dtype = dtype )

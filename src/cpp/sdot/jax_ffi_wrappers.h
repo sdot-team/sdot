@@ -25,8 +25,11 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 // xla::ffi::Buffer
 template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf ) {
+auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
+
+    if ( ! valid )
+        return TensorView<const TF,ndim,Cpu>::make_invalid( ndim );
 
     ASSERT_EQ( ndim, buf.dimensions().size() );
     DsVec<PI,ndim,Cpu> sizes( Size(), ndim );
@@ -40,8 +43,11 @@ auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf ) {
 
 // xla::ffi::ResultBuffer
 template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf ) {
+auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
+
+    if ( ! valid )
+        return TensorView<TF,ndim,Cpu>::make_invalid( ndim );
 
     ASSERT_EQ( ndim, buf->dimensions().size() );
     DsVec<PI,ndim,Cpu> sizes( Size(), ndim );
@@ -50,6 +56,12 @@ auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf ) {
 
     // XLA FFI guarantees C-contiguous (row-major) layout
     return TensorView<TF,ndim,Cpu>( reinterpret_cast<TF *>( buf->untyped_data() ), sizes );
+}
+
+bool test_and_shift( auto &mask ) {
+    bool res = mask & 1;
+    mask >>= 1;
+    return res;
 }
 
 } // namespace sdot

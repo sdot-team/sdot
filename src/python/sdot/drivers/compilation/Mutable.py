@@ -14,13 +14,13 @@ class Mutable:
     def cpp_class_name( self ):
         return cpp_class_name( self.value )
 
-    def as_jax_ffi_compatible_args( self, driver ):
-        return driver.as_jax_ffi_compatible_args( self.value )
+    def as_jax_ffi_compatible_args( self, driver, name ):
+        return driver.as_jax_ffi_compatible_args( self.value, name )
 
-    def as_jax_ffi_compatible_rets( self, driver ):
-        return driver.as_jax_ffi_compatible_rets( self.value )
+    def as_jax_ffi_compatible_rets( self, driver, name ):
+        return driver.as_jax_ffi_compatible_rets( self.value, name )
 
-    def cpp_assembly_from_jax_ffi_compatible_args( self, driver, arg_iter ):
+    def cpp_assembly_from_jax_ffi_compatible_args( self, driver, arg_iter, pos_in_validity_bits: list[ int ] ):
         return driver.cpp_assembly_from_jax_ffi_compatible_args( self.value, arg_iter )
 
     def python_assembly_from_jax_ffi_compatible_args( self, driver, arg_iter ):
