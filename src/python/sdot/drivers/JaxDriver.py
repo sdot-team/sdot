@@ -183,7 +183,7 @@ class JaxDriver:
     def normalized_framework( self ):
         return "jax"
 
-    def call( self, func_name: str, includes: str | list[ str ], *args ):
+    def call( self, func_name: str, includes: str | list[ str ], **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -207,13 +207,13 @@ class JaxDriver:
         validity_bits = []
         flat_inputs = []
         flat_specs = []
-        for num_arg, ( arg, has_input, has_output ) in enumerate( JaxDriver._with_hio( args ) ):
+        for arg_name, arg_data, has_input, has_output in JaxDriver._with_hio( args ):
             if has_input:
-                for obj, name, valid, _, _ in self.as_jax_ffi_compatible_args( arg, f"inp_{ num_arg }" ):
+                for obj, _, valid, _, _ in self.as_jax_ffi_compatible_args( arg_data, f"inp_{ arg_name }" ):
                     validity_bits.append( valid )
                     flat_inputs.append( obj )
             if has_output:
-                for spec, name, valid, _, _ in self.as_jax_ffi_compatible_rets( arg, f"out_{ num_arg }" ):
+                for spec, _, valid, _, _ in self.as_jax_ffi_compatible_rets( arg_data, f"out_{ arg_name }" ):
                     validity_bits.append( valid )
                     flat_specs.append( spec )
 
@@ -281,12 +281,12 @@ class JaxDriver:
         # --- réassemblage Python ---
         results = []
         out_iter = iter( flat_outs )
-        for arg, has_input, has_output in JaxDriver._with_hio( args ):
+        for arg_name, arg_data, has_input, has_output in JaxDriver._with_hio( args ):
             if has_output:
                 if has_input:
-                    self.python_update_from_jax_ffi_compatible_args( arg, out_iter )
+                    self.python_update_from_jax_ffi_compatible_args( arg_data, out_iter )
                 else:
-                    results.append( self.python_assembly_from_jax_ffi_compatible_args( arg, out_iter ) )
+                    results.append( self.python_assembly_from_jax_ffi_compatible_args( arg_data, out_iter ) )
 
         if len( results ) == 0:
             return None
@@ -296,16 +296,16 @@ class JaxDriver:
 
 
     @staticmethod
-    def _with_hio( args ) -> list[ tuple[ any, bool, bool ] ]:
+    def _with_hio( args: dict ) -> list[ tuple[ str, any, bool, bool ] ]:
         """ list of arguments with as tuples with ( arg, is_input, is_output ) """
         res = []
-        for arg in args:
-            if isinstance( arg, Mutable ):
-                res.append( ( arg, True, True ) )
-            elif isinstance( arg, Return ):
-                res.append( ( arg, False, True ) )
+        for arg_name, arg_data in args.items():
+            if isinstance( arg_data, Mutable ):
+                res.append( ( arg_name, arg_data, True, True ) )
+            elif isinstance( arg_data, Return ):
+                res.append( ( arg_name, arg_data, False, True ) )
             else:
-                res.append( ( arg, True, False ) )
+                res.append( ( arg_name, arg_data, True, False ) )
         return res
 
 
@@ -502,12 +502,12 @@ class JaxDriver:
             args.append( f"{ name }_{ attr }" )
         return f"{ cpp_class_name( obj ) }{{ { str.join( ", ", args ) } }}"
 
-    def _module_name_for( self, func_name: str, includes: list[ str ], args ):
+    def _module_name_for( self, func_name: str, includes: list[ str ], args: dict ):
         # get signature
         from .compilation.cpp_class_name import cpp_class_name
         signature_items = [ func_name ]
-        for arg in args:
-            signature_items.append( cpp_class_name( arg ) )
+        for arg_name, arg_data in args.items():
+            signature_items.append( arg_name + "_" + cpp_class_name( arg_data ) )
         signature_items += includes
 
         # module name
@@ -520,7 +520,7 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args, make_backward_binding = True ):
+    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: dict, make_backward_binding = True ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -549,7 +549,7 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, func_name: str, includes: list[ str ], args, module_name: str, make_backward_binding: bool ):
+    def _make_dylib( self, func_name: str, includes: list[ str ], args: dict, module_name: str, make_backward_binding: bool ):
         # include list
         std_includes = [
             "sdot/jax_ffi_wrappers.h",
@@ -568,12 +568,12 @@ class JaxDriver:
         lines.append( "" )
 
         # --- forward handler ---
-        lines += self._handler_source( module_name, func_name, args )
+        lines += self._handler_source( func_name, args )
         lines.append( "" )
 
         # --- backward handler ---
         if make_backward_binding:
-            lines += self._handler_source( module_name, func_name + "_backward", self._make_backwarg_args_instance( args ) )
+            lines += self._handler_source( func_name + "_backward", self._make_backwarg_args_instance( args ) )
             lines.append( "" )
 
         lines.append( "" )
@@ -593,68 +593,64 @@ class JaxDriver:
         from .compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-    def _make_backwarg_args_instance( self, args ):
-        """ make a list of arg that can be used to compile the backward version """
+    def _make_backwarg_args_instance( self, args: dict ) -> dict:
+        """ make a (fake) list of args that can be used to compile the backward version """
 
         # transformation of the forward args (everything becomes an input)
-        res = []
-        for arg in args:
-            if isinstance( arg, Return ):
-                res.append( arg.fake_instance( self ) )
-            elif isinstance( arg, Mutable ):
-                res.append( arg.value )
+        res = {}
+        for arg_name, arg_data in args.items():
+            if isinstance( arg_data, Return ):
+                res[ arg_name ] = arg_data.fake_instance( self )
+            elif isinstance( arg_data, Mutable ):
+                res[ arg_name ] = arg_data.value
             else:
-                res.append( arg )
+                res[ arg_name ] = arg_data
 
         # gradients
-        for arg in args:
-            grad_inp = None
-            grad_out = None
-            if isinstance( arg, Return ):
-                grad_out = arg.fake_instance( self )
-            elif isinstance( arg, Mutable ):
-                grad_out = arg.value
-                grad_inp = arg.value
-            else:
-                grad_inp = arg
+        # for arg in args:
+        #     grad_inp = None
+        #     grad_out = None
+        #     if isinstance( arg, Return ):
+        #         grad_out = arg.fake_instance( self )
+        #     elif isinstance( arg, Mutable ):
+        #         grad_out = arg.value
+        #         grad_inp = arg.value
+        #     else:
+        #         grad_inp = arg
 
-            if grad_out is not None:
-                for obj, _, _, _, _ in self.as_jax_ffi_compatible_args( grad_out, "" ):
-                    if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
-                        if self.is_int_dtype( obj.dtype ):
-                            continue
-                        res.append( obj )
-                    else:
-                        raise NotImplementedError
+        #     if grad_out is not None:
+        #         for obj, _, _, _, _ in self.as_jax_ffi_compatible_args( grad_out, "" ):
+        #             if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
+        #                 if self.is_int_dtype( obj.dtype ):
+        #                     continue
+        #                 res.append( obj )
+        #             else:
+        #                 raise NotImplementedError
 
-            if grad_inp is not None:
-                for obj, _, _, _, _ in self.as_jax_ffi_compatible_args( arg, "" ):
-                    if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
-                        if self.is_int_dtype( obj.dtype ):
-                            continue
-                        res.append( Return( Tensor, obj.shape, obj.dtype ) )
-                    else:
-                        raise NotImplementedError
+        #     if grad_inp is not None:
+        #         for obj, _, _, _, _ in self.as_jax_ffi_compatible_args( arg, "" ):
+        #             if isinstance( obj, ( jax_core.Tracer, jax.Array, numpy.ndarray ) ):
+        #                 if self.is_int_dtype( obj.dtype ):
+        #                     continue
+        #                 res.append( Return( Tensor, obj.shape, obj.dtype ) )
+        #             else:
+        #                 raise NotImplementedError
 
         return res
 
-    def _handler_source( self, module_name: str, func_name: str, args: list ) -> list[ str ]:
+    def _handler_source( self, func_name: str, args: dict ) -> list[ str ]:
         #
         lines = []
 
         # start impl: declaration. Split between inputs then outputs
         output_arg_decls = []
-        output_arg_names = []
         input_arg_decls = []
-        input_arg_names = []
-        for num_cpp_obj, ( arg, has_input, has_output ) in enumerate( JaxDriver._with_hio( args ) ):
+        for arg_name, arg_data, has_input, has_output in JaxDriver._with_hio( args ):
             if has_input:
-                for _, arg_name, _, _, cpp_type in self.as_jax_ffi_compatible_args( arg, f"inp_{ num_cpp_obj }" ):
-                    input_arg_names.append( arg_name )
+                for _, arg_name, _, _, cpp_type in self.as_jax_ffi_compatible_args( arg_data, "inp_" + arg_name ):
                     input_arg_decls.append( f"{ cpp_type } { arg_name }" )
             if has_output:
-                for _, arg_name, _, _, cpp_type in self.as_jax_ffi_compatible_rets( arg, f"out_{ num_cpp_obj }" ):
-                    output_arg_names.append( arg_name )
+                for _, arg_name, _, _, cpp_type in self.as_jax_ffi_compatible_rets( arg_data, "out_" + arg_name ):
                     output_arg_decls.append( f"{ cpp_type } { arg_name }" )
 
         input_arg_decls.append( "xla::ffi::Buffer<xla::ffi::DataType::U64> validity_mask_buffer" )
@@ -665,19 +661,19 @@ class JaxDriver:
 
         # assembly of the C++ objects (splitted between inputs outputs)
         pos_in_validity_bits = [ 0 ]
-        for num_cpp_obj, arg in enumerate( args ):
-            if isinstance( arg, Mutable ):
+        for arg_name, arg_data in args.items():
+            if isinstance( arg_data, Mutable ):
                 # copy input data to output value
-                lines.append( f"    auto input_cpp_assembly_{ num_cpp_obj } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg, f"inp_{ num_cpp_obj }", pos_in_validity_bits ) };" )
-                lines.append( f"    auto cpp_assembly_{ num_cpp_obj } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg, f"out_{ num_cpp_obj }", pos_in_validity_bits ) };" )
-                lines.append( f"    cpp_assembly_{ num_cpp_obj } = input_cpp_assembly_{ num_cpp_obj };" )
-            elif isinstance( arg, Return ):
-                lines.append( f"    auto cpp_assembly_{ num_cpp_obj } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg, f"out_{ num_cpp_obj }", pos_in_validity_bits ) };" )
+                lines.append( f"    auto input_cpp_assembly_{ arg_name } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg_data, f"inp_{ arg_name }", pos_in_validity_bits ) };" )
+                lines.append( f"    auto cpp_assembly_{ arg_name } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg_data, f"out_{ arg_name }", pos_in_validity_bits ) };" )
+                lines.append( f"    cpp_assembly_{ arg_name } = input_cpp_assembly_{ arg_name };" )
+            elif isinstance( arg_data, Return ):
+                lines.append( f"    auto cpp_assembly_{ arg_name } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg_data, f"out_{ arg_name }", pos_in_validity_bits ) };" )
             else:
-                lines.append( f"    auto cpp_assembly_{ num_cpp_obj } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg, f"inp_{ num_cpp_obj }", pos_in_validity_bits ) };" )
+                lines.append( f"    auto cpp_assembly_{ arg_name } = { self.cpp_assembly_from_jax_ffi_compatible_args( arg_data, f"inp_{ arg_name }", pos_in_validity_bits ) };" )
 
         # call the function
-        lines.append( f"    { func_name }( { str.join( ", ", [ f"cpp_assembly_{ num_cpp_obj }" for num_cpp_obj in range( len( args ) ) ] ) } );" )
+        lines.append( f"    { func_name }( { str.join( ", ", [ f"cpp_assembly_{ arg_name }" for arg_name in args.keys() ] ) } );" )
 
         # end impl
         lines.append( "    return xla::ffi::Error::Success();" )
@@ -686,12 +682,12 @@ class JaxDriver:
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
         output_bind_chain = []
         input_bind_chain = []
-        for num_cpp_obj, ( arg, has_input, has_output ) in enumerate( JaxDriver._with_hio( args ) ):
+        for arg_name, arg_data, has_input, has_output in JaxDriver._with_hio( args ):
             if has_output:
-                for _, _, _, bind_type, _ in self.as_jax_ffi_compatible_rets( arg, f"out_{ num_cpp_obj }" ):
+                for _, _, _, bind_type, _ in self.as_jax_ffi_compatible_rets( arg_data, arg_name ):
                     output_bind_chain.append( f"{ bind_type }()" )
             if has_input:
-                for _, _, _, bind_type, _ in self.as_jax_ffi_compatible_args( arg, f"out_{ num_cpp_obj }" ):
+                for _, _, _, bind_type, _ in self.as_jax_ffi_compatible_args( arg_data, arg_name ):
                     input_bind_chain.append( f"{ bind_type }()" )
         input_bind_chain.append( "Arg<xla::ffi::Buffer<xla::ffi::DataType::U64>>()" )
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + input_bind_chain + output_bind_chain
@@ -754,76 +750,3 @@ class JaxDriver:
         final = unpack( result.x )
         return final if is_list else final[ 0 ]
 
-    # def plan( self, bindings, f, g ):
-    #     np_dtype = np.dtype( self.dtype )
-
-    #     input_tensors = flat_tensor_list( f ) + flat_tensor_list( g )
-    #     dirac_xs = input_tensors[ 0 ]
-
-    #     batch_size = dirac_xs.shape[ 0 ]
-    #     nb_diracs  = dirac_xs.shape[ 1 ]
-    #     dim        = dirac_xs.shape[ 2 ]
-
-    #     fwd_shapes = (
-    #         jax.ShapeDtypeStruct( ( batch_size, ),                self.dtype ),
-    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs, dim ), self.dtype ),
-    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs ),      self.dtype ),
-    #         jax.ShapeDtypeStruct( ( batch_size, nb_diracs, 2 ),   self.dtype ),
-    #     )
-    #     bwd_shapes = tuple(
-    #         jax.ShapeDtypeStruct( t.shape, t.dtype ) for t in input_tensors
-    #     )
-
-    #     @jax.custom_vjp
-    #     def sdot_op( *inputs ):
-    #         def fwd_cb( *jax_inputs ):
-    #             np_inputs = [ np.asarray( x ) for x in jax_inputs ]
-
-    #             distances   = np.empty( ( batch_size, ),                dtype = np_dtype )
-    #             barycenters = np.empty( ( batch_size, nb_diracs, dim ), dtype = np_dtype )
-    #             potentials  = np.empty( ( batch_size, nb_diracs ),      dtype = np_dtype )
-    #             cuts        = np.empty( ( batch_size, nb_diracs, 2 ),   dtype = np_dtype )
-
-    #             binding_inputs = unflatten_args( f, g, np_inputs )
-    #             bindings.forward( *binding_inputs, distances, barycenters, potentials, cuts )
-    #             return distances, barycenters, potentials, cuts
-    #         return jax.pure_callback( fwd_cb, fwd_shapes, *inputs )
-
-    #     def sdot_op_fwd( *inputs ):
-    #         outputs = sdot_op( *inputs )
-    #         residuals = ( outputs[ 0 ], outputs[ 1 ], outputs[ 2 ], outputs[ 3 ], *inputs )
-    #         return outputs, residuals
-
-    #     def sdot_op_bwd( residuals, grads ):
-    #         distances, barycenters, potentials, cuts = residuals[ 0 ], residuals[ 1 ], residuals[ 2 ], residuals[ 3 ]
-    #         saved_inputs = residuals[ 4: ]
-    #         grad_distances, grad_barycenters, grad_potentials, grad_cuts = grads
-
-    #         def bwd_cb( *jax_args ):
-    #             np_args = [ np.asarray( x ) for x in jax_args ]
-
-    #             # Order in pure_callback call below: distances, barycenters, potentials, cuts, *saved_inputs, grad_distances, ...
-    #             np_dist, np_bary, np_pot, np_cuts = np_args[ 0 ], np_args[ 1 ], np_args[ 2 ], np_args[ 3 ]
-    #             n_in = len( input_tensors )
-    #             np_inputs = np_args[ 4 : 4 + n_in ]
-    #             np_grad_out = np_args[ 4 + n_in : ] # grad_distances, grad_barycenters, grad_potentials, grad_cuts
-
-    #             flat_grad_inputs = [ np.zeros( t.shape, dtype = np_dtype ) for t in input_tensors ]
-
-    #             binding_inputs = unflatten_args( f, g, np_inputs )
-    #             binding_grad_inputs = unflatten_args( f, g, flat_grad_inputs )
-
-    #             # bindings.backward expects: inputs..., distances, barycenters, potentials, cuts, grad_outputs..., grad_inputs...
-    #             bindings.backward( *binding_inputs, np_dist, np_bary, np_pot, np_cuts, *np_grad_out, *binding_grad_inputs )
-
-    #             return tuple( flat_grad_inputs )
-
-    #         return jax.pure_callback(
-    #             bwd_cb, bwd_shapes,
-    #             distances, barycenters, potentials, cuts, *saved_inputs,
-    #             grad_distances, grad_barycenters, grad_potentials, grad_cuts
-    #         )
-
-    #     sdot_op.defvjp( sdot_op_fwd, sdot_op_bwd )
-
-    #     return BatchOfOtPlans( *sdot_op( *input_tensors ) )

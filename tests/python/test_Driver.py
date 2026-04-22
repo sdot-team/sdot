@@ -48,4 +48,4 @@ if __name__ == "__main__":
     # test_alac_grad()
 
     x = sdot.driver.t0( 3.0 )
-    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", sdot.Return( sdot.Tensor, [] ), x ) )
+    ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", ret = sdot.Return( sdot.Tensor, [] ), inp = x ) )
