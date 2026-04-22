@@ -377,7 +377,7 @@ class JaxDriver:
 
         # method
         if callable( getattr( obj, "as_jax_ffi_compatible_args", None ) ):
-            return obj.as_jax_ffi_compatible_args( self, str )
+            return obj.as_jax_ffi_compatible_args( self, name )
 
         #
         if isinstance( obj, ad_util.SymbolicZero ):
@@ -613,7 +613,7 @@ class JaxDriver:
 
         # --- backward handler ---
         if make_backward_binding:
-            lines += self._handler_source( func_name + "_backward", self._make_backwarg_args_instance( args ) )
+            lines += self._handler_source( func_name + "_backward", args, True )
             lines.append( "" )
 
         lines.append( "" )
@@ -664,15 +664,34 @@ class JaxDriver:
 
         return res
 
-    def _handler_source( self, func_name: str, rargs: dict ) -> list[ str ]:
+    def _handler_source( self, func_name: str, rargs: dict, add_backward_args = False ) -> list[ str ]:
         #
         lines = []
+
+        #
+        # backward_inputs = []
+        # backward_outputs = []
+        # if add_backward_args:
+        #     for rarg_name, rarg_data, has_input, has_output in JaxDriver._with_hio( rargs ):
+        #         if has_input:
+        #             for farg in self.as_jax_ffi_compatible_args( rarg_data, "inp_" + rarg_name ):
+        #                 input_arg_decls.append( f"{ farg.cpp_type } { farg.name }" )
+        #         if has_output:
+        #             for farg in self.as_jax_ffi_compatible_rets( rarg_data, "out_" + rarg_name ):
+        #                 output_arg_decls.append( f"{ farg.cpp_type } { farg.name }" )
+
 
         # make a structure with the names
         lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( rargs ) ) ] ) }>" )
         lines.append( f"struct Parameters_{ func_name } {{" )
         for n, ( rarg_name, rarg_data, has_input, has_output ) in enumerate( JaxDriver._with_hio( rargs ) ):
             lines.append( f"    T{ n } { rarg_name };" )
+        if add_backward_args:
+            # add grad of outputs
+            for n, ( rarg_name, rarg_data, has_input, has_output ) in enumerate( JaxDriver._with_hio( rargs ) ):
+                if has_output:
+                    lines.append( f"    T{ n } { rarg_name };" )
+            #
         lines.append( "};" )
 
         # Split between inputs and outputs

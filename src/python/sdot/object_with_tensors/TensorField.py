@@ -1,4 +1,4 @@
-from .UndefinedTensor import UndefinedTensor
+from ..UndefinedTensor import UndefinedTensor
 from ..driver import driver
 
 from typing import Self, overload

@@ -24,9 +24,16 @@ def test_driver():
 
 def test_alac_grad():
     from jax._src import test_util as jtu
+    import numpy
 
     def f( x ):
-        res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", o0 = sdot.Return( sdot.Tensor, [] ), i0 = x, o1 = sdot.Return( sdot.Tensor, [] ), i1 = x )
+        y = numpy.array( 34 )
+        res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
+            o0 = sdot.Return( sdot.Tensor, [] ),
+            i0 = x,
+            o1 = sdot.Return( sdot.Tensor, [] ),
+            i1 = sdot.UndefinedTensor( [] )
+        )
         return res[ 0 ]
 
     x = sdot.driver.t0( 3.0 )

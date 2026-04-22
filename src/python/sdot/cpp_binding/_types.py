@@ -2,7 +2,7 @@
 from ..driver import driver
 from sdot.drivers.compilation.Output import Output
 from sdot.drivers.compilation.Return import Return
-from ..object_with_tensors.UndefinedTensor import UndefinedTensor
+from sdot.UndefinedTensor import UndefinedTensor
 
 
 def cpp_class_name( obj ) -> str:
