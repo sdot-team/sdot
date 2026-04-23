@@ -17,7 +17,7 @@ class Bsp:
 
     sorted_vertex_indices = TensorField( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
     cell_children = TensorField( "max_nb_cells", "2", dtype = int ) # cell index -> children
-    cell_bounds = TensorField( "max_nb_cells", "3 * dim + 1" ) # cell index -> min pt, max pt, poly bound
+    cell_bounds = TensorField( "max_nb_cells", "cb_size" ) # cell index -> min pt, max pt, poly bound
     nb_cells = TensorField( dtype = int )
 
     def __init__( self, positions, weights = None, max_points_per_cell = 30 ):
@@ -28,12 +28,14 @@ class Bsp:
             driver.call( "make_bsp", "sdot/geometry/Bsp.h",
                 sorted_vertex_indices = Return( Tensor, [ nb_vertices ], int ),
                 cell_children = Return( Tensor, [ max_nb_cells, 2 ], int ),
-                cell_bounds = Return( Tensor, [ max_nb_cells, 2 ] ),
-                nb_cells = Return( Tensor, [ max_nb_cells, 3 * dim + 1 ], int ),
+                cell_bounds = Return( Tensor, [ max_nb_cells, 3 * dim + 1 ] ),
+                nb_cells = Return( Tensor, [], int ),
+
                 max_points_per_cell = max_points_per_cell,
                 positions = positions,
                 weights = weights,
-                ct_dim = CtInt( dim )
+                ct_dim = CtInt( dim ),
+                _no_grad = True
             )
 
         max_nb_cells = positions.shape[ 0 ]

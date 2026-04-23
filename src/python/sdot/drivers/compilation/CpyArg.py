@@ -8,7 +8,7 @@ class CpyArg:
         self.sub_list = sub_list
         self.for_return = 0 # 0 => pure input, 1 => mutable, 2 => return
         self.signature_type = ""
-        self._python_ctor: callable | tuple[ int, int, bool ] = () # for output value. ( 1 if differentiable, num in list, validity )
+        self._python_ctor: callable | tuple[ int, int, bool ] | None = None # for output value. ( 1 if differentiable, num in list, validity )
 
     def arg( self, name: str ):
         cpy_arg = CpyArg( name )
@@ -24,13 +24,13 @@ class CpyArg:
     def reassemble( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs ):
         # tensor ?
         if isinstance( self._python_ctor, tuple ):
-            if len( self._python_ctor ) != 3:
-                info( self._python_ctor, self.name )
-                raise "trpoute"
+            assert len( self._python_ctor ) == 3
+
             # not valid ?
             if not self._python_ctor[ 2 ]:
                 return None
 
+            # else, get tensor
             if self.for_return:
                 if self._python_ctor[ 0 ]:
                     return differentiable_outputs[ self._python_ctor[ 1 ] ]
@@ -38,6 +38,10 @@ class CpyArg:
             if self._python_ctor[ 0 ]:
                 return differentiable_inputs[ self._python_ctor[ 1 ] ]
             return non_differentiable_inputs[ self._python_ctor[ 1 ] ]
+
+        #
+        if self._python_ctor is None:
+            raise RuntimeError( f"No python ctor for { self.name }" )
 
         # ctor
         if self.sub_list is None:

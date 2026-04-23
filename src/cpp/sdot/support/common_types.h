@@ -22,7 +22,7 @@ using SI = long long;
 using PI = std::size_t;
 
 template<class T> struct CtType {};
-template<int i> struct CtInt {};
+template<int i> struct CtInt { static constexpr int value = i; };
 
 inline static const char *type_name( CtType<FP64> ) { return "FP64"; }
 inline static const char *type_name( CtType<FP32> ) { return "FP32"; }

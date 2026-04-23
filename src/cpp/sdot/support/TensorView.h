@@ -13,9 +13,11 @@ template<class T,int ct_size,class Arch> class DsVec;
 template<class T,int ct_rank,class Arch>
 class TensorView {
 public:
+    using          value_type        = T;
     using          Strides           = DsVec<SI,ct_rank,Arch>; ///< byte strides
     using          Sizes             = DsVec<PI,ct_rank,Arch>;
     using          Ptr               = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
+
 
     static HD auto make_invalid      ( PI rank = ct_rank ); ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 

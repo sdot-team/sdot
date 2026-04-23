@@ -4,6 +4,7 @@ def test_bsp():
     positions = sdot.driver.t2( [ [ 1 ], [ 2 ] ] )
     weights = sdot.driver.t1( [ 3, 4 ] )
     bsp = sdot.Bsp( positions, weights )
+    info( bsp.sorted_vertex_indices )
     info( bsp )
 
 if __name__ == "__main__":

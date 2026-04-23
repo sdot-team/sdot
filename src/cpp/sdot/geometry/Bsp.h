@@ -3,38 +3,67 @@
 // #include "../support/SimpleSquareMatrix.h"
 #include "../support/TensorView.h"
 #include "../support/P.h"
+#include <numeric>
 // #include "Cell.h"
 
 namespace sdot {
 
 template<int ct_dim,class TF>
-std::pair<DsVec<TF,ct_dim>,DsVec<TF,ct_dim>> min_max( CtInt<ct_dim>, TensorView<TF,2,Cpu> pts, const auto &indices ) {
-    const PI dim = pts.size( 1 );
+std::pair<DsVec<TF,ct_dim>,DsVec<TF,ct_dim>> min_max( CtInt<ct_dim>, TensorView<TF,2,Cpu> positions, const auto &indices ) {
+    using namespace std;
+    const PI dim = positions.size( 1 );
     const PI ind = indices( 0 );
-    DsVec<TF,ct_dim> mi( pts.row( ind ) );
+    DsVec<TF,ct_dim> mi( positions.row( ind ) );
     DsVec<TF,ct_dim> ma = mi;
-    for( PI i = 1; i < pts.size( 0 ); ++i ) {
+    for( PI i = 1; i < positions.size( 0 ); ++i ) {
         const PI ind = indices( i );
         for( PI d = 0; d < dim; ++d ) {
-            const TF v = pts( ind, d );
-            mi( ind, d ) = min( mi( ind, d ), v );
-            ma( ind, d ) = max( ma( ind, d ), v );
+            const TF v = positions( ind, d );
+            mi[ d ] = min( mi[ d ], v );
+            ma[ d ] = max( ma[ d ], v );
         }
     }
-    return mi, ma;
+    return { mi, ma };
 }
 
-void make_bsp( auto &&p ) {
-    // sorted_vertex_indices = Return( Tensor, [ nb_vertices ], int ),
-    // cell_children = Return( Tensor, [ max_nb_cells, 2 ], int ),
-    // cell_bounds = Return( Tensor, [ max_nb_cells, 2 ] ),
-    // nb_cells = Return( Tensor, [ max_nb_cells, 3 * dim + 1 ], int ),
-    // max_points_per_cell = max_points_per_cell,
-    // positions = positions,
-    // weights = weights,
-
+template<int ct_dim,class TF>
+void split_rec( CtInt<ct_dim> c, TensorView<TF,2,Cpu> positions, const auto &indices ) {
     //
-    P( min_max( p.ct_dim ) );
+    auto [ mi, ma ] = min_max( c, positions, indices );
+    P( mi, ma );
+}
+
+template<class TF,int ct_dim,class Arch>
+struct BspMaker {
+    TensorView<SI,1,Arch> sorted_vertex_indices;
+    TensorView<SI,0,Arch> max_points_per_cell;
+    TensorView<SI,2,Arch> cell_children;
+    TensorView<TF,2,Arch> cell_bounds;
+    TensorView<TF,2,Arch> positions;
+    TensorView<SI,0,Arch> nb_cells;
+    TensorView<TF,1,Arch> weights;
+
+    void exec() {
+        std::iota( sorted_vertex_indices.begin(), sorted_vertex_indices.end(), PI( 0 ) );
+        // split_rec( ct_dim, sorted_vertex_indices, cell_children, cell_bounds, nb_cells, positions, weights );
+        P( __LINE__ );
+    }
+};
+
+void make_bsp( auto &&p ) {
+    constexpr int ct_dim = DECAYED_TYPE_OF( p.ct_dim )::value;
+    using TF = DECAYED_TYPE_OF( p.positions( 0, 0 ) );
+    BspMaker<TF,ct_dim,Cpu> bm{
+        p.sorted_vertex_indices,
+        p.max_points_per_cell,
+        p.cell_children,
+        p.cell_bounds,
+        p.positions,
+        p.nb_cells,
+        p.weights,
+    };
+
+    bm.exec();
 }
 
 

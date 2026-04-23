@@ -184,7 +184,7 @@ class JaxDriver:
     def normalized_framework( self ):
         return "jax"
 
-    def call( self, func_name: str, includes: str | list[ str ], **args ):
+    def call( self, func_name: str, includes: str | list[ str ], _no_grad = False, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -201,9 +201,9 @@ class JaxDriver:
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, jal )
-        self._register_ffi_target( module_name, func_name, includes, jal )
+        self._register_ffi_target( module_name, func_name, includes, jal, make_backward_binding = not _no_grad )
 
-        #
+        # a place to store outputs not handled by jax
         non_differentiable_outputs = []
 
         def _call_ffi( differentiable_jax_ffi_input_values ):
@@ -219,39 +219,42 @@ class JaxDriver:
                 non_differentiable_outputs.append( r )
             return tuple( ret[ :len( dout ) ] )
 
-        @jax.custom_vjp
-        def ffi_op( differentiable_jax_ffi_input_values ):
-            return _call_ffi( differentiable_jax_ffi_input_values )
+        if _no_grad:
+            differentiable_outputs = _call_ffi( tuple( jal.differentiable_jax_ffi_input_values ) )
+        else:
+            @jax.custom_vjp
+            def ffi_op( differentiable_jax_ffi_input_values ):
+                return _call_ffi( differentiable_jax_ffi_input_values )
 
-        def ffi_op_fwd( _differentiable_jax_ffi_input_values ):
-            # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
-            differentiable_jax_ffi_input_values = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
-            flat_outputs = _call_ffi( differentiable_jax_ffi_input_values )
-            return flat_outputs, ( list( differentiable_jax_ffi_input_values ), list( flat_outputs ) )
+            def ffi_op_fwd( _differentiable_jax_ffi_input_values ):
+                # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
+                differentiable_jax_ffi_input_values = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
+                flat_outputs = _call_ffi( differentiable_jax_ffi_input_values )
+                return flat_outputs, ( list( differentiable_jax_ffi_input_values ), list( flat_outputs ) )
 
-        def ffi_op_bwd( residuals, grads_of_the_outputs ):
-            non_differentiable_inputs = jal.non_differentiable_jax_ffi_input_values
-            differentiable_inputs, differentiable_outputs = residuals
-            if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
-                grads_of_the_outputs = ( grads_of_the_outputs, )
+            def ffi_op_bwd( residuals, grads_of_the_outputs ):
+                non_differentiable_inputs = jal.non_differentiable_jax_ffi_input_values
+                differentiable_inputs, differentiable_outputs = residuals
+                if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
+                    grads_of_the_outputs = ( grads_of_the_outputs, )
 
-            bjal = jal.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
+                bjal = jal.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
 
-            ndout = bjal.non_differentiable_jax_ffi_output_specs
-            ndinp = bjal.non_differentiable_jax_ffi_input_values
-            dout = bjal.differentiable_jax_ffi_output_specs
-            dinp = bjal.differentiable_jax_ffi_input_values
+                ndout = bjal.non_differentiable_jax_ffi_output_specs
+                ndinp = bjal.non_differentiable_jax_ffi_input_values
+                dout = bjal.differentiable_jax_ffi_output_specs
+                dinp = bjal.differentiable_jax_ffi_input_values
 
-            func = jax.ffi.ffi_call( module_name + "_backward", dout + ndout )
-            res = func( *dinp, *ndinp )
+                func = jax.ffi.ffi_call( module_name + "_backward", dout + ndout )
+                res = func( *dinp, *ndinp )
 
-            return ( tuple( res[ : len( dout ) ] ), )
+                return ( tuple( res[ : len( dout ) ] ), )
 
 
-        ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
+            ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
 
-        # --- appel ---
-        differentiable_outputs = ffi_op( tuple( jal.differentiable_jax_ffi_input_values ) )
+            # --- appel ---
+            differentiable_outputs = ffi_op( tuple( jal.differentiable_jax_ffi_input_values ) )
 
         # ret assembly
         res = []
