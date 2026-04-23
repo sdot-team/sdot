@@ -89,8 +89,12 @@ UTP void make_aligned_simplex( DTP &cell, SI cut_id ) {
         cell.cut_ids( num_cut ) = cut_id;
 }
 
-UTP void make_empty_cell( DTP &cell ) {
-    make_aligned_simplex( cell, DTP::INFINITE );
+void make_empty_cell( auto &&p ) {
+    make_aligned_simplex( p.cell, p.cell.INFINITE );
+}
+
+void make_empty_cell_backward( auto && ) {
+    TODO; // make_aligned_simplex( p.cell, p.cell.INFINITE );
 }
 
 UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {

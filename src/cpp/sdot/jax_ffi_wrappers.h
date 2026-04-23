@@ -29,7 +29,7 @@ auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) 
     using TF = SdotTypeFor<dtype>::type;
 
     if ( ! valid )
-        return TensorView<const TF,ndim,Cpu>::make_invalid( ndim );
+        return TensorView<TF,ndim,Cpu>::make_invalid( ndim );
 
     ASSERT_EQ( ndim, buf.dimensions().size() );
     DsVec<PI,ndim,Cpu> sizes( Size(), ndim );
@@ -37,7 +37,7 @@ auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) 
         sizes[ i ] = buf.dimensions()[ i ];
 
     // XLA FFI guarantees C-contiguous (row-major) layout
-    return TensorView<const TF,ndim,Cpu>( buf.typed_data(), sizes );
+    return TensorView<TF,ndim,Cpu>( const_cast<TF *>( buf.typed_data() ), sizes );
 }
 
 

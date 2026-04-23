@@ -101,6 +101,9 @@ class JaxDriver:
         elif dtype is int:
             dtype = self.itype
 
+        if isinstance( tensor, jax.ShapeDtypeStruct ):
+            return jnp.empty( [ s or 0 for s in tensor.shape ], dtype = tensor.dtype )
+
         res = jnp.asarray( tensor, dtype = dtype, device = self.device )
 
         if ndim is not None and res.ndim != ndim:

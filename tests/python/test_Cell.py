@@ -1,5 +1,4 @@
 from sdot.Cell import Cell
-from icecream import ic
 import sdot
 # import faulthandler
 # faulthandler.enable()
@@ -16,7 +15,7 @@ import sdot
 #     ic( c.measure )
 
 def test_cell_2D():
-    import torch
+    # import torch
     c = Cell.aligned_hypercube( 2 )
 
     c.cut( [ 1, 0 ], 0.3 )
@@ -30,22 +29,25 @@ def test_cell_2D():
     c.plot()
 
 def test_cell_2D_diff():
-    import torch
+    # c = Cell.aligned_hypercube( [ 0, 0 ], [ 1, 1 ] )
+    c = Cell( 2 )
+    info( c.nb_vertices )
+    # import torch
 
-    def loss( scale ):
-        min_pos = sdot.driver.zeros( [ 2 ] )
-        max_pos = scale * sdot.driver.ones( [ 2 ] )
-        c = Cell.aligned_hypercube( min_pos, max_pos )
-        return ( c.measure - 2 )**2
+    # def loss( scale ):
+    #     min_pos = sdot.driver.zeros( [ 2 ] )
+    #     max_pos = scale * sdot.driver.ones( [ 2 ] )
+    #     c = Cell.aligned_hypercube( min_pos, max_pos )
+    #     return ( c.measure - 2 )**2
 
 
-    scale = sdot.driver.t0( 1 )
-    # scale.requires_grad = True
-    # torch.autograd.gradcheck( loss, scale )
+    # scale = sdot.driver.t0( 1 )
+    # # scale.requires_grad = True
+    # # torch.autograd.gradcheck( loss, scale )
 
-    sdot.driver.optimize_using_lbfgs( loss, scale )
+    # sdot.driver.optimize_using_lbfgs( loss, scale )
 
-    ic( scale )
+    # ic( scale )
 
     # c.cut( [ 1, 0 ], 0.3 )
     # ic( c.vertex_positions )
@@ -69,9 +71,9 @@ def test_cell_2D_diff():
 def test_cell_3D():
     c = Cell.aligned_simplex( 3 )
     # c.cut( [ 1, 0, 0 ], 0.5 )
-    ic( c.vertex_indices )
-    ic( c.edge_indices )
-    ic( c.measure )
+    info( c.vertex_indices )
+    info( c.edge_indices )
+    info( c.measure )
 
 if __name__ == "__main__":
     test_cell_2D_diff()

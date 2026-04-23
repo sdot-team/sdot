@@ -2,7 +2,7 @@
 
 class UndefinedTensor:
     def __init__( self, shape, dtype = None ):
-        self.shape = shape
+        self.shape = [ s or 0 for s in shape ]
         self.dtype = dtype
 
     @property
@@ -13,7 +13,14 @@ class UndefinedTensor:
         return f"R{ len( self.shape ) }{ driver.normalized_type_for( self.dtype ) }"
 
     def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name, cpp_arg ):
-        jax_ffi_arg_list._add_tensor_arg( driver, jax_ffi_arg_list._tensor_value( driver, self.shape, self.dtype, cpp_arg.for_return ), name, cpp_arg, valid = False )
+        jax_ffi_arg_list._add_tensor_arg(
+            driver,
+            jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),
+            jax_ffi_arg_list._tensor_spec( driver, [ 0 for _ in self.shape ], self.dtype ),
+            name,
+            cpp_arg,
+            valid = False
+        )
 
     def to_nanobind_compatible_objects( self ):
         if self.dtype == int:

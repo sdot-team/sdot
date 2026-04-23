@@ -140,8 +140,8 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
     fields = _collect_attributes( cls )
 
     # --- __init__ -----------------------------------------------------------
-    if '__init__' not in vars( cls ):
-        def __init__( self, *args, **kwargs ):
+    if '__default_init__' not in vars( cls ):
+        def __default_init__( self, *args, **kwargs ):
             for i, ( name, _ ) in enumerate( fields ):
                 if i < len( args ):
                     kwargs.setdefault( name, args[ i ] )
@@ -150,7 +150,11 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
                 if isinstance( val, ( ListOfTensorFields, TensorField, property ) ):
                     default = None
                 setattr( self, name, kwargs.get( name, default ) )
-        cls.__init__ = __init__
+        cls.__default_init__ = __default_init__
+
+    # --- __init__ -----------------------------------------------------------
+    if '__init__' not in vars( cls ):
+        cls.__init__ = cls.__default_init__
 
     # --- dim -----------
     if 'dim' not in vars( cls ) and cls.__name__.endswith( "1d" ):

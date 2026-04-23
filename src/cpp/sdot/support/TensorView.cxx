@@ -25,7 +25,7 @@ UTP DTP::TensorView( T *data, PI size ) : _sizes( Values(), size ), _strides( Va
 UTP DTP::TensorView( Rank, PI rank ) : _strides( Size(), rank, 0 ), _sizes( Size(), rank, 0 ), _ptr( nullptr ) {
 }
 
-UTP DTP &DTP::get_data_from( const TensorView<const T,ct_rank,Arch> &that ) {
+UTP DTP &DTP::get_data_from( const TensorView<T,ct_rank,Arch> &that ) {
     if ( is_contiguous() ) {
         std::memcpy( data(), that.data(), sizeof( T ) * total_size() );
         return *this;

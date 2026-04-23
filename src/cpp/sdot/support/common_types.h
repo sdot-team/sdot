@@ -18,7 +18,7 @@ using PI64 = std::uint64_t;
 using SI32 = std::int32_t;
 using SI64 = std::int64_t;
 
-using SI = std::ptrdiff_t;
+using SI = long long;
 using PI = std::size_t;
 
 template<class T> struct CtType {};

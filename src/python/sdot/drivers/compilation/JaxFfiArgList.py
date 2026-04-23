@@ -4,7 +4,7 @@ from .Return import Return
 from .Tensor import Tensor
 
 from jax._src import ad_util
-from typing import cast, Self
+from typing import cast
 import jax.numpy
 import jax.core
 import numpy
@@ -119,7 +119,7 @@ class JaxFfiArgList:
         for n, v in enumerate( self.validity_mask_values ):
            if v:
                validity_mask[ n // 64 ] |= ( 1 << ( n % 64 ) )
-        self.non_differentiable_jax_ffi_input_args.append( JaxFfiArg( validity_mask, "validity_mask_buffer", None,
+        self.non_differentiable_jax_ffi_input_args.append( JaxFfiArg( validity_mask, "validity_mask_buffer", None, None,
             "Arg<xla::ffi::Buffer<xla::ffi::U64>>",
             "xla::ffi::Buffer<xla::ffi::U64>"
         ) )
@@ -135,11 +135,11 @@ class JaxFfiArgList:
 
     @property
     def non_differentiable_jax_ffi_output_specs( self ):
-        return [ output.value for output in self.non_differentiable_jax_ffi_output_args ]
+        return [ output.spec for output in self.non_differentiable_jax_ffi_output_args ]
 
     @property
     def differentiable_jax_ffi_output_specs( self ):
-        return [ output.value for output in self.differentiable_jax_ffi_output_args ]
+        return [ output.spec for output in self.differentiable_jax_ffi_output_args ]
 
     @property
     def non_differentiable_jax_ffi_input_values( self ):
@@ -185,21 +185,22 @@ class JaxFfiArgList:
 
         # SymbolicZero
         if isinstance( value, ad_util.SymbolicZero ):
-            array = self._tensor_value( driver, value.shape, value.dtype, cpy_arg.for_return )
-            return self._add_tensor_arg( driver, array, name, cpy_arg, valid = False )
+            array_value = self._tensor_value( driver, value.shape, value.dtype )
+            array_spec = self._tensor_spec( driver, value.shape, value.dtype )
+            return self._add_tensor_arg( driver, array_value, array_spec, name, cpy_arg, valid = False )
 
         # arrays
         if isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct ) ):
-            return self._add_tensor_arg( driver, value, name, cpy_arg )
+            return self._add_tensor_arg( driver, value, jax.ShapeDtypeStruct( value.shape, value.dtype ), name, cpy_arg )
 
         # std objects
         if isinstance( value, float ):
             array = driver.tn( value, ndim = 0, dtype = driver.dtype )
-            return self._add_tensor_arg( driver, array, name, cpy_arg )
+            return self._add_tensor_arg( driver, array, jax.ShapeDtypeStruct( [], driver.dtype ), name, cpy_arg )
 
         if isinstance( value, int ):
             array = driver.tn( value, ndim = 0, dtype = driver.itype )
-            return self._add_tensor_arg( driver, array, name, cpy_arg )
+            return self._add_tensor_arg( driver, array, jax.ShapeDtypeStruct( [], driver.itype ), name, cpy_arg )
 
         if isinstance( value, ( list, tuple ) ):
             cpy_arg._python_ctor = type( value )
@@ -222,10 +223,11 @@ class JaxFfiArgList:
             self.get_jax_ffi_args( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ) )
 
 
-    def _tensor_value( self, driver, shape, dtype, for_return ):
-        if for_return:
-            return jax.ShapeDtypeStruct( shape, dtype or driver.dtype )
-        return driver.empty( [ 0 ] * len( cast( tuple, shape ) ), dtype = dtype )
+    def _tensor_spec( self, driver, shape, dtype ):
+        return jax.ShapeDtypeStruct( shape, dtype or driver.dtype )
+
+    def _tensor_value( self, driver, shape, dtype ):
+        return driver.empty( shape, dtype = dtype )
 
     @staticmethod
     def cpp_class_name( driver, value ):
@@ -261,7 +263,7 @@ class JaxFfiArgList:
         raise NotImplementedError( f"for dtype { dtype }" )
 
 
-    def _add_tensor_arg( self, driver, value: any, name: str, cpy_arg: CpyArg, valid: bool = True ):
+    def _add_tensor_arg( self, driver, value: any, spec: any, name: str, cpy_arg: CpyArg, valid: bool = True ):
         # differentiable
         differentiable = self._differentiable_dtype( value.dtype )
 
@@ -287,6 +289,7 @@ class JaxFfiArgList:
                 bind = f"Arg<xla::ffi::Buffer<{ jax_dtype }>>",
                 value = value,
                 valid = valid,
+                spec = spec,
                 name = name,
             ) )
 
@@ -297,6 +300,7 @@ class JaxFfiArgList:
                 bind = f"Ret<xla::ffi::Buffer<{ jax_dtype }>>",
                 value = value,
                 valid = valid,
+                spec = spec,
                 name = name + "_out" if cpy_arg.for_return == 1 else name,
             ) )
 

@@ -27,12 +27,11 @@ def test_alac_grad():
     import numpy
 
     def f( x ):
-        y = numpy.array( 34 )
         res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
             o0 = sdot.Return( sdot.Tensor, [] ),
             i0 = x,
             o1 = sdot.Return( sdot.Tensor, [] ),
-            i1 = sdot.UndefinedTensor( [] )
+            i1 = numpy.array( 34. ) # sdot.UndefinedTensor( [] )
         )
         return res[ 0 ]
 

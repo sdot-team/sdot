@@ -1,8 +1,6 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
+from .driver import driver, Return, Mutable
 from typing import TYPE_CHECKING
-from .driver import driver
-# from .cpp_binding import cpp_binding, Output, Return
-# from .CtInt import CtInt
 import numpy
 
 # constant
@@ -28,34 +26,40 @@ class Cell:
     nb_cuts = TensorField( dtype = int )
 
     if TYPE_CHECKING:
+        def __default_init__( self, *args, **kwargs ): ...
         vertex_capacity: int
         edge_capacity: int
         cut_capacity: int
         dim: int
 
 
-    def __init__( self, dim, ctor = None ):
-        vertex_capacity = 32
-        edge_capacity = 32
-        cut_capacity = 32
+    def __init__( self, *args, **kwargs ):
+        # only dim
+        if len( args ) == 1 and len( kwargs ) == 0:
+            vertex_capacity = 32
+            edge_capacity = 32
+            cut_capacity = 32
+            dim = args[ 0 ]
 
-        self.large_vertex_positions = driver.empty( [ vertex_capacity, dim ] )
-        self.large_cut_planes = driver.empty( [ cut_capacity, dim + 1 ] )
-        self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.itype )
+            self.large_vertex_positions = driver.empty( [ vertex_capacity, dim ] )
+            self.large_cut_planes = driver.empty( [ cut_capacity, dim + 1 ] )
+            self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.itype )
 
-        self.is_fully_closed = 0
-        self.nb_vertices = 0
-        self.nb_edges = 0
-        self.nb_cuts = 0
+            self.is_fully_closed = 0
+            self.nb_vertices = 0
+            self.nb_edges = 0
+            self.nb_cuts = 0
 
-        if dim != 2:
-            self.large_vertex_indices = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
-            self.large_edge_indices = driver.empty( [ edge_capacity, dim + 1 ], dtype = driver.int_type )
+            if dim != 2:
+                self.large_vertex_indices = driver.empty( [ vertex_capacity, dim ], dtype = driver.int_type )
+                self.large_edge_indices = driver.empty( [ edge_capacity, dim + 1 ], dtype = driver.int_type )
 
-        if ctor is None:
-            cpp_binding( "make_empty_cell", "sdot/cell/Cell.h" )( Output( self ) )
-        else:
-            ctor( self )
+            driver.call( "make_empty_cell", "sdot/cell/Cell.h", cell = Mutable( self ) )
+            return
+
+        # assuming tensors
+        self.__default_init__( *args, **kwargs )
+
 
     @staticmethod
     def aligned_hypercube( min_coords_or_dim = None, max_coords = None, dim = None, bnd = BOUNDARY ):
