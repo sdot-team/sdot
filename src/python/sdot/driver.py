@@ -1,5 +1,7 @@
 from .drivers.compilation.Mutable import Mutable as Mutable
 from .drivers.compilation.Return import Return as Return
+from .drivers.compilation.Tensor import Tensor as Tensor
+from .CtInt import CtInt as CtInt
 from typing import TYPE_CHECKING, Any
 import numpy
 import sys

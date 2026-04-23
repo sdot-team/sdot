@@ -28,7 +28,7 @@ from .CtInt import CtInt as CtInt
 
 # from .Polynomial import Polynomial as Polynomial
 from .Cell import Cell as Cell
-# from .Bsp import Bsp as Bsp
+from .Bsp import Bsp as Bsp
 
 # from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters, make_apply_fn as make_apply_fn
 

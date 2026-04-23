@@ -17,7 +17,9 @@ class Tensor:
 
     @staticmethod
     def get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = None ):
-        jax_ffi_arg_list._add_tensor_arg( driver, jax_ffi_arg_list._tensor_value( driver, shape, dtype, cpy_arg.for_return ), name, cpy_arg, valid = True )
+        value = jax_ffi_arg_list._tensor_value( driver, shape, dtype )
+        spec = jax_ffi_arg_list._tensor_spec( driver, shape, dtype )
+        jax_ffi_arg_list._add_tensor_arg( driver, value, spec, name, cpy_arg, valid = True )
 
     # @staticmethod
     # def as_jax_ffi_compatible_rets( driver, name, shape, dtype = None ) -> list[ JaxFfiCompatibleItem ]:

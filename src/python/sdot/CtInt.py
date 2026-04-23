@@ -9,7 +9,8 @@ class CtInt:
     def cpp_class_name( self ):
         return f"CtInt<{ self.value }>"
 
-    def to_nanobind_compatible_objects( self ):
-        return []
+    def get_jax_ffi_args( self, *args, **kwargs ):
+        pass
 
-    # .Attr<float>("eps")
+    # def to_nanobind_compatible_objects( self ):
+    #     return []
