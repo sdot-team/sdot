@@ -56,10 +56,9 @@ class CpyArg:
         if self.sub_list is None:
             return
 
-        info( obj )
         for s in self.sub_list:
+            # get sub obj + how to update it
             s = cast( CpyArg, s )
-            info( s.name )
             if s.name.isdigit():
                 k = int( s.name )
                 nobj = obj[ k ]
@@ -70,7 +69,8 @@ class CpyArg:
                 def ncb( x ):
                     setattr( obj, s.name, x )
 
-            self.update( nobj, ncb, differentiable_output_values, non_differentiable_output_values )
+            # recursive call
+            s.update( nobj, ncb, differentiable_output_values, non_differentiable_output_values )
 
 
     def assembled_code( self ) -> str:
@@ -157,7 +157,7 @@ class JaxFfiArgList:
 
         # SymbolicZero
         if isinstance( value, ad_util.SymbolicZero ):
-            array = self._tensor_value( driver, value.shape, value.dtype )
+            array = self._tensor_value( driver, value.shape, value.dtype, cpy_arg.for_return )
             return self._add_tensor_arg( driver, array, name, cpy_arg, valid = False )
 
         # arrays
@@ -234,13 +234,8 @@ class JaxFfiArgList:
 
 
     def _add_tensor_arg( self, driver, value: any, name: str, cpy_arg: CpyArg, valid: bool = True ):
-        # _python_ctor
+        # differentiable
         differentiable = self._differentiable_dtype( value.dtype )
-        if cpy_arg.for_return == 2:
-            if differentiable:
-                cpy_arg._python_ctor = ( 1, len( self.differentiable_jax_ffi_output_args ) )
-            else:
-                cpy_arg._python_ctor = ( 0, len( self.non_differentiable_jax_ffi_output_args ) )
 
         # signature_type
         cpy_arg.signature_type = f"T{ len( value.shape ) }{ driver.normalized_type_for( value.dtype ) }"
@@ -272,7 +267,7 @@ class JaxFfiArgList:
 
         # output
         if cpy_arg.for_return >= 1:
-            self._add_jax_ffi_arg_output( differentiable = differentiable, jax_ffi_arg = JaxFfiArg(
+            self._add_jax_ffi_arg_output( cpy_arg, differentiable = differentiable, jax_ffi_arg = JaxFfiArg(
                 cpp_type = f"xla::ffi::ResultBuffer<{ jax_dtype }>",
                 bind = f"Ret<xla::ffi::Buffer<{ jax_dtype }>>",
                 value = value,
@@ -281,10 +276,12 @@ class JaxFfiArgList:
             ) )
 
 
-    def _add_jax_ffi_arg_output( self, differentiable, jax_ffi_arg ):
+    def _add_jax_ffi_arg_output( self, cpy_arg, differentiable, jax_ffi_arg ):
         if differentiable:
+            cpy_arg._python_ctor = ( 1, len( self.differentiable_jax_ffi_output_args ) )
             self.differentiable_jax_ffi_output_args.append( jax_ffi_arg )
         else:
+            cpy_arg._python_ctor = ( 0, len( self.non_differentiable_jax_ffi_output_args ) )
             self.non_differentiable_jax_ffi_output_args.append( jax_ffi_arg )
 
     def _add_jax_ffi_arg_input( self, differentiable, jax_ffi_arg ):
