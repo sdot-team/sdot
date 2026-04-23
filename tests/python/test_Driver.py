@@ -39,6 +39,27 @@ def test_alac_grad():
     x = sdot.driver.t0( 3.0 )
     jtu.check_grads( f, ( x, ), order=1, modes=[ "rev" ] )
 
+def test_codegen():
+    from jax._src import test_util as jtu
+    import numpy
+
+    # class Pouet:
+    #     t = sdot.driver.t1( [ 3, 4 ] )
+    #     def __init__(self):
+    #         self.t = sdot.driver.t1( [ 1, 2 ] )
+        # pouet = Pouet(),
+        # cell = sdot.Cell( 2, lambda x: 0 ),
+        # o1 = sdot.Return( sdot.Tensor, [], int ),
+
+    x = numpy.array( 34 )
+    res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
+        o0 = sdot.Return( sdot.Tensor, [] ),
+        i0 = x,
+        o1 = sdot.Return( sdot.Tensor, [] ),
+        i1 = sdot.UndefinedTensor( [] )
+    )
+    info( res )
+
 
 # import jax
 
@@ -53,7 +74,8 @@ def test_alac_grad():
 # ic( x )
 # ic( r )
 if __name__ == "__main__":
-    test_alac_grad()
+    # test_alac_grad()
+    test_codegen()
 
     # x = sdot.driver.t0( 3.0 )
     # ic( sdot.driver.call( "test_alac", "sdot/cell/test_alac.h", ret = sdot.Return( sdot.Tensor, [] ), inp = x ) )

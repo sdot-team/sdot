@@ -12,14 +12,19 @@ def custom_printer_impl( obj, nl ):
             res += nnl + custom_printer_impl( v, nnl )
         return res
 
+    if type( obj ).__str__ is not object.__str__:
+        return obj.__str__()
+
     if hasattr( obj, "__dict__" ):
         res = type( obj ).__name__
         nnl = nl + "  "
         for n, v in obj.__dict__.items():
+            if n.startswith( "_" ):
+                continue
             res += nnl + n + ": " + custom_printer_impl( v, nnl )
         return str(res)
 
-    return repr( obj )
+    return str( obj )
 
 def custom_printer( *arg, **kwargs ):
     f = debug._process( arg, kwargs, frame_depth = 2 )

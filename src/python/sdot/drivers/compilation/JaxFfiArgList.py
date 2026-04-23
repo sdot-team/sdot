@@ -11,90 +11,154 @@ import jax.core
 import numpy
 import jax
 
+class CpyArg:
+    def __init__( self, name: str, value: str = "", sub_list: list | None = None ):
+        self.name = name
+        self.value = value
+        self.sub_list = sub_list
+        self.signature_type = ""
+        self._python_ctor: callable = lambda x: x
+
+    def arg( self, name: str ):
+        sub_cpp_arg = CpyArg( name )
+
+        if self.sub_list is None:
+            self.sub_list = []
+        self.sub_list.append( sub_cpp_arg )
+
+        return sub_cpp_arg
+
+    def assemble( self ) -> str:
+        res = self.value
+        if self.sub_list is not None:
+            res += "( " + str.join( ", ", [ a.assemble() for a in self.sub_list ] ) + " )"
+        return res
+
 
 class JaxFfiArgList:
     """ lists of arguments
     - flat lists of JaxFfi compatible items (tensors, returned tensors)
-        - jax_ffi_non_differentiable_outputs
-        - jax_ffi_non_differentiable_inputs
-        - jax_ffi_differentiable_outputs
-        - jax_ffi_differentiable_inputs
+        - non_differentiable_jax_ffi_output_args
+        - non_differentiable_jax_ffi_input_args
+        - differentiable_jax_ffi_output_args
+        - differentiable_jax_ffi_input_args
     - list of Python and Cpp side arguments
+
+    cpy_args -> list
     """
 
-
     def __init__( self, driver, python_args: dict ):
-        self.jax_ffi_non_differentiable_outputs = []
-        self.jax_ffi_non_differentiable_inputs = []
-        self.jax_ffi_differentiable_outputs = []
-        self.jax_ffi_differentiable_inputs = []
-        self.validity_mask = []
-        self.cpp_args = [] # recursive list
+        # rec find sub args
+        self.non_differentiable_jax_ffi_output_args: list[ JaxFfiArg ] = []
+        self.non_differentiable_jax_ffi_input_args: list[ JaxFfiArg ] = []
+        self.differentiable_jax_ffi_output_args: list[ JaxFfiArg ] = []
+        self.differentiable_jax_ffi_input_args: list[ JaxFfiArg ] = []
+        self.validity_mask_values = []
+        self.cpy_args: list[ CpyArg ] = [] # recursive list
         for python_arg_name, python_arg_value in python_args.items():
-            self.get_jax_ffi_args( driver, python_arg_name, python_arg_value, self.cpp_args, False )
+            cpy_arg = CpyArg( python_arg_name )
+            self.cpy_args.append( cpy_arg )
+            self.get_jax_ffi_args( driver, python_arg_name, python_arg_value, cpy_arg, False )
 
-        info( self.jax_ffi_non_differentiable_outputs,
-            self.jax_ffi_non_differentiable_inputs,
-            self.jax_ffi_differentiable_outputs,
-            self.jax_ffi_differentiable_inputs,
-            self.validity_mask,
-            self.cpp_args )
-        import sys
-        sys.exit( 0 )
+        # make validity_input_arg
+        validity_mask = numpy.zeros( [ ( len( self.validity_mask_values ) + 63 ) // 64 ], dtype = numpy.uint64 )
+        for n, v in enumerate( self.validity_mask_values ):
+           if v:
+               validity_mask[ n // 64 ] |= ( 1 << ( n % 64 ) )
+        self.non_differentiable_jax_ffi_input_args.append( JaxFfiArg( validity_mask, "validity_mask_buffer", None,
+            "Arg<xla::ffi::Buffer<xla::ffi::U64>>",
+            "xla::ffi::Buffer<xla::ffi::U64>"
+        ) )
 
-    def get_jax_ffi_args( self, driver, name: str, value: any, cpp_args: list, for_return: bool ):
+        # info
+        # info( self.non_differentiable_jax_ffi_output_args,
+        #     self.non_differentiable_jax_ffi_input_args,
+        #     self.differentiable_jax_ffi_output_args,
+        #     self.differentiable_jax_ffi_input_args,
+        #     self.validity_mask_values,
+        #     self.cpy_args )
+
+
+    @property
+    def non_differentiable_jax_ffi_output_specs( self ):
+        return [ output.value for output in self.non_differentiable_jax_ffi_output_args ]
+
+    @property
+    def differentiable_jax_ffi_output_specs( self ):
+        return [ output.value for output in self.differentiable_jax_ffi_output_args ]
+
+    @property
+    def non_differentiable_jax_ffi_input_values( self ):
+        return [ input.value for input in self.non_differentiable_jax_ffi_input_args ]
+
+    @property
+    def differentiable_jax_ffi_input_values( self ):
+        return [ input.value for input in self.differentiable_jax_ffi_input_args ]
+
+    @property
+    def jax_ffi_output_args( self ) -> list[ JaxFfiArg ]:
+        return self.differentiable_jax_ffi_output_args + self.non_differentiable_jax_ffi_output_args
+
+    @property
+    def jax_ffi_input_args( self ) -> list[ JaxFfiArg ]:
+        return self.differentiable_jax_ffi_input_args + self.non_differentiable_jax_ffi_input_args
+
+    def get_jax_ffi_args( self, driver, name: str, value: any, cpy_arg: CpyArg, for_return: bool ):
         """ recursively fill the jax_ffi_... lists """
 
         # method
         if callable( getattr( value, "get_jax_ffi_args", None ) ):
-            return value.get_jax_ffi_args( self, driver, name, cpp_args, for_return )
+            return value.get_jax_ffi_args( self, driver, name, cpy_arg, for_return )
 
         # SymbolicZero
         if isinstance( value, ad_util.SymbolicZero ):
             array = self._tensor_value( driver, value.shape, value.dtype, for_return )
-            return self._add_tensor_arg( driver, array, name, cpp_args, for_return, valid = False )
+            return self._add_tensor_arg( driver, array, name, cpy_arg, for_return, valid = False )
 
         # arrays
         if isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray ) ):
-            return self._add_tensor_arg( driver, value, name, cpp_args, for_return )
+            return self._add_tensor_arg( driver, value, name, cpy_arg, for_return )
 
         # std objects
         if isinstance( value, float ):
             array = driver.tn( value, ndim = 0, dtype = driver.dtype )
-            return self._add_tensor_arg( driver, array, name, cpp_args, for_return )
+            return self._add_tensor_arg( driver, array, name, cpy_arg, for_return )
 
         if isinstance( value, int ):
             array = driver.tn( value, ndim = 0, dtype = driver.itype )
-            return self._add_tensor_arg( driver, array, name, cpp_args, for_return )
+            return self._add_tensor_arg( driver, array, name, cpy_arg, for_return )
 
         if isinstance( value, ( list, tuple ) ):
-            sublist = []
-            cpp_args.append( ( "std::tie", sublist ) )
+            cpy_arg._python_ctor = type( value )
+            cpy_arg.signature_type = "L"
+            cpy_arg.value = "std::tie"
             for num, item in enumerate( value ):
-                self.get_jax_ffi_args( driver, f"{ name }_{ num }", item, sublist, for_return )
+                self.get_jax_ffi_args( driver, f"{ name }_{ num }", item, cpy_arg.arg( str( num ) ), for_return )
             return
 
         if value is None:
-            cpp_args.append( "{}" )
+            cpy_arg.signature_type = "N"
+            cpy_arg.value = "{}"
             return
 
         # else, get attributes
-        sublist = []
-        cpp_args.append( ( self.cpp_class_name( driver, value ), sublist ) )
+        cpy_arg.value = self.cpp_class_name( driver, value )
+        cpy_arg.signature_type = cpy_arg.value
+        cpy_arg._python_ctor = type( value )
         for attr, _ in collect_attributes( value ):
-            self.get_jax_ffi_args( driver, f"{ name }_{ attr }", getattr( value, attr ), sublist, for_return )
+            self.get_jax_ffi_args( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ), for_return )
 
 
     def _tensor_value( self, driver, shape, dtype, for_return ):
         if for_return:
-            return jax.ShapeDtypeStruct( shape, dtype )
+            return jax.ShapeDtypeStruct( shape, dtype or driver.dtype )
         return driver.empty( [ 0 ] * len( cast( tuple, shape ) ), dtype = dtype )
 
 
     def cpp_class_name( self, driver, value ):
         if callable( getattr( value, "cpp_class_name", None ) ):
             return value.cpp_class_name( driver )
-        return value.__class_name__
+        return value.__class__.__name__
 
 
     def _differentiable_dtype( self, dtype ):
@@ -124,11 +188,12 @@ class JaxFfiArgList:
         raise NotImplementedError( f"for dtype { dtype }" )
 
 
-    def _add_tensor_arg( self, driver, value: any, name: str, cpp_args: list, for_return: bool, valid: bool = True ):
+    def _add_tensor_arg( self, driver, value: any, name: str, cpy_arg: CpyArg, for_return: bool, valid: bool = True ):
         #
-        p = len( self.validity_mask )
-        self.validity_mask.append( valid )
-        cpp_args.append( f"tensor_view( CtInt<{ len( value.shape ) }>(), { name }, validity_mask[ { p // 64 } ] & { 1 << ( p % 64 ) } )" )
+        p = len( self.validity_mask_values )
+        self.validity_mask_values.append( valid )
+        cpy_arg.value = f"tensor_view( CtInt<{ len( value.shape ) }>(), { name }, validity_mask[ { p // 64 } ] & { 1 << ( p % 64 ) } )"
+        cpy_arg.signature_type = f"T{ len( value.shape ) }{ driver.normalized_type_for( value.dtype ) }"
 
         #
         jax_dtype = self._jax_dtype( driver, value.dtype )
@@ -151,11 +216,11 @@ class JaxFfiArgList:
     def _add_jax_ffi_arg( self, for_return, differentiable, jax_ffi_arg ):
         if for_return:
             if differentiable:
-                self.jax_ffi_differentiable_outputs.append( jax_ffi_arg )
+                self.differentiable_jax_ffi_output_args.append( jax_ffi_arg )
             else:
-                self.jax_ffi_non_differentiable_outputs.append( jax_ffi_arg )
+                self.non_differentiable_jax_ffi_output_args.append( jax_ffi_arg )
         else:
             if differentiable:
-                self.jax_ffi_differentiable_inputs.append( jax_ffi_arg )
+                self.differentiable_jax_ffi_input_args.append( jax_ffi_arg )
             else:
-                self.jax_ffi_non_differentiable_inputs.append( jax_ffi_arg )
+                self.non_differentiable_jax_ffi_input_args.append( jax_ffi_arg )

@@ -41,7 +41,7 @@ class Cell:
 
         self.large_vertex_positions = driver.empty( [ vertex_capacity, dim ] )
         self.large_cut_planes = driver.empty( [ cut_capacity, dim + 1 ] )
-        self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.int_type )
+        self.large_cut_ids = driver.empty( [ cut_capacity ], dtype = driver.itype )
 
         self.is_fully_closed = 0
         self.nb_vertices = 0
@@ -149,7 +149,7 @@ class Cell:
             cut_plane = driver.hstack( [ cut_plane, driver.expand_dims( cut_off, 0 ) ] )
         cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_plane, cut_id )
 
-    def cpp_class_name( self ):
+    def cpp_class_name( self, driver ):
         return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"
 
     @classmethod
