@@ -278,25 +278,17 @@ class JaxDriver:
         # ret assembly
         res = []
         for cpy_arg in jal.cpy_args:
-            if cpy_arg.for_return == 1:
+            if cpy_arg.for_return == 1: # Mutable
+                cpy_arg.update( args[ cpy_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
+            if cpy_arg.for_return == 2: # Return
                 res.append( cpy_arg.reassemble( differentiable_outputs, non_differentiable_outputs ) )
+
+        # item or list
+        if len( res ) == 0:
+            return None
+        if len( res ) == 1:
+            return res[ 0 ]
         return res
-
-        # # --- réassemblage Python ---
-        # results = []
-        # out_iter = iter( flat_outs )
-        # for _, arg_data, has_input, has_output in JaxDriver._with_hio( args ):
-        #     if has_output:
-        #         if has_input:
-        #             self.python_update_from_jax_ffi_compatible_args( arg_data, out_iter )
-        #         else:
-        #             results.append( self.python_assembly_from_jax_ffi_compatible_args( arg_data, out_iter ) )
-
-        # if len( results ) == 0:
-        #     return None
-        # if len( results ) == 1:
-        #     return results[ 0 ]
-        # return results
 
 
     def _module_name_for( self, func_name: str, includes: list[ str ], args: JaxFfiArgList ):
@@ -449,7 +441,7 @@ class JaxDriver:
         # call the function
         lines.append( f"    { func_name }( Parameters_{ func_name }{{" )
         for cpy_arg in args.cpy_args:
-            lines.append( f"        .{ cpy_arg.name } = { cpy_arg.assemble() }," )
+            lines.append( f"        .{ cpy_arg.name } = { cpy_arg.assembled_code() }," )
         lines.append( "    } );" )
 
         # end impl

@@ -16,8 +16,8 @@ class Tensor:
         return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
 
     @staticmethod
-    def get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpp_arg, for_return, shape, dtype = None ):
-        jax_ffi_arg_list._add_tensor_arg( driver, jax_ffi_arg_list._tensor_value( driver, shape, dtype, for_return ), name, cpp_arg, for_return, valid = True )
+    def get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = None ):
+        jax_ffi_arg_list._add_tensor_arg( driver, jax_ffi_arg_list._tensor_value( driver, shape, dtype, cpy_arg.for_return ), name, cpy_arg, valid = True )
 
     # @staticmethod
     # def as_jax_ffi_compatible_rets( driver, name, shape, dtype = None ) -> list[ JaxFfiCompatibleItem ]:

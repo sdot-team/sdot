@@ -29,7 +29,9 @@ class Return:
             return "PI"
         return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
 
-    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg, for_return: int ):
+    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
+        cpy_arg.for_return = 2
+
         if self.return_type is float:
             raise NotImplementedError
         if self.return_type is int:
@@ -37,11 +39,11 @@ class Return:
 
         # method
         if callable( getattr( self.return_type, "get_jax_ffi_args_for", None ) ):
-            return self.return_type.get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, 1, *self.type_args, **self.type_kwargs )
+            return self.return_type.get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, *self.type_args, **self.type_kwargs )
 
         # else, make an instance (slow but may be ok)
         instance = self.return_type( *self.type_args, **self.type_kwargs )
-        jax_ffi_arg_list.get_jax_ffi_args( driver, name, instance, cpy_arg, True )
+        jax_ffi_arg_list.get_jax_ffi_args( driver, name, instance, cpy_arg )
 
     def fake_instance( self, driver ):
         """ make a fake instance to help find how to compile a function with a value that comes from a return """

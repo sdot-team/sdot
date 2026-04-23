@@ -1,4 +1,4 @@
-from .cpp_class_name import cpp_class_name
+from .JaxFfiArgList import JaxFfiArgList
 
 class Mutable:
     """Marks an existing object as read+write in driver.call.
@@ -11,21 +11,9 @@ class Mutable:
     def __init__( self, value ):
         self.value = value
 
-    def cpp_class_name( self ):
-        return cpp_class_name( self.value )
+    def cpp_class_name( self, driver ):
+        return JaxFfiArgList.cpp_class_name( self.value, driver )
 
-    def as_jax_ffi_compatible_args( self, driver, name ):
-        return driver.as_jax_ffi_compatible_args( self.value, name )
-
-    def as_jax_ffi_compatible_rets( self, driver, name ):
-        return driver.as_jax_ffi_compatible_rets( self.value, name )
-
-    def cpp_assembly_from_jax_ffi_compatible_args( self, driver, arg_iter, pos_in_validity_bits: list[ int ] ):
-        return driver.cpp_assembly_from_jax_ffi_compatible_args( self.value, arg_iter )
-
-    def python_assembly_from_jax_ffi_compatible_args( self, driver, arg_iter ):
-        raise RuntimeError( "Mutable are not meant to assemble" )
-
-    def python_update_from_jax_ffi_compatible_args( self, driver, arg_iter ):
-        return driver.python_update_from_jax_ffi_compatible_args( self.value, arg_iter )
-
+    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
+        cpy_arg.for_return = 1
+        return jax_ffi_arg_list.get_jax_ffi_args( driver, name, self.value, cpy_arg )

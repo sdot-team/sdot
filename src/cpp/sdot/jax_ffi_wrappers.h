@@ -37,7 +37,7 @@ auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) 
         sizes[ i ] = buf.dimensions()[ i ];
 
     // XLA FFI guarantees C-contiguous (row-major) layout
-    return TensorView<const TF,ndim,Cpu>( reinterpret_cast<const TF *>( buf.untyped_data() ), sizes );
+    return TensorView<const TF,ndim,Cpu>( buf.typed_data(), sizes );
 }
 
 
@@ -55,7 +55,19 @@ auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = t
         sizes[ i ] = buf->dimensions()[ i ];
 
     // XLA FFI guarantees C-contiguous (row-major) layout
-    return TensorView<TF,ndim,Cpu>( reinterpret_cast<TF *>( buf->untyped_data() ), sizes );
+    return TensorView<TF,ndim,Cpu>( buf->typed_data(), sizes );
+}
+
+// mutable
+template<int ndim,xla::ffi::DataType dtype>
+auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
+    if ( ! valid )
+        return tensor_view( CtInt<ndim>(), buf_out, false );
+
+    auto out = tensor_view( CtInt<ndim>(), buf_out, true );
+    auto inp = tensor_view( CtInt<ndim>(), buf_inp, true );
+    out.get_data_from( inp );
+    return out;
 }
 
 bool test_and_shift( auto &mask ) {

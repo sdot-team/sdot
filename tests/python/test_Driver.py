@@ -55,12 +55,13 @@ def test_codegen():
     # o1 = sdot.Return( sdot.Tensor, [], int ),
 
     x = numpy.array( 34 )
+    pouet = Pouet()
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
         o0 = sdot.Return( sdot.Tensor, [] ),
+        pouet = sdot.Mutable( pouet ),
         i0 = x,
-        o1 = sdot.Return( Pouet ),
-        i1 = sdot.UndefinedTensor( [] )
     )
+    info( pouet )
     info( res )
 
 

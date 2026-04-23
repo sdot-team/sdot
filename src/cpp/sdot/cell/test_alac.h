@@ -1,14 +1,14 @@
 #include <sdot/support/P.h>
 
 template<class T,class S>
-struct Pouet { T pouet; S slmurf; };
+struct Pouet { T t; S s; };
 
 void test_alac( auto &&p ) {
     if ( p.o0.is_valid() && p.i0.is_valid() )
         p.o0() = p.i0() * p.i0();
     // if ( p.o1.is_valid() ) //  && p.i1.is_valid()
     //     p.o1() = 178;
-    p.o1.pouet[ 0 ] = 43;
+    p.pouet.t[ 0 ] = 43;
 }
 
 void test_alac_backward( auto &&p ) {
