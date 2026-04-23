@@ -212,17 +212,15 @@ class JaxDriver:
             func = jax.ffi.ffi_call( module_name, dout + ndout )
             ret = func( *dinp, *ndinp )
 
-            for r in ret[ len( dinp ): ]:
+            for r in ret[ len( dout ): ]:
                 non_differentiable_outputs.append( r )
-            return tuple( ret[ : len( dinp ) ] )
+            return tuple( ret[ :len( dout ) ] )
 
         @jax.custom_vjp
         def ffi_op( differentiable_jax_ffi_input_values ):
-            info( differentiable_jax_ffi_input_values )
             return _call_ffi( differentiable_jax_ffi_input_values )
 
         def ffi_op_fwd( _differentiable_jax_ffi_input_values ):
-            info( differentiable_jax_ffi_input_values )
             # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
             differentiable_jax_ffi_input_values = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
             flat_outputs = _call_ffi( differentiable_jax_ffi_input_values )
@@ -276,8 +274,13 @@ class JaxDriver:
 
         # --- appel ---
         differentiable_outputs = ffi_op( tuple( jal.differentiable_jax_ffi_input_values ) )
-        rets = list( differentiable_outputs ) + non_differentiable_outputs
-        return rets
+
+        # ret assembly
+        res = []
+        for cpy_arg in jal.cpy_args:
+            if cpy_arg.for_return == 1:
+                res.append( cpy_arg.reassemble( differentiable_outputs, non_differentiable_outputs ) )
+        return res
 
         # # --- réassemblage Python ---
         # results = []
@@ -365,9 +368,9 @@ class JaxDriver:
         lines.append( "" )
 
         # --- backward handler ---
-        if make_backward_binding:
-            lines += self._handler_source( func_name + "_backward", args, True )
-            lines.append( "" )
+        # if make_backward_binding:
+        #     lines += self._handler_source( func_name + "_backward", args, True )
+        #     lines.append( "" )
 
         lines.append( "" )
         lines.append( "template<typename T>" )

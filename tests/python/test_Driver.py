@@ -43,19 +43,22 @@ def test_codegen():
     from jax._src import test_util as jtu
     import numpy
 
-    # class Pouet:
-    #     t = sdot.driver.t1( [ 3, 4 ] )
-    #     def __init__(self):
-    #         self.t = sdot.driver.t1( [ 1, 2 ] )
-        # pouet = Pouet(),
-        # cell = sdot.Cell( 2, lambda x: 0 ),
-        # o1 = sdot.Return( sdot.Tensor, [], int ),
+    class Pouet:
+        t = sdot.driver.t1( [ 3., 4 ] )
+        s = sdot.driver.t1( [ 3., 4 ] )
+        def __init__( self, t = None, s = None ):
+            self.t = sdot.driver.t1( t if t is not None else [ 1., 2 ] )
+            self.s = sdot.driver.t1( s if s is not None else [ 1., 2 ] )
+
+    # pouet = Pouet(),
+    # cell = sdot.Cell( 2, lambda x: 0 ),
+    # o1 = sdot.Return( sdot.Tensor, [], int ),
 
     x = numpy.array( 34 )
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
         o0 = sdot.Return( sdot.Tensor, [] ),
         i0 = x,
-        o1 = sdot.Return( sdot.Tensor, [] ),
+        o1 = sdot.Return( Pouet ),
         i1 = sdot.UndefinedTensor( [] )
     )
     info( res )

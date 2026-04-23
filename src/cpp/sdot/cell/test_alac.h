@@ -1,7 +1,7 @@
 #include <sdot/support/P.h>
 
-template<class T>
-struct Pouet { T pouet; };
+template<class T,class S>
+struct Pouet { T pouet; S slmurf; };
 
 void test_alac( auto &&p ) {
     if ( p.o0.is_valid() && p.i0.is_valid() )

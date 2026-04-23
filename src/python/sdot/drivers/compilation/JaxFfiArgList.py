@@ -16,8 +16,9 @@ class CpyArg:
         self.name = name
         self.value = value
         self.sub_list = sub_list
+        self.for_return = 0
         self.signature_type = ""
-        self._python_ctor: callable = lambda x: x
+        self._python_ctor: callable | tuple[ int, int ] = () # for output value. ( 1 if differentiable, num in list )
 
     def arg( self, name: str ):
         sub_cpp_arg = CpyArg( name )
@@ -27,6 +28,20 @@ class CpyArg:
         self.sub_list.append( sub_cpp_arg )
 
         return sub_cpp_arg
+
+    def reassemble( self, differentiable_output_values, non_differentiable_output_values ):
+        # tensor ?
+        if isinstance( self._python_ctor, tuple ):
+            assert len( self._python_ctor ) == 2
+            info( self._python_ctor, differentiable_output_values, non_differentiable_output_values )
+            if self._python_ctor[ 0 ]:
+                return differentiable_output_values[ self._python_ctor[ 1 ] ]
+            return non_differentiable_output_values[ self._python_ctor[ 1 ] ]
+
+        # ctor
+        if self.sub_list is None:
+            return self._python_ctor()
+        return self._python_ctor( *[ item.reassemble( differentiable_output_values, non_differentiable_output_values ) for item in self.sub_list ] )
 
     def assemble( self ) -> str:
         res = self.value
@@ -58,7 +73,7 @@ class JaxFfiArgList:
         for python_arg_name, python_arg_value in python_args.items():
             cpy_arg = CpyArg( python_arg_name )
             self.cpy_args.append( cpy_arg )
-            self.get_jax_ffi_args( driver, python_arg_name, python_arg_value, cpy_arg, False )
+            self.get_jax_ffi_args( driver, python_arg_name, python_arg_value, cpy_arg, 0 )
 
         # make validity_input_arg
         validity_mask = numpy.zeros( [ ( len( self.validity_mask_values ) + 63 ) // 64 ], dtype = numpy.uint64 )
@@ -103,8 +118,9 @@ class JaxFfiArgList:
     def jax_ffi_input_args( self ) -> list[ JaxFfiArg ]:
         return self.differentiable_jax_ffi_input_args + self.non_differentiable_jax_ffi_input_args
 
-    def get_jax_ffi_args( self, driver, name: str, value: any, cpy_arg: CpyArg, for_return: bool ):
+    def get_jax_ffi_args( self, driver, name: str, value: any, cpy_arg: CpyArg, for_return: int ):
         """ recursively fill the jax_ffi_... lists """
+        cpy_arg.for_return = for_return
 
         # method
         if callable( getattr( value, "get_jax_ffi_args", None ) ):
@@ -188,12 +204,21 @@ class JaxFfiArgList:
         raise NotImplementedError( f"for dtype { dtype }" )
 
 
-    def _add_tensor_arg( self, driver, value: any, name: str, cpy_arg: CpyArg, for_return: bool, valid: bool = True ):
-        #
+    def _add_tensor_arg( self, driver, value: any, name: str, cpy_arg: CpyArg, for_return: int, valid: bool = True ):
+        # _python_ctor
+        differentiable = self._differentiable_dtype( value.dtype )
+        if for_return:
+            if differentiable:
+                cpy_arg._python_ctor = ( 1, len( self.differentiable_jax_ffi_output_args ) )
+            else:
+                cpy_arg._python_ctor = ( 0, len( self.non_differentiable_jax_ffi_output_args ) )
+
+        # signature_type
+        cpy_arg.signature_type = f"T{ len( value.shape ) }{ driver.normalized_type_for( value.dtype ) }"
+
         p = len( self.validity_mask_values )
         self.validity_mask_values.append( valid )
         cpy_arg.value = f"tensor_view( CtInt<{ len( value.shape ) }>(), { name }, validity_mask[ { p // 64 } ] & { 1 << ( p % 64 ) } )"
-        cpy_arg.signature_type = f"T{ len( value.shape ) }{ driver.normalized_type_for( value.dtype ) }"
 
         #
         jax_dtype = self._jax_dtype( driver, value.dtype )
@@ -204,7 +229,7 @@ class JaxFfiArgList:
             cpp_type = f"xla::ffi::Buffer<{ jax_dtype }>"
             bind = f"Arg<xla::ffi::Buffer<{ jax_dtype }>>"
 
-        self._add_jax_ffi_arg( for_return, self._differentiable_dtype( value.dtype ), JaxFfiArg(
+        self._add_jax_ffi_arg( for_return, differentiable, JaxFfiArg(
             cpp_type = cpp_type,
             value = value,
             valid = valid,

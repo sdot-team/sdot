@@ -29,7 +29,7 @@ class Return:
             return "PI"
         return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
 
-    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg, for_return: bool ):
+    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg, for_return: int ):
         if self.return_type is float:
             raise NotImplementedError
         if self.return_type is int:
@@ -37,7 +37,7 @@ class Return:
 
         # method
         if callable( getattr( self.return_type, "get_jax_ffi_args_for", None ) ):
-            return self.return_type.get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, True, *self.type_args, **self.type_kwargs )
+            return self.return_type.get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, 1, *self.type_args, **self.type_kwargs )
 
         # else, make an instance (slow but may be ok)
         instance = self.return_type( *self.type_args, **self.type_kwargs )
@@ -52,10 +52,3 @@ class Return:
         # call ctor
         return self.return_type( *self.type_args, **self.type_kwargs )
 
-    # def cpp_assembly_from_jax_ffi_compatible_args( self, driver, flat_arg_iterator, pos_in_validity_bits: list[ int ] ):
-    #     return self.return_type.cpp_assembly_from_jax_ffi_compatible_args( flat_arg_iterator, pos_in_validity_bits, *self.type_args, **self.type_kwargs )
-
-    # def python_assembly_from_jax_ffi_compatible_args( self, driver, flat_arg_iterator ):
-    #     if callable( getattr( self.return_type, "python_assembly_from_jax_ffi_compatible_args", None ) ):
-    #         return self.return_type.python_assembly_from_jax_ffi_compatible_args( driver, flat_arg_iterator, *self.type_args, **self.type_kwargs )
-    #     raise NotImplementedError
