@@ -198,7 +198,7 @@ class JaxDriver:
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, jal )
-        self._register_ffi_target( module_name, func_name, includes, jal, False )
+        self._register_ffi_target( module_name, func_name, includes, jal )
 
         #
         non_differentiable_outputs = []
@@ -227,47 +227,22 @@ class JaxDriver:
             return flat_outputs, ( list( differentiable_jax_ffi_input_values ), list( flat_outputs ) )
 
         def ffi_op_bwd( residuals, grads_of_the_outputs ):
-            flat_inputs_res, flat_outputs_res = residuals
-
+            non_differentiable_inputs = jal.non_differentiable_jax_ffi_input_values
+            differentiable_inputs, differentiable_outputs = residuals
             if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                 grads_of_the_outputs = ( grads_of_the_outputs, )
 
-            pouet3000()
-            # # new_grads_of_the_outputs
-            # new_size = ( len( flat_inputs_res ) + len( non_differentiable_inputs ) + len( flat_outputs_res ) + len( grads_of_the_outputs ) + 63 ) // 64
-            # pos_in_new_validity_tensor = len( flat_inputs_res ) + len( non_differentiable_inputs ) + len( flat_outputs_res )
-            # new_validity_tensor = self.to_numpy( validity_tensor )
-            # new_validity_tensor.resize( [ new_size ] )
-            # new_grads_of_the_outputs = []
-            # for grad in grads_of_the_outputs:
-            #     if isinstance( grad, ad_util.SymbolicZero ):
-            #         new_grads_of_the_outputs.append( self.empty( [ 0 ] * len( grad.shape ), dtype = grad.dtype ) )
-            #     else:
-            #         new_grads_of_the_outputs.append( grad )
-            #         new_validity_tensor[ pos_in_new_validity_tensor // 64 ] |= ( 1 << ( pos_in_new_validity_tensor % 64 ) )
-            #     pos_in_new_validity_tensor += 1
+            bjal = jal.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
 
-            # # validity for the returned grads. For now we say that we want the grad for each input
-            # for _ in range( len( flat_inputs_res ) ):
-            #     new_validity_tensor[ pos_in_new_validity_tensor // 64 ] |= ( 1 << ( pos_in_new_validity_tensor % 64 ) )
-            #     pos_in_new_validity_tensor += 1
+            ndout = bjal.non_differentiable_jax_ffi_output_specs
+            ndinp = bjal.non_differentiable_jax_ffi_input_values
+            dout = bjal.differentiable_jax_ffi_output_specs
+            dinp = bjal.differentiable_jax_ffi_input_values
 
-            # # grads to get
-            # bwd_flat_specs = []
-            # for obj in flat_inputs_res:
-            #     bwd_flat_specs.append( jax.ShapeDtypeStruct( obj.shape, obj.dtype ) )
+            func = jax.ffi.ffi_call( module_name + "_backward", dout + ndout )
+            res = func( *dinp, *ndinp )
 
-            # bwd_func = jax.ffi.ffi_call( module_name + "_backward", bwd_flat_specs )
-            # output = bwd_func(
-            #     *flat_inputs_res,
-            #     *non_differentiable_inputs,
-            #     *flat_outputs_res,
-            #     *new_grads_of_the_outputs,
-            #     new_validity_tensor
-            # )
-
-            # return ( tuple( output ), )
-            return ( )
+            return ( tuple( res[ : len( dout ) ] ), )
 
 
         ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
@@ -281,7 +256,7 @@ class JaxDriver:
             if cpy_arg.for_return == 1: # Mutable
                 cpy_arg.update( args[ cpy_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
             if cpy_arg.for_return == 2: # Return
-                res.append( cpy_arg.reassemble( differentiable_outputs, non_differentiable_outputs ) )
+                res.append( cpy_arg.reassemble( [], [], differentiable_outputs, non_differentiable_outputs ) )
 
         # item or list
         if len( res ) == 0:
@@ -360,9 +335,13 @@ class JaxDriver:
         lines.append( "" )
 
         # --- backward handler ---
-        # if make_backward_binding:
-        #     lines += self._handler_source( func_name + "_backward", args, True )
-        #     lines.append( "" )
+        if make_backward_binding:
+            ndout = args.non_differentiable_jax_ffi_output_specs
+            ndinp = args.non_differentiable_jax_ffi_input_values
+            dout = args.differentiable_jax_ffi_output_specs
+            dinp = args.differentiable_jax_ffi_input_values
+            lines += self._handler_source( func_name + "_backward", args.backward_version( self, dinp, ndinp, dout, ndout, dout ) )
+            lines.append( "" )
 
         lines.append( "" )
         lines.append( "template<typename T>" )
@@ -373,8 +352,8 @@ class JaxDriver:
         lines.append( "" )
         lines.append( f"NB_MODULE( { module_name }, m ) {{" )
         lines.append( f"  m.def( \"{ func_name }\", []() {{ return EncapsulateFfiCall( binding_{ func_name } ); }} );" )
-        # if make_backward_binding:
-        #     lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
+        if make_backward_binding:
+            lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
         lines.append( "}" )
 
         #

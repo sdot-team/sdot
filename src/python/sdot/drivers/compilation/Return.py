@@ -1,5 +1,3 @@
-# from ...driver import driver
-from .collect_attributes import collect_attributes
 
 class Return:
     """Declares what type a C++ function returns.
