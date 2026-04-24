@@ -4,10 +4,12 @@
 // struct Pouet { T t; S s; };
 
 void test_alac( auto &&p ) {
-    if ( p.o0.is_valid() && p.i0.is_valid() )
-        p.o0() = p.i0() * p.i0();
-    if ( p.o1.is_valid() && p.i1.is_valid() ) //
-        p.o1() = p.i1() + 178;
+    P( p.b );
+    p.ret() = 23;
+    // if ( p.o0.is_valid() && p.i0.is_valid() )
+    //     p.o0() = p.i0() * p.i0();
+    // if ( p.o1.is_valid() && p.i1.is_valid() ) //
+    //     p.o1() = p.i1() + 178;
 }
 
 void test_alac_backward( auto &&p ) {

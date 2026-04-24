@@ -14,6 +14,6 @@ class Mutable:
     def cpp_class_name( self, driver ):
         return FfiArgInfo.cpp_class_name( self.value, driver )
 
-    def call_arg_analysis( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
+    def configure_call_arg( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
         cpy_arg.for_return = 1
-        return jax_ffi_arg_list.call_arg_analysis( driver, name, self.value, cpy_arg )
+        return jax_ffi_arg_list.configure_call_arg( driver, name, self.value, cpy_arg )

@@ -217,20 +217,16 @@ class JaxDriver:
         non_differentiable_outputs = []
 
         def _call_ffi( differentiable_jax_ffi_input_values ):
-            ndout = fai.non_differentiable_jax_ffi_output_specs
-            ndinp = fai.non_differentiable_jax_ffi_input_values
-            dout = fai.differentiable_jax_ffi_output_specs
-            dinp = differentiable_jax_ffi_input_values
+            func = jax.ffi.ffi_call( module_name, fai.output_specs )
+            ret = func( *fai.input_values )
 
-            func = jax.ffi.ffi_call( module_name, dout + ndout )
-            ret = func( *dinp, *ndinp )
-
-            for r in ret[ len( dout ): ]:
+            lim = len( fai.non_differentiable_ffi_outputs )
+            for r in ret[ : lim ]:
                 non_differentiable_outputs.append( r )
-            return tuple( ret[ :len( dout ) ] )
+            return tuple( ret[ lim : ] )
 
         if _no_grad:
-            differentiable_outputs = _call_ffi( tuple( fai.differentiable_jax_ffi_input_values ) )
+            differentiable_outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
             def ffi_op( differentiable_jax_ffi_input_values ):
@@ -268,11 +264,11 @@ class JaxDriver:
 
         # ret assembly
         res = []
-        for cpy_arg in fai.call_args:
-            if cpy_arg.for_return == 1: # Mutable
-                cpy_arg.update( args[ cpy_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
-            if cpy_arg.for_return == 2: # Return
-                res.append( cpy_arg.reassemble( [], [], differentiable_outputs, non_differentiable_outputs ) )
+        for call_arg in fai.call_args:
+            if call_arg.io_category == 1: # Mutable
+                call_arg.update( args[ call_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
+            if call_arg.io_category == 2: # Return
+                res.append( call_arg.construct( fai, differentiable_outputs, non_differentiable_outputs ) )
 
         # item or list
         if len( res ) == 0:
@@ -287,13 +283,22 @@ class JaxDriver:
     def ffi_tensor_input_arg_code( self, ndim, dtype ) -> str:
         return f"xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>"
 
+    def ffi_tensor_output_bind_code( self, ndim, dtype ) -> str:
+        return f"Ret<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>"
+
+    def ffi_tensor_output_arg_code( self, ndim, dtype ) -> str:
+        return f"xla::ffi::ResultBuffer<{ self.ffi_tensor_type_code( dtype ) }>"
+
+    def ffi_tensor_output_spec( self, shape, dtype ):
+        return jax.ShapeDtypeStruct( shape, dtype )
+
     def ffi_tensor_type_code( self, dtype ) -> str:
         """ C++ jax name for dtype """
 
         if dtype is None or dtype is float:
-            return self._jax_dtype( self, self.dtype )
+            return self.ffi_tensor_type_code( self.dtype )
         if dtype is int:
-            return self._jax_dtype( self, self.itype )
+            return self.ffi_tensor_type_code( self.itype )
 
         if dtype == jax.numpy.float32:
             return "xla::ffi::F32"
@@ -303,8 +308,15 @@ class JaxDriver:
             return "xla::ffi::S32"
         if dtype == jax.numpy.int64:
             return "xla::ffi::S64"
+        if dtype == jax.numpy.uint32:
+            return "xla::ffi::U32"
+        if dtype == jax.numpy.uint64:
+            return "xla::ffi::U64"
 
         raise NotImplementedError( f"for dtype { dtype }" )
+
+    def is_zero_tensor( self, value ):
+        return isinstance( value, ad_util.SymbolicZero )
 
     def _module_name_for( self, func_name: str, includes: list[ str ], args: FfiArgInfo ):
         # get signature
@@ -449,12 +461,12 @@ class JaxDriver:
         lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", arg_decls ) } ) {{" )
 
         # read the validity_mask
-        lines.append( "    const PI64 *validity_mask = validity_mask_buffer.typed_data();" )
+        lines.append( f"    const PI64 *validity_mask = { fai.name_of_validity_mask }.typed_data();" )
 
         # call the function
         lines.append( f"    { func_name }( Parameters_{ func_name }{{" )
-        # for call_arg in fai.call_args:
-        #     lines.append( f"        .{ call_arg.name } = { call_arg.assembled_code() }," )
+        for call_arg in fai.call_args:
+            lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
         lines.append( "    } );" )
 
         # end impl

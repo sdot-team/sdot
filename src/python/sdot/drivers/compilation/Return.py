@@ -1,3 +1,5 @@
+from .CallArg import CallArg
+
 
 class Return:
     """Declares what type a C++ function returns.
@@ -20,35 +22,23 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def cpp_class_name( self, driver ):
-        if self.return_type is float:
-            return "TF"
-        if self.return_type is int:
-            return "PI"
-        return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
+    # def cpp_class_name( self, driver ):
+    #     if self.return_type is float:
+    #         return "TF"
+    #     if self.return_type is int:
+    #         return "PI"
+    #     return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
 
-    def call_arg_analysis( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
-        cpy_arg.for_return = 2
+            # return python_value.configure_call_arg( res, fai, driver )
+    def configure_call_arg( self, call_arg: CallArg, fai, driver ):
+        return call_arg.configure_as_return( fai, driver, self.return_type, *self.type_args, **self.type_kwargs )
 
-        if self.return_type is float:
-            raise NotImplementedError
-        if self.return_type is int:
-            raise NotImplementedError
+    # def fake_instance( self, driver ):
+    #     """ make a fake instance to help find how to compile a function with a value that comes from a return """
+    #     # special method ?
+    #     if callable( getattr( self.return_type, "fake_instance", None ) ):
+    #         return self.return_type.fake_instance( driver, *self.type_args, **self.type_kwargs )
 
-        # method
-        if callable( getattr( self.return_type, "call_arg_analysis_for", None ) ):
-            return self.return_type.call_arg_analysis_for( jax_ffi_arg_list, driver, name, cpy_arg, *self.type_args, **self.type_kwargs )
-
-        # else, make an instance (slow but may be ok)
-        instance = self.return_type( *self.type_args, **self.type_kwargs )
-        jax_ffi_arg_list.call_arg_analysis( driver, name, instance, cpy_arg )
-
-    def fake_instance( self, driver ):
-        """ make a fake instance to help find how to compile a function with a value that comes from a return """
-        # special method ?
-        if callable( getattr( self.return_type, "fake_instance", None ) ):
-            return self.return_type.fake_instance( driver, *self.type_args, **self.type_kwargs )
-
-        # call ctor
-        return self.return_type( *self.type_args, **self.type_kwargs )
+    #     # call ctor
+    #     return self.return_type( *self.type_args, **self.type_kwargs )
 

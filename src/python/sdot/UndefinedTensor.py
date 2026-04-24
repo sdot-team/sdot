@@ -12,7 +12,7 @@ class UndefinedTensor:
     def cpp_class_name( self, driver ):
         return f"R{ len( self.shape ) }{ driver.normalized_type_for( self.dtype ) }"
 
-    def call_arg_analysis( self, jax_ffi_arg_list, driver, name, cpp_arg ):
+    def configure_call_arg( self, jax_ffi_arg_list, driver, name, cpp_arg ):
         jax_ffi_arg_list._add_tensor_arg(
             driver,
             jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),

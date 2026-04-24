@@ -29,11 +29,11 @@ class Bsp:
         )
 
     @staticmethod
-    def call_arg_analysis_for( jal, driver, name, cpy_arg, *, nb_vertices, max_nb_cells, cb_size ):
+    def configure_call_arg_for( jal, driver, name, cpy_arg, *, nb_vertices, max_nb_cells, cb_size ):
         cpy_arg.code = f"Bsp<{ driver.normalized_dtype },Cpu>"
         cpy_arg.signature_type = cpy_arg.code
         cpy_arg._python_ctor = Bsp
-        jal.call_arg_analysis( driver, f"{ name }_{ "sorted_vertex_indices" }", getattr( value, "sorted_vertex_indices" ), cpy_arg.arg( "sorted_vertex_indices" ) )
+        jal.configure_call_arg( driver, f"{ name }_{ "sorted_vertex_indices" }", getattr( value, "sorted_vertex_indices" ), cpy_arg.arg( "sorted_vertex_indices" ) )
 
 
         info( nb_vertices, max_nb_cells, cb_size )
@@ -44,7 +44,7 @@ class Bsp:
     #     raise Pouet
     #     return f"Bsp<{ driver.normalized_dtype },Cpu>"
 
-    # def call_arg_analysis( self, jax_ffi_arg_list, driver, name, cpy_arg ):
+    # def configure_call_arg( self, jax_ffi_arg_list, driver, name, cpy_arg ):
     #     cpy_arg.code
     #     jax_ffi_arg_list._add_tensor_arg(
     #         driver,

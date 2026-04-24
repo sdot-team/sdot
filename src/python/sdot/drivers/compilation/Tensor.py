@@ -10,16 +10,25 @@ class Tensor:
         )
     """
 
-    @staticmethod
-    def cpp_class_name_for( shape, dtype = None ):
-        from ...driver import driver
-        return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
+    # @staticmethod
+    # def cpp_class_name_for( shape, dtype = None ):
+    #     from ...driver import driver
+    #     return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
 
     @staticmethod
-    def call_arg_analysis_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = None ):
-        value = jax_ffi_arg_list._tensor_value( driver, shape, dtype )
-        spec = jax_ffi_arg_list._tensor_spec( driver, shape, dtype )
-        jax_ffi_arg_list._add_tensor_arg( driver, value, spec, name, cpy_arg, valid = True )
+    def configure_call_ret_for( call_arg, fai, driver, shape, dtype = None ):
+        arg_name, validity_index = fai.add_output_tensor( driver, shape, dtype )
+        dim = len( shape )
+
+        call_arg.python_ctor = lambda x: x # not mutable -> we can used python_value
+        call_arg.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
+        call_arg.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
+
+
+    # def configure_call_arg_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = lambda x: x ):
+    #     value = jax_ffi_arg_list._tensor_value( driver, shape, dtype )
+    #     spec = jax_ffi_arg_list._tensor_spec( driver, shape, dtype )
+    #     jax_ffi_arg_list._add_tensor_arg( driver, value, spec, name, cpy_arg, valid = True )
 
     # @staticmethod
     # def as_jax_ffi_compatible_rets( driver, name, shape, dtype = None ) -> list[ JaxFfiCompatibleItem ]:

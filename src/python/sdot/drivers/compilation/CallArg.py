@@ -33,34 +33,31 @@ class CallArg:
         res.io_category = 1 if mutable else 0
         res.sub_list = None
 
-        # # method
-        # if callable( getattr( python_value, "call_arg_analysis", None ) ):
-        #     return python_value.call_arg_analysis( res, fai, driver )
-
-        # # SymbolicZero
-        # if isinstance( value, ad_util.SymbolicZero ):
-        #     array_value = self._tensor_value( driver, value.shape, value.dtype )
-        #     array_spec = self._tensor_spec( driver, value.shape, value.dtype )
-        #     return self._add_tensor_arg( driver, array_value, array_spec, name, cpy_arg, valid = False )
+        # method
+        if callable( getattr( python_value, "configure_call_arg", None ) ):
+            python_value.configure_call_arg( res, fai, driver )
+            return res
 
         # arrays
         if driver.is_a_tensor( python_value ):
-            return res.configure_as_input_tensor( python_value, mutable, fai, driver )
+            res.configure_as_input_tensor( python_value, mutable, fai, driver )
+            return res
 
-        # # std objects
-        # if isinstance( value, float ):
-        #     array = driver.tn( value, ndim = 0, dtype = driver.dtype )
-        #     return self._add_tensor_arg( driver, array, jax.ShapeDtypeStruct( [], driver.dtype ), name, cpy_arg )
+        # std objects
+        if isinstance( python_value, float ):
+            res.configure_as_parameter( python_value, "FP64", mutable, fai, driver )
+            return res
 
         if isinstance( python_value, int ):
-            return res.configure_as_parameter( python_value, "PI64", mutable, fai, driver )
+            res.configure_as_parameter( python_value, "PI64", mutable, fai, driver )
+            return res
 
         # if isinstance( value, ( list, tuple ) ):
         #     cpy_arg._python_ctor = type( value )
         #     cpy_arg.signature_type = "L"
         #     cpy_arg.code = "std::tie"
         #     for num, item in enumerate( value ):
-        #         self.call_arg_analysis( driver, f"{ name }_{ num }", item, cpy_arg.arg( str( num ) ) )
+        #         self.configure_call_arg( driver, f"{ name }_{ num }", item, cpy_arg.arg( str( num ) ) )
         #     return
 
         # if value is None:
@@ -73,19 +70,18 @@ class CallArg:
         # cpy_arg.signature_type = cpy_arg.code
         # cpy_arg._python_ctor = type( value )
         # for attr, _ in collect_attributes( value ):
-        #     self.call_arg_analysis( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ) )
+        #     self.configure_call_arg( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ) )
         raise NotImplementedError
 
     def configure_as_parameter( self, python_value: any, cpp_type: str, mutable: bool, fai, driver ) -> Self:
         if mutable:
             raise NotImplementedError
         else:
+            n = fai.add_parameter( python_value, cpp_type )
+
             self.python_ctor = None # not mutable -> we can directly use python_value
-            self.base_code = "" # nothing to do to convert the value
             self.signature = cpp_type
-
-            fai.add_parameter( python_value, cpp_type )
-
+            self.base_code = n
         return self
 
     def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver ) -> Self:
@@ -93,22 +89,54 @@ class CallArg:
         dim = len( python_value.shape )
 
         self.python_ctor = None # not mutable -> we can used python_value
-        self.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask & { 1 << validity_index } )"
-        self.signature = f"T{ len( python_value.shape ) }{ driver.normalized_type_for( python_value.dtype ) }"
+        self.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
+        self.signature = f"T{ dim }{ driver.normalized_type_for( python_value.dtype ) }"
 
         if mutable:
             raise NotImplementedError
 
         return self
 
-    # def __init__( self, name: str, code: str = "", sub_list: list | None = None ):
-    #     self.name = name
-    #     self.code = code
-    #     self.value = None
-    #     self.sub_list = sub_list
-    #     self.for_return = 0 # 0 => pure input, 1 => mutable, 2 => return
-    #     self.signature_type = ""
-    #     self._python_ctor: callable | tuple[ int, int, bool ] | None = None # for output value. ( 1 if differentiable, num in list, validity )
+    def configure_as_return( self, fai, driver, return_type, *type_args, **type_kwargs ):
+        """ complete self, with information for return """
+        self.io_category = 2
+
+        if return_type is float:
+            # return self.configure_as_raw_return( fai, driver, return_type, *args, **kwargs )
+            raise NotImplementedError
+
+        if return_type is int:
+            # return self.configure_as_raw_return( fai, driver, return_type, *args, **kwargs )
+            raise NotImplementedError
+
+
+        # method
+        if callable( getattr( return_type, "configure_call_ret_for", None ) ):
+            return_type.configure_call_ret_for( self, fai, driver, *type_args, **type_kwargs )
+            return self
+
+        raise NotImplementedError
+        # # else, make an instance (slow but may be ok)
+        # instance = self.return_type( *self.type_args, **self.type_kwargs )
+        # jax_ffi_arg_list.configure_call_arg( driver, name, instance, cpy_arg )
+        # pouet()
+
+    def configure_as_raw_return( self, fai, valid, driver, return_type, *args, **kwargs ) -> Self:
+        arg_name, validity_index = fai.add_raw_return( return_type, valid, driver, *args, **kwargs )
+        self.python_ctor = lambda x: x #
+        self.base_code = f"*{ arg_name }"
+        self.signature = f"{ return_type }{ args }{ kwargs }"
+        return self
+
+    def assembled_code( self ) -> str:
+        res = self.base_code
+        if self.sub_list is not None:
+            res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"
+        return res
+
+    def construct( fai, differentiable_outputs, non_differentiable_outputs ):
+        raise NotImplementedError
+
 
     # def arg( self, name: str ):
     #     cpy_arg = CallArg( name )
@@ -185,8 +213,3 @@ class CallArg:
     #         s.update( nobj, ncb, differentiable_output_values, non_differentiable_output_values )
 
 
-    # def assembled_code( self ) -> str:
-    #     res = self.code
-    #     if self.sub_list is not None:
-    #         res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"
-    #     return res

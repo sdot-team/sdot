@@ -50,16 +50,21 @@ class FfiArgInfo:
                validity_mask[ n // 64 ] |= ( 1 << ( n % 64 ) )
 
         # register the validity_mask
-        # self.non_differentiable_ffi_inputs.append( FfiInput(
-        #     value = validity_mask,
-        #     spec = self._tensor_spec( driver, [ ], jax.numpy.uint64 ),
-        #     name = "validity_mask_buffer",
-        #     valid = None,
-        #     bind = "Arg<xla::ffi::Buffer<xla::ffi::U64>>",
-        #     cpp_type = "xla::ffi::Buffer<xla::ffi::U64>"
-        # ) )
+        self.validity_mask_index = len( self.non_differentiable_ffi_inputs )
+        self.non_differentiable_ffi_inputs.append( FfiInput(
+            python_value = validity_mask,
+            cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
+            valid = None,
+            bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
+        ) )
 
-    def add_input_tensor( self, python_value: any, driver, valid = True ) -> tuple[ str, int ]:
+    def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int ]:
+        if valid is None:
+            valid = True
+            if driver.is_zero_tensor( python_value ):
+                python_value = numpy.empty( [ 0 ] * len( python_value.shape ), dtype = python_value.dtype )
+                valid = False
+
         validity_index = len( self.validity_mask_values )
         self.validity_mask_values.append( valid )
 
@@ -68,9 +73,9 @@ class FfiArgInfo:
             differentiable = False
 
         ffi_input = FfiInput(
+            python_value = python_value,
             cpp_type = driver.ffi_tensor_input_arg_code( len( python_value.shape ), python_value.dtype ),
             bind = driver.ffi_tensor_input_bind_code( len( python_value.shape ), python_value.dtype ),
-            value = python_value,
             valid = valid,
         )
 
@@ -78,19 +83,84 @@ class FfiArgInfo:
             num_variable = len( self.differentiable_ffi_inputs )
             self.differentiable_ffi_inputs.append( ffi_input )
             return f"di{ num_variable }", validity_index
+        else:
+            num_variable = len( self.non_differentiable_ffi_inputs )
+            self.non_differentiable_ffi_inputs.append( ffi_input )
+            return f"ni{ num_variable }", validity_index
 
-        num_variable = len( self.non_differentiable_ffi_inputs )
-        self.non_differentiable_ffi_inputs.append( ffi_input )
+    def add_output_tensor( self, driver, shape, dtype, valid = None ) -> tuple[ str, int ]:
+        """ return name, validity index """
 
-        return f"ni{ num_variable }", validity_index
+        if valid is None:
+            valid = True
+            #     if driver.is_zero_tensor( python_value ):
+            #         python_value = numpy.empty( [ 0 ] * len( python_value.shape ), dtype = python_value.dtype )
+            #         valid = False
+
+        if dtype is None:
+            dtype = driver.dtype
+
+        validity_index = len( self.validity_mask_values )
+        self.validity_mask_values.append( valid )
+
+        differentiable = True
+        if not driver.differentiable_type( dtype ):
+            differentiable = False
+
+        ffi_output = FfiOutput(
+            cpp_type = driver.ffi_tensor_output_arg_code( len( shape ), dtype ),
+            valid = valid,
+            bind = driver.ffi_tensor_output_bind_code( len( shape ), dtype ),
+            spec = driver.ffi_tensor_output_spec( shape, dtype ),
+        )
+
+        if differentiable:
+            num_variable = len( self.differentiable_ffi_outputs )
+            self.differentiable_ffi_outputs.append( ffi_output )
+            return f"do{ num_variable }", validity_index
+        else:
+            num_variable = len( self.non_differentiable_ffi_outputs )
+            self.non_differentiable_ffi_outputs.append( ffi_output )
+            return f"no{ num_variable }", validity_index
+
+    def add_raw_return( self, return_type, valid, driver, *args, **kwargs ) -> tuple[ str, int ]:
+        n = len( self.non_differentiable_ffi_outputs )
+
+        cpp_type = str( return_type )
+
+        self.ffi_parameters.append( FfiOutput(
+            cpp_type = cpp_type,
+            valid = valid,
+            spec = "...",
+            bind = "...",
+            # bind = "Attr<float>"
+        ) )
+
+        return f"p{ n }"
 
 
-    def add_parameter( self, python_value: any, cpp_type: str ):
+    def add_parameter( self, python_value: any, cpp_type: str ) -> str:
+        n = len( self.ffi_parameters )
+
         self.ffi_parameters.append( FfiParameter(
             python_value = python_value,
             cpp_type = cpp_type,
             bind = "Attr<float>"
         ) )
+
+        return f"p{ n }"
+
+    @property
+    def output_specs( self ):
+        return [ output.spec for output in self.non_differentiable_ffi_outputs + self.differentiable_ffi_outputs ]
+
+    @property
+    def input_values( self ):
+        return [ input.python_value for input in self.non_differentiable_ffi_inputs + self.differentiable_ffi_inputs + self.ffi_parameters ]
+
+    @property
+    def name_of_validity_mask( self ):
+        return f"ni{ self.validity_mask_index }"
 
     @property
     def named_ffi_args( self ) -> list[ tuple[ str, FfiOutput | FfiInput | FfiOutput | FfiInput | FfiParameter ] ]:
@@ -171,18 +241,12 @@ class FfiArgInfo:
 
     #     return FfiArgInfo( driver, nargs )
 
-    # def call_arg_analysis( self, driver, name: str, value: any, cpy_arg: CallArg ):
+    # def configure_call_arg( self, driver, name: str, value: any, cpy_arg: CallArg ):
     #     """ recursively fill the jax_ffi_... lists """
 
     #     # method
-    #     if callable( getattr( value, "call_arg_analysis", None ) ):
-    #         return value.call_arg_analysis( self, driver, name, cpy_arg )
-
-    #     # SymbolicZero
-    #     if isinstance( value, ad_util.SymbolicZero ):
-    #         array_value = self._tensor_value( driver, value.shape, value.dtype )
-    #         array_spec = self._tensor_spec( driver, value.shape, value.dtype )
-    #         return self._add_tensor_arg( driver, array_value, array_spec, name, cpy_arg, valid = False )
+    #     if callable( getattr( value, "configure_call_arg", None ) ):
+    #         return value.configure_call_arg( self, driver, name, cpy_arg )
 
     #     # arrays
     #     if isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct ) ):
@@ -202,7 +266,7 @@ class FfiArgInfo:
     #         cpy_arg.signature_type = "L"
     #         cpy_arg.code = "std::tie"
     #         for num, item in enumerate( value ):
-    #             self.call_arg_analysis( driver, f"{ name }_{ num }", item, cpy_arg.arg( str( num ) ) )
+    #             self.configure_call_arg( driver, f"{ name }_{ num }", item, cpy_arg.arg( str( num ) ) )
     #         return
 
     #     if value is None:
@@ -215,7 +279,7 @@ class FfiArgInfo:
     #     cpy_arg.signature_type = cpy_arg.code
     #     cpy_arg._python_ctor = type( value )
     #     for attr, _ in collect_attributes( value ):
-    #         self.call_arg_analysis( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ) )
+    #         self.configure_call_arg( driver, f"{ name }_{ attr }", getattr( value, attr ), cpy_arg.arg( attr ) )
 
 
     # def _tensor_spec( self, driver, shape, dtype ):
