@@ -1,4 +1,4 @@
-from .JaxFfiArgList import JaxFfiArgList
+from .FfiArgInfo import FfiArgInfo
 
 class Mutable:
     """Marks an existing object as read+write in driver.call.
@@ -12,8 +12,8 @@ class Mutable:
         self.value = value
 
     def cpp_class_name( self, driver ):
-        return JaxFfiArgList.cpp_class_name( self.value, driver )
+        return FfiArgInfo.cpp_class_name( self.value, driver )
 
-    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
+    def call_arg_analysis( self, jax_ffi_arg_list, driver, name: str, cpy_arg ):
         cpy_arg.for_return = 1
-        return jax_ffi_arg_list.get_jax_ffi_args( driver, name, self.value, cpy_arg )
+        return jax_ffi_arg_list.call_arg_analysis( driver, name, self.value, cpy_arg )

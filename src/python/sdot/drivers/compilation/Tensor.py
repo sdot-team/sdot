@@ -1,4 +1,4 @@
-# from sdot.drivers.compilation.JaxFfiArgList import JaxFfiCompatibleItem
+# from sdot.drivers.compilation.FfiValueList import JaxFfiCompatibleItem
 
 class Tensor:
     """Sentinel type for returning a raw array from driver.call.
@@ -16,7 +16,7 @@ class Tensor:
         return f"R{ len( shape ) }{ driver.normalized_type_for( dtype ) }"
 
     @staticmethod
-    def get_jax_ffi_args_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = None ):
+    def call_arg_analysis_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = None ):
         value = jax_ffi_arg_list._tensor_value( driver, shape, dtype )
         spec = jax_ffi_arg_list._tensor_spec( driver, shape, dtype )
         jax_ffi_arg_list._add_tensor_arg( driver, value, spec, name, cpy_arg, valid = True )

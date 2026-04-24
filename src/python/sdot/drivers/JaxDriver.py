@@ -1,4 +1,4 @@
-from sdot.drivers.compilation.JaxFfiArgList import JaxFfiArgList
+from sdot.drivers.compilation.FfiArgInfo import FfiArgInfo
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
@@ -184,7 +184,17 @@ class JaxDriver:
     def normalized_framework( self ):
         return "jax"
 
-    def call( self, func_name: str, includes: str | list[ str ], _no_grad = False, **args ):
+    def is_a_tensor( self, value ):
+        return isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct ) )
+
+    def differentiable_type( self, dtype ):
+        if dtype is None or dtype is float:
+            return True
+        if dtype is int:
+            return False
+        return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
+
+    def call( self, func_name: str, includes: str | list[ str ], *, _no_grad = False, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -197,19 +207,19 @@ class JaxDriver:
             includes = [ includes ]
 
         # get a jax compatible set of arg lists
-        jal = JaxFfiArgList( self, args )
+        fai = FfiArgInfo( args, self )
 
         # check ffi function is registered
-        module_name = self._module_name_for( func_name, includes, jal )
-        self._register_ffi_target( module_name, func_name, includes, jal, make_backward_binding = not _no_grad )
+        module_name = self._module_name_for( func_name, includes, fai )
+        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not _no_grad )
 
         # a place to store outputs not handled by jax
         non_differentiable_outputs = []
 
         def _call_ffi( differentiable_jax_ffi_input_values ):
-            ndout = jal.non_differentiable_jax_ffi_output_specs
-            ndinp = jal.non_differentiable_jax_ffi_input_values
-            dout = jal.differentiable_jax_ffi_output_specs
+            ndout = fai.non_differentiable_jax_ffi_output_specs
+            ndinp = fai.non_differentiable_jax_ffi_input_values
+            dout = fai.differentiable_jax_ffi_output_specs
             dinp = differentiable_jax_ffi_input_values
 
             func = jax.ffi.ffi_call( module_name, dout + ndout )
@@ -220,7 +230,7 @@ class JaxDriver:
             return tuple( ret[ :len( dout ) ] )
 
         if _no_grad:
-            differentiable_outputs = _call_ffi( tuple( jal.differentiable_jax_ffi_input_values ) )
+            differentiable_outputs = _call_ffi( tuple( fai.differentiable_jax_ffi_input_values ) )
         else:
             @jax.custom_vjp
             def ffi_op( differentiable_jax_ffi_input_values ):
@@ -233,12 +243,12 @@ class JaxDriver:
                 return flat_outputs, ( list( differentiable_jax_ffi_input_values ), list( flat_outputs ) )
 
             def ffi_op_bwd( residuals, grads_of_the_outputs ):
-                non_differentiable_inputs = jal.non_differentiable_jax_ffi_input_values
+                non_differentiable_inputs = fai.non_differentiable_jax_ffi_input_values
                 differentiable_inputs, differentiable_outputs = residuals
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
-                bjal = jal.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
+                bjal = fai.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
 
                 ndout = bjal.non_differentiable_jax_ffi_output_specs
                 ndinp = bjal.non_differentiable_jax_ffi_input_values
@@ -254,11 +264,11 @@ class JaxDriver:
             ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
 
             # --- appel ---
-            differentiable_outputs = ffi_op( tuple( jal.differentiable_jax_ffi_input_values ) )
+            differentiable_outputs = ffi_op( tuple( fai.differentiable_jax_ffi_input_values ) )
 
         # ret assembly
         res = []
-        for cpy_arg in jal.cpy_args:
+        for cpy_arg in fai.call_args:
             if cpy_arg.for_return == 1: # Mutable
                 cpy_arg.update( args[ cpy_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
             if cpy_arg.for_return == 2: # Return
@@ -271,12 +281,36 @@ class JaxDriver:
             return res[ 0 ]
         return res
 
+    def ffi_tensor_input_bind_code( self, ndim, dtype ) -> str:
+        return f"Arg<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>"
 
-    def _module_name_for( self, func_name: str, includes: list[ str ], args: JaxFfiArgList ):
+    def ffi_tensor_input_arg_code( self, ndim, dtype ) -> str:
+        return f"xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>"
+
+    def ffi_tensor_type_code( self, dtype ) -> str:
+        """ C++ jax name for dtype """
+
+        if dtype is None or dtype is float:
+            return self._jax_dtype( self, self.dtype )
+        if dtype is int:
+            return self._jax_dtype( self, self.itype )
+
+        if dtype == jax.numpy.float32:
+            return "xla::ffi::F32"
+        if dtype == jax.numpy.float64:
+            return "xla::ffi::F64"
+        if dtype == jax.numpy.int32:
+            return "xla::ffi::S32"
+        if dtype == jax.numpy.int64:
+            return "xla::ffi::S64"
+
+        raise NotImplementedError( f"for dtype { dtype }" )
+
+    def _module_name_for( self, func_name: str, includes: list[ str ], args: FfiArgInfo ):
         # get signature
         signature_items = [ func_name ]
-        for arg in args.cpy_args:
-            signature_items.append( arg.signature_type )
+        for arg in args.call_args:
+            signature_items.append( arg.signature )
         signature_items += includes
 
         # module name
@@ -289,7 +323,7 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: JaxFfiArgList, make_backward_binding = True ):
+    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: FfiArgInfo, make_backward_binding = True ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -318,7 +352,7 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, func_name: str, includes: list[ str ], args: JaxFfiArgList, module_name: str, make_backward_binding: bool ):
+    def _make_dylib( self, func_name: str, includes: list[ str ], fai: FfiArgInfo, module_name: str, make_backward_binding: bool ):
         # include list
         std_includes = [
             "sdot/jax_ffi_wrappers.h",
@@ -337,16 +371,16 @@ class JaxDriver:
         lines.append( "" )
 
         # --- forward handler ---
-        lines += self._handler_source( func_name, args )
+        lines += self._handler_source( func_name, fai )
         lines.append( "" )
 
         # --- backward handler ---
         if make_backward_binding:
-            ndout = args.non_differentiable_jax_ffi_output_specs
-            ndinp = args.non_differentiable_jax_ffi_input_values
-            dout = args.differentiable_jax_ffi_output_specs
-            dinp = args.differentiable_jax_ffi_input_values
-            lines += self._handler_source( func_name + "_backward", args.backward_version( self, dinp, ndinp, dout, ndout, dout ) )
+            ndout = fai.non_differentiable_jax_ffi_output_specs
+            ndinp = fai.non_differentiable_jax_ffi_input_values
+            dout = fai.differentiable_jax_ffi_output_specs
+            dinp = fai.differentiable_jax_ffi_input_values
+            lines += self._handler_source( func_name + "_backward", fai.backward_version( self, dinp, ndinp, dout, ndout, dout ) )
             lines.append( "" )
 
         lines.append( "" )
@@ -397,36 +431,30 @@ class JaxDriver:
 
     #     return res
 
-    def _handler_source( self, func_name: str, args: JaxFfiArgList ) -> list[ str ]:
+    def _handler_source( self, func_name: str, fai: FfiArgInfo ) -> list[ str ]:
         #
         lines = []
 
         # make a structure with the names
-        lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( args.cpy_args ) ) ] ) }>" )
+        lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( fai.call_args ) ) ] ) }>" )
         lines.append( f"struct Parameters_{ func_name } {{" )
-        for n, cpy_arg in enumerate( args.cpy_args ):
-            lines.append( f"    T{ n } { cpy_arg.name };" )
+        for n, call_arg in enumerate( fai.call_args ):
+            lines.append( f"    T{ n } { call_arg.attribute_name };" )
         lines.append( "};" )
 
-        # Split between inputs and outputs
-        input_arg_decls = []
-        for input_arg in args.jax_ffi_input_args:
-            input_arg_decls.append( f"{ input_arg.cpp_type } { input_arg.name }" )
-
-        output_arg_decls = []
-        for output_arg in args.jax_ffi_output_args:
-            output_arg_decls.append( f"{ output_arg.cpp_type } { output_arg.name }" )
-
-        # start impl: declaration. Split between inputs and outputs
-        lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", input_arg_decls + output_arg_decls ) } ) {{" )
+        # start impl: declaration
+        arg_decls = []
+        for name, arg in fai.named_ffi_args:
+            arg_decls.append( f"{ arg.cpp_type } { name }" )
+        lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", arg_decls ) } ) {{" )
 
         # read the validity_mask
         lines.append( "    const PI64 *validity_mask = validity_mask_buffer.typed_data();" )
 
         # call the function
         lines.append( f"    { func_name }( Parameters_{ func_name }{{" )
-        for cpy_arg in args.cpy_args:
-            lines.append( f"        .{ cpy_arg.name } = { cpy_arg.assembled_code() }," )
+        # for call_arg in fai.call_args:
+        #     lines.append( f"        .{ call_arg.name } = { call_arg.assembled_code() }," )
         lines.append( "    } );" )
 
         # end impl
@@ -434,9 +462,7 @@ class JaxDriver:
         lines.append( "}" )
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
-        output_bind_chain = [ output_arg.bind + "()" for output_arg in args.jax_ffi_output_args ]
-        input_bind_chain = [ input_arg.bind + "()" for input_arg in args.jax_ffi_input_args ]
-        bind_chain = [ "xla::ffi::Ffi::Bind()" ] + input_bind_chain + output_bind_chain
+        bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain
         lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( ".", bind_chain ) } );" )
 
         return lines

@@ -37,7 +37,7 @@ class OtPlan:
         f, g, update_cb = self._ordered_f_and_g()
 
         self.power_diagram = PowerDiagram( f.positions, f.weights )
-        info( self.power_diagram )
+        info( self.power_diagram.newton_dir( g ) )
 
     def _ordered_f_and_g( self ) -> tuple[ SumOfWeightedDiracs, Distribution, callable ]:
         if isinstance( self.f, SumOfWeightedDiracs ):

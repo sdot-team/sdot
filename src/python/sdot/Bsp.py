@@ -2,13 +2,6 @@ from sdot.object_with_tensors import object_with_tensors, TensorField
 from .driver import driver, Return, Mutable, Tensor, CtInt
 
 
-
-class BspConfig:
-    def __init__( self, max_points_per_cell, max_points_per_node ):
-        self.max_points_per_cell = max_points_per_cell
-        self.max_points_per_node = max_points_per_node
-
-
 @object_with_tensors
 class Bsp:
     """
@@ -20,27 +13,52 @@ class Bsp:
     cell_bounds = TensorField( "max_nb_cells", "cb_size" ) # cell index -> min pt, max pt, poly bound
     nb_cells = TensorField( dtype = int )
 
-    def __init__( self, positions, weights = None, max_points_per_cell = 30 ):
+    @staticmethod
+    def make_from( positions, weights = None, max_points_per_cell = 30 ):
         nb_vertices, dim = positions.shape
         max_nb_cells = nb_vertices
+        ct_dim = CtInt( dim )
 
-        self.sorted_vertex_indices, self.cell_indices, self.cell_bounds, self.nb_cells = \
-            driver.call( "make_bsp", "sdot/geometry/Bsp.h",
-                sorted_vertex_indices = Return( Tensor, [ nb_vertices ], int ),
-                cell_indices = Return( Tensor, [ max_nb_cells, 4 ], int ),
-                cell_bounds = Return( Tensor, [ max_nb_cells, 3 * dim + 1 ] ),
-                nb_cells = Return( Tensor, [], int ),
+        driver.call( "make_bsp", "sdot/geometry/make_bsp.h",
+            bsp = Return( Bsp, nb_vertices = nb_vertices, max_nb_cells = max_nb_cells, cb_size = 3 * dim + 1 ),
+            max_points_per_cell = max_points_per_cell,
+            positions = positions,
+            weights = weights,
+            ct_dim = ct_dim,
+            _no_grad = True,
+        )
 
-                max_points_per_cell = max_points_per_cell,
-                positions = positions,
-                weights = weights,
-                ct_dim = CtInt( dim ),
-                _no_grad = True
-            )
-
-        max_nb_cells = positions.shape[ 0 ]
+    @staticmethod
+    def call_arg_analysis_for( jal, driver, name, cpy_arg, *, nb_vertices, max_nb_cells, cb_size ):
+        cpy_arg.code = f"Bsp<{ driver.normalized_dtype },Cpu>"
+        cpy_arg.signature_type = cpy_arg.code
+        cpy_arg._python_ctor = Bsp
+        jal.call_arg_analysis( driver, f"{ name }_{ "sorted_vertex_indices" }", getattr( value, "sorted_vertex_indices" ), cpy_arg.arg( "sorted_vertex_indices" ) )
 
 
+        info( nb_vertices, max_nb_cells, cb_size )
+        raise NotImplementedError
+        # return f"Bsp<{ driver.normalized_dtype },Cpu>"
+
+    # def cpp_class_name( self, driver ):
+    #     raise Pouet
+    #     return f"Bsp<{ driver.normalized_dtype },Cpu>"
+
+    # def call_arg_analysis( self, jax_ffi_arg_list, driver, name, cpy_arg ):
+    #     cpy_arg.code
+    #     jax_ffi_arg_list._add_tensor_arg(
+    #         driver,
+    #         jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),
+    #         jax_ffi_arg_list._tensor_spec( driver, [ 0 for _ in self.shape ], self.dtype ),
+    #         name,
+    #         cpy_arg,
+    #         valid = False
+    #     )
+
+# class BspConfig:
+#     def __init__( self, max_points_per_cell, max_points_per_node ):
+#         self.max_points_per_cell = max_points_per_cell
+#         self.max_points_per_node = max_points_per_node
 
 #         config = BspConfig( max_points_per_cell, max_points_per_node )
 

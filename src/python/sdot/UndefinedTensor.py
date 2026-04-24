@@ -1,4 +1,4 @@
-# from sdot.drivers.compilation.JaxFfiArgList import JaxFfiCompatibleItem
+# from sdot.drivers.compilation.FfiValueList import JaxFfiCompatibleItem
 
 class UndefinedTensor:
     def __init__( self, shape, dtype = None ):
@@ -12,7 +12,7 @@ class UndefinedTensor:
     def cpp_class_name( self, driver ):
         return f"R{ len( self.shape ) }{ driver.normalized_type_for( self.dtype ) }"
 
-    def get_jax_ffi_args( self, jax_ffi_arg_list, driver, name, cpp_arg ):
+    def call_arg_analysis( self, jax_ffi_arg_list, driver, name, cpp_arg ):
         jax_ffi_arg_list._add_tensor_arg(
             driver,
             jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),
