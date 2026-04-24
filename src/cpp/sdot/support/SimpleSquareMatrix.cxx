@@ -31,6 +31,13 @@ UTP DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
     return res;
 }
 
+UTP DTP::Vec DTP::diagonal() const {
+    Vec res( Size(), size() );
+    for( PI i = 0; i < size(); ++i )
+        res[ i ] = operator()( i, i );
+    return res;
+}
+
 UTP T DTP::determinant() const {
     if ( size() == 1 )
         return operator()( 0, 0 );

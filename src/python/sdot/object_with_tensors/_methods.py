@@ -79,7 +79,7 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     return cls
 
 
-def variants_of( cls: Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[ _D ] ]:
+def variants_of( cls ): # : Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[ _D ] ]:
     t = cls.UnidimensionalBatchVersion
     u = cls.UnidimensionalVersion
     b = cls.BatchVersion

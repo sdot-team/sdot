@@ -114,7 +114,8 @@ def test_piecewise_affine():
 
 if __name__ == "__main__":
     check_plan( "[ 0, 1 ] => 1",
-        sdot.SumOfWeightedDiracs( [ [ 0.5, 0.5 ], [ 0.75, 0.5 ], [ 0.5, 0.75 ],  ] ),
+        # sdot.SumOfWeightedDiracs( [ [ 0.5, 0.5 ], [ 0.75, 0.5 ], [ 0.5, 0.75 ],  ] ),
+        sdot.SumOfWeightedDiracs( numpy.random.random( [ 50, 2 ] ) ),
         sdot.PiecewiseConstantGrid( [ [ 1 ] ] ),
     )
 

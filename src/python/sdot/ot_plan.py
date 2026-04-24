@@ -1,4 +1,4 @@
-from sdot.object_with_tensors._methods import _collect_attributes
+# from sdot.object_with_tensors._methods import _collect_attributes
 from sdot.object_with_tensors.ListOfTensorFields import ListOfTensorFields
 from sdot.object_with_tensors.TensorField import TensorField
 
@@ -12,7 +12,7 @@ from .OtPlan1d import OtPlan1d
 from .OtPlan import OtPlan
 from .Bsp import Bsp
 
-from .driver import driver, tensor_conv_for
+# from .driver import driver, tensor_conv_for
 
 from typing import TYPE_CHECKING
 
@@ -56,6 +56,7 @@ def ot_plan( f: Distribution | BatchOfDistributions, g: Distribution | BatchOfDi
 
 def _ot_plan_nd( batch_of_f : BatchOfDistributions, batch_of_g : BatchOfDistributions ) -> BatchOfOtPlans:
     """
+        f is i assumed here to be a BatchOfSumOfWeightedDiracs
     """
     if TYPE_CHECKING:
         from . import BatchOfSumOfWeightedDiracs
@@ -71,9 +72,8 @@ def _ot_plan_nd( batch_of_f : BatchOfDistributions, batch_of_g : BatchOfDistribu
         g = batch_of_g.batch_item( batch_index )
         assert isinstance( g, Distribution )
 
-        if bindings is None:
-            bindings = _nd_bindings( f, g )
-
+        plan = OtPlan( f, g )
+        plan.solve()
         bsp = Bsp( f.positions, f.weights )
         solve_nd( bindings, bsp, g )
 

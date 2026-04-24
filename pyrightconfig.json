@@ -29,6 +29,6 @@
   "reportOptionalMemberAccess": "none",
   "reportGeneralTypeIssues": "none",
   "reportPrivateUsage": "none",
-  "stubPath": "",
-  "extraBuiltins": ["ic"]
+  "stubPath": "stubs",
+  "extraBuiltins": ["ic", "info"]
 }

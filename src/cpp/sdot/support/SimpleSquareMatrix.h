@@ -13,7 +13,8 @@ public:
     using              Content                 = DsVec<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
     using              Vec                     = DsVec<T,ct_size,Arch>;
 
-    /**/               SimpleSquareMatrix      ( PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/               SimpleSquareMatrix      ( Size, PI size, T value ) : _content( Size(), size * size, value ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/               SimpleSquareMatrix      ( Size, PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
 
     static auto        with_func               ( PI size, auto &&func );
 
@@ -25,10 +26,11 @@ public:
     auto               with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
     EigenSystem        eigen_system            () const;
     T                  determinant             () const;
+    Vec                diagonal                () const;
     SimpleSquareMatrix cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
     Vec                solve_ge                ( Vec b ) const;   ///< Gaussian elimination with partial pivoting; zero pivot → x[p]=0 (handles degenerate cells)
-    Vec                solve                   ( const Vec &vec ) const;
     SimpleSquareMatrix inverse                 () const;  ///< Gauss-Jordan on [A | I]; zero pivot row → identity row in result
+    Vec                solve                   ( const Vec &vec ) const;
     PI                 size                    ( PI ) const { return size(); }
     PI                 size                    () const { return ct_size >= 0 ? ct_size : _size; }
 

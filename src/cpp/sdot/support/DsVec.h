@@ -62,6 +62,7 @@ public:
     auto         end                     ();
 
     PI           arg_max                 () const;
+    T            max                     () const;
 
 
     friend DsVec normalized              ( const DsVec &a ) { return a / norm_2( a ); }
@@ -77,8 +78,8 @@ public:
     friend DsVec operator-               ( const DsVec &a, const DsVec &b ) { DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] - b[ i ]; return res; }
     friend DsVec operator*               ( const T &a, const DsVec &b ) { DsVec res( Size(), b.size() ); for( PI i = 0; i < b.size(); ++i ) res[ i ] = a * b[ i ]; return res; }
     friend DsVec operator/               ( const DsVec &a, const T &b ) { DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = a[ i ] / b; return res; }
-    friend DsVec max                     ( const DsVec &a, const DsVec &b ) { using namespace std; DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = max( a[ i ], b[ i ] ); return res; }
-    friend DsVec min                     ( const DsVec &a, const DsVec &b ) { using namespace std; DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = min( a[ i ], b[ i ] ); return res; }
+    friend DsVec max                     ( const DsVec &a, const DsVec &b ) { using namespace std; DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = std::max( a[ i ], b[ i ] ); return res; }
+    friend DsVec min                     ( const DsVec &a, const DsVec &b ) { using namespace std; DsVec res( Size(), a.size() ); for( PI i = 0; i < a.size(); ++i ) res[ i ] = std::min( a[ i ], b[ i ] ); return res; }
     friend T     dot                     ( const DsVec &a, const DsVec &b ) { T res = 0; for( PI i = 0; i < a.size(); ++i ) res += a[ i ] * b[ i ]; return res; }
 
     friend void  operator+=              ( DsVec &a, const DsVec &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] += b[ i ]; }

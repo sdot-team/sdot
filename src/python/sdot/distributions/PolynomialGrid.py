@@ -1,8 +1,9 @@
-from sdot.object_with_tensors._methods import TensorField, ListOfTensorFields, object_with_tensors, Distribution, driver
+from sdot.object_with_tensors._methods import TensorField, ListOfTensorFields, object_with_tensors, driver
 from itertools import product as iproduct
+from .Distribution import Distribution
 from typing import TYPE_CHECKING, Self
 from bisect import bisect_right
-from math import prod, floor
+from math import prod # , floor
 
 
 @object_with_tensors

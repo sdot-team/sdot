@@ -1,8 +1,7 @@
-from sdot.object_with_tensors._methods import TensorField, ListOfTensorFields, object_with_tensors, Distribution, driver
-# from itertools import product as iproduct
+from sdot.object_with_tensors._methods import TensorField, ListOfTensorFields, object_with_tensors, driver
 from .PolynomialGrid import PolynomialGrid
+from .Distribution import Distribution
 from typing import TYPE_CHECKING
-# import numpy as np
 
 
 @object_with_tensors

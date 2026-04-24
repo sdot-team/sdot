@@ -1,26 +1,48 @@
+from .object_with_tensors._methods import object_with_tensors, TensorField, ListOfTensorFields, driver
+from .distributions.BatchOfDistributions import BatchOfDistributions
+from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
+from .distributions.Distribution import Distribution
+from .PowerDiagram import PowerDiagram
 from .OtPlan1d import OtPlan1d
 
-__all__ = [ "OtPlan" ]
-
+@object_with_tensors
 class OtPlan:
     """
-        barycenters : Tensor[ dirac_index, dim ]
-        potentials : Tensor[ dirac_index ]
-        distances : Tensor[]
-        cuts : Tensor[ dirac_index, 2 ]
     """
 
-    def __init__( self, distances, barycenters, potentials, cuts ):
-        assert barycenters.ndim == 2
-        assert potentials.ndim == 1
-        assert distances.ndim == 0
-        assert cuts.ndim == 2
+    # outputs
+    barycenters = TensorField( "nb_diracs", "dim" )
+    potentials = TensorField( "nb_diracs" )
+    distance = TensorField()
 
-        self.barycenters = barycenters
-        self.potentials = potentials
-        self.distances = distances
-        self.cuts = cuts
+    # inputs
+    f: Distribution
+    g: Distribution
+
+    # intermediate data
+    power_diagram: PowerDiagram
+
+    def __init__( self, f: Distribution, g: Distribution, call_solve = True ):
+        self.f = f
+        self.g = g
+
+        if call_solve:
+            self.solve()
 
     def unidimensional_version( self ):
         assert self.barycenters.shape[ 1 ] == 1
         return OtPlan1d( self.distances, self.barycenters[ :, 0 ], self.potentials, self.cuts )
+
+    def solve( self ):
+        f, g, update_cb = self._ordered_f_and_g()
+
+        self.power_diagram = PowerDiagram( f.positions, f.weights )
+        info( self.power_diagram )
+
+    def _ordered_f_and_g( self ) -> tuple[ SumOfWeightedDiracs, Distribution, callable ]:
+        if isinstance( self.f, SumOfWeightedDiracs ):
+            def nothing_to_do():
+                pass
+            return self.f, self.g, nothing_to_do
+
+        raise NotImplementedError

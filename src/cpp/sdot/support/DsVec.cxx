@@ -222,6 +222,14 @@ UTP PI DTP::arg_max() const {
     return res;
 }
 
+UTP T DTP::max() const {
+    T res = operator[]( 0 );
+    for( PI i = 1; i < size(); ++i )
+        if ( res < operator[]( i ) )
+            res = i;
+    return res;
+}
+
 #undef UTP
 #undef DTP
 

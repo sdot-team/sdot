@@ -16,7 +16,7 @@ class Bsp:
     """
 
     sorted_vertex_indices = TensorField( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
-    cell_children = TensorField( "max_nb_cells", "2", dtype = int ) # cell index -> children
+    cell_indices = TensorField( "max_nb_cells", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
     cell_bounds = TensorField( "max_nb_cells", "cb_size" ) # cell index -> min pt, max pt, poly bound
     nb_cells = TensorField( dtype = int )
 
@@ -24,10 +24,10 @@ class Bsp:
         nb_vertices, dim = positions.shape
         max_nb_cells = nb_vertices
 
-        self.sorted_vertex_indices, self.cell_children, self.cell_bounds, self.nb_cells = \
+        self.sorted_vertex_indices, self.cell_indices, self.cell_bounds, self.nb_cells = \
             driver.call( "make_bsp", "sdot/geometry/Bsp.h",
                 sorted_vertex_indices = Return( Tensor, [ nb_vertices ], int ),
-                cell_children = Return( Tensor, [ max_nb_cells, 2 ], int ),
+                cell_indices = Return( Tensor, [ max_nb_cells, 4 ], int ),
                 cell_bounds = Return( Tensor, [ max_nb_cells, 3 * dim + 1 ] ),
                 nb_cells = Return( Tensor, [], int ),
 
