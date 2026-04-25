@@ -86,11 +86,9 @@ struct BspMaker {
         while ( beg < end ) {
             const SI beg_index = bsp.sorted_vertex_indices[ beg ];
             const TF sp = dot( positions.row( beg_index ), split_dir ) - split_dot;
-            if ( sp > 0 ) {
-                const SI end_index = bsp.sorted_vertex_indices[ --end ];
-                for( PI d = 0; d < dim; ++d )
-                    std::swap( positions( beg_index, d ), positions( end_index, d ) );
-            } else
+            if ( sp > 0 )
+                std::swap( bsp.sorted_vertex_indices[ beg ], bsp.sorted_vertex_indices[ --end ] );
+            else
                 ++beg;
         }
 
@@ -191,7 +189,7 @@ struct BspMaker {
         update_rec( 0 );
     }
 
-    TensorView<SI,0,Arch> max_points_per_cell;
+    SI                    max_points_per_cell;
     TensorView<TF,2,Arch> positions;
     TensorView<TF,1,Arch> weights;
     Bsp<TF,Arch>          bsp;
@@ -201,7 +199,6 @@ struct BspMaker {
 void make_bsp( auto &&p ) {
     constexpr int ct_dim = DECAYED_TYPE_OF( p.ct_dim )::value;
     using TF = DECAYED_TYPE_OF( p.positions( 0, 0 ) );
-    P( p.bsp.sorted_vertex_indices.size( 0 ) );
     BspMaker<TF,ct_dim,Cpu> bm{
         p.max_points_per_cell,
         p.positions,

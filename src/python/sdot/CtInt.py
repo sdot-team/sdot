@@ -10,8 +10,5 @@ class CtInt:
         return f"CtInt<{ self.value }>"
 
     def configure_call_arg( self, call_arg, fai, mutable, driver ):
-        cpy_arg._python_ctor = lambda : CtInt( self.value )
-        cpy_arg.code = f"CtInt<{ self.value }>()"
-
-    # def to_nanobind_compatible_objects( self ):
-    #     return []
+        call_arg.base_code = f"CtInt<{ self.value }>()"
+        call_arg.signature = f"C{ self.value }"

@@ -67,7 +67,7 @@ class CallArg:
             return self.configure_as_parameter( python_value, "FP64", mutable, fai, driver )
 
         if isinstance( python_value, int ):
-            return self.configure_as_parameter( python_value, "PI64", mutable, fai, driver )
+            return self.configure_as_parameter( python_value, "SI64", mutable, fai, driver )
 
         if isinstance( python_value, ( list, tuple ) ):
             #     cpy_arg._python_ctor = type( value )
@@ -91,11 +91,9 @@ class CallArg:
         if mutable:
             raise NotImplementedError
         else:
-            n = fai.add_parameter( python_value, cpp_type )
-
-            self.python_ctor = None # not mutable -> we can directly use python_value
+            ffi_parameter = fai.add_parameter( python_value, cpp_type )
+            self.base_code = ffi_parameter.arg_name
             self.signature = cpp_type
-            self.base_code = n
 
     def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver, valid = True ) -> Self:
         if driver.is_zero_tensor( python_value ):

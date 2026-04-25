@@ -225,7 +225,7 @@ class JaxDriver:
             func = jax.ffi.ffi_call( module_name, fai.output_specs )
 
             # normalize the output
-            ret = func( *fai.input_values )
+            ret = func( *fai.input_values, **fai.attributes )
 
             # always return a tuple
             if isinstance( ret, jax.Array ):
@@ -255,7 +255,7 @@ class JaxDriver:
 
                 bfai = fai.backward_version( self, outputs, grads_of_the_outputs )
                 func = jax.ffi.ffi_call( module_name + "_backward", bfai.output_specs )
-                ret = func( *bfai.input_values )
+                ret = func( *bfai.input_values, **bfai.attributes )
                 if isinstance( ret, jax.Array ):
                     ret = ( ret, )
 

@@ -152,13 +152,16 @@ class FfiArgInfo:
     def add_parameter( self, python_value: any, cpp_type: str ) -> str:
         n = len( self.ffi_parameters )
 
-        self.ffi_parameters.append( FfiParameter(
+        res = FfiParameter(
             python_value = python_value,
+            arg_name = f"p{ n }",
             cpp_type = cpp_type,
-            bind = "Attr<float>"
-        ) )
+            bind = f"Attr<{ cpp_type }>"
+        )
 
-        return f"p{ n }"
+        self.ffi_parameters.append( res )
+
+        return res
 
     def update_differentiable_input_values_with( self, differentiable_input_values ):
         # replace differentiable_ffi_inputs
@@ -176,7 +179,14 @@ class FfiArgInfo:
 
     @property
     def input_values( self ):
-        return [ input.python_value for input in self.non_differentiable_ffi_inputs + self.differentiable_ffi_inputs + self.ffi_parameters ]
+        return [ input.python_value for input in self.non_differentiable_ffi_inputs + self.differentiable_ffi_inputs ]
+
+    @property
+    def attributes( self ):
+        res = {}
+        for p in self.ffi_parameters:
+            res[ p.arg_name ] = p.python_value
+        return res
 
     @property
     def named_ffi_args( self ) -> list[ tuple[ str, FfiOutput | FfiInput | FfiOutput | FfiInput | FfiParameter ] ]:

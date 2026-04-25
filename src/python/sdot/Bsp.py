@@ -1,5 +1,5 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
-from .driver import driver, Return, Mutable, Tensor, CtInt
+from .driver import driver, Return, Tensor, CtInt
 
 
 @object_with_tensors
@@ -10,7 +10,7 @@ class Bsp:
 
     sorted_vertex_indices = TensorField( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
     cell_indices = TensorField( "max_nb_cells", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
-    cell_bounds = TensorField( "max_nb_cells", "cb_size" ) # cell index -> min pt, max pt, poly bound
+    cell_bounds = TensorField( "max_nb_cells", "3 * dim + 1" ) # cell index -> min pt, max pt, poly bound
     nb_cells = TensorField( dtype = int )
 
     @staticmethod
@@ -19,41 +19,18 @@ class Bsp:
         max_nb_cells = nb_vertices
         ct_dim = CtInt( dim )
 
-        driver.call( "make_bsp", "sdot/geometry/make_bsp.h",
-            bsp = Return( Bsp, nb_vertices = nb_vertices, max_nb_cells = max_nb_cells, cb_size = 3 * dim + 1 ),
+        return driver.call( "make_bsp", "sdot/geometry/make_bsp.h",
+            bsp = Return( Bsp, nb_vertices = nb_vertices, max_nb_cells = max_nb_cells, dim = dim ),
             max_points_per_cell = max_points_per_cell,
             positions = positions,
             weights = weights,
-            ct_dim = ct_dim,
             no_grad = True,
+            ct_dim = ct_dim,
         )
-
-    @staticmethod
-    def configure_call_arg_for( jal, driver, name, cpy_arg, *, nb_vertices, max_nb_cells, cb_size ):
-        cpy_arg.code = f"Bsp<{ driver.normalized_dtype },Cpu>"
-        cpy_arg.signature_type = cpy_arg.code
-        cpy_arg._python_ctor = Bsp
-        jal.configure_call_arg( driver, f"{ name }_{ "sorted_vertex_indices" }", getattr( value, "sorted_vertex_indices" ), cpy_arg.arg( "sorted_vertex_indices" ) )
-
-
-        info( nb_vertices, max_nb_cells, cb_size )
-        raise NotImplementedError
-        # return f"Bsp<{ driver.normalized_dtype },Cpu>"
 
     # def cpp_class_name( self, driver ):
     #     raise Pouet
     #     return f"Bsp<{ driver.normalized_dtype },Cpu>"
-
-    # def configure_call_arg( self, jax_ffi_arg_list, driver, name, cpy_arg ):
-    #     cpy_arg.code
-    #     jax_ffi_arg_list._add_tensor_arg(
-    #         driver,
-    #         jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),
-    #         jax_ffi_arg_list._tensor_spec( driver, [ 0 for _ in self.shape ], self.dtype ),
-    #         name,
-    #         cpy_arg,
-    #         valid = False
-    #     )
 
 # class BspConfig:
 #     def __init__( self, max_points_per_cell, max_points_per_node ):
