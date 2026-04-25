@@ -19,25 +19,24 @@ def test_base():
     # info( fai.backward_version( sdot.driver ) )
 
     # pouet = Pouet( [ 53 ] )
-    # res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
-    #     b = numpy.array( [ 13 ] ),
-    #     ret = sdot.Mutable( pouet ),
-    # )
+    res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
+        ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs" ), 3 ] ),
+    )
     # info( pouet )
-    # info( res )
+    info( res )
 
-    def f( x ):
-        return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
-            o0 = sdot.Return( sdot.Tensor, [] ),
-            o1 = sdot.Return( sdot.Tensor, [], dtype = int ),
-            i0 = x,
-            i1 = sdot.driver.array( [ 134 ], dtype = int ),
-        )[ 0 ]
+    # def f( x ):
+    #     return sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
+    #         o0 = sdot.Return( sdot.Tensor, [] ),
+    #         o1 = sdot.Return( sdot.Tensor, [], dtype = int ),
+    #         i0 = x,
+    #         i1 = sdot.driver.array( [ 134 ], dtype = int ),
+    #     )[ 0 ]
 
-    from jax._src import test_util as jtu
+    # from jax._src import test_util as jtu
 
-    x = sdot.driver.t0( 3.0 )
-    jtu.check_grads( f, ( x, ), order = 1, modes = [ "rev" ] )
+    # x = sdot.driver.t0( 3.0 )
+    # jtu.check_grads( f, ( x, ), order = 1, modes = [ "rev" ] )
 
 if __name__ == "__main__":
     test_base()

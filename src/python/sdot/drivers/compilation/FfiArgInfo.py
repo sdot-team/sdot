@@ -1,3 +1,4 @@
+from .FfiDynamicAxis import FfiDynamicAxis
 from .FfiParameter import FfiParameter
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
@@ -16,42 +17,116 @@ class FfiArgInfo:
             - re-assembly and update of `args` from outputs of the jax calls (python side)
             - generation of the assembly code in C++
 
-        It also prepares validity_mask (added in non_differentiable_ffi_inputs) to take into account the invalid tensors and gradients
+        It also prepares a U64 tensor input (added in non_differentiable_ffi_inputs) with
+        - a validity mask, to store in a dynamic fashion the invalid tensors and gradients
+        - dynamic axe sizes
+
+        Also, it can add a U64 output tensor for
+        - update dynamic axe sizes
     """
 
     def __init__( self, call_args: dict, driver, parameters_struct = None ):
-        # rec find sub args
+        # ffi values (for XLA ffi)
         self.non_differentiable_ffi_inputs: list[ FfiInput ] = []
         self.differentiable_ffi_inputs: list[ FfiInput ] = []
         self.ffi_parameters: list[ FfiParameter ] = []
         self.ffi_outputs: list[ FfiOutput ] = []
+
+        # python/cpp values (for the user)
         self.call_args: list[ CallArg ] = [] # one for each call arg
-        self.validity_mask_values = []
 
-        self.parameters_struct = parameters_struct
+        #
+        self.dynamic_axes: dict[ FfiDynamicAxis ] = {} # registerd dynamic axes
 
+        # configuration
+        self.parameters_struct = parameters_struct # struct name to use instead of the parameter list
+
+        # input u64 value
+        self.u64_input_bit_offset = 64 # where to set the next input bit (64 means that we will have to allocate a new U64 in self.u64_input_values)
+        self.u64_input_values = []
+
+        # input u64 value
+        self.u64_output_bit_offset = 0 # where to set the next output bit (multiple of 64 means that we will have to allocate a new U64)
+        self.u64_output_size = 0
+
+        # recursive analysis
         for arg_name, arg_value in call_args.items():
             self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, False, driver ) )
 
-        # make validity_input_arg
-        validity_mask = numpy.zeros( [ ( len( self.validity_mask_values ) + 63 ) // 64 ], dtype = numpy.uint64 )
-        for n, v in enumerate( self.validity_mask_values ):
-           if v:
-               validity_mask[ n // 64 ] |= ( 1 << ( n % 64 ) )
+        # register u64_input
+        if self.u64_input_values:
+            self.non_differentiable_ffi_inputs.append( FfiInput(
+                num_in_sub_list = -1,
+                differentiable = False,
+                validity_index = -1,
+                requires_grad = False,
+                python_value = numpy.array( self.u64_input_values, numpy.uint64 ),
+                arg_name = "u64_input",
+                cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
+                valid = None,
+                bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
+            ) )
 
-        # register the validity_mask
-        # self.validity_mask_index = len( self.non_differentiable_ffi_inputs )
-        self.non_differentiable_ffi_inputs.append( FfiInput(
-            num_in_sub_list = -1,
-            differentiable = False,
-            validity_index = -1,
-            requires_grad = False,
-            python_value = validity_mask,
-            arg_name = "validity_mask_buffer",
-            cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
-            valid = None,
-            bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
-        ) )
+        # register u64_output
+        if self.u64_output_size:
+            self.ffi_outputs.append( FfiOutput(
+                num_in_sub_list = len( self.ffi_outputs ),
+                differentiable = False,
+                validity_index = -1,
+                arg_name = "u64_output",
+                cpp_type = driver.ffi_tensor_output_arg_code( 1, numpy.uint64 ),
+                valid = None,
+                spec = driver.ffi_tensor_output_spec( [ self.u64_output_size ], numpy.uint64 ),
+                bind = driver.ffi_tensor_output_bind( 1, numpy.uint64 ),
+            ) )
+
+
+        # # append input dynamic axis sizes at the tail of validity_mask (read-only source)
+        # # and finalize each CallArg to use DynamicAxis::input with the writable slot in ffi_output_for_dynamic_sizes
+        # if self._input_dyn_axis_sizes:
+        #     extra = numpy.array( [ s for _, s in self._input_dyn_axis_sizes ], dtype = numpy.uint64 )
+        #     validity_mask = numpy.concatenate( [ validity_mask, extra ] )
+        #     out_name = self.ffi_output_for_dynamic_sizes.arg_name
+        #     for dyn_call_arg, extra_index in self._pending_input_dyn_call_args:
+        #         slot   = n_out + extra_index
+        #         offset = n_validity_words + extra_index
+        #         dyn_call_arg.base_code = (
+        #             f"DynamicAxis::input( { out_name }->typed_data() + { slot }, "
+        #             f"SI( validity_mask[{ offset }] ) )"
+        #         )
+
+    def add_dynamic_axis( self, name: str, driver ) -> FfiDynamicAxis:
+        """ Register a named dynamic axis. Returns the FfiDynamicAxis. """
+        if name in self.dynamic_axes:
+            return self.dynamic_axes[ name ]
+
+        ffi_dyn_axis = FfiDynamicAxis(
+            pos_in_u64_output = self.u64_output_size,
+            name = name,
+        )
+
+        self.dynamic_axes[ name ] = ffi_dyn_axis
+        self.u64_output_size += 1
+
+        return ffi_dyn_axis
+
+    # def add_input_dynamic_axis( self, axis_name: str, size: int ) -> 'CallArg':
+    #     """ Register an input-side dynamic axis; its size is appended to the validity_mask buffer. """
+    #     extra_index = len( self._input_dyn_axis_sizes )
+    #     self._input_dyn_axis_sizes.append( ( axis_name, size ) )
+    #     info( axis_name, size )
+
+    #     dyn_call_arg = CallArg()
+    #     dyn_call_arg.attribute_name = axis_name
+    #     dyn_call_arg.python_value = None
+    #     dyn_call_arg.io_category = 3
+    #     dyn_call_arg.sub_list = None
+    #     dyn_call_arg.brace_ctor = False
+    #     dyn_call_arg.base_code = ""  # filled after validity_mask is built
+    #     dyn_call_arg.signature = "Dyn"
+
+    #     self._pending_input_dyn_call_args.append( ( dyn_call_arg, extra_index ) )
+    #     return dyn_call_arg
 
     def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int, FfiInput ]:
         if valid is None:
@@ -220,6 +295,8 @@ class FfiArgInfo:
         # turn fwd arg into inputs
         nargs = {}
         for call_arg in self.call_args:
+            if call_arg.io_category == 3:  # DynamicAxis — structural only, no Python value
+                continue
             if call_arg.io_category == 2:
                 nargs[ call_arg.attribute_name ] = call_arg.construct( self, outputs )
             else:

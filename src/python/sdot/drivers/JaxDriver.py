@@ -211,6 +211,7 @@ class JaxDriver:
 
         # get a jax compatible set of arg lists
         fai = FfiArgInfo( args, self, parameters_struct = _parameters_struct )
+        info( fai )
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
@@ -372,6 +373,7 @@ class JaxDriver:
     def _make_dylib( self, func_name: str, includes: list[ str ], fai: FfiArgInfo, module_name: str, make_backward_binding: bool ):
         # include list
         std_includes = [
+            "sdot/support/DynamicAxis.h",
             "sdot/jax_ffi_wrappers.h",
             "nanobind/nanobind.h",
         ]

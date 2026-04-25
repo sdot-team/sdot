@@ -1,5 +1,6 @@
 from .collect_attributes import collect_attributes #, Annotation
 from ...UndefinedTensor import UndefinedTensor
+from ...Dyn import Dyn
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .Return import Return
@@ -129,20 +130,45 @@ class CallArg:
             return outputs[ index ]
         return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype ):
-        ffi_output = fai.add_output_tensor( driver, shape, dtype )
+    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False ):
+        # resolve Dyn axes: register them, build actual (capacity) shape
+        actual_shape = []
+        dyn_axes = {}  # tensor axis position -> FfiDynamicAxis
+        for i, s in enumerate( shape ):
+            if isinstance( s, Dyn ):
+                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, s.capacity, driver )
+                actual_shape.append( s.capacity )
+            else:
+                actual_shape.append( s )
+
+        ffi_output = fai.add_output_tensor( driver, actual_shape, dtype )
         self.ffi_output = ffi_output
-        dim = len( shape )
+        dim = len( actual_shape )
+
+        # register this tensor as a capacity source for each dyn axis
+        for tensor_axis, ffi_dyn_axis in dyn_axes.items():
+            ffi_dyn_axis.add_cap_source( ffi_output, tensor_axis )
 
         self.base_code = f"tensor_view( CtInt<{ dim }>(), { ffi_output.arg_name }, validity_mask[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 
-        def python_ctor( fai, outputs ):
-            return CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
-                fallback_shape = shape,
+        def _python_ctor( fai, outputs ):
+            output = CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
+                fallback_shape = actual_shape,
                 fallback_dtype = dtype,
             )
-        self.python_ctor = python_ctor
+            if dyn_axes and fai.ffi_output_for_dynamic_sizes.num_in_sub_list < len( outputs ):
+                sizes = outputs[ fai.ffi_output_for_dynamic_sizes.num_in_sub_list ]
+                slices = tuple(
+                    slice( None, int( sizes[ dyn_axes[ i ].axis_index ].item() ) ) if i in dyn_axes else slice( None )
+                    for i in range( dim )
+                )
+                output = output[ slices ]
+            if for_single_item:
+                return output.item()
+            return output
+
+        self.python_ctor = _python_ctor
 
     def configure_as_return( self, fai, driver, return_type, *type_args, **type_kwargs ):
         """ complete self, with information for return """
@@ -155,12 +181,10 @@ class CallArg:
 
         # base types
         if return_type is float:
-            # return self.configure_as_raw_return( fai, driver, return_type, *args, **kwargs )
-            raise NotImplementedError
+            return self.configure_as_output_tensor( fai, driver, [], float, for_single_item = True )
 
         if return_type is int:
-            # return self.configure_as_raw_return( fai, driver, return_type, *args, **kwargs )
-            raise NotImplementedError
+            return self.configure_as_output_tensor( fai, driver, [], int, for_single_item = True )
 
         # -> use collect_attributes
         self.configure_as_output_object_with_collect_attributes( fai, driver, return_type, *type_args, **type_kwargs )
@@ -181,6 +205,12 @@ class CallArg:
         self.sub_list = []
         for name, _ in collect_attributes( type( python_value ) ):
             self.sub_list.append( self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver ) )
+
+        # add DynamicAxis members for input objects that declare dynamic axes
+        dynamic_axes = getattr( python_value, 'dynamic_axes', None )
+        if dynamic_axes:
+            for axis_name, size in dynamic_axes.items():
+                self.sub_list.append( fai.add_input_dynamic_axis( axis_name, size ) )
 
     def configure_as_output_object_with_collect_attributes( self, fai, driver, return_type, *type_args, **type_kwargs ):
         if callable( getattr( return_type, "base_code_for", None ) ):

@@ -3,8 +3,9 @@ from .TensorField import TensorField, _axis_names
 
 from ..driver import driver
 
-from typing import TypeVar, Type
+from typing import TypeVar, Type, cast
 # import numpy
+import re
 
 _D = TypeVar( '_D' ) # , bound=Distribution
 _T = TypeVar( '_T' )
@@ -41,12 +42,21 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     fields = _collect_attributes( cls )
 
     # all the axis names
-    all_the_axis_names = [ "batch_size" ]
+    static_axis_names = [ "batch_size" ]
     for _, field in fields:
         if isinstance( field, TensorField ):
-            for name in _axis_names( field.axis_names ):
-                if name not in all_the_axis_names:
-                    all_the_axis_names.append( name )
+            for name in _axis_names( field.static_axis_names ):
+                if name not in static_axis_names:
+                    static_axis_names.append( name )
+
+    dynamic_axis_names = []
+    for _, field in fields:
+        if isinstance( field, TensorField ):
+            for name in field.dynamic_axis_names:
+                if name not in dynamic_axis_names:
+                    dynamic_axis_names.append( name )
+                    if name in static_axis_names:
+                        raise RuntimeError( f"axes can't ne both dynamic and static (for axis { name })" )
 
     # make the variants (batch, unidim, ...)
     clu = _make_variant( cls, fields, batch_version = 0, unidimensional_version = 1 )
@@ -71,10 +81,10 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     clt.BaseVersion = cls
 
     # add generated methods and properties for these variants
-    _setup_distribution_class( cls.UnidimensionalBatchVersion, all_the_axis_names )
-    _setup_distribution_class( cls.UnidimensionalVersion, all_the_axis_names )
-    _setup_distribution_class( cls.BatchVersion, all_the_axis_names )
-    _setup_distribution_class( cls, all_the_axis_names )
+    _setup_distribution_class( cls.UnidimensionalBatchVersion, static_axis_names, dynamic_axis_names )
+    _setup_distribution_class( cls.UnidimensionalVersion, static_axis_names, dynamic_axis_names )
+    _setup_distribution_class( cls.BatchVersion, static_axis_names, dynamic_axis_names )
+    _setup_distribution_class( cls, static_axis_names, dynamic_axis_names )
 
     return cls
 
@@ -136,7 +146,7 @@ def _make_variant( cls, fields, batch_version : int, unidimensional_version : in
     return res
 
 
-def _setup_distribution_class( cls, axis_names : list[ str ] ):
+def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axis_names : list[ str ] ):
     fields = _collect_attributes( cls )
 
     # --- __init__ -----------------------------------------------------------
@@ -161,9 +171,22 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
         cls.dim = property( lambda self: 1 )
 
     # --- properties from axes (dim, nb_points, ...) --------------------------
-    for axis_name in axis_names:
+    for axis_name in static_axis_names:
         if axis_name not in vars( cls ):
             setattr( cls, axis_name, property( lambda self, a = axis_name: _axis_count( self, a ) ) )
+
+    for axis_name in dynamic_axis_names:
+        # tensor info -> axis_name + "_capacity"
+        setattr( cls, axis_name + "_capacity", property( lambda self, a = axis_name + "_capacity": _axis_count( self, a ) ) )
+
+        # else, add an attributen handled by a property
+        def get_dyn( self ):
+            return getattr( self, "_" + axis_name, 0 )
+        def set_dyn( self, value: int ):
+            if value >= getattr( axis_name + "_capacity" ):
+                raise RuntimeError( f"no enough capacity (for '{ axis_name }')" )
+            return setattr( self, "_" + axis_name, value )
+        setattr( cls, axis_name, property( get_dyn, set_dyn ) )
 
     # --- tensor_list -----------
     if 'tensors' not in vars( cls ):
@@ -174,6 +197,20 @@ def _setup_distribution_class( cls, axis_names : list[ str ] ):
                     res.append( ( name, getattr( self, name ) ) )
             return res
         setattr( cls, 'tensors', property( tensors ) )
+
+    # --- dynamic_axes: {axis_name -> actual_size} for all Dyn axes -----------
+    if 'dynamic_axes' not in vars( cls ):
+        def _dynamic_axes( self ):
+            res = {}
+            for name, field in fields:
+                if isinstance( field, TensorField ) and field.dynamic_axis_names:
+                    tensor_value = self.__dict__.get( f'_{ name }' )
+                    if tensor_value is not None:
+                        for i, axis_name in enumerate( field.axis_names ):
+                            if axis_name in field.dynamic_axis_names and axis_name not in res:
+                                res[ axis_name ] = int( tensor_value.shape[ i ] )
+            return res
+        setattr( cls, 'dynamic_axes', property( _dynamic_axes ) )
 
     # --- batch_version -----------
     if hasattr( cls, "BatchVersion" ) and "batch_version" not in vars( cls ):

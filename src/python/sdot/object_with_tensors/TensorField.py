@@ -1,5 +1,6 @@
 from ..UndefinedTensor import UndefinedTensor
 from ..driver import driver
+from ..Dyn import Dyn
 
 from typing import Self, overload
 from inspect import signature
@@ -27,12 +28,25 @@ class TensorField:
     When we set a TensorField, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
     """
 
-    def __init__( self, *axis_names: str, dtype = None ):
+    def __init__( self, *axis_names, dtype = None ):
         self.comes_from_a_dim_list = False
-        self.removed_dim_axes = []
-        self.axis_names = axis_names
+        self.removed_dim_axes = [] # used in variants like 1d version, ...
         self.dtype = dtype
         self.name = None
+
+        self.dynamic_axis_names = []
+        self.static_axis_names = []
+        self.axis_names = []
+        for axis_name in axis_names:
+            if isinstance( axis_name, Dyn ):
+                if not axis_name.name.isidentifier():
+                    raise RuntimeError( f"dynamic axes do not support operations (for axis { axis_name.name })" )
+                self.axis_names.append( axis_name.name + "_capacity" )
+                self.dynamic_axis_names.append( axis_name.name )
+            else:
+                self.static_axis_names.append( axis_name )
+                self.axis_names.append( axis_name )
+
 
     @property
     def ndim( self ):
