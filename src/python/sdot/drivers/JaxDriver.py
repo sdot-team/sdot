@@ -185,7 +185,7 @@ class JaxDriver:
         return "jax"
 
     def is_a_tensor( self, value ):
-        return isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct ) )
+        return isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct, ad_util.SymbolicZero ) )
 
     def differentiable_type( self, dtype ):
         if dtype is None or dtype is float:
@@ -217,17 +217,19 @@ class JaxDriver:
         non_differentiable_outputs = []
 
         # Rq: on pourrait avoir des Tracers dans les non_differentiable_inputs !
-        # -->
         def _call_ffi( differentiable_input_values ):
             fai.update_differentiable_input_values_with( differentiable_input_values )
             func = jax.ffi.ffi_call( module_name, fai.output_specs )
             ret = func( *fai.input_values )
+            if isinstance( ret, jax.Array ):
+                ret = [ ret ]
 
             # store non_differentiable_outputs in a separate list
             lim = len( fai.non_differentiable_ffi_outputs )
             for r in ret[ : lim ]:
                 non_differentiable_outputs.append( r )
 
+            # differentiable_outputs
             return tuple( ret[ lim : ] )
 
         if no_grad:
@@ -240,7 +242,7 @@ class JaxDriver:
             def ffi_op_fwd( _differentiable_inputs ):
                 # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
                 differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_inputs )
-                differentiable_outputs = _call_ffi( differentiable_inputs )
+                differentiable_outputs = _call_ffi( differentiable_inputs ) # tuple
 
                 return differentiable_outputs, ( differentiable_inputs, differentiable_outputs )
 
@@ -251,14 +253,11 @@ class JaxDriver:
 
                 bfai = fai.backward_version( self, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
                 func = jax.ffi.ffi_call( module_name + "_backward", bfai.output_specs )
+                ret = func( *bfai.input_values )
+                if isinstance( ret, jax.Array ):
+                    ret = ( ret, )
 
-                res = func( *bfai.input_values )
-                return res
-                # if isinstance( res, list ):
-                #     return tuple( res )
-                # if isinstance( res, tuple ):
-                #     return res
-                # return ( res, )
+                return ( tuple( ret ), )
 
 
             ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )

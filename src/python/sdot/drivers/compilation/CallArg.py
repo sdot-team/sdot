@@ -1,4 +1,5 @@
-from .collect_attributes import collect_attributes, Annotation
+from .collect_attributes import collect_attributes #, Annotation
+from ...UndefinedTensor import UndefinedTensor
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .Return import Return
@@ -97,6 +98,9 @@ class CallArg:
             self.base_code = n
 
     def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver, valid = True ) -> Self:
+        if driver.is_zero_tensor( python_value ):
+            return self.configure( UndefinedTensor( python_value.shape, python_value.dtype ), fai, mutable, driver )
+
         ndim = len( python_value.shape )
         self.signature = f"T{ ndim }{ driver.normalized_type_for( python_value.dtype ) }"
 
