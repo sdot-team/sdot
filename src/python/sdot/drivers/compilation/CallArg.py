@@ -12,6 +12,7 @@ class CallArg:
     """
 
     attribute_name : str # attribute name
+    updated_value  : callable # for update of mutable object. If None, `update` will use `sub_list` to go deeper
     python_value   : any #
     io_category    : int # 0 => pure input, 1 => mutable, 2 => return
     python_ctor    : callable # for reassembly of python objects. Called using an object that contains lists like differentiable_ffi_outputs, ...
@@ -24,39 +25,40 @@ class CallArg:
         self.python_ctor = None
         self.brace_ctor = False
         self.sub_list = None
+        self.updated_value = None
 
     @staticmethod
     def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver ):
-        """ recursively construct a CallArg
-
-
-        """
+        """ recursively construct a CallArg """
 
         # common info
         res = CallArg()
         res.attribute_name = attribute_name
-        res.python_value = python_value
-        res.io_category = 1 if mutable else 0
         res.sub_list = None
+
+        # fill the remaining arguments
+        res.configure( python_value, fai, mutable, driver )
+
+        return res
+
+    def configure( self, python_value: any, fai, mutable: bool, driver ):
+        self.io_category = 1 if mutable else 0
+        self.python_value = python_value
 
         # method
         if callable( getattr( python_value, "configure_call_arg", None ) ):
-            python_value.configure_call_arg( res, fai, driver )
-            return res
+            return python_value.configure_call_arg( self, fai, driver )
 
         # arrays
         if driver.is_a_tensor( python_value ):
-            res.configure_as_input_tensor( python_value, mutable, fai, driver )
-            return res
+            return self.configure_as_input_tensor( python_value, mutable, fai, driver )
 
         # std objects
         if isinstance( python_value, float ):
-            res.configure_as_parameter( python_value, "FP64", mutable, fai, driver )
-            return res
+            return self.configure_as_parameter( python_value, "FP64", mutable, fai, driver )
 
         if isinstance( python_value, int ):
-            res.configure_as_parameter( python_value, "PI64", mutable, fai, driver )
-            return res
+            return self.configure_as_parameter( python_value, "PI64", mutable, fai, driver )
 
         if isinstance( python_value, ( list, tuple ) ):
             #     cpy_arg._python_ctor = type( value )
@@ -74,8 +76,7 @@ class CallArg:
             raise NotImplementedError
 
         # else, get attributes
-        res.configure_as_input_object_with_collect_attributes( python_value, mutable, fai, driver )
-        return res
+        self.configure_as_input_object_with_collect_attributes( python_value, mutable, fai, driver )
 
     def configure_as_parameter( self, python_value: any, cpp_type: str, mutable: bool, fai, driver ) -> Self:
         if mutable:
@@ -86,39 +87,41 @@ class CallArg:
             self.python_ctor = None # not mutable -> we can directly use python_value
             self.signature = cpp_type
             self.base_code = n
-        return self
 
-    def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver ) -> Self:
-        arg_name, validity_index = fai.add_input_tensor( python_value, driver )
-        dim = len( python_value.shape )
-
-        self.python_ctor = None # not mutable -> we can used python_value
-        self.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
-        self.signature = f"T{ dim }{ driver.normalized_type_for( python_value.dtype ) }"
+    def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver, valid = True ) -> Self:
+        ndim = len( python_value.shape )
+        self.signature = f"T{ ndim }{ driver.normalized_type_for( python_value.dtype ) }"
 
         if mutable:
-            raise NotImplementedError
-        return self
+            output_arg_name, output_validity_index = fai.add_output_tensor( driver, python_value.shape, python_value.dtype, valid )
+            input_arg_name, input_validity_index = fai.add_input_tensor( python_value, driver, valid )
+            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { output_arg_name }, { input_arg_name }, ( validity_mask[ { output_validity_index // 64 } ] & { 1 << ( output_validity_index % 64 ) } ) && ( validity_mask[ { input_validity_index // 64 } ] & { 1 << ( input_validity_index % 64 ) } ) )"
 
-        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
-            #if arg_name[ 0 ] == "n":
-            raise NotImplementedError
-        self.python_ctor = python_ctor #
+            def updated_value( fai, differentiable_outputs, non_differentiable_outputs ):
+                return CallArg.get_output_tensor( output_arg_name, fai, differentiable_outputs, non_differentiable_outputs )
+            self.updated_value = updated_value
+        else:
+            arg_name, validity_index = fai.add_input_tensor( python_value, driver, valid )
+            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
+
+    @staticmethod
+    def get_output_tensor( arg_name, fai, differentiable_outputs, non_differentiable_outputs ):
+        if arg_name[ 0:2 ] == "no":
+            return non_differentiable_outputs[ int( arg_name[ 2: ] ) ]
+        if arg_name[ 0:2 ] == "do":
+            return differentiable_outputs[ int( arg_name[ 2: ] ) ]
+        raise NotImplementedError
 
     def configure_as_output_tensor( self, fai, driver, shape, dtype ):
         arg_name, validity_index = fai.add_output_tensor( driver, shape, dtype )
         dim = len( shape )
 
-        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
-            if arg_name[ 0:2 ] == "no":
-                return non_differentiable_outputs[ int( arg_name[ 2: ] ) ]
-            if arg_name[ 0:2 ] == "do":
-                return differentiable_outputs[ int( arg_name[ 2: ] ) ]
-            raise NotImplementedError
-
-        self.python_ctor = python_ctor #
         self.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
+
+        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
+            return CallArg.get_output_tensor( arg_name, fai, differentiable_outputs, non_differentiable_outputs )
+        self.python_ctor = python_ctor
 
     def configure_as_return( self, fai, driver, return_type, *type_args, **type_kwargs ):
         """ complete self, with information for return """
@@ -140,7 +143,6 @@ class CallArg:
 
         # -> use collect_attributes
         self.configure_as_output_object_with_collect_attributes( fai, driver, return_type, *type_args, **type_kwargs )
-        return self
 
     def configure_as_input_object_with_collect_attributes( self, python_value, mutable, fai, driver ):
         if callable( getattr( python_value, "base_code", None ) ):
@@ -203,7 +205,7 @@ class CallArg:
 
         return res
 
-    def configure_as_raw_return( self, fai, valid, driver, return_type, *args, **kwargs ) -> Self:
+    def configure_as_raw_return( self, fai, valid, driver, return_type, *args, **kwargs ):
         arg_name, validity_index = fai.add_raw_return( return_type, valid, driver, *args, **kwargs )
 
         def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
@@ -213,7 +215,6 @@ class CallArg:
         self.python_ctor = python_ctor #
         self.base_code = f"*{ arg_name }"
         self.signature = f"{ return_type }{ args }{ kwargs }"
-        return self
 
     def assembled_code( self ) -> str:
         res = self.base_code
@@ -233,79 +234,9 @@ class CallArg:
     def construct( self, fai, differentiable_outputs, non_differentiable_outputs ):
         return self.python_ctor( fai, differentiable_outputs, non_differentiable_outputs )
 
-
-    # def arg( self, name: str ):
-    #     cpy_arg = CallArg( name )
-
-    #     cpy_arg.for_return = self.for_return
-
-    #     if self.sub_list is None:
-    #         self.sub_list = []
-    #     self.sub_list.append( cpy_arg )
-
-    #     return cpy_arg
-
-    # def reassemble( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs ):
-    #     # tensor ?
-    #     if isinstance( self._python_ctor, tuple ):
-    #         assert len( self._python_ctor ) == 3
-
-    #         # not valid ?
-    #         if not self._python_ctor[ 2 ]:
-    #             return None
-
-    #         # else, get tensor
-    #         if self.for_return:
-    #             if self._python_ctor[ 0 ]:
-    #                 return differentiable_outputs[ self._python_ctor[ 1 ] ]
-    #             return non_differentiable_outputs[ self._python_ctor[ 1 ] ]
-    #         if self._python_ctor[ 0 ]:
-    #             return differentiable_inputs[ self._python_ctor[ 1 ] ]
-    #         return non_differentiable_inputs[ self._python_ctor[ 1 ] ]
-
-    #     #
-    #     if self._python_ctor is None:
-    #         raise RuntimeError( f"No python ctor for { self.name }" )
-
-    #     # ctor
-    #     if self.sub_list is None:
-    #         return self._python_ctor()
-    #     return self._python_ctor( *[ item.reassemble( differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs ) for item in self.sub_list ] )
-
-    # def update( self, obj, cb, differentiable_output_values, non_differentiable_output_values ):
-    #     """ obj = ref. cb = how to modify the ref """
-    #     # tensor ?
-    #     if isinstance( self._python_ctor, tuple ):
-    #         assert len( self._python_ctor ) == 3
-
-    #         # not valid ?
-    #         if not self._python_ctor[ 2 ]:
-    #             return
-
-    #         if cb is None:
-    #             raise RuntimeError( "Mutable() takes only objects that contains other objects (like lists for instance)" )
-    #         if self._python_ctor[ 0 ]:
-    #             return cb( differentiable_output_values[ self._python_ctor[ 1 ] ] )
-    #         return cb( non_differentiable_output_values[ self._python_ctor[ 1 ] ] )
-
-    #     # ctor
-    #     if self.sub_list is None:
-    #         return
-
-    #     for s in self.sub_list:
-    #         # get sub obj + how to update it
-    #         s = cast( CallArg, s )
-    #         if s.name.isdigit():
-    #             k = int( s.name )
-    #             nobj = obj[ k ]
-    #             def ncb( x ):
-    #                 obj[ k ] = x
-    #         else:
-    #             nobj = getattr( obj, s.name )
-    #             def ncb( x ):
-    #                 setattr( obj, s.name, x )
-
-    #         # recursive call
-    #         s.update( nobj, ncb, differentiable_output_values, non_differentiable_output_values )
-
-
+    def update( self, fai, differentiable_outputs, non_differentiable_outputs ):
+        for item in self.sub_list:
+            if callable( item.updated_value ):
+                setattr( self.python_value, item.attribute_name, item.updated_value( fai, differentiable_outputs, non_differentiable_outputs ) )
+            else:
+                item.update( fai, differentiable_outputs, non_differentiable_outputs )

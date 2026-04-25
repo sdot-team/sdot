@@ -22,14 +22,6 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    # def cpp_class_name( self, driver ):
-    #     if self.return_type is float:
-    #         return "TF"
-    #     if self.return_type is int:
-    #         return "PI"
-    #     return self.return_type.cpp_class_name_for( *self.type_args, **self.type_kwargs )
-
-            # return python_value.configure_call_arg( res, fai, driver )
     def configure_call_arg( self, call_arg: CallArg, fai, driver ):
         return call_arg.configure_as_return( fai, driver, self.return_type, *self.type_args, **self.type_kwargs )
 

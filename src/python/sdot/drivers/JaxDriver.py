@@ -194,7 +194,7 @@ class JaxDriver:
             return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, func_name: str, includes: str | list[ str ], *, _no_grad = False, **args ):
+    def call( self, func_name: str, includes: str | list[ str ], *, no_grad = False, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -211,7 +211,7 @@ class JaxDriver:
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
-        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not _no_grad )
+        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not no_grad )
 
         # a place to store outputs not handled by jax
         non_differentiable_outputs = []
@@ -225,7 +225,7 @@ class JaxDriver:
                 non_differentiable_outputs.append( r )
             return tuple( ret[ lim : ] )
 
-        if _no_grad:
+        if no_grad:
             differentiable_outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
@@ -266,7 +266,7 @@ class JaxDriver:
         res = []
         for call_arg in fai.call_args:
             if call_arg.io_category == 1: # Mutable
-                call_arg.update( args[ call_arg.name ].value, None, differentiable_outputs, non_differentiable_outputs )
+                call_arg.update( fai, differentiable_outputs, non_differentiable_outputs )
             if call_arg.io_category == 2: # Return
                 res.append( call_arg.construct( fai, differentiable_outputs, non_differentiable_outputs ) )
 

@@ -25,7 +25,7 @@ class Bsp:
             positions = positions,
             weights = weights,
             ct_dim = ct_dim,
-            _no_grad = True,
+            no_grad = True,
         )
 
     @staticmethod

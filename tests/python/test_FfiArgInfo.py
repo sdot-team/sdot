@@ -12,12 +12,13 @@ def test_base():
     # fai = FfiArgInfo( { "a": 17, "b": numpy.array( [ 13 ] ) }, sdot.driver )
     # info( fai )
 
+    pouet = Pouet( [ 53 ] )
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
         b = numpy.array( [ 13 ] ),
-        ret = sdot.Return( Pouet, dim = 3 ),
-        inp = Pouet( [ 32 ] ),
-        _no_grad = True
+        ret = sdot.Mutable( pouet ),
+        no_grad = True
     )
+    info( pouet )
     info( res )
 
 if __name__ == "__main__":
