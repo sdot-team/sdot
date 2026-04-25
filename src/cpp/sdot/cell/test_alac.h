@@ -17,12 +17,12 @@ void test_alac_backward( auto &&p ) {
     // P( p.o1.is_valid() );
     // P( p.i0.is_valid() );
     // P( p.i1.is_valid() );
-    P( p.grad_i1.is_valid(), p.grad_o1.is_valid() );
+    // P( p.grad_i1.is_valid(), p.grad_o1.is_valid() );
 
-    if ( p.grad_i0.is_valid() && p.grad_o0.is_valid() && p.i0.is_valid() )
-        p.grad_i0() = 2 * p.grad_o0() * p.i0();
+    // if ( p.grad_i0.is_valid() && p.grad_o0.is_valid() && p.i0.is_valid() )
+    //     p.grad_i0() = 2 * p.grad_o0() * p.i0();
 
-    if ( p.grad_i1.is_valid() && p.grad_o1.is_valid() )
-        p.grad_i1() = p.grad_o1();
+    // if ( p.grad_i1.is_valid() && p.grad_o1.is_valid() )
+    //     p.grad_i1() = p.grad_o1();
 }
 

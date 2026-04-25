@@ -11,19 +11,9 @@ class UndefinedTensor:
     def cpp_class_name( self, driver ):
         return f"R{ len( self.shape ) }{ driver.normalized_type_for( self.dtype ) }"
 
-    def configure_call_arg( self, call_arg, fai, driver ):
-        # return call_arg.configure( self.value, fai, True, driver )
-        raise NotImplementedError
-
-    # def configure_call_arg( self, jax_ffi_arg_list, driver, name, cpp_arg ):
-    #     jax_ffi_arg_list._add_tensor_arg(
-    #         driver,
-    #         jax_ffi_arg_list._tensor_value( driver, [ 0 for _ in self.shape ], self.dtype ),
-    #         jax_ffi_arg_list._tensor_spec( driver, [ 0 for _ in self.shape ], self.dtype ),
-    #         name,
-    #         cpp_arg,
-    #         valid = False
-    #     )
+    def configure_call_arg( self, call_arg, fai, mutable, driver ):
+        python_value = driver.array( [ 0 for _ in self.shape ], dtype = self.dtype )
+        return call_arg.configure_as_input_tensor( python_value, mutable, fai, driver, valid = False )
 
     def to_nanobind_compatible_objects( self ):
         if self.dtype == int:

@@ -100,13 +100,22 @@ class TensorField:
         # register the tensor
         distribution.__dict__[ f'_{ self.name }' ] = tensor
 
-    def configure_call_ret_for( self, call_arg, fai, driver, *type_args, **type_kwargs ):
-        def get_value( attr ):
-            if attr not in type_kwargs:
-                raise RuntimeError( f"To get the shape of { self.name } we need the value of '{ attr }'" )
-            return type_kwargs[ attr ]
-        shape = _shape( self, get_value )
+    def configure_call_ret_for( self, call_arg, fai, driver, *args, **kwargs ):
+        shape = self.shape_for( mandatory = True, **kwargs )
         call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype )
+
+    # def fake_instance_for( self, driver, *args, **kwargs ):
+    #     shape = self.shape_for( mandatory = False, **kwargs )
+    #     return driver.empty( [ 0 for _ in shape ], self.dtype or driver.dtype )
+
+    def shape_for( self, mandatory = True, **kwargs ):
+        def get_value( attr ):
+            if attr not in kwargs:
+                if mandatory:
+                    raise RuntimeError( f"To get the shape of { self.name } we need the value of '{ attr }'" )
+                return 0
+            return kwargs[ attr ]
+        return _shape( self, get_value )
 
     def _rank( self, distribution ):
         return _rank( distribution, self.axis_names )

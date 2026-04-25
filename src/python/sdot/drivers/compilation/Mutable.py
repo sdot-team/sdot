@@ -11,6 +11,6 @@ class Mutable:
     def __init__( self, value ):
         self.value = value
 
-    def configure_call_arg( self, call_arg: CallArg, fai, driver ):
+    def configure_call_arg( self, call_arg: CallArg, fai, mutable, driver ):
         return call_arg.configure( self.value, fai, True, driver )
 

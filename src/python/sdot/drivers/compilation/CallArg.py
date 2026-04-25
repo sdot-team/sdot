@@ -1,4 +1,8 @@
 from .collect_attributes import collect_attributes, Annotation
+from .FfiOutput import FfiOutput
+from .FfiInput import FfiInput
+from .Return import Return
+from .Tensor import Tensor
 from typing import Self
 
 class CallArg:
@@ -17,15 +21,19 @@ class CallArg:
     io_category    : int # 0 => pure input, 1 => mutable, 2 => return
     python_ctor    : callable # for reassembly of python objects. Called using an object that contains lists like differentiable_ffi_outputs, ...
     brace_ctor     : bool # true to use '{}' in generated code for instanciation
+    ffi_output     : FfiOutput | None #
+    ffi_input      : FfiInput | None #
     base_code      : str # name of function or class for assembly of C++ objects (e.g. "Cell<TF,2>")
     signature      : str # name used to make the signature of the module (e.g. T0F64 for a tensor)
     sub_list       : list[ Self ] | None # arguments for python_ctor or base_code
 
     def __init__( self ):
+        self.updated_value = None
         self.python_ctor = None
         self.brace_ctor = False
+        self.ffi_output = None
+        self.ffi_input = None
         self.sub_list = None
-        self.updated_value = None
 
     @staticmethod
     def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver ):
@@ -47,7 +55,7 @@ class CallArg:
 
         # method
         if callable( getattr( python_value, "configure_call_arg", None ) ):
-            return python_value.configure_call_arg( self, fai, driver )
+            return python_value.configure_call_arg( self, fai, mutable, driver )
 
         # arrays
         if driver.is_a_tensor( python_value ):
@@ -93,34 +101,54 @@ class CallArg:
         self.signature = f"T{ ndim }{ driver.normalized_type_for( python_value.dtype ) }"
 
         if mutable:
-            output_arg_name, output_validity_index = fai.add_output_tensor( driver, python_value.shape, python_value.dtype, valid )
-            input_arg_name, input_validity_index = fai.add_input_tensor( python_value, driver, valid )
-            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { output_arg_name }, { input_arg_name }, ( validity_mask[ { output_validity_index // 64 } ] & { 1 << ( output_validity_index % 64 ) } ) && ( validity_mask[ { input_validity_index // 64 } ] & { 1 << ( input_validity_index % 64 ) } ) )"
+            ffi_output = fai.add_output_tensor( driver, python_value.shape, python_value.dtype, valid )
+            ffi_input = fai.add_input_tensor( python_value, driver, valid )
 
-            def updated_value( fai, differentiable_outputs, non_differentiable_outputs ):
-                return CallArg.get_output_tensor( output_arg_name, fai, differentiable_outputs, non_differentiable_outputs )
+            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_output.arg_name }, { ffi_input.arg_name }, ( validity_mask[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ) && ( validity_mask[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } ) )"
+            self.ffi_output = ffi_output
+            self.ffi_input = ffi_input
+
+            def updated_value( fai, non_differentiable_outputs, differentiable_outputs ):
+                return CallArg.get_output_tensor( ffi_output.arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs,
+                    fallback_shape = python_value.shape,
+                    fallback_dtype = python_value.dtype,
+                )
             self.updated_value = updated_value
         else:
-            arg_name, validity_index = fai.add_input_tensor( python_value, driver, valid )
-            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
+            ffi_input = fai.add_input_tensor( python_value, driver, valid )
+
+            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, validity_mask[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } )"
+            self.ffi_input = ffi_input
 
     @staticmethod
-    def get_output_tensor( arg_name, fai, differentiable_outputs, non_differentiable_outputs ):
+    def get_output_tensor( arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs, fallback_shape, fallback_dtype ):
         if arg_name[ 0:2 ] == "no":
-            return non_differentiable_outputs[ int( arg_name[ 2: ] ) ]
+            index = int( arg_name[ 2: ] )
+            if index >= len( non_differentiable_outputs ):
+                return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
+            return non_differentiable_outputs[ index ]
+
         if arg_name[ 0:2 ] == "do":
-            return differentiable_outputs[ int( arg_name[ 2: ] ) ]
+            index = int( arg_name[ 2: ] )
+            if index >= len( differentiable_outputs ):
+                return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
+            return differentiable_outputs[ index ]
+
         raise NotImplementedError
 
     def configure_as_output_tensor( self, fai, driver, shape, dtype ):
-        arg_name, validity_index = fai.add_output_tensor( driver, shape, dtype )
+        ffi_output = fai.add_output_tensor( driver, shape, dtype )
+        self.ffi_output = ffi_output
         dim = len( shape )
 
-        self.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
+        self.base_code = f"tensor_view( CtInt<{ dim }>(), { ffi_output.arg_name }, validity_mask[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 
-        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
-            return CallArg.get_output_tensor( arg_name, fai, differentiable_outputs, non_differentiable_outputs )
+        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
+            return CallArg.get_output_tensor( ffi_output.arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs,
+                fallback_shape = shape,
+                fallback_dtype = dtype,
+            )
         self.python_ctor = python_ctor
 
     def configure_as_return( self, fai, driver, return_type, *type_args, **type_kwargs ):
@@ -172,10 +200,10 @@ class CallArg:
         else:
             self.signature = self.base_code
 
-        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
+        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
             args = {}
             for item in self.sub_list:
-                args[ item.attribute_name ] = item.python_ctor( fai, differentiable_outputs, non_differentiable_outputs )
+                args[ item.attribute_name ] = item.python_ctor( fai, non_differentiable_outputs, differentiable_outputs )
 
             if callable( getattr( return_type, "__default_init__", None ) ):
                 res = object.__new__( return_type )
@@ -208,7 +236,7 @@ class CallArg:
     def configure_as_raw_return( self, fai, valid, driver, return_type, *args, **kwargs ):
         arg_name, validity_index = fai.add_raw_return( return_type, valid, driver, *args, **kwargs )
 
-        def python_ctor( fai, differentiable_outputs, non_differentiable_outputs ):
+        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
             #if arg_name[ 0 ] == "n":
             raise NotImplementedError
 
@@ -231,12 +259,32 @@ class CallArg:
                 res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"
         return res
 
-    def construct( self, fai, differentiable_outputs, non_differentiable_outputs ):
-        return self.python_ctor( fai, differentiable_outputs, non_differentiable_outputs )
+    def construct( self, fai, non_differentiable_outputs, differentiable_outputs ):
+        return self.python_ctor( fai, non_differentiable_outputs, differentiable_outputs )
 
-    def update( self, fai, differentiable_outputs, non_differentiable_outputs ):
+    def update( self, fai, non_differentiable_outputs, differentiable_outputs ):
         for item in self.sub_list:
             if callable( item.updated_value ):
-                setattr( self.python_value, item.attribute_name, item.updated_value( fai, differentiable_outputs, non_differentiable_outputs ) )
+                setattr( self.python_value, item.attribute_name, item.updated_value( fai, non_differentiable_outputs, differentiable_outputs ) )
             else:
-                item.update( fai, differentiable_outputs, non_differentiable_outputs )
+                item.update( fai, non_differentiable_outputs, differentiable_outputs )
+
+    def as_input( self, driver ):
+        if self.io_category == 0:
+            return self
+
+    def add_gradients_to( self, nargs: dict, name: str, driver, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs ):
+        if self.ffi_input is not None and self.ffi_input.differentiable:
+            nargs[ "grad_of_inp_" + name ] = Return( Tensor, self.ffi_input.python_value.shape, dtype = self.ffi_input.python_value.dtype )
+
+        if self.ffi_output is not None and self.ffi_output.differentiable:
+            n = self.ffi_output.num_in_sub_list
+            if n < len( grads_of_the_outputs ):
+                grad = grads_of_the_outputs[ n ]
+            else:
+                grad = driver.empty( [ 0 for _ in self.ffi_output.spec.shape ], dtype = self.ffi_output.spec.dtype )
+            nargs[ "grad_of_out_" + name ] = grad
+
+        if self.sub_list is not None:
+            for s in self.sub_list:
+                s.add_gradients_to( nargs, name + "_" + s.attribute_name, driver, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )

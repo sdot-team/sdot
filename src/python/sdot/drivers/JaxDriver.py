@@ -72,8 +72,8 @@ class JaxDriver:
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
 
-    def array( self, data ):
-        return jnp.asarray( data, dtype = self.dtype, device = self.device )
+    def array( self, data, dtype = None ):
+        return jnp.asarray( data, dtype = dtype or self.dtype, device = self.device )
 
     def t3( self, tensor, dtype = None ):
         """ make a rank 3 tensor """
@@ -216,6 +216,8 @@ class JaxDriver:
         # a place to store outputs not handled by jax
         non_differentiable_outputs = []
 
+        # Rq: on peut avoir des Tracers dans les non_differentiable_inputs !
+        # -->
         def _call_ffi( differentiable_jax_ffi_input_values ):
             func = jax.ffi.ffi_call( module_name, fai.output_specs )
             ret = func( *fai.input_values )
@@ -223,28 +225,28 @@ class JaxDriver:
             lim = len( fai.non_differentiable_ffi_outputs )
             for r in ret[ : lim ]:
                 non_differentiable_outputs.append( r )
+
             return tuple( ret[ lim : ] )
 
         if no_grad:
             differentiable_outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
-            def ffi_op( differentiable_jax_ffi_input_values ):
-                return _call_ffi( differentiable_jax_ffi_input_values )
+            def ffi_op( differentiable_inputs ):
+                return _call_ffi( differentiable_inputs )
 
             def ffi_op_fwd( _differentiable_jax_ffi_input_values ):
                 # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
-                differentiable_jax_ffi_input_values = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
-                flat_outputs = _call_ffi( differentiable_jax_ffi_input_values )
-                return flat_outputs, ( list( differentiable_jax_ffi_input_values ), list( flat_outputs ) )
+                differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
+                differentiable_outputs = _call_ffi( differentiable_inputs )
+                return differentiable_outputs, ( differentiable_inputs, list( differentiable_outputs ) )
 
             def ffi_op_bwd( residuals, grads_of_the_outputs ):
-                non_differentiable_inputs = fai.non_differentiable_jax_ffi_input_values
                 differentiable_inputs, differentiable_outputs = residuals
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
-                bjal = fai.backward_version( self, differentiable_inputs, non_differentiable_inputs, differentiable_outputs, non_differentiable_outputs, grads_of_the_outputs )
+                bjal = fai.backward_version( self, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
 
                 ndout = bjal.non_differentiable_jax_ffi_output_specs
                 ndinp = bjal.non_differentiable_jax_ffi_input_values
@@ -266,9 +268,9 @@ class JaxDriver:
         res = []
         for call_arg in fai.call_args:
             if call_arg.io_category == 1: # Mutable
-                call_arg.update( fai, differentiable_outputs, non_differentiable_outputs )
+                call_arg.update( fai, non_differentiable_outputs, differentiable_outputs )
             if call_arg.io_category == 2: # Return
-                res.append( call_arg.construct( fai, differentiable_outputs, non_differentiable_outputs ) )
+                res.append( call_arg.construct( fai, non_differentiable_outputs, differentiable_outputs ) )
 
         # item or list
         if len( res ) == 0:
@@ -388,11 +390,7 @@ class JaxDriver:
 
         # --- backward handler ---
         if make_backward_binding:
-            ndout = fai.non_differentiable_jax_ffi_output_specs
-            ndinp = fai.non_differentiable_jax_ffi_input_values
-            dout = fai.differentiable_jax_ffi_output_specs
-            dinp = fai.differentiable_jax_ffi_input_values
-            lines += self._handler_source( func_name + "_backward", fai.backward_version( self, dinp, ndinp, dout, ndout, dout ) )
+            lines += self._handler_source( func_name + "_backward", fai.backward_version( self ) )
             lines.append( "" )
 
         lines.append( "" )
@@ -412,37 +410,6 @@ class JaxDriver:
         from .compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-    # def _make_backwarg_args_instance( self, args: dict ) -> dict:
-    #     """ make a (fake) list of args that can be used to compile the backward version
-
-    #     """
-    #     # transformation of the forward args. Everything becomes an input. Object with several tensors become tuples
-    #     res = {}
-    #     input_names = []
-    #     output_names = []
-    #     for arg_name, arg_data in args.items():
-    #         if isinstance( arg_data, Return ):
-    #             res[ arg_name ] = arg_data.fake_instance( self )
-    #             output_names.append( arg_name )
-    #         elif isinstance( arg_data, Mutable ):
-    #             res[ arg_name ] = arg_data.value
-    #             output_names.append( arg_name )
-    #             input_names.append( arg_name )
-    #         else:
-    #             res[ arg_name ] = arg_data
-    #             input_names.append( arg_name )
-
-    #     # gradient of outputs
-    #     for arg_name in output_names:
-    #         res[ f"grad_out_{ arg_name }" ] = res[ arg_name ]
-
-    #     # gradient of inputs
-    #     for arg_name in input_names:
-    #         arg = res[ arg_name ]
-    #         res[ f"grad_inp_{ arg_name }" ] = Return( Tensor, arg.shape, arg.dtype )
-
-    #     return res
-
     def _handler_source( self, func_name: str, fai: FfiArgInfo ) -> list[ str ]:
         #
         lines = []
@@ -461,7 +428,7 @@ class JaxDriver:
         lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", arg_decls ) } ) {{" )
 
         # read the validity_mask
-        lines.append( f"    const PI64 *validity_mask = { fai.name_of_validity_mask }.typed_data();" )
+        lines.append( "    const PI64 *validity_mask = validity_mask_buffer.typed_data();" )
 
         # call the function
         lines.append( f"    { func_name }( Parameters_{ func_name }{{" )

@@ -9,7 +9,7 @@ class CtInt:
     def cpp_class_name( self ):
         return f"CtInt<{ self.value }>"
 
-    def configure_call_arg( self, jax_ffi_arg_list, driver, name, cpy_arg ):
+    def configure_call_arg( self, call_arg, fai, mutable, driver ):
         cpy_arg._python_ctor = lambda : CtInt( self.value )
         cpy_arg.code = f"CtInt<{ self.value }>()"
 
