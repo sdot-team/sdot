@@ -17,13 +17,7 @@ class Tensor:
 
     @staticmethod
     def configure_call_ret_for( call_arg, fai, driver, shape, dtype = None ):
-        arg_name, validity_index = fai.add_output_tensor( driver, shape, dtype )
-        dim = len( shape )
-
-        call_arg.python_ctor = lambda x: x # not mutable -> we can used python_value
-        call_arg.base_code = f"tensor_view( CtInt<{ dim }>(), { arg_name }, validity_mask[ { validity_index // 64 } ] & { 1 << ( validity_index % 64 ) } )"
-        call_arg.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
-
+        call_arg.configure_as_output_tensor( fai, driver, shape, dtype )
 
     # def configure_call_arg_for( jax_ffi_arg_list, driver, name, cpy_arg, shape, dtype = lambda x: x ):
     #     value = jax_ffi_arg_list._tensor_value( driver, shape, dtype )

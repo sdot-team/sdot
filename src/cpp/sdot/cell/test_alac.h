@@ -1,11 +1,11 @@
 #include <sdot/support/P.h>
 
-// template<class T,class S>
-// struct Pouet { T t; S s; };
+template<class T>
+struct Pouet { T positions; };
 
 void test_alac( auto &&p ) {
     P( p.b );
-    p.ret() = 23;
+    p.ret.positions( 0 ) = 23;
     // if ( p.o0.is_valid() && p.i0.is_valid() )
     //     p.o0() = p.i0() * p.i0();
     // if ( p.o1.is_valid() && p.i1.is_valid() ) //

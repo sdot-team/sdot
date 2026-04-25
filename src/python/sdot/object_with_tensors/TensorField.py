@@ -77,7 +77,9 @@ class TensorField:
             return enclosing.__dict__[ f'_{ self.name }' ]
 
         # not found :(
-        return UndefinedTensor( _shape( self, enclosing ), self.dtype )
+        def get_value( attr ):
+            return getattr( enclosing, attr, None )
+        return UndefinedTensor( _shape( self, get_value ), self.dtype )
 
     def __set__( self, distribution, value ):
         if value is None:
@@ -98,22 +100,13 @@ class TensorField:
         # register the tensor
         distribution.__dict__[ f'_{ self.name }' ] = tensor
 
-    # def cpp_class_name( self ):
-    #     if driver.is_int_dtype( self.dtype ):
-    #         return "MI"
-    #     return "MF"
-
-    # def to_nanobind_compatible_objects( self, obj ):
-    #     if self.dtype == int:
-    #         return [ ( obj, "MI" ) ]
-
-    #     if self.dtype is not None:
-    #         raise NotImplementedError( f"to_nanobind_compatible_objects with dtype = { self.dtype }" )
-
-    #     return [ ( obj, "MF" ) ]
-
-    # def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names ):
-    #     return f"tensor_view_{ self.ndim }( { arg_names.pop( 0 ) } )"
+    def configure_call_ret_for( self, call_arg, fai, driver, *type_args, **type_kwargs ):
+        def get_value( attr ):
+            if attr not in type_kwargs:
+                raise RuntimeError( f"To get the shape of { self.name } we need the value of '{ attr }'" )
+            return type_kwargs[ attr ]
+        shape = _shape( self, get_value )
+        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype )
 
     def _rank( self, distribution ):
         return _rank( distribution, self.axis_names )
@@ -122,29 +115,9 @@ class TensorField:
 def _rank( distribution, base_axis_names ):
     res = 0
     for axis_name in base_axis_names:
-        axis_name = axis_name.replace( ' ', '' )
-        if "*" in axis_name:
-            _, axis = axis_name.split( "*" )
-            axis_size = getattr( distribution, axis )
-            if axis_size is None:
-                return None
-
-            assert isinstance( axis_size, int )
-            res += axis_size
-            continue
-
-        res += 1
-
-    return res
-
-
-def _shape( field, enclosing ):
-    res = []
-    for axis_name in field.axis_names:
-        axis_name = axis_name.replace( ' ', '' )
-        if "*" in axis_name:
+        if "[" in axis_name:
             # _, axis = axis_name.split( "*" )
-            # axis_size = getattr( enclosing, axis )
+            # axis_size = getattr( distribution, axis )
             # if axis_size is None:
             #     return None
 
@@ -153,52 +126,71 @@ def _shape( field, enclosing ):
             # continue
             raise NotImplementedError
 
-        if "+" in axis_name:
-            lhs, rhs = axis_name.split( "+" )
-            rhs = int( rhs )
-
-            res.append( getattr( enclosing, lhs ) + rhs )
-            continue
-
-        res.append( getattr( enclosing, axis_name ) )
+        res += 1
 
     return res
 
+def _axis_value( text: str, get_value: callable ):
+    if "+" in text:
+        lhs, rhs = text.split( "+" )
+        return _axis_value( lhs, get_value ) + _axis_value( rhs, get_value )
+
+    if "*" in text:
+        lhs, rhs = text.split( "*" )
+        return _axis_value( lhs, get_value ) * _axis_value( rhs, get_value )
+
+    #
+    text = text.strip()
+    if text.isdigit():
+        return int( text )
+
+    return get_value( text )
+
+
+def _shape( field, get_value: callable ):
+    res = []
+    for axis_name in field.axis_names:
+        if "," in axis_name:
+            raise NotImplementedError
+        if "[" in axis_name:
+            raise NotImplementedError
+        res.append( _axis_value( axis_name, get_value ) )
+    return res
 
 def _axis_names( axis_names: tuple[ str, ... ] ) -> list[ str ]:
     res = []
+    def concat( values ):
+        for value in values:
+            if value not in res:
+                res.append( value )
+
     for axis_name in axis_names:
-        axis_name = axis_name.replace( ' ', '' )
+        axis_name = axis_name.strip()
 
         if "," in axis_name:
-            lhs = axis_name.split( "," )[ 0 ]
-            if lhs not in res:
-                res.append( lhs )
-            continue
-
-        if "[" in axis_name:
-            lhs = axis_name.split( "[]" )[ 0 ]
-            if lhs not in res:
-                res.append( lhs )
+            for v in axis_name.split( "," ):
+                concat( _axis_names( v ) )
             continue
 
         if "+" in axis_name:
-            lhs = axis_name.split( "+" )[ 0 ]
-            # rhs = axis_name.split( "+" )[ 1 ]
-            if lhs not in res:
-                res.append( lhs )
+            for v in axis_name.split( "+" ):
+                concat( _axis_names( v ) )
             continue
 
         if "*" in axis_name:
-            name = axis_name.split( "*" )[ 0 ]
-            axis = axis_name.split( "*" )[ 1 ]
-            if name not in res:
-                res.append( name )
-            if axis not in res:
-                res.append( axis )
+            for v in axis_name.split( "*" ):
+                concat( _axis_names( v ) )
             continue
 
-        if axis_name not in res:
-            res.append( axis_name )
+        if "[" in axis_name:
+            lhs, rhs = axis_name.split( "[" )
+            assert rhs.endswith( ']' )
+            rhs = rhs[ :-1 ]
+
+            concat( _axis_names( lhs ) )
+            concat( _axis_names( rhs ) )
+            continue
+
+        concat( [ axis_name ] )
 
     return res
