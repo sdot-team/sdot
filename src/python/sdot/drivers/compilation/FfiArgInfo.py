@@ -42,7 +42,7 @@ class FfiArgInfo:
         self.parameters_struct = parameters_struct # struct name to use instead of the parameter list
 
         # input u64 value
-        self.u64_input_bit_offset = 64 # where to set the next input bit (64 means that we will have to allocate a new U64 in self.u64_input_values)
+        self.u64_input_bit_offset = 0 # where to set the next input bit (64 means that we will have to allocate a new U64 in self.u64_input_values)
         self.u64_input_values = []
 
         # input u64 value
@@ -61,7 +61,7 @@ class FfiArgInfo:
                 validity_index = -1,
                 requires_grad = False,
                 python_value = numpy.array( self.u64_input_values, numpy.uint64 ),
-                arg_name = "u64_input",
+                arg_name = "u64_input_buffer",
                 cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
                 valid = None,
                 bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
@@ -73,11 +73,11 @@ class FfiArgInfo:
                 num_in_sub_list = len( self.ffi_outputs ),
                 differentiable = False,
                 validity_index = -1,
-                arg_name = "u64_output",
+                arg_name = "u64_output_buffer",
                 cpp_type = driver.ffi_tensor_output_arg_code( 1, numpy.uint64 ),
                 valid = None,
                 spec = driver.ffi_tensor_output_spec( [ self.u64_output_size ], numpy.uint64 ),
-                bind = driver.ffi_tensor_output_bind( 1, numpy.uint64 ),
+                bind = driver.ffi_tensor_output_bind_code( 1, numpy.uint64 ),
             ) )
 
 
@@ -94,6 +94,23 @@ class FfiArgInfo:
         #             f"DynamicAxis::input( { out_name }->typed_data() + { slot }, "
         #             f"SI( validity_mask[{ offset }] ) )"
         #         )
+
+    def append_u64_input_bit( self, value ) -> int:
+        """ append a bit in u64_input. return index """
+
+        # position
+        if self.u64_input_bit_offset % 64 == 0:
+            res = 64 * len( self.u64_input_values )
+            self.u64_input_values.append( 0 )
+        else:
+            res = self.u64_input_bit_offset
+
+        self.u64_input_bit_offset = res + 1
+
+        # value
+        self.u64_input_values[ res // 64 ] |= ( 1 << ( res % 64 ) )
+
+        return res
 
     def add_dynamic_axis( self, name: str, driver ) -> FfiDynamicAxis:
         """ Register a named dynamic axis. Returns the FfiDynamicAxis. """
@@ -135,8 +152,7 @@ class FfiArgInfo:
                 python_value = numpy.empty( [ 0 ] * len( python_value.shape ), dtype = python_value.dtype )
                 valid = False
 
-        validity_index = len( self.validity_mask_values )
-        self.validity_mask_values.append( valid )
+        validity_index = self.append_u64_input_bit( valid )
 
         differentiable = True
         requires_grad = True
@@ -185,8 +201,7 @@ class FfiArgInfo:
         if dtype is None:
             dtype = driver.dtype
 
-        validity_index = len( self.validity_mask_values )
-        self.validity_mask_values.append( valid )
+        validity_index = self.append_u64_input_bit( valid )
 
         differentiable = True
         if not driver.differentiable_type( dtype ):

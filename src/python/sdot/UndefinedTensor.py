@@ -24,28 +24,3 @@ class UndefinedTensor:
 
         return [ ( self, "MF" ) ]
 
-    # def diffentiable_tensors( self ):
-    #     if self.dtype == int:
-    #         return []
-    #     return [ self ]
-
-    # def cpp_assembly_from_nanobind_compatible_objects( self, obj, arg_names, use_view = False ):
-    #     name = arg_names.pop( 0 )
-    #     if use_view:
-    #         return name
-    #     return f"tensor_view_{ self.ndim }( { name } )"
-
-    # def cpp_assembly_from_jax_ffi_compatible_args( self, driver, name, pos_in_validity_bits ):
-    #     p = pos_in_validity_bits[ 0 ]
-    #     pos_in_validity_bits[ 0 ] += 1
-    #     return f"tensor_view( CtInt<{ len( self.shape ) }>(), { name }, validity_mask[ { p // 64 } ] & { 1 << ( p % 64 ) } )"
-
-    # def as_jax_ffi_compatible_args( self, driver, name ) -> list[ JaxFfiCompatibleItem ]:
-    #     dtype = driver._cpp_ffi_type_name( self.dtype )
-    #     differentiable = not driver.is_int_dtype( self.dtype )
-    #     return [ JaxFfiCompatibleItem( driver.empty( [ 0 ] * self.ndim, dtype = self.dtype ), name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>", differentiable ) ]
-
-    # def as_jax_ffi_compatible_rets( self, driver, name ) -> list[ JaxFfiCompatibleItem ]:
-    #     dtype = driver._cpp_ffi_type_name( self.dtype )
-    #     differentiable = not driver.is_int_dtype( self.dtype )
-    #     return [ JaxFfiCompatibleItem( driver._jax_shape_out( self.shape, self.dtype ), name, False, f"Arg<xla::ffi::Buffer<{ dtype }>>", f"xla::ffi::Buffer<{ dtype }>", differentiable ) ]

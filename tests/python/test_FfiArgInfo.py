@@ -20,7 +20,7 @@ def test_base():
 
     # pouet = Pouet( [ 53 ] )
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
-        ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs" ), 3 ] ),
+        ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs", 2 ), 3 ] ),
     )
     # info( pouet )
     info( res )

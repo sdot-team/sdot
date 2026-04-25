@@ -438,7 +438,10 @@ class JaxDriver:
         lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", arg_decls ) } ) {{" )
 
         # read the validity_mask
-        lines.append( "    const PI64 *validity_mask = validity_mask_buffer.typed_data();" )
+        if len( fai.u64_input_values ):
+            lines.append( "    const PI64 *u64_input = u64_input_buffer.typed_data();" )
+        if fai.u64_output_size:
+            lines.append( "    PI64 *u64_output = u64_output_buffer->typed_data();" )
 
         # call the function
         lines.append( f"    { func_name }( { parameters_struct }{{" )
