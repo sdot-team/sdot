@@ -24,8 +24,10 @@ class Bsp:
             max_points_per_cell = max_points_per_cell,
             positions = positions,
             weights = weights,
-            no_grad = True,
             ct_dim = ct_dim,
+
+            _parameters_struct = "BspMaker",
+            _no_grad = True,
         )
 
     # def cpp_class_name( self, driver ):

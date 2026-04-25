@@ -19,7 +19,7 @@ class FfiArgInfo:
         It also prepares validity_mask (added in non_differentiable_ffi_inputs) to take into account the invalid tensors and gradients
     """
 
-    def __init__( self, call_args: dict, driver ):
+    def __init__( self, call_args: dict, driver, parameters_struct = None ):
         # rec find sub args
         self.non_differentiable_ffi_inputs: list[ FfiInput ] = []
         self.differentiable_ffi_inputs: list[ FfiInput ] = []
@@ -27,6 +27,8 @@ class FfiArgInfo:
         self.ffi_outputs: list[ FfiOutput ] = []
         self.call_args: list[ CallArg ] = [] # one for each call arg
         self.validity_mask_values = []
+
+        self.parameters_struct = parameters_struct
 
         for arg_name, arg_value in call_args.items():
             self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, False, driver ) )

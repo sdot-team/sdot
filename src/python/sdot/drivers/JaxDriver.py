@@ -197,7 +197,7 @@ class JaxDriver:
             return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, func_name: str, includes: str | list[ str ], *, no_grad = False, **args ):
+    def call( self, func_name: str, includes: str | list[ str ], *, _no_grad = False, _parameters_struct = None, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -210,11 +210,11 @@ class JaxDriver:
             includes = [ includes ]
 
         # get a jax compatible set of arg lists
-        fai = FfiArgInfo( args, self )
+        fai = FfiArgInfo( args, self, parameters_struct = _parameters_struct )
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
-        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not no_grad )
+        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not _no_grad )
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
@@ -234,7 +234,7 @@ class JaxDriver:
                 return ret
             return tuple( ret )
 
-        if no_grad:
+        if _no_grad:
             outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
@@ -418,11 +418,16 @@ class JaxDriver:
         lines = []
 
         # make a structure with the names
-        lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( fai.call_args ) ) ] ) }>" )
-        lines.append( f"struct Parameters_{ func_name } {{" )
-        for n, call_arg in enumerate( fai.call_args ):
-            lines.append( f"    T{ n } { call_arg.attribute_name };" )
-        lines.append( "};" )
+        if fai.parameters_struct is None:
+            parameters_struct = f"Parameters_{ func_name }"
+
+            lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( fai.call_args ) ) ] ) }>" )
+            lines.append( f"struct Parameters_{ func_name } {{" )
+            for n, call_arg in enumerate( fai.call_args ):
+                lines.append( f"    T{ n } { call_arg.attribute_name };" )
+            lines.append( "};" )
+        else:
+            parameters_struct = fai.parameters_struct
 
         # start impl: declaration
         arg_decls = []
@@ -434,7 +439,7 @@ class JaxDriver:
         lines.append( "    const PI64 *validity_mask = validity_mask_buffer.typed_data();" )
 
         # call the function
-        lines.append( f"    { func_name }( Parameters_{ func_name }{{" )
+        lines.append( f"    { func_name }( { parameters_struct }{{" )
         for call_arg in fai.call_args:
             lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
         lines.append( "    } );" )
