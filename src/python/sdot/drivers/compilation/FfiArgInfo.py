@@ -45,6 +45,7 @@ class FfiArgInfo:
             num_in_sub_list = -1,
             differentiable = False,
             validity_index = -1,
+            requires_grad = False,
             python_value = validity_mask,
             arg_name = "validity_mask_buffer",
             cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
@@ -63,8 +64,13 @@ class FfiArgInfo:
         self.validity_mask_values.append( valid )
 
         differentiable = True
-        if isinstance( python_value, numpy.ndarray ) or not driver.differentiable_type( python_value.dtype ):
+        requires_grad = True
+        if not driver.differentiable_type( python_value.dtype ): # isinstance( python_value, numpy.ndarray ) or
             differentiable = False
+            requires_grad = False
+        if isinstance( python_value, numpy.ndarray ):
+            requires_grad = False
+
 
         if differentiable:
             num_in_sub_list = len( self.differentiable_ffi_inputs )
@@ -77,6 +83,7 @@ class FfiArgInfo:
             num_in_sub_list = num_in_sub_list,
             validity_index = validity_index,
             differentiable = differentiable,
+            requires_grad = requires_grad,
             python_value = python_value,
             arg_name = arg_name,
             cpp_type = driver.ffi_tensor_input_arg_code( len( python_value.shape ), python_value.dtype ),
@@ -162,6 +169,16 @@ class FfiArgInfo:
 
         return f"p{ n }"
 
+    def update_differentiable_input_values_with( self, differentiable_input_values ):
+        # replace differentiable_ffi_inputs
+        for n, v in enumerate( differentiable_input_values ):
+            self.differentiable_ffi_inputs[ n ].python_value = v
+
+        # update CallArgs
+        for call_arg in self.call_args:
+            call_arg.update_differentiable_input_values()
+
+
     @property
     def output_specs( self ):
         return [ output.spec for output in self.non_differentiable_ffi_outputs + self.differentiable_ffi_outputs ]
@@ -173,13 +190,10 @@ class FfiArgInfo:
     @property
     def named_ffi_args( self ) -> list[ tuple[ str, FfiOutput | FfiInput | FfiOutput | FfiInput | FfiParameter ] ]:
         res = []
-
         for arg in self.non_differentiable_ffi_inputs + self.differentiable_ffi_inputs + self.ffi_parameters:
             res.append( ( arg.arg_name, arg ) )
-
         for arg in self.non_differentiable_ffi_outputs + self.differentiable_ffi_outputs:
             res.append( ( arg.arg_name, arg ) )
-
         return res
 
     @property
@@ -204,24 +218,16 @@ class FfiArgInfo:
         # turn fwd arg into inputs
         nargs = {}
         for call_arg in self.call_args:
-            # convert base args to inputs
             if call_arg.io_category == 2:
                 nargs[ call_arg.attribute_name ] = call_arg.construct( self, non_differentiable_outputs, differentiable_outputs )
             else:
                 nargs[ call_arg.attribute_name ] = call_arg.python_value
 
-            # add gradients
-            call_arg.add_gradients_to( nargs, call_arg.attribute_name, driver, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
+        # add gradients
+        for call_arg in self.call_args:
+            call_arg.add_gradients_to( nargs, call_arg.attribute_name, driver, grads_of_the_outputs )
 
-        # # grad of the outputs (-> inputs)
-        # for n in range( len( self.differentiable_ffi_outputs ) ):
-        #     call_arg = self.differentiable_ffi_outputs[ n ]
-
-        # return grad of the inputs (-> inputs)
-        # for n in range( len( differentiable_inputs ) ):
-        #     farg = self.differentiable_ffi_inputs[ n ]
-        #     nargs[ "grad_" + farg.name ] = Return( Tensor, differentiable_inputs[ n ].shape )
-
+        # make the analysis (again)
         return FfiArgInfo( nargs, driver )
 
 

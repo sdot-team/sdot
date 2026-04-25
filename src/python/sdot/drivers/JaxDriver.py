@@ -216,12 +216,14 @@ class JaxDriver:
         # a place to store outputs not handled by jax
         non_differentiable_outputs = []
 
-        # Rq: on peut avoir des Tracers dans les non_differentiable_inputs !
+        # Rq: on pourrait avoir des Tracers dans les non_differentiable_inputs !
         # -->
-        def _call_ffi( differentiable_jax_ffi_input_values ):
+        def _call_ffi( differentiable_input_values ):
+            fai.update_differentiable_input_values_with( differentiable_input_values )
             func = jax.ffi.ffi_call( module_name, fai.output_specs )
             ret = func( *fai.input_values )
 
+            # store non_differentiable_outputs in a separate list
             lim = len( fai.non_differentiable_ffi_outputs )
             for r in ret[ : lim ]:
                 non_differentiable_outputs.append( r )
@@ -235,34 +237,34 @@ class JaxDriver:
             def ffi_op( differentiable_inputs ):
                 return _call_ffi( differentiable_inputs )
 
-            def ffi_op_fwd( _differentiable_jax_ffi_input_values ):
+            def ffi_op_fwd( _differentiable_inputs ):
                 # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
-                differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_jax_ffi_input_values )
+                differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_inputs )
                 differentiable_outputs = _call_ffi( differentiable_inputs )
-                return differentiable_outputs, ( differentiable_inputs, list( differentiable_outputs ) )
+
+                return differentiable_outputs, ( differentiable_inputs, differentiable_outputs )
 
             def ffi_op_bwd( residuals, grads_of_the_outputs ):
                 differentiable_inputs, differentiable_outputs = residuals
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
-                bjal = fai.backward_version( self, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
+                bfai = fai.backward_version( self, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
+                func = jax.ffi.ffi_call( module_name + "_backward", bfai.output_specs )
 
-                ndout = bjal.non_differentiable_jax_ffi_output_specs
-                ndinp = bjal.non_differentiable_jax_ffi_input_values
-                dout = bjal.differentiable_jax_ffi_output_specs
-                dinp = bjal.differentiable_jax_ffi_input_values
-
-                func = jax.ffi.ffi_call( module_name + "_backward", dout + ndout )
-                res = func( *dinp, *ndinp )
-
-                return ( tuple( res[ : len( dout ) ] ), )
+                res = func( *bfai.input_values )
+                return res
+                # if isinstance( res, list ):
+                #     return tuple( res )
+                # if isinstance( res, tuple ):
+                #     return res
+                # return ( res, )
 
 
             ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
 
             # --- appel ---
-            differentiable_outputs = ffi_op( tuple( fai.differentiable_jax_ffi_input_values ) )
+            differentiable_outputs = ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
 
         # ret assembly
         res = []

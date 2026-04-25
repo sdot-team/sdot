@@ -273,7 +273,7 @@ class CallArg:
         if self.io_category == 0:
             return self
 
-    def add_gradients_to( self, nargs: dict, name: str, driver, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs ):
+    def add_gradients_to( self, nargs: dict, name: str, driver, grads_of_the_outputs ):
         if self.ffi_input is not None and self.ffi_input.differentiable:
             nargs[ "grad_of_inp_" + name ] = Return( Tensor, self.ffi_input.python_value.shape, dtype = self.ffi_input.python_value.dtype )
 
@@ -287,4 +287,11 @@ class CallArg:
 
         if self.sub_list is not None:
             for s in self.sub_list:
-                s.add_gradients_to( nargs, name + "_" + s.attribute_name, driver, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
+                s.add_gradients_to( nargs, name + "_" + s.attribute_name, driver, grads_of_the_outputs )
+
+    def update_differentiable_input_values( self ):
+        if self.ffi_input is not None and self.ffi_input.differentiable:
+            self.python_value = self.ffi_input.python_value
+        if self.sub_list is not None:
+            for s in self.sub_list:
+                s.update_differentiable_input_values()

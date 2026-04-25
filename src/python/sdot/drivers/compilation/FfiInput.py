@@ -10,6 +10,7 @@ class FfiInput:
     num_in_sub_list : int #
     differentiable  : bool #
     validity_index  : int #
+    requires_grad   : bool #
     python_value    : any # python value
     arg_name        : str #
     cpp_type        : str # the cpp argument type (like xla::ffi::ResultBuffer<FP32>)

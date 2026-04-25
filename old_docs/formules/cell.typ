@@ -17,3 +17,9 @@ Si une coupe ne change rien, on vérifie que refaire toutes les coupes avec un v
 
 Prop: dans le paths, on propose max sp pour tous les points
   -> il faudrait aussi garde minmax
+
+
+
+
+Pb: on fait FfiArgInfo avec les tracers en en entrée
+  Quand on fait la version backward, on peut conserver les tracer pour le FfiArgInfo puisque l'appel ffi se fait avec les valeurs mise à jour
