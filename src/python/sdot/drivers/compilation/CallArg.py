@@ -112,8 +112,8 @@ class CallArg:
             self.ffi_output = ffi_output
             self.ffi_input = ffi_input
 
-            def updated_value( fai, non_differentiable_outputs, differentiable_outputs ):
-                return CallArg.get_output_tensor( ffi_output.arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs,
+            def updated_value( fai, outputs ):
+                return CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
                     fallback_shape = python_value.shape,
                     fallback_dtype = python_value.dtype,
                 )
@@ -125,20 +125,11 @@ class CallArg:
             self.ffi_input = ffi_input
 
     @staticmethod
-    def get_output_tensor( arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs, fallback_shape, fallback_dtype ):
-        if arg_name[ 0:2 ] == "no":
-            index = int( arg_name[ 2: ] )
-            if index >= len( non_differentiable_outputs ):
-                return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
-            return non_differentiable_outputs[ index ]
-
-        if arg_name[ 0:2 ] == "do":
-            index = int( arg_name[ 2: ] )
-            if index >= len( differentiable_outputs ):
-                return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
-            return differentiable_outputs[ index ]
-
-        raise NotImplementedError
+    def get_output_tensor( ffi_output: FfiOutput, fai, driver, outputs, fallback_shape, fallback_dtype ):
+        index = int( ffi_output.num_in_sub_list )
+        if index < len( outputs ):
+            return outputs[ index ]
+        return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
     def configure_as_output_tensor( self, fai, driver, shape, dtype ):
         ffi_output = fai.add_output_tensor( driver, shape, dtype )
@@ -148,8 +139,8 @@ class CallArg:
         self.base_code = f"tensor_view( CtInt<{ dim }>(), { ffi_output.arg_name }, validity_mask[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 
-        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
-            return CallArg.get_output_tensor( ffi_output.arg_name, fai, driver, non_differentiable_outputs, differentiable_outputs,
+        def python_ctor( fai, outputs ):
+            return CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
                 fallback_shape = shape,
                 fallback_dtype = dtype,
             )
@@ -204,10 +195,10 @@ class CallArg:
         else:
             self.signature = self.base_code
 
-        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
+        def python_ctor( fai, outputs ):
             args = {}
             for item in self.sub_list:
-                args[ item.attribute_name ] = item.python_ctor( fai, non_differentiable_outputs, differentiable_outputs )
+                args[ item.attribute_name ] = item.python_ctor( fai, outputs )
 
             if callable( getattr( return_type, "__default_init__", None ) ):
                 res = object.__new__( return_type )
@@ -240,7 +231,7 @@ class CallArg:
     def configure_as_raw_return( self, fai, valid, driver, return_type, *args, **kwargs ):
         arg_name, validity_index = fai.add_raw_return( return_type, valid, driver, *args, **kwargs )
 
-        def python_ctor( fai, non_differentiable_outputs, differentiable_outputs ):
+        def python_ctor( fai, outputs ):
             #if arg_name[ 0 ] == "n":
             raise NotImplementedError
 
@@ -263,15 +254,15 @@ class CallArg:
                 res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"
         return res
 
-    def construct( self, fai, non_differentiable_outputs, differentiable_outputs ):
-        return self.python_ctor( fai, non_differentiable_outputs, differentiable_outputs )
+    def construct( self, fai, outputs ):
+        return self.python_ctor( fai, outputs )
 
-    def update( self, fai, non_differentiable_outputs, differentiable_outputs ):
+    def update( self, fai, outputs ):
         for item in self.sub_list:
             if callable( item.updated_value ):
-                setattr( self.python_value, item.attribute_name, item.updated_value( fai, non_differentiable_outputs, differentiable_outputs ) )
+                setattr( self.python_value, item.attribute_name, item.updated_value( fai, outputs ) )
             else:
-                item.update( fai, non_differentiable_outputs, differentiable_outputs )
+                item.update( fai, outputs )
 
     def as_input( self, driver ):
         if self.io_category == 0:

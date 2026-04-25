@@ -159,8 +159,11 @@ class JaxDriver:
         return numpy.array( t )
 
     def normalized_type_for( self, dtype ):
-        if dtype is None:
+        if dtype is None or dtype is float:
             return self.normalized_type_for( self.dtype )
+
+        if dtype is int:
+            return self.normalized_type_for( self.itype )
 
         if dtype == jnp.float32:
             return "FP32"
@@ -213,45 +216,44 @@ class JaxDriver:
         module_name = self._module_name_for( func_name, includes, fai )
         self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not no_grad )
 
-        # a place to store outputs not handled by jax
-        non_differentiable_outputs = []
-
-        # Rq: on pourrait avoir des Tracers dans les non_differentiable_inputs !
+        # forward helper
         def _call_ffi( differentiable_input_values ):
+            # update fai content with the actua values
             fai.update_differentiable_input_values_with( differentiable_input_values )
+
+            # make the call
             func = jax.ffi.ffi_call( module_name, fai.output_specs )
+
+            # normalize the output
             ret = func( *fai.input_values )
+
+            # always return a tuple
             if isinstance( ret, jax.Array ):
-                ret = [ ret ]
-
-            # store non_differentiable_outputs in a separate list
-            lim = len( fai.non_differentiable_ffi_outputs )
-            for r in ret[ : lim ]:
-                non_differentiable_outputs.append( r )
-
-            # differentiable_outputs
-            return tuple( ret[ lim : ] )
+                return ( ret, )
+            if isinstance( ret, tuple ):
+                return ret
+            return tuple( ret )
 
         if no_grad:
-            differentiable_outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
+            outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
-            def ffi_op( differentiable_inputs ):
+            def my_ffi_op( differentiable_inputs ):
                 return _call_ffi( differentiable_inputs )
 
-            def ffi_op_fwd( _differentiable_inputs ):
+            def my_ffi_op_fwd( _differentiable_inputs ):
                 # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
                 differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_inputs )
-                differentiable_outputs = _call_ffi( differentiable_inputs ) # tuple
+                outputs = _call_ffi( differentiable_inputs )
 
-                return differentiable_outputs, ( differentiable_inputs, differentiable_outputs )
+                return outputs, ( differentiable_inputs, outputs )
 
-            def ffi_op_bwd( residuals, grads_of_the_outputs ):
-                differentiable_inputs, differentiable_outputs = residuals
+            def my_ffi_op_bwd( residuals, grads_of_the_outputs ):
+                differentiable_inputs, outputs = residuals
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
-                bfai = fai.backward_version( self, non_differentiable_outputs, differentiable_outputs, grads_of_the_outputs )
+                bfai = fai.backward_version( self, outputs, grads_of_the_outputs )
                 func = jax.ffi.ffi_call( module_name + "_backward", bfai.output_specs )
                 ret = func( *bfai.input_values )
                 if isinstance( ret, jax.Array ):
@@ -260,18 +262,18 @@ class JaxDriver:
                 return ( tuple( ret ), )
 
 
-            ffi_op.defvjp( ffi_op_fwd, ffi_op_bwd, symbolic_zeros = True )
+            my_ffi_op.defvjp( my_ffi_op_fwd, my_ffi_op_bwd, symbolic_zeros = True )
 
             # --- appel ---
-            differentiable_outputs = ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
+            outputs = my_ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
 
         # ret assembly
         res = []
         for call_arg in fai.call_args:
             if call_arg.io_category == 1: # Mutable
-                call_arg.update( fai, non_differentiable_outputs, differentiable_outputs )
+                call_arg.update( fai, outputs )
             if call_arg.io_category == 2: # Return
-                res.append( call_arg.construct( fai, non_differentiable_outputs, differentiable_outputs ) )
+                res.append( call_arg.construct( fai, outputs ) )
 
         # item or list
         if len( res ) == 0:

@@ -25,6 +25,3 @@ class Return:
 
     def configure_call_arg( self, call_arg, fai, mutable, driver ):
         return call_arg.configure_as_return( fai, driver, self.return_type, *self.type_args, **self.type_kwargs )
-
-    # def fake_instance( self, driver ):
-    #     return fake_instance( driver, self.return_type, *self.type_args, **self.type_kwargs )

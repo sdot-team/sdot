@@ -7,12 +7,11 @@ import numpy
 
 class FfiArgInfo:
     """ take a list of generic arguments `args` that are sent to driver.call in the python side and get
-        - flat lists of FfiInput and FfiOutput, splitted in the following categories
-            - non_differentiable_ffi_outputs
+        - flat lists for ffi arguments
             - non_differentiable_ffi_inputs
-            - differentiable_ffi_outputs
             - differentiable_ffi_inputs
             - ffi_parameters
+            - ffi_outputs
         - list of CpyArg for each arg in `arg` that allows for
             - re-assembly and update of `args` from outputs of the jax calls (python side)
             - generation of the assembly code in C++
@@ -22,11 +21,10 @@ class FfiArgInfo:
 
     def __init__( self, call_args: dict, driver ):
         # rec find sub args
-        self.non_differentiable_ffi_outputs: list[ FfiOutput ] = []
         self.non_differentiable_ffi_inputs: list[ FfiInput ] = []
-        self.differentiable_ffi_outputs: list[ FfiOutput ] = []
         self.differentiable_ffi_inputs: list[ FfiInput ] = []
         self.ffi_parameters: list[ FfiParameter ] = []
+        self.ffi_outputs: list[ FfiOutput ] = []
         self.call_args: list[ CallArg ] = [] # one for each call arg
         self.validity_mask_values = []
 
@@ -117,17 +115,13 @@ class FfiArgInfo:
         if not driver.differentiable_type( dtype ):
             differentiable = False
 
-        if differentiable:
-            num_in_sub_list = len( self.differentiable_ffi_outputs )
-            arg_name = f"do{ num_in_sub_list }"
-        else:
-            num_in_sub_list = len( self.non_differentiable_ffi_outputs )
-            arg_name = f"no{ num_in_sub_list }"
+        num_in_sub_list = len( self.ffi_outputs )
+        arg_name = f"out_{ num_in_sub_list }"
 
         ffi_output = FfiOutput(
             num_in_sub_list = num_in_sub_list,
             validity_index = validity_index,
-            differentiable = differentiable,
+            differentiable = differentiable, # we keep this information because we're not going to pass non differentiable outputs to the C++ call
             arg_name = arg_name,
             cpp_type = driver.ffi_tensor_output_arg_code( len( shape ), dtype ),
             valid = valid,
@@ -135,10 +129,7 @@ class FfiArgInfo:
             spec = driver.ffi_tensor_output_spec( shape, dtype ),
         )
 
-        if differentiable:
-            self.differentiable_ffi_outputs.append( ffi_output )
-        else:
-            self.non_differentiable_ffi_outputs.append( ffi_output )
+        self.ffi_outputs.append( ffi_output )
 
         return ffi_output
 
@@ -181,7 +172,7 @@ class FfiArgInfo:
 
     @property
     def output_specs( self ):
-        return [ output.spec for output in self.non_differentiable_ffi_outputs + self.differentiable_ffi_outputs ]
+        return [ output.spec for output in self.ffi_outputs ]
 
     @property
     def input_values( self ):
@@ -189,10 +180,11 @@ class FfiArgInfo:
 
     @property
     def named_ffi_args( self ) -> list[ tuple[ str, FfiOutput | FfiInput | FfiOutput | FfiInput | FfiParameter ] ]:
+        """ in the right order """
         res = []
         for arg in self.non_differentiable_ffi_inputs + self.differentiable_ffi_inputs + self.ffi_parameters:
             res.append( ( arg.arg_name, arg ) )
-        for arg in self.non_differentiable_ffi_outputs + self.differentiable_ffi_outputs:
+        for arg in self.ffi_outputs:
             res.append( ( arg.arg_name, arg ) )
         return res
 
@@ -207,19 +199,17 @@ class FfiArgInfo:
         for n, arg in enumerate( self.ffi_parameters ):
             res.append( arg.bind + f"( \"p{ n }\" )" )
 
-        for arg in self.non_differentiable_ffi_outputs:
-            res.append( arg.bind + "()" )
-        for arg in self.differentiable_ffi_outputs:
+        for arg in self.ffi_outputs:
             res.append( arg.bind + "()" )
 
         return res
 
-    def backward_version( self, driver, non_differentiable_outputs = [], differentiable_outputs = [], grads_of_the_outputs = [] ):
+    def backward_version( self, driver, outputs = [], grads_of_the_outputs = [] ):
         # turn fwd arg into inputs
         nargs = {}
         for call_arg in self.call_args:
             if call_arg.io_category == 2:
-                nargs[ call_arg.attribute_name ] = call_arg.construct( self, non_differentiable_outputs, differentiable_outputs )
+                nargs[ call_arg.attribute_name ] = call_arg.construct( self, outputs )
             else:
                 nargs[ call_arg.attribute_name ] = call_arg.python_value
 
