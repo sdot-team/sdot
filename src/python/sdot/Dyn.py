@@ -6,6 +6,7 @@ class Dyn:
     In Return:       Return( Tensor, [ Dyn("nb_points", reservation), dim ] )
     """
 
-    def __init__( self, name: str, capacity = None ):
+    def __init__( self, name: str, capacity = None, initial_value = 0 ):
+        self.initial_value = initial_value
         self.capacity = capacity
         self.name = name

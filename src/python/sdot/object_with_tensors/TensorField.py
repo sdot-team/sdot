@@ -115,12 +115,12 @@ class TensorField:
         distribution.__dict__[ f'_{ self.name }' ] = tensor
 
     def configure_call_ret_for( self, call_arg, fai, driver, *args, **kwargs ):
-        shape = self.shape_for( mandatory = True, **kwargs )
-        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype )
-
-    # def fake_instance_for( self, driver, *args, **kwargs ):
-    #     shape = self.shape_for( mandatory = False, **kwargs )
-    #     return driver.empty( [ 0 for _ in shape ], self.dtype or driver.dtype )
+        shape_with_dyn = self.shape_for( mandatory = True, **kwargs )
+        for dynamic_axis_name in self.dynamic_axis_names:
+            index = self.axis_names.index( dynamic_axis_name + "_capacity" )
+            assert( index >= 0 )
+            shape_with_dyn[ index ] = Dyn( dynamic_axis_name, shape_with_dyn[ index ] )
+        call_arg.configure_as_output_tensor( fai, driver, shape_with_dyn, self.dtype or driver.dtype, resize_dyn_axes = False, call_arg_with_axes = call_arg.parent )
 
     def shape_for( self, mandatory = True, **kwargs ):
         def get_value( attr ):

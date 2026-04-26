@@ -183,7 +183,7 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
         def get_dyn( self ):
             return getattr( self, "_" + axis_name, 0 )
         def set_dyn( self, value: int ):
-            if value >= getattr( axis_name + "_capacity" ):
+            if value >= getattr( self, axis_name + "_capacity" ):
                 raise RuntimeError( f"no enough capacity (for '{ axis_name }')" )
             return setattr( self, "_" + axis_name, value )
         setattr( cls, axis_name, property( get_dyn, set_dyn ) )

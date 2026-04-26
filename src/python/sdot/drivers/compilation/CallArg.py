@@ -1,11 +1,16 @@
-from .collect_attributes import collect_attributes #, Annotation
+from .collect_attributes import collect_attributes
 from ...UndefinedTensor import UndefinedTensor
 from ...Dyn import Dyn
+
+from .FfiDynamicAxis import FfiDynamicAxis
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .Return import Return
 from .Tensor import Tensor
+
 from typing import Self
+import weakref
+
 
 class CallArg:
     """
@@ -20,6 +25,7 @@ class CallArg:
     attribute_name : str # attribute name
     updated_value  : callable # for update of mutable object. If None, `update` will use `sub_list` to go deeper
     python_value   : any #
+    dynamic_axes   : list[ FfiDynamicAxis ] #
     io_category    : int # 0 => pure input, 1 => mutable, 2 => return
     python_ctor    : callable # for reassembly of python objects. Called using an object that contains lists like differentiable_ffi_outputs, ...
     brace_ctor     : bool # true to use '{}' in generated code for instanciation
@@ -28,23 +34,29 @@ class CallArg:
     base_code      : str # name of function or class for assembly of C++ objects (e.g. "Cell<TF,2>")
     signature      : str # name used to make the signature of the module (e.g. T0F64 for a tensor)
     sub_list       : list[ Self ] | None # arguments for python_ctor or base_code
+    parent         : Self | None #
 
     def __init__( self ):
         self.updated_value = None
+        self.dynamic_axes = []
         self.python_ctor = None
         self.brace_ctor = False
         self.ffi_output = None
         self.ffi_input = None
         self.sub_list = None
+        self.parent = None
 
     @staticmethod
-    def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver ):
+    def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver, parent = None ):
         """ recursively construct a CallArg """
 
         # common info
         res = CallArg()
         res.attribute_name = attribute_name
         res.sub_list = None
+
+        if parent is not None:
+            res.parent = weakref.ref( parent )
 
         # fill the remaining arguments
         res.configure( python_value, fai, mutable, driver )
@@ -130,13 +142,13 @@ class CallArg:
             return outputs[ index ]
         return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False ):
+    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, call_arg_with_axes = None ):
         # resolve Dyn axes: register them, build actual (capacity) shape
         actual_shape = []
         dyn_axes = {}  # tensor axis position -> FfiDynamicAxis
         for i, s in enumerate( shape ):
             if isinstance( s, Dyn ):
-                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, driver )
+                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, s.initial_value, call_arg_with_axes, driver )
                 actual_shape.append( s.capacity )
             else:
                 actual_shape.append( s )
@@ -154,12 +166,14 @@ class CallArg:
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 
         def _python_ctor( fai, outputs ):
+            # get tensor
             output = CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
                 fallback_shape = actual_shape,
                 fallback_dtype = dtype,
             )
 
-            if dyn_axes and fai.u64_ffi_output.num_in_sub_list < len( outputs ):
+            # resize dyn axes
+            if resize_dyn_axes and dyn_axes and fai.u64_ffi_output.num_in_sub_list < len( outputs ):
                 slices = [ slice( None ) for i in range( dim ) ]
                 for tensor_axis, ffi_dyn_axis in dyn_axes.items():
                     u64_tensor = outputs[ fai.u64_ffi_output.num_in_sub_list ]
@@ -167,6 +181,7 @@ class CallArg:
                     slices[ tensor_axis ] = slice( None, lim )
                 output = output[ tuple( slices ) ]
 
+            # output format
             if for_single_item:
                 return output.item()
             return output
@@ -207,7 +222,7 @@ class CallArg:
 
         self.sub_list = []
         for name, _ in collect_attributes( type( python_value ) ):
-            self.sub_list.append( self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver ) )
+            self.sub_list.append( self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self ) )
 
         # add DynamicAxis members for input objects that declare dynamic axes
         dynamic_axes = getattr( python_value, 'dynamic_axes', None )
@@ -234,9 +249,15 @@ class CallArg:
             if callable( getattr( return_type, "__default_init__", None ) ):
                 res = object.__new__( return_type )
                 res.__default_init__( **args )
-                return res
+            else:
+                res = return_type( **args )
 
-            raise return_type( **args )
+            for dynamic_axis in self.dynamic_axes:
+                if dynamic_axis.pos_in_u64_output >= 0 and dynamic_axis.pos_in_u64_output < len( outputs ):
+                    size = outputs[ fai.u64_ffi_output.num_in_sub_list ][ dynamic_axis.pos_in_u64_output ]
+                    setattr( res, dynamic_axis.name, size )
+
+            return res
 
         self.python_ctor = python_ctor
 
@@ -253,6 +274,7 @@ class CallArg:
         res.python_value = None
         res.io_category = 2
         res.sub_list = None
+        res.parent = weakref.ref( self )
 
         # analysis
         res.configure_as_return( fai, driver, return_type, *type_args, **type_kwargs )

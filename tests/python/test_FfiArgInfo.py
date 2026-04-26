@@ -6,8 +6,8 @@ import sdot
 
 @object_with_tensors
 class Pouet:
-    positions = TensorField( "dim" )
-
+    positions = TensorField( sdot.Dyn( "nb_points" ), "dim" )
+    nb_points : int
 
 def test_base():
     # Rq: ça serait bien que la backward version construise les entrées
@@ -20,7 +20,8 @@ def test_base():
 
     # pouet = Pouet( [ 53 ] )
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
-        ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs", 2 ), 3 ] ),
+        # ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs", 2 ), 3 ] ),
+        ret = sdot.Return( Pouet, nb_points_capacity = 3, dim = 2 ),
     )
     # info( pouet )
     info( res )

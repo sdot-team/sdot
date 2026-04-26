@@ -19,7 +19,7 @@ def custom_printer_impl( obj, nl ):
     if hasattr( obj, "__dict__" ):
         res = type( obj ).__name__
         nnl = nl + "  "
-        for n, _ in collect_attributes_inst( obj ):
+        for n, _ in collect_attributes_inst( obj, use_annotations = True ):
             res += nnl + n + ": " + custom_printer_impl( getattr( obj, n ), nnl )
         return str(res)
 

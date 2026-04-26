@@ -101,38 +101,25 @@ class FfiArgInfo:
 
         return res
 
-    def add_dynamic_axis( self, name: str, driver ) -> FfiDynamicAxis:
+    def add_dynamic_axis( self, name: str, initial_value: int, call_arg_with_axes: CallArg | None, driver ) -> FfiDynamicAxis:
         """ Register a named dynamic axis. Returns the FfiDynamicAxis. """
         if name in self.dynamic_axes:
-            return self.dynamic_axes[ name ]
+            res = self.dynamic_axes[ name ]
+        else:
+            res = FfiDynamicAxis(
+                pos_in_u64_output = self.u64_output_size,
+                pos_in_u64_input = len( self.u64_input_values ),
+                name = name,
+            )
 
-        ffi_dyn_axis = FfiDynamicAxis(
-            pos_in_u64_output = self.u64_output_size,
-            name = name,
-        )
+            self.dynamic_axes[ name ] = res
 
-        self.dynamic_axes[ name ] = ffi_dyn_axis
-        self.u64_output_size += 1
+            self.u64_input_values.append( initial_value )
+            self.u64_output_size += 1
 
-        return ffi_dyn_axis
-
-    # def add_input_dynamic_axis( self, axis_name: str, size: int ) -> 'CallArg':
-    #     """ Register an input-side dynamic axis; its size is appended to the validity_mask buffer. """
-    #     extra_index = len( self._input_dyn_axis_sizes )
-    #     self._input_dyn_axis_sizes.append( ( axis_name, size ) )
-    #     info( axis_name, size )
-
-    #     dyn_call_arg = CallArg()
-    #     dyn_call_arg.attribute_name = axis_name
-    #     dyn_call_arg.python_value = None
-    #     dyn_call_arg.io_category = 3
-    #     dyn_call_arg.sub_list = None
-    #     dyn_call_arg.brace_ctor = False
-    #     dyn_call_arg.base_code = ""  # filled after validity_mask is built
-    #     dyn_call_arg.signature = "Dyn"
-
-    #     self._pending_input_dyn_call_args.append( ( dyn_call_arg, extra_index ) )
-    #     return dyn_call_arg
+        if call_arg_with_axes is not None and res not in call_arg_with_axes().dynamic_axes:
+            call_arg_with_axes().dynamic_axes.append( res )
+        return res
 
     def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int, FfiInput ]:
         if valid is None:

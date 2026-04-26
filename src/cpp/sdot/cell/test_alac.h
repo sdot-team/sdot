@@ -1,13 +1,15 @@
 #include <sdot/support/P.h>
+using namespace sdot;
 
 template<class T>
 struct Pouet { T positions; };
 
 void test_alac( auto &&p ) {
-    P( p.ret.is_invalid() );
-    P( p.ret.size( 0 ) );
-    P( p.nb_smurfs.capacity );
-    p.nb_smurfs = 1;
+    P( p.ret.positions.is_invalid() );
+    P( p.ret.positions.size( 0 ) );
+    P( p.nb_points.capacity );
+    P( PI( p.nb_points ) );
+    p.nb_points = 1;
     // P( p.b );
     // p.ret.positions( 0 ) = 23;
     // p.o0() = p.i0() * p.i0();
