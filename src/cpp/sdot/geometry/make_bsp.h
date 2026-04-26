@@ -115,7 +115,7 @@ struct BspMaker {
     }
 
     SI add_cell( SI beg_in_sorted_vertex_indices, SI end_in_sorted_vertex_indices ) {
-        SI res = bsp.nb_cells()++;
+        SI res = bsp.nb_cells++;
         if ( res == bsp.cell_indices.size( 0 ) )
             throw std::runtime_error( "reservation of cell_indices" );
 
@@ -190,7 +190,7 @@ struct BspMaker {
     void exec() {
         // base init
         std::iota( bsp.sorted_vertex_indices.begin(), bsp.sorted_vertex_indices.end(), PI( 0 ) );
-        bsp.nb_cells() = 0;
+        bsp.nb_cells = 0;
 
         // first cell
         add_cell( 0, bsp.sorted_vertex_indices.size() );

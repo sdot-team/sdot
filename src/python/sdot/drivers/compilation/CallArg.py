@@ -1,4 +1,4 @@
-from .collect_attributes import collect_attributes
+from .collect_attributes import collect_attributes_inst, collect_attributes, Annotation
 from ...UndefinedTensor import UndefinedTensor
 from ...Dyn import Dyn
 
@@ -222,7 +222,7 @@ class CallArg:
         self.brace_ctor = True
 
         self.sub_list = []
-        for name, inst in collect_attributes( type( python_value ) ):
+        for name, inst in collect_attributes_inst( python_value, use_annotations = True ):
             analysis_of_python_arg = getattr( inst, "analysis_of_python_arg", None )
             if analysis_of_python_arg:
                 sc = analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
@@ -265,7 +265,11 @@ class CallArg:
         self.brace_ctor = True
 
         self.sub_list = []
-        for name, value in collect_attributes( return_type ):
+        for name, value in collect_attributes( return_type, use_annotations = True ):
+            if isinstance( value, Annotation ):
+                info( name, value )
+                import sys
+                sys.exit( 0 )
             self.sub_list.append( self.return_child( fai, driver, name, value, *type_args, **type_kwargs ) )
 
     def return_child( self, fai, driver, attribute_name: str, return_type: any, *type_args, **type_kwargs ) -> Self:

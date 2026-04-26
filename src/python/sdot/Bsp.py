@@ -1,5 +1,5 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
-from .driver import driver, Return, Tensor, CtInt
+from .driver import driver, Return, CtInt, Dyn
 
 
 @object_with_tensors
@@ -9,18 +9,17 @@ class Bsp:
     """
 
     sorted_vertex_indices = TensorField( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
-    cell_indices = TensorField( "max_nb_cells", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
-    cell_bounds = TensorField( "max_nb_cells", "3 * dim + 1" ) # cell index -> min pt, max pt, poly bound
-    nb_cells = TensorField( dtype = int )
+    cell_indices = TensorField( Dyn( "nb_cells" ), "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
+    cell_bounds = TensorField( Dyn( "nb_cells" ), "3 * dim + 1" ) # cell index -> min pt, max pt, poly bound
 
     @staticmethod
     def make_from( positions, weights = None, max_points_per_cell = 30 ):
         nb_vertices, dim = positions.shape
-        max_nb_cells = nb_vertices
+        nb_cells_capacity = nb_vertices
         ct_dim = CtInt( dim )
 
         return driver.call( "make_bsp", "sdot/geometry/make_bsp.h",
-            bsp = Return( Bsp, nb_vertices = nb_vertices, max_nb_cells = max_nb_cells, dim = dim ),
+            bsp = Return( Bsp, nb_vertices = nb_vertices, nb_cells_capacity = nb_cells_capacity, dim = dim ),
             max_points_per_cell = max_points_per_cell,
             positions = positions,
             weights = weights,

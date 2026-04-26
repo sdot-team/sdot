@@ -16,7 +16,7 @@ class PowerDiagram:
     positions = TensorField( "nb_vertices", "dim" ) # vertex index ->
     weights = TensorField( "nb_vertices" ) # vertex index ->
     ct_dim = CtInt( -1 ) #
-    # bsp : Bsp
+    bsp : Bsp
 
     if TYPE_CHECKING:
         nb_vertices_capacity : int
@@ -28,7 +28,7 @@ class PowerDiagram:
         self.weights = weights
         self.ct_dim = CtInt( positions.shape[ 1 ] )
 
-        # self.bsp = Bsp.make_from( self.positions, self.weights )
+        self.bsp = Bsp.make_from( self.positions, self.weights )
 
     def plot( self, plotter = None ):
         with Plotter( plotter ) as p:

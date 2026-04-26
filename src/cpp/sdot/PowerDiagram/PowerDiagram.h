@@ -11,8 +11,6 @@ struct PowerDiagram {
     TensorView<TF,1,Arch> weights;
     CtInt<ct_dim_>        ct_dim;
     Bsp<TF,Arch>          bsp;
-    
-    DynamicAxis           nb_vertices;
 };
 
 }
