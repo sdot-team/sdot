@@ -6,24 +6,19 @@
 namespace sdot {
 
 struct DynamicAxis {
-    SI*  ptr;
-    SI   cap;
+    /**/         DynamicAxis( PI *ptr, PI size, PI capacity ) : capacity( capacity ), ptr( ptr ) { *ptr = size; }
 
-    static DynamicAxis input( SI* ptr, SI size ) { *ptr = size; return { ptr, size }; }
+    operator     PI         () const { return *ptr; }
 
-    operator SI () const { return *ptr; }
+    PI           operator++ () { if ( ++( *ptr ) > capacity ) overflow(); return *ptr; }
+    PI           operator++ ( int ) { PI res = *ptr; ++( *this ); return res; }
 
-    SI& operator++ () {
-        if ( ++( *ptr ) > cap )
-            throw std::runtime_error( "DynamicAxis: capacity exceeded" );
-        return *ptr;
-    }
+    DynamicAxis& operator=  ( PI value ) { if ( value > capacity ) overflow(); *ptr = value; return *this; }
 
-    SI operator++ ( int ) {
-        SI res = *ptr;
-        ++( *this );
-        return res;
-    }
+    void         overflow   () { throw std::runtime_error( "DynamicAxis: capacity exceeded" ); }
+
+    PI           capacity;
+    PI*          ptr;
 };
 
 } // namespace sdot

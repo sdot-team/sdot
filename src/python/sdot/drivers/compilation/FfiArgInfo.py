@@ -44,10 +44,12 @@ class FfiArgInfo:
         # input u64 value
         self.u64_input_bit_offset = 0 # where to set the next input bit (64 means that we will have to allocate a new U64 in self.u64_input_values)
         self.u64_input_values = []
+        self.u64_ffi_input = None
 
         # input u64 value
         self.u64_output_bit_offset = 0 # where to set the next output bit (multiple of 64 means that we will have to allocate a new U64)
         self.u64_output_size = 0
+        self.u64_ffi_output = None
 
         # recursive analysis
         for arg_name, arg_value in call_args.items():
@@ -55,7 +57,7 @@ class FfiArgInfo:
 
         # register u64_input
         if self.u64_input_values:
-            self.non_differentiable_ffi_inputs.append( FfiInput(
+            self.u64_ffi_input = FfiInput(
                 num_in_sub_list = -1,
                 differentiable = False,
                 validity_index = -1,
@@ -65,11 +67,12 @@ class FfiArgInfo:
                 cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
                 valid = None,
                 bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
-            ) )
+            )
+            self.non_differentiable_ffi_inputs.append( self.u64_ffi_input )
 
         # register u64_output
         if self.u64_output_size:
-            self.ffi_outputs.append( FfiOutput(
+            self.u64_ffi_output = FfiOutput(
                 num_in_sub_list = len( self.ffi_outputs ),
                 differentiable = False,
                 validity_index = -1,
@@ -78,22 +81,8 @@ class FfiArgInfo:
                 valid = None,
                 spec = driver.ffi_tensor_output_spec( [ self.u64_output_size ], numpy.uint64 ),
                 bind = driver.ffi_tensor_output_bind_code( 1, numpy.uint64 ),
-            ) )
-
-
-        # # append input dynamic axis sizes at the tail of validity_mask (read-only source)
-        # # and finalize each CallArg to use DynamicAxis::input with the writable slot in ffi_output_for_dynamic_sizes
-        # if self._input_dyn_axis_sizes:
-        #     extra = numpy.array( [ s for _, s in self._input_dyn_axis_sizes ], dtype = numpy.uint64 )
-        #     validity_mask = numpy.concatenate( [ validity_mask, extra ] )
-        #     out_name = self.ffi_output_for_dynamic_sizes.arg_name
-        #     for dyn_call_arg, extra_index in self._pending_input_dyn_call_args:
-        #         slot   = n_out + extra_index
-        #         offset = n_validity_words + extra_index
-        #         dyn_call_arg.base_code = (
-        #             f"DynamicAxis::input( { out_name }->typed_data() + { slot }, "
-        #             f"SI( validity_mask[{ offset }] ) )"
-        #         )
+            )
+            self.ffi_outputs.append( self.u64_ffi_output )
 
     def append_u64_input_bit( self, value ) -> int:
         """ append a bit in u64_input. return index """

@@ -141,13 +141,14 @@ class CallArg:
             else:
                 actual_shape.append( s )
 
+        # create and register the ffi_output
         ffi_output = fai.add_output_tensor( driver, actual_shape, dtype )
         self.ffi_output = ffi_output
         dim = len( actual_shape )
 
         # register this tensor as a capacity source for each dyn axis
-        # for tensor_axis, ffi_dyn_axis in dyn_axes.items():
-        #     ffi_dyn_axis.add_cap_source( ffi_output, tensor_axis )
+        for tensor_axis, ffi_dyn_axis in dyn_axes.items():
+            ffi_dyn_axis.add_output_capacity_source( ffi_output, tensor_axis )
 
         self.base_code = f"tensor_view( CtInt<{ dim }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
@@ -157,13 +158,15 @@ class CallArg:
                 fallback_shape = actual_shape,
                 fallback_dtype = dtype,
             )
-            # if dyn_axes and fai.ffi_output_for_dynamic_sizes.num_in_sub_list < len( outputs ):
-            #     sizes = outputs[ fai.ffi_output_for_dynamic_sizes.num_in_sub_list ]
-            #     slices = tuple(
-            #         slice( None, int( sizes[ dyn_axes[ i ].axis_index ].item() ) ) if i in dyn_axes else slice( None )
-            #         for i in range( dim )
-            #     )
-            #     output = output[ slices ]
+
+            if dyn_axes and fai.u64_ffi_output.num_in_sub_list < len( outputs ):
+                slices = [ slice( None ) for i in range( dim ) ]
+                for tensor_axis, ffi_dyn_axis in dyn_axes.items():
+                    u64_tensor = outputs[ fai.u64_ffi_output.num_in_sub_list ]
+                    lim = int( u64_tensor[ ffi_dyn_axis.pos_in_u64_output ] )
+                    slices[ tensor_axis ] = slice( None, lim )
+                output = output[ tuple( slices ) ]
+
             if for_single_item:
                 return output.item()
             return output

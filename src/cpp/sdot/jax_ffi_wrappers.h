@@ -9,7 +9,7 @@
 
 #include "support/TensorView.h"
 #include <xla/ffi/api/ffi.h>
-// #include "support/jax_ffi.h"
+// #include "support/P.h"
 
 namespace sdot {
 
@@ -74,6 +74,23 @@ bool test_and_shift( auto &mask ) {
     bool res = mask & 1;
     mask >>= 1;
     return res;
+}
+
+// ------------------- first_valid_dimension -------------------
+PI first_valid_dimension( const PI64 */* u64_input */ ) {
+    return 0;
+}
+template<xla::ffi::DataType dtype>
+PI first_valid_dimension( const PI64 *u64_input, const xla::ffi::Buffer<dtype> &buffer, PI validity_index, PI num_axis, auto&& ...tail ) {
+    if ( u64_input[ validity_index / 64 ] & ( PI64( 1 ) << ( validity_index % 64 ) ) )
+        return buffer.dimensions()[ num_axis ];
+    return first_valid_dimension( u64_input, FORWARD( tail )... );
+}
+template<xla::ffi::DataType dtype>
+PI first_valid_dimension( const PI64 *u64_input, xla::ffi::ResultBuffer<dtype> &buffer, PI validity_index, PI num_axis, auto& ...tail ) {
+    if ( u64_input[ validity_index / 64 ] & ( PI64( 1 ) << ( validity_index % 64 ) ) )
+        return buffer->dimensions()[ num_axis ];
+    return first_valid_dimension( u64_input, FORWARD( tail )... );
 }
 
 } // namespace sdot
