@@ -22,6 +22,12 @@ class FfiDynamicAxis:
     def add_output_capacity_source( self, ffi_output: FfiOutput, tensor_axis: int ):
         self.output_capacity_sources.append( ( ffi_output, tensor_axis ) )
 
+    def add_input_capacity_source( self, ffi_input: FfiInput, tensor_axis: int, differentiable: bool ):
+        if differentiable:
+            self.differentiable_input_capacity_sources.append( ( ffi_input, tensor_axis ) )
+        else:
+            self.non_differentiable_input_capacity_sources.append( ( ffi_input, tensor_axis ) )
+
     def ctor_code( self ) -> str:
         init_value = "0"
         if self.pos_in_u64_input >= 0:

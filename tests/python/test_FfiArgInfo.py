@@ -18,10 +18,12 @@ def test_base():
 
     # info( fai.backward_version( sdot.driver ) )
 
-    # pouet = Pouet( [ 53 ] )
+    pouet = Pouet( [ [ 53 ] ], nb_points = 2 )
+
     res = sdot.driver.call( "test_alac", "sdot/cell/test_alac.h",
         # ret = sdot.Return( sdot.Tensor, [ sdot.Dyn( "nb_smurfs", 2 ), 3 ] ),
         ret = sdot.Return( Pouet, nb_points_capacity = 3, dim = 2 ),
+        inp = pouet,
     )
     # info( pouet )
     info( res )

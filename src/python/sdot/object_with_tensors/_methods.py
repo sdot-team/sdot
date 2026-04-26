@@ -155,11 +155,15 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
             for i, ( name, _ ) in enumerate( fields ):
                 if i < len( args ):
                     kwargs.setdefault( name, args[ i ] )
+            # basic setattr
+            for name, value in kwargs.items():
+                setattr( self, name, value )
+
+            # init fields if not already done
             for name, val in fields:
-                default = val
-                if isinstance( val, ( ListOfTensorFields, TensorField, property ) ):
-                    default = None
-                setattr( self, name, kwargs.get( name, default ) )
+                if name not in kwargs and isinstance( val, ( ListOfTensorFields, TensorField ) ):
+                    setattr( self, name, None )
+
         cls.__default_init__ = __default_init__
 
     # --- __init__ -----------------------------------------------------------
@@ -183,7 +187,8 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
         def get_dyn( self ):
             return getattr( self, "_" + axis_name, 0 )
         def set_dyn( self, value: int ):
-            if value >= getattr( self, axis_name + "_capacity" ):
+            capacity = getattr( self, axis_name + "_capacity" )
+            if capacity is not None and value > capacity:
                 raise RuntimeError( f"no enough capacity (for '{ axis_name }')" )
             return setattr( self, "_" + axis_name, value )
         setattr( cls, axis_name, property( get_dyn, set_dyn ) )
@@ -200,15 +205,12 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
 
     # --- dynamic_axes: {axis_name -> actual_size} for all Dyn axes -----------
     if 'dynamic_axes' not in vars( cls ):
-        def _dynamic_axes( self ):
-            res = {}
+        def _dynamic_axes( self ) -> list[ str ]:
+            res = []
             for name, field in fields:
                 if isinstance( field, TensorField ) and field.dynamic_axis_names:
-                    tensor_value = self.__dict__.get( f'_{ name }' )
-                    if tensor_value is not None:
-                        for i, axis_name in enumerate( field.axis_names ):
-                            if axis_name in field.dynamic_axis_names and axis_name not in res:
-                                res[ axis_name ] = int( tensor_value.shape[ i ] )
+                    if axis_name not in res:
+                        res.append( axis_name )
             return res
         setattr( cls, 'dynamic_axes', property( _dynamic_axes ) )
 

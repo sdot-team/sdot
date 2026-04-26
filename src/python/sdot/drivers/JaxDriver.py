@@ -426,7 +426,7 @@ class JaxDriver:
             lines.append( f"struct Parameters_{ func_name } {{" )
             for n, call_arg in enumerate( fai.call_args ):
                 lines.append( f"    T{ n } { call_arg.attribute_name };" )
-            for dynamic_axis in fai.dynamic_axes.values():
+            for dynamic_axis in fai.global_list_of_dynamic_axes:
                 lines.append( f"    DynamicAxis { dynamic_axis.name };" )
             lines.append( "};" )
         else:
@@ -448,7 +448,7 @@ class JaxDriver:
         lines.append( f"    { func_name }( { parameters_struct }{{" )
         for call_arg in fai.call_args:
             lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
-        for dynamic_axis in fai.dynamic_axes.values():
+        for dynamic_axis in fai.global_list_of_dynamic_axes:
             lines.append( f"        .{ dynamic_axis.name } = { dynamic_axis.ctor_code() }," )
         lines.append( "    } );" )
 

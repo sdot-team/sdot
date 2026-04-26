@@ -11,4 +11,4 @@ class Tensor:
 
     @staticmethod
     def configure_call_ret_for( call_arg, fai, driver, shape, dtype = None ):
-        call_arg.configure_as_output_tensor( fai, driver, shape, dtype )
+        call_arg.configure_as_output_tensor( fai, driver, shape, dtype, list_of_dynamic_axes = fai.global_list_of_dynamic_axes )

@@ -1,15 +1,20 @@
+#include <sdot/support/DynamicAxis.h>
 #include <sdot/support/P.h>
 using namespace sdot;
 
 template<class T>
-struct Pouet { T positions; };
+struct Pouet {
+    T positions;
+    DynamicAxis nb_points;
+};
 
 void test_alac( auto &&p ) {
     P( p.ret.positions.is_invalid() );
     P( p.ret.positions.size( 0 ) );
-    P( p.nb_points.capacity );
-    P( PI( p.nb_points ) );
-    p.nb_points = 1;
+    P( p.ret.nb_points.capacity );
+    P( p.ret.nb_points );
+    P( p.inp.nb_points );
+    p.ret.nb_points = 2;
     // P( p.b );
     // p.ret.positions( 0 ) = 23;
     // p.o0() = p.i0() * p.i0();

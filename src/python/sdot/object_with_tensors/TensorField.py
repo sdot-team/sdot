@@ -1,3 +1,4 @@
+from ..drivers.compilation.CallArg import CallArg
 from ..UndefinedTensor import UndefinedTensor
 from ..driver import driver
 from ..Dyn import Dyn
@@ -120,7 +121,27 @@ class TensorField:
             index = self.axis_names.index( dynamic_axis_name + "_capacity" )
             assert( index >= 0 )
             shape_with_dyn[ index ] = Dyn( dynamic_axis_name, shape_with_dyn[ index ] )
-        call_arg.configure_as_output_tensor( fai, driver, shape_with_dyn, self.dtype or driver.dtype, resize_dyn_axes = False, call_arg_with_axes = call_arg.parent )
+
+        list_of_dynamic_axes = None
+        if call_arg.parent is not None:
+            list_of_dynamic_axes = call_arg.parent().dynamic_axes
+
+        call_arg.configure_as_output_tensor( fai, driver, shape_with_dyn, self.dtype or driver.dtype, resize_dyn_axes = False, list_of_dynamic_axes = list_of_dynamic_axes )
+
+    def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
+        res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent )
+
+        # add DynamicAxis members for input objects that declare dynamic axes
+        for axis_name in self.dynamic_axis_names:
+            num_axis = self.axis_names.index( axis_name + "_capacity" )
+            assert( num_axis >= 0 )
+
+            initial_value = getattr( parent.python_value, axis_name )
+            fda = fai.add_dynamic_axis( axis_name, initial_value, parent.dynamic_axes, driver )
+            if res.ffi_input:
+                fda.add_input_capacity_source( res.ffi_input, num_axis, res.ffi_input.differentiable )
+
+        return res
 
     def shape_for( self, mandatory = True, **kwargs ):
         def get_value( attr ):

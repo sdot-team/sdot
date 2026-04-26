@@ -142,13 +142,14 @@ class CallArg:
             return outputs[ index ]
         return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, call_arg_with_axes = None ):
+    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None ):
         # resolve Dyn axes: register them, build actual (capacity) shape
         actual_shape = []
         dyn_axes = {}  # tensor axis position -> FfiDynamicAxis
         for i, s in enumerate( shape ):
             if isinstance( s, Dyn ):
-                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, s.initial_value, call_arg_with_axes, driver )
+                assert list_of_dynamic_axes is not None
+                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, s.initial_value, list_of_dynamic_axes, driver )
                 actual_shape.append( s.capacity )
             else:
                 actual_shape.append( s )
@@ -221,14 +222,14 @@ class CallArg:
         self.brace_ctor = True
 
         self.sub_list = []
-        for name, _ in collect_attributes( type( python_value ) ):
-            self.sub_list.append( self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self ) )
+        for name, inst in collect_attributes( type( python_value ) ):
+            analysis_of_python_arg = getattr( inst, "analysis_of_python_arg", None )
+            if analysis_of_python_arg:
+                sc = analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
+            else:
+                sc = self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
+            self.sub_list.append( sc )
 
-        # add DynamicAxis members for input objects that declare dynamic axes
-        dynamic_axes = getattr( python_value, 'dynamic_axes', None )
-        if dynamic_axes:
-            for axis_name, size in dynamic_axes.items():
-                self.sub_list.append( fai.add_input_dynamic_axis( axis_name, size ) )
 
     def configure_as_output_object_with_collect_attributes( self, fai, driver, return_type, *type_args, **type_kwargs ):
         if callable( getattr( return_type, "base_code_for", None ) ):
@@ -302,6 +303,8 @@ class CallArg:
                         lst.append( a.assembled_code() )
                     else:
                         lst.append( f".{ a.attribute_name } = { a.assembled_code() }" )
+                for dynamic_axis in self.dynamic_axes:
+                    lst.append( f".{ dynamic_axis.name } = {{  { dynamic_axis.ctor_code() } }}" )
                 res += "{ " + str.join( ", ", lst ) + " }"
             else:
                 res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"
