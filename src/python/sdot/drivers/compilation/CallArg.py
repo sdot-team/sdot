@@ -1,4 +1,4 @@
-from .collect_attributes import collect_attributes_inst, collect_attributes, Annotation
+from .collect_attributes import collect_attributes_inst, collect_attributes #, Annotation
 from ...UndefinedTensor import UndefinedTensor
 from ...Dyn import Dyn
 
@@ -142,45 +142,35 @@ class CallArg:
             return outputs[ index ]
         return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None ):
-        # resolve Dyn axes: register them, build actual (capacity) shape
-        actual_shape = []
-        dyn_axes = {}  # tensor axis position -> FfiDynamicAxis
-        for i, s in enumerate( shape ):
-            if isinstance( s, Dyn ):
-                assert list_of_dynamic_axes is not None
-                dyn_axes[ i ] = fai.add_dynamic_axis( s.name, s.initial_value, list_of_dynamic_axes, driver )
-                actual_shape.append( s.capacity )
-            else:
-                actual_shape.append( s )
-
+    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_size = False ):
         # create and register the ffi_output
-        ffi_output = fai.add_output_tensor( driver, actual_shape, dtype )
+        ffi_output = fai.add_output_tensor( driver, shape, dtype )
         self.ffi_output = ffi_output
-        dim = len( actual_shape )
 
-        # register this tensor as a capacity source for each dyn axis
-        for tensor_axis, ffi_dyn_axis in dyn_axes.items():
-            ffi_dyn_axis.add_output_capacity_source( ffi_output, tensor_axis )
-
-        self.base_code = f"tensor_view( CtInt<{ dim }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
-        self.signature = f"T{ dim }{ driver.normalized_type_for( dtype or driver.dtype ) }"
+        if represents_a_dynamic_size:
+            self.base_code = f"DynamicSize( tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ), __capacity__ )"
+        else:
+            self.base_code = f"tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
+        self.signature = f"T{ len( shape ) }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 
         def _python_ctor( fai, outputs ):
             # get tensor
-            output = CallArg.get_output_tensor( ffi_output, fai, driver, outputs,
-                fallback_shape = actual_shape,
-                fallback_dtype = dtype,
-            )
+            output = CallArg.get_output_tensor( ffi_output, fai, driver, outputs, fallback_shape = shape, fallback_dtype = dtype )
 
-            # resize dyn axes
-            if resize_dyn_axes and dyn_axes and fai.u64_ffi_output.num_in_sub_list < len( outputs ):
-                slices = [ slice( None ) for i in range( dim ) ]
-                for tensor_axis, ffi_dyn_axis in dyn_axes.items():
-                    u64_tensor = outputs[ fai.u64_ffi_output.num_in_sub_list ]
-                    lim = int( u64_tensor[ ffi_dyn_axis.pos_in_u64_output ] )
-                    slices[ tensor_axis ] = slice( None, lim )
-                output = output[ tuple( slices ) ]
+            # # resize dyn axes (skip entirely on code-generation calls where outputs is empty)
+            # if resize_dyn_axes and dyn_axes:
+            #     slices = [ slice( None ) for _ in range( dim ) ]
+            #     changed = False
+            #     for tensor_axis, ffi_dyn_axis in dyn_axes.items():
+            #         n_out = ffi_dyn_axis.ffi_output.num_in_sub_list
+            #         if n_out < len( outputs ):
+            #             sizes = outputs[ n_out ]
+            #             lim = int( sizes.item() ) if sizes.ndim == 0 else None
+            #             if lim is not None:
+            #                 slices[ tensor_axis ] = slice( None, lim )
+            #                 changed = True
+            #     if changed:
+            #         output = output[ tuple( slices ) ]
 
             # output format
             if for_single_item:
@@ -253,10 +243,12 @@ class CallArg:
             else:
                 res = return_type( **args )
 
-            for dynamic_axis in self.dynamic_axes:
-                if dynamic_axis.pos_in_u64_output >= 0 and dynamic_axis.pos_in_u64_output < len( outputs ):
-                    size = outputs[ fai.u64_ffi_output.num_in_sub_list ][ dynamic_axis.pos_in_u64_output ]
-                    setattr( res, dynamic_axis.name, size )
+            for ffi_dyn_axis in self.dynamic_axes:
+                n_out = ffi_dyn_axis.ffi_output.num_in_sub_list
+                if n_out < len( outputs ):
+                    sizes = outputs[ n_out ]
+                    val = int( sizes.item() ) if sizes.ndim == 0 else sizes
+                    setattr( res, ffi_dyn_axis.name, val )
 
             return res
 
@@ -266,11 +258,11 @@ class CallArg:
 
         self.sub_list = []
         for name, value in collect_attributes( return_type, use_annotations = True ):
-            if isinstance( value, Annotation ):
-                value = value.value
-                # info( name, value )
-                # import sys
-                # sys.exit( 0 )
+            # if isinstance( value, Annotation ):
+            #     value = value.value
+            #     # info( name, value )
+            #     # import sys
+            #     # sys.exit( 0 )
             self.sub_list.append( self.return_child( fai, driver, name, value, *type_args, **type_kwargs ) )
 
     def return_child( self, fai, driver, attribute_name: str, return_type: any, *type_args, **type_kwargs ) -> Self:
@@ -324,6 +316,13 @@ class CallArg:
                 setattr( self.python_value, item.attribute_name, item.updated_value( fai, outputs ) )
             else:
                 item.update( fai, outputs )
+
+        for ffi_dyn_axis in self.dynamic_axes:
+            n_out = ffi_dyn_axis.ffi_output.num_in_sub_list
+            if n_out < len( outputs ):
+                sizes = outputs[ n_out ]
+                val = int( sizes.item() ) if sizes.ndim == 0 else sizes
+                setattr( self.python_value, ffi_dyn_axis.name, val )
 
     def as_input( self, driver ):
         if self.io_category == 0:

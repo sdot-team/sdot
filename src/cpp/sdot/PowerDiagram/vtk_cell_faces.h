@@ -1,5 +1,5 @@
-#include "../support/P.h"
 #include "../cell/for_each_face.h"
+#include "../support/P.h"
 #include "PowerDiagram.h"
 
 namespace sdot {

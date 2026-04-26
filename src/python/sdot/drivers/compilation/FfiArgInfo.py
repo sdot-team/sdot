@@ -3,6 +3,7 @@ from .FfiParameter import FfiParameter
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .CallArg import CallArg
+from ...util import find
 
 import numpy
 
@@ -35,8 +36,7 @@ class FfiArgInfo:
         # python/cpp values (for the user)
         self.call_args: list[ CallArg ] = [] # one for each call arg
 
-        #
-        self.global_list_of_dynamic_axes: list[ FfiDynamicAxis ] = [] # typically dynamic axes for Return( Tensor( Dyn( "..." ) ) )
+        self.global_list_of_dynamic_axes: list[ FfiDynamicAxis ] = [] # typically dynamic axes for Return( Tensor( Dyn( "..." ) ) ) where "..." will be exposed in the parameters of the C++ call
 
         # configuration
         self.parameters_struct = parameters_struct # struct name to use instead of the parameter list
@@ -54,6 +54,9 @@ class FfiArgInfo:
         # recursive analysis
         for arg_name, arg_value in call_args.items():
             self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, False, driver ) )
+
+        #
+        info( self.call_args )
 
         # register u64_input
         if self.u64_input_values:
@@ -101,24 +104,20 @@ class FfiArgInfo:
 
         return res
 
-    def add_dynamic_axis( self, name: str, initial_value: int, list_of_dynamic_axes: list[ CallArg ], driver ) -> FfiDynamicAxis:
-        """ Register a named dynamic axis. Returns the FfiDynamicAxis. """
-        res = next( ( dynamic_axis for dynamic_axis in list_of_dynamic_axes if dynamic_axis.name == name ), None )
-        if res is None:
-            res = FfiDynamicAxis(
-                pos_in_u64_output = self.u64_output_size,
-                pos_in_u64_input = len( self.u64_input_values ),
-                name = name,
-            )
-
-            list_of_dynamic_axes.append( res )
-
-            self.u64_input_values.append( initial_value )
-            self.u64_output_size += 1
-        else:
-            self.u64_input_values[ res.pos_in_u64_input ] = initial_value
-
-        return res
+    def add_dynamic_axis( self, name: str, initial_values, local_list_of_dynamic_axes: list, driver ) -> FfiDynamicAxis:
+        """ Register a named dynamic axis backed by dedicated non-diff tensors (numpy or driver tensor). """
+        todo()
+        # find
+        # res = next( ( da for da in local_list_of_dynamic_axes if da.name == name ), None )
+        # if res is None:
+        #     shape = list( initial_values.shape )
+        #     ffi_input = self.add_input_tensor( initial_values, driver )
+        #     ffi_output = self.add_output_tensor( driver, shape, numpy.uint64 )
+        #     res = FfiDynamicAxis( name = name, ffi_input = ffi_input, ffi_output = ffi_output )
+        #     local_list_of_dynamic_axes.append( res )
+        # else:
+        #     res.ffi_input.python_value = initial_values
+        # return res
 
     def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int, FfiInput ]:
         if valid is None:
@@ -214,7 +213,6 @@ class FfiArgInfo:
         ) )
 
         return f"p{ n }"
-
 
     def add_parameter( self, python_value: any, cpp_type: str ) -> str:
         n = len( self.ffi_parameters )

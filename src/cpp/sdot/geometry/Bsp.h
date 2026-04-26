@@ -10,7 +10,7 @@ struct Bsp {
     TensorView<SI,1,Arch> sorted_vertex_indices;
     TensorView<SI,2,Arch> cell_indices;
     TensorView<TF,2,Arch> cell_bounds;
-    DynamicAxis           nb_cells;
+    DynamicAxis<0,Arch>   nb_cells;
 };
 
 } // namespace sdot

@@ -385,6 +385,7 @@ class JaxDriver:
         lines.append( "namespace nb = nanobind;" )
         lines.append( "using namespace sdot;" )
         lines.append( "" )
+        lines.append( "using Arch = Cpu;" )
         lines.append( f"using TF = { self.normalized_dtype };" )
         lines.append( "" )
 

@@ -13,8 +13,10 @@ from .distributions.Distribution import Distribution as Distribution
 from .drivers.compilation.Mutable import Mutable as Mutable
 from .drivers.compilation.Return import Return as Return
 from .drivers.compilation.Tensor import Tensor as Tensor
+
 from .Dyn import Dyn as Dyn
 
+from .object_with_tensors import object_with_tensors as object_with_tensors, TensorField as TensorField
 from .UndefinedTensor import UndefinedTensor as UndefinedTensor
 from .CtInt import CtInt as CtInt
 

@@ -63,6 +63,15 @@ def test_codegen():
     info( pouet )
     info( res )
 
+def test_fields():
+    @sdot.object_with_tensors
+    class Yo:
+        a = sdot.TensorField( sdot.Dyn( "nb_points" ), "dim" )
+
+    yo = sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Return( Yo, nb_points_capacity = 4, dim = 2 ) )
+    info( yo )
+
+
 
 # import jax
 
@@ -77,7 +86,8 @@ def test_codegen():
 # ic( x )
 # ic( r )
 if __name__ == "__main__":
-    test_alac_grad()
+    # test_alac_grad()
+    test_fields()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

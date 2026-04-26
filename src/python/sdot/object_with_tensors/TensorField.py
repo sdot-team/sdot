@@ -1,9 +1,10 @@
 from ..drivers.compilation.CallArg import CallArg
 from ..UndefinedTensor import UndefinedTensor
 from ..driver import driver
+from ..util import find
 from ..Dyn import Dyn
 
-from typing import Self, overload
+from typing import Self, overload, TYPE_CHECKING
 from inspect import signature
 import numpy
 
@@ -29,25 +30,36 @@ class TensorField:
     When we set a TensorField, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
     """
 
-    def __init__( self, *axis_names, dtype = None ):
-        self._ctor_args = axis_names  # original args (with Dyn objects), used to reconstruct variants
+    represents_a_dynamic_size: bool
+    comes_from_a_dim_list: bool
+    static_axis_names : list[ str ]
+    removed_dim_axes: list[ int ]
+    dynamic_axes : list[ Dyn ]
+    axis_names : list[ str ]
+    dtype: any
+    name: str
+
+    def __init__( self, *axes, dtype = None, represents_a_dynamic_size = False ):
+        self.represents_a_dynamic_size = represents_a_dynamic_size  # original args (with Dyn objects), used to reconstruct variants
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = [] # used in variants like 1d version, ...
         self.dtype = dtype
         self.name = None
 
-        self.dynamic_axis_names = []
+        # dynamic_axis_names and static_axis_names contain the raw names
+        # axis_names contains name + "_capacity" for dynamic axes
         self.static_axis_names = []
+        self.dynamic_axes = []
         self.axis_names = []
-        for axis_name in axis_names:
-            if isinstance( axis_name, Dyn ):
-                if not axis_name.name.isidentifier():
-                    raise RuntimeError( f"dynamic axes do not support operations (for axis { axis_name.name })" )
-                self.axis_names.append( axis_name.name + "_capacity" )
-                self.dynamic_axis_names.append( axis_name.name )
+        for axis in axes:
+            if isinstance( axis, Dyn ):
+                if not axis.name.isidentifier():
+                    raise RuntimeError( f"dynamic axes do not support operations like +, *, ... (for axis { axis.name } which is not an identifier)" )
+                self.axis_names.append( axis.name + "_capacity" )
+                self.dynamic_axes.append( axis )
             else:
-                self.static_axis_names.append( axis_name )
-                self.axis_names.append( axis_name )
+                self.static_axis_names.append( axis )
+                self.axis_names.append( axis )
 
 
     @property
@@ -60,11 +72,11 @@ class TensorField:
     def __set_name__( self, enclosing, name ):
         self.name = name
 
-    # overloads for typing
-    @overload
-    def __get__( self, enclosing: None, _type: type ) -> Self: ...
-    @overload
-    def __get__( self, enclosing: object, _type: type ) -> GenericTensor: ...
+    if TYPE_CHECKING:
+        @overload
+        def __get__( self, enclosing: None, _type: type ) -> Self: ...
+        @overload
+        def __get__( self, enclosing: object, _type: type ) -> GenericTensor: ...
 
     def __get__( self, enclosing, _type = None ):
         # not in a Distribution ?
@@ -79,20 +91,21 @@ class TensorField:
         # we have a default method ?
         default_method = getattr( type( enclosing ), f'default_{ self.name }', None )
         if default_method is not None:
-            # make the new value
-            sig = signature( default_method )
-            if len( sig.parameters ) == 2:
-                value = default_method( enclosing, isinstance( enclosing, BatchOfDistributions ) )
-            else:
-                value = default_method( enclosing )
+            # # make the new value
+            # sig = signature( default_method )
+            # if len( sig.parameters ) == 2:
+            #     value = default_method( enclosing, isinstance( enclosing, BatchOfDistributions ) )
+            # else:
+            #     value = default_method( enclosing )
 
-            # register it
-            self.__set__( enclosing, value )
+            # # register it
+            # self.__set__( enclosing, value )
 
             # return the normalized value
-            return enclosing.__dict__[ f'_{ self.name }' ]
+            # return enclosing.__dict__[ f'_{ self.name }' ]
+            raise NotImplementedError
 
-        # not found :(
+        # not found -> make an UndefinedTensor with shape and dtype
         def get_value( attr ):
             return getattr( enclosing, attr, None )
         return UndefinedTensor( _shape( self, get_value ), self.dtype )
@@ -111,38 +124,55 @@ class TensorField:
                 currs = distribution._axis_count_for( self, tensor, axis_name, [] )
                 for curr in currs:
                     if curr is not None and curr != size:
-                        raise RuntimeError( f"tensor used to define the '{ self.name }' attribute is not of the correct size along the '{ axis_name }' axis (expecting { size }, provided tensor shape - minus potential offset - is { curr })" )
+                        raise RuntimeError( f"tensor used to define the '{ self.name }' attribute is not of the correct size along the '{ axis_name }' axis (expecting { size }, provided tensor shape is { curr })" )
 
         # register the tensor
         distribution.__dict__[ f'_{ self.name }' ] = tensor
 
+    # def base_code_for( self, driver, *type_args, **type_kwargs ):
+
     def configure_call_ret_for( self, call_arg, fai, driver, *args, **kwargs ):
-        shape_with_dyn = self.shape_for( mandatory = True, **kwargs )
-        for dynamic_axis_name in self.dynamic_axis_names:
-            index = self.axis_names.index( dynamic_axis_name + "_capacity" )
-            assert( index >= 0 )
-            shape_with_dyn[ index ] = Dyn( dynamic_axis_name, shape_with_dyn[ index ] )
+        """ surdef for Return( ObjWithTensorFields ) """
+        shape = self.shape_for( **kwargs )
+        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, represents_a_dynamic_size = self.represents_a_dynamic_size )
 
-        list_of_dynamic_axes = None
-        if call_arg.parent is not None:
-            list_of_dynamic_axes = call_arg.parent().dynamic_axes
+    # def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
+    #     """ surdef for CallArgs """
+    #     if self.represents_a_dynamic_size:
+    #         from ..drivers.compilation.FfiDynamicAxis import FfiDynamicAxis as _FfiDynamicAxis
+    #         # Always mutable: C++ always writes updated sizes alongside reading initial ones
+    #         res = CallArg.analysis_of_python_arg( python_value, name, fai, True, driver, parent )
+    #         # Wrap the ffi_input/output just created — no duplicate FFI tensors
+    #         fda = _FfiDynamicAxis( name, res.ffi_input, res.ffi_output )
+    #         if parent is not None:
+    #             parent.dynamic_axes.append( fda )
+    #         res.base_code = fda.ctor_code  # callable, resolved at assembled_code time
+    #         res.signature = f"DA{ res.ffi_input.python_value.ndim }"
+    #         return res
 
-        call_arg.configure_as_output_tensor( fai, driver, shape_with_dyn, self.dtype or driver.dtype, resize_dyn_axes = False, list_of_dynamic_axes = list_of_dynamic_axes )
+    #     res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent )
 
-    def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
-        res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent )
+    #     # add DynamicAxis members for input tensors that have dynamic axes
+    #     dyn_by_name = { a.name: a for a in self._ctor_args if isinstance( a, Dyn ) }
+    #     for axis_name in self.dynamic_axis_names:
+    #         num_axis = self.axis_names.index( axis_name + "_capacity" )
+    #         dyn = dyn_by_name[ axis_name ]
 
-        # add DynamicAxis members for input objects that declare dynamic axes
-        for axis_name in self.dynamic_axis_names:
-            num_axis = self.axis_names.index( axis_name + "_capacity" )
-            assert( num_axis >= 0 )
+    #         raw = getattr( parent.python_value, axis_name, None ) if parent is not None else None
 
-            initial_value = getattr( parent.python_value, axis_name )
-            fda = fai.add_dynamic_axis( axis_name, initial_value, parent.dynamic_axes, driver )
-            if res.ffi_input:
-                fda.add_input_capacity_source( res.ffi_input, num_axis, res.ffi_input.differentiable )
+    #         if driver.is_a_tensor( raw ):
+    #             iv = raw  # driver tensor (JAX / Torch / numpy), pass directly
+    #         elif dyn.one_value_for_each:
+    #             iv_shape = [ python_value.shape[ self.axis_names.index( d ) ] for d in dyn.one_value_for_each ]
+    #             iv = numpy.zeros( iv_shape, dtype = numpy.uint64 )
+    #         else:
+    #             iv = numpy.array( int( raw ) if raw is not None else 0, dtype = numpy.uint64 )
 
-        return res
+    #         fda = fai.add_dynamic_axis( axis_name, iv, parent.dynamic_axes, driver )
+    #         if res.ffi_input:
+    #             fda.add_input_capacity_source( res.ffi_input, num_axis, res.ffi_input.differentiable )
+
+    #     return res
 
     def shape_for( self, mandatory = True, **kwargs ):
         def get_value( attr ):
@@ -154,12 +184,28 @@ class TensorField:
         return _shape( self, get_value )
 
     def make_variant( self, batch_version: int, unidimensional_version: int ) -> 'TensorField':
-        ctor_args = list( self._ctor_args )
+        ctor_args = []
+        for name in self.axis_names:
+            if ad := find( self.dynamic_axes, lambda x: x.name == name ):
+                ctor_args.append( ad )
+            else:
+                ctor_args.append( name )
 
         if batch_version:
-            ctor_args = [ "batch_size" ] + ctor_args
+            new_ctor_args = [ "batch_size" ]
+            for ctor_arg in ctor_args:
+                if isinstance( ctor_arg, Dyn ):
+                    if ctor_arg.capacity is not None:
+                        raise NotImplementedError
+                    new_ctor_args.append( Dyn(
+                        one_value_for_each = [ "batch_size" ] + ctor_arg.one_value_for_each,
+                        name = ctor_arg.name,
+                    ) )
+                else:
+                    new_ctor_args.append( ctor_arg )
+            ctor_args = new_ctor_args
 
-        removed_dim_axes = []
+        removed_dim_axes = self.removed_dim_axes.copy()
         if unidimensional_version:
             new_ctor_args = []
             for i, arg in enumerate( ctor_args ):
@@ -171,8 +217,9 @@ class TensorField:
             ctor_args = new_ctor_args
 
         new_field = TensorField( *ctor_args, dtype = self.dtype )
-        new_field.removed_dim_axes = removed_dim_axes
         new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
+        new_field.removed_dim_axes = removed_dim_axes
+        new_field.name = self.name
         return new_field
 
     def _rank( self, distribution ):
@@ -228,6 +275,9 @@ def _axis_names( axis_names: tuple[ str, ... ] ) -> list[ str ]:
     res = []
     def concat( values ):
         for value in values:
+            value = value.strip()
+            if value == "" or value.isnumeric():
+                continue
             if value not in res:
                 res.append( value )
 
