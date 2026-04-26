@@ -1,4 +1,3 @@
-from .FfiDynamicAxis import FfiDynamicAxis
 from .FfiParameter import FfiParameter
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
@@ -36,8 +35,6 @@ class FfiArgInfo:
         # python/cpp values (for the user)
         self.call_args: list[ CallArg ] = [] # one for each call arg
 
-        self.global_list_of_dynamic_axes: list[ FfiDynamicAxis ] = [] # typically dynamic axes for Return( Tensor( Dyn( "..." ) ) ) where "..." will be exposed in the parameters of the C++ call
-
         # configuration
         self.parameters_struct = parameters_struct # struct name to use instead of the parameter list
 
@@ -55,8 +52,8 @@ class FfiArgInfo:
         for arg_name, arg_value in call_args.items():
             self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, False, driver ) )
 
-        #
-        info( self.call_args )
+        # second pass : updates for dynamic axes, ...
+        CallArg.second_pass_analysis( self.call_args, self, driver )
 
         # register u64_input
         if self.u64_input_values:
@@ -76,9 +73,11 @@ class FfiArgInfo:
         # register u64_output
         if self.u64_output_size:
             self.u64_ffi_output = FfiOutput(
+                represents_a_dynamic_axis = False,
                 num_in_sub_list = len( self.ffi_outputs ),
                 differentiable = False,
                 validity_index = -1,
+                axes_names = [ "" ],
                 arg_name = "u64_output_buffer",
                 cpp_type = driver.ffi_tensor_output_arg_code( 1, numpy.uint64 ),
                 valid = None,
@@ -104,20 +103,20 @@ class FfiArgInfo:
 
         return res
 
-    def add_dynamic_axis( self, name: str, initial_values, local_list_of_dynamic_axes: list, driver ) -> FfiDynamicAxis:
-        """ Register a named dynamic axis backed by dedicated non-diff tensors (numpy or driver tensor). """
-        todo()
-        # find
-        # res = next( ( da for da in local_list_of_dynamic_axes if da.name == name ), None )
-        # if res is None:
-        #     shape = list( initial_values.shape )
-        #     ffi_input = self.add_input_tensor( initial_values, driver )
-        #     ffi_output = self.add_output_tensor( driver, shape, numpy.uint64 )
-        #     res = FfiDynamicAxis( name = name, ffi_input = ffi_input, ffi_output = ffi_output )
-        #     local_list_of_dynamic_axes.append( res )
-        # else:
-        #     res.ffi_input.python_value = initial_values
-        # return res
+    # def add_dynamic_axis( self, name: str, initial_values, local_list_of_dynamic_axes: list, driver ) -> FfiDynamicAxis:
+    #     """ Register a named dynamic axis backed by dedicated non-diff tensors (numpy or driver tensor). """
+    #     todo()
+    #     # find
+    #     # res = next( ( da for da in local_list_of_dynamic_axes if da.name == name ), None )
+    #     # if res is None:
+    #     #     shape = list( initial_values.shape )
+    #     #     ffi_input = self.add_input_tensor( initial_values, driver )
+    #     #     ffi_output = self.add_output_tensor( driver, shape, numpy.uint64 )
+    #     #     res = FfiDynamicAxis( name = name, ffi_input = ffi_input, ffi_output = ffi_output )
+    #     #     local_list_of_dynamic_axes.append( res )
+    #     # else:
+    #     #     res.ffi_input.python_value = initial_values
+    #     # return res
 
     def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int, FfiInput ]:
         if valid is None:
@@ -163,7 +162,7 @@ class FfiArgInfo:
 
         return ffi_input
 
-    def add_output_tensor( self, driver, shape, dtype, valid = None ) -> FfiOutput:
+    def add_output_tensor( self, driver, shape, dtype, axis_names, valid = None, represents_a_dynamic_axis = False ) -> FfiOutput:
         """ return name, validity index """
 
         if valid is None:
@@ -185,9 +184,11 @@ class FfiArgInfo:
         arg_name = f"out_{ num_in_sub_list }"
 
         ffi_output = FfiOutput(
+            represents_a_dynamic_axis = represents_a_dynamic_axis,
             num_in_sub_list = num_in_sub_list,
             validity_index = validity_index,
             differentiable = differentiable, # we keep this information because we're not going to pass non differentiable outputs to the C++ call
+            axis_names = axis_names,
             arg_name = arg_name,
             cpp_type = driver.ffi_tensor_output_arg_code( len( shape ), dtype ),
             valid = valid,

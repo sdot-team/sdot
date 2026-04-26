@@ -1,8 +1,7 @@
 from .collect_attributes import collect_attributes_inst, collect_attributes #, Annotation
 from ...UndefinedTensor import UndefinedTensor
-from ...Dyn import Dyn
+from ...util import index
 
-from .FfiDynamicAxis import FfiDynamicAxis
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .Return import Return
@@ -25,7 +24,6 @@ class CallArg:
     attribute_name : str # attribute name
     updated_value  : callable # for update of mutable object. If None, `update` will use `sub_list` to go deeper
     python_value   : any #
-    dynamic_axes   : list[ FfiDynamicAxis ] #
     io_category    : int # 0 => pure input, 1 => mutable, 2 => return
     python_ctor    : callable # for reassembly of python objects. Called using an object that contains lists like differentiable_ffi_outputs, ...
     brace_ctor     : bool # true to use '{}' in generated code for instanciation
@@ -38,7 +36,6 @@ class CallArg:
 
     def __init__( self ):
         self.updated_value = None
-        self.dynamic_axes = []
         self.python_ctor = None
         self.brace_ctor = False
         self.ffi_output = None
@@ -62,6 +59,30 @@ class CallArg:
         res.configure( python_value, fai, mutable, driver )
 
         return res
+
+    @staticmethod
+    def second_pass_analysis( call_args: list[ 'CallArg' ], fai, driver ):
+        # s'il y a des axes dynamiques en input, pas grand chose à faire
+        # s'il y a des axes dynamiques en output,
+        #   remplacer __capacity__
+        #   faire un python_ctor qui utilise le retour
+        for call_arg in call_args:
+            if call_arg.ffi_output and call_arg.ffi_output.represents_a_dynamic_axis:
+                axis_name = call_arg.attribute_name + "_capacity"
+                # remplacer __capacity__
+                capacity_list = []
+                for gra_llac in call_args:
+                    if gra_llac.ffi_output:
+                        num_axis = index( gra_llac.ffi_output.axis_names, axis_name )
+                        if num_axis >= 0:
+                            capacity_list.append( gra_llac.ffi_output.arg_name )
+                            capacity_list.append( f"u64_input[ { gra_llac.ffi_output.validity_index // 64 } ] & { 1 << ( gra_llac.ffi_output.validity_index % 64 ) }" )
+                            capacity_list.append( str( num_axis ) )
+                capacity = f"first_valid_dimension( u64_input, { str.join( ", ", capacity_list ) } )"
+                call_arg.base_code = call_arg.base_code.replace( "__capacity__", capacity )
+
+        if call_arg.sub_list:
+            CallArg.second_pass_analysis( call_arg.sub_list, fai, driver )
 
     def configure( self, python_value: any, fai, mutable: bool, driver ):
         self.io_category = 1 if mutable else 0
@@ -142,13 +163,13 @@ class CallArg:
             return outputs[ index ]
         return driver.empty( [ 0 for _ in fallback_shape ], dtype = fallback_dtype )
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_size = False ):
+    def configure_as_output_tensor( self, fai, driver, shape, dtype, axis_names, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_axis = False ):
         # create and register the ffi_output
-        ffi_output = fai.add_output_tensor( driver, shape, dtype )
+        ffi_output = fai.add_output_tensor( driver, shape, dtype, axis_names, represents_a_dynamic_axis = represents_a_dynamic_axis )
         self.ffi_output = ffi_output
 
-        if represents_a_dynamic_size:
-            self.base_code = f"DynamicSize( tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ), __capacity__ )"
+        if represents_a_dynamic_axis:
+            self.base_code = f"DynamicAxis<{ len( shape ) },Arch>( tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ), __capacity__ )"
         else:
             self.base_code = f"tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         self.signature = f"T{ len( shape ) }{ driver.normalized_type_for( dtype or driver.dtype ) }"
@@ -190,10 +211,10 @@ class CallArg:
 
         # base types
         if return_type is float:
-            return self.configure_as_output_tensor( fai, driver, [], float, for_single_item = True )
+            return self.configure_as_output_tensor( fai, driver, [], float, [], for_single_item = True )
 
         if return_type is int:
-            return self.configure_as_output_tensor( fai, driver, [], int, for_single_item = True )
+            return self.configure_as_output_tensor( fai, driver, [], int, [], for_single_item = True )
 
         # -> use collect_attributes
         self.configure_as_output_object_with_collect_attributes( fai, driver, return_type, *type_args, **type_kwargs )
@@ -243,12 +264,12 @@ class CallArg:
             else:
                 res = return_type( **args )
 
-            for ffi_dyn_axis in self.dynamic_axes:
-                n_out = ffi_dyn_axis.ffi_output.num_in_sub_list
-                if n_out < len( outputs ):
-                    sizes = outputs[ n_out ]
-                    val = int( sizes.item() ) if sizes.ndim == 0 else sizes
-                    setattr( res, ffi_dyn_axis.name, val )
+            # for ffi_dyn_axis in self.dynamic_axes:
+            #     n_out = ffi_dyn_axis.ffi_output.num_in_sub_list
+            #     if n_out < len( outputs ):
+            #         sizes = outputs[ n_out ]
+            #         val = int( sizes.item() ) if sizes.ndim == 0 else sizes
+            #         setattr( res, ffi_dyn_axis.name, val )
 
             return res
 
@@ -300,8 +321,6 @@ class CallArg:
                         lst.append( a.assembled_code() )
                     else:
                         lst.append( f".{ a.attribute_name } = { a.assembled_code() }" )
-                for dynamic_axis in self.dynamic_axes:
-                    lst.append( f".{ dynamic_axis.name } = { dynamic_axis.ctor_code() }" )
                 res += "{ " + str.join( ", ", lst ) + " }"
             else:
                 res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"

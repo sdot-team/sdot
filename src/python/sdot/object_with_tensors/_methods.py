@@ -70,7 +70,7 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
     # add a TensorField for each Dynamic axis — inserted at the beginning of fields so they are
     for dynamic_axis in dynamic_axes:
         if dynamic_axis.name not in vars( cls ):
-            tf = TensorField( *dynamic_axis.one_value_for_each, dtype = int, represents_a_dynamic_size = True )
+            tf = TensorField( *dynamic_axis.one_value_for_each, dtype = driver.uint64, represents_a_dynamic_axis = True )
             tf.__set_name__( cls, dynamic_axis.name )
 
             fields.append( ( dynamic_axis.name, tf ) )

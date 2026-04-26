@@ -30,7 +30,7 @@ class TensorField:
     When we set a TensorField, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
     """
 
-    represents_a_dynamic_size: bool
+    represents_a_dynamic_axis: bool
     comes_from_a_dim_list: bool
     static_axis_names : list[ str ]
     removed_dim_axes: list[ int ]
@@ -39,8 +39,8 @@ class TensorField:
     dtype: any
     name: str
 
-    def __init__( self, *axes, dtype = None, represents_a_dynamic_size = False ):
-        self.represents_a_dynamic_size = represents_a_dynamic_size  # original args (with Dyn objects), used to reconstruct variants
+    def __init__( self, *axes, dtype = None, represents_a_dynamic_axis = False ):
+        self.represents_a_dynamic_axis = represents_a_dynamic_axis  # original args (with Dyn objects), used to reconstruct variants
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = [] # used in variants like 1d version, ...
         self.dtype = dtype
@@ -134,11 +134,11 @@ class TensorField:
     def configure_call_ret_for( self, call_arg, fai, driver, *args, **kwargs ):
         """ surdef for Return( ObjWithTensorFields ) """
         shape = self.shape_for( **kwargs )
-        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, represents_a_dynamic_size = self.represents_a_dynamic_size )
+        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, self.axis_names, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
     # def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
     #     """ surdef for CallArgs """
-    #     if self.represents_a_dynamic_size:
+    #     if self.represents_a_dynamic_axis:
     #         from ..drivers.compilation.FfiDynamicAxis import FfiDynamicAxis as _FfiDynamicAxis
     #         # Always mutable: C++ always writes updated sizes alongside reading initial ones
     #         res = CallArg.analysis_of_python_arg( python_value, name, fai, True, driver, parent )
@@ -216,7 +216,7 @@ class TensorField:
                     new_ctor_args.append( arg )
             ctor_args = new_ctor_args
 
-        new_field = TensorField( *ctor_args, dtype = self.dtype )
+        new_field = TensorField( *ctor_args, dtype = self.dtype, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
         new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
         new_field.removed_dim_axes = removed_dim_axes
         new_field.name = self.name

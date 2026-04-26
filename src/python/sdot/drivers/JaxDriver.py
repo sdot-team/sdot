@@ -50,12 +50,17 @@ class JaxDriver:
         raise RuntimeError( f"Unknown device { normalized_device }" )
 
     @staticmethod
-    def find_dtype( normalized_dtype: str ):
-        if normalized_dtype == "FP32":
+    def find_dtype( dtype ):
+        if dtype == "FP32":
             return jnp.float32
-        if normalized_dtype == "FP64":
+        if dtype == "FP64":
             return jnp.float64
-        raise RuntimeError( f"Unknown dtype { normalized_dtype }" )
+        if dtype == "PI32":
+            return jnp.uint32
+        if dtype == "PI64":
+            return jnp.uint64
+
+        return numpy.dtype( dtype )
 
     @property
     def array_type( self ):
@@ -68,6 +73,10 @@ class JaxDriver:
     @property
     def normalized_itype( self ) -> str:
         return self.normalized_type_for( self.itype )
+
+    @property
+    def uint64( self ):
+        return jnp.uint64
 
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
@@ -135,7 +144,7 @@ class JaxDriver:
         return jnp.linspace( a, b, n, dtype = self.dtype, device = self.device )
 
     def empty( self, shape, dtype = None ):
-        return jnp.zeros( shape, dtype = dtype or self.dtype, device = self.device )
+        return jnp.zeros( shape, dtype = self.find_dtype( dtype ) or self.dtype, device = self.device )
 
     def expand_dims( self, tensor, index ):
         return jnp.expand_dims( tensor, index )
@@ -175,6 +184,14 @@ class JaxDriver:
         if dtype == jnp.int64:
             return "SI64"
 
+        if dtype == jnp.uint32:
+            return "PI32"
+        if dtype == jnp.uint64:
+            return "PI64"
+
+        if dtype in [ "FP32", "FP64", "PI32", "PI64", "SI32", "SI64" ]:
+            return dtype
+
         raise NotImplementedError( f"for dtype { dtype }" )
 
     @property
@@ -195,6 +212,11 @@ class JaxDriver:
             return True
         if dtype is int:
             return False
+        if isinstance( dtype, str ):
+            if dtype.startswith( "FP" ):
+                return True
+            if dtype.startswith( "PI" ) or dtype.startswith( "SI" ):
+                return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
     def call( self, func_name: str, includes: str | list[ str ], *, _no_grad = False, _parameters_struct = None, **args ):
@@ -295,7 +317,7 @@ class JaxDriver:
         return f"xla::ffi::ResultBuffer<{ self.ffi_tensor_type_code( dtype ) }>"
 
     def ffi_tensor_output_spec( self, shape, dtype ):
-        return jax.ShapeDtypeStruct( shape, dtype )
+        return jax.ShapeDtypeStruct( shape, self.find_dtype( dtype ) )
 
     def ffi_tensor_type_code( self, dtype ) -> str:
         """ C++ jax name for dtype """
@@ -305,17 +327,20 @@ class JaxDriver:
         if dtype is int:
             return self.ffi_tensor_type_code( self.itype )
 
-        if dtype == jax.numpy.float32:
+        if isinstance( dtype, str ):
+            return self.ffi_tensor_type_code( self.find_dtype( dtype ) )
+
+        if dtype == jax.numpy.float32 or dtype == "FP32":
             return "xla::ffi::F32"
-        if dtype == jax.numpy.float64:
+        if dtype == jax.numpy.float64 or dtype == "FP64":
             return "xla::ffi::F64"
-        if dtype == jax.numpy.int32:
+        if dtype == jax.numpy.int32 or dtype == "SI32":
             return "xla::ffi::S32"
-        if dtype == jax.numpy.int64:
+        if dtype == jax.numpy.int64 or dtype == "SI64":
             return "xla::ffi::S64"
-        if dtype == jax.numpy.uint32:
+        if dtype == jax.numpy.uint32 or dtype == "PI32":
             return "xla::ffi::U32"
-        if dtype == jax.numpy.uint64:
+        if dtype == jax.numpy.uint64 or dtype == "PI64":
             return "xla::ffi::U64"
 
         raise NotImplementedError( f"for dtype { dtype }" )
@@ -427,8 +452,6 @@ class JaxDriver:
             lines.append( f"struct Parameters_{ func_name } {{" )
             for n, call_arg in enumerate( fai.call_args ):
                 lines.append( f"    T{ n } { call_arg.attribute_name };" )
-            for dynamic_axis in fai.global_list_of_dynamic_axes:
-                lines.append( f"    DynamicAxis { dynamic_axis.name };" )
             lines.append( "};" )
         else:
             parameters_struct = fai.parameters_struct
@@ -449,8 +472,6 @@ class JaxDriver:
         lines.append( f"    { func_name }( { parameters_struct }{{" )
         for call_arg in fai.call_args:
             lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
-        for dynamic_axis in fai.global_list_of_dynamic_axes:
-            lines.append( f"        .{ dynamic_axis.name } = { dynamic_axis.ctor_code() }," )
         lines.append( "    } );" )
 
         # end impl
