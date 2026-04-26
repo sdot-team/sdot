@@ -1,3 +1,4 @@
+#include "../support/P.h"
 #include "../cell/for_each_face.h"
 #include "PowerDiagram.h"
 
@@ -5,7 +6,7 @@ namespace sdot {
 
 template<class TF,class Arch,int ct_dim>
 void for_each_cell( const PowerDiagram<TF,Arch,ct_dim> &pd, auto &&func ) {
-    Cell<TF,ct_dim,Arch> cell;
+    Cell<TF,Arch> cell;
     func( cell );
 }
 
@@ -26,6 +27,8 @@ void vtk_cell_faces( auto &&p ) {
     p.faces( p.nb_faces ) = 1; p.nb_faces++;
     p.faces( p.nb_faces ) = 2; p.nb_faces++;
     p.faces( p.nb_faces ) = 3; p.nb_faces++;
+
+    P( p.cells.nb_vertices );
 }
 
 void vtk_cell_faces_backward( auto &&p ) {

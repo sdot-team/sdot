@@ -16,8 +16,8 @@ def collect_attributes_inst( obj, add_dict = False, use_annotations = False ) ->
 _NON_VALUES = ( classmethod, staticmethod, property, type, _types.FunctionType, _types.ModuleType )
 
 def collect_attributes( cls, dct = None, use_annotations = False ) -> list[ tuple[ str, any ] ]:
-    res = []
     name_indices = {} # if attribute appears in a subclass and in a parent class, we want to take
+    res = []
 
     def add( name, value ):
         if isinstance( value, _NON_VALUES ):

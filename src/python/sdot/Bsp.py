@@ -1,6 +1,6 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
 from .driver import driver, Return, CtInt, Dyn
-
+from typing import TYPE_CHECKING
 
 @object_with_tensors
 class Bsp:
@@ -11,6 +11,13 @@ class Bsp:
     sorted_vertex_indices = TensorField( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
     cell_indices = TensorField( Dyn( "nb_cells" ), "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
     cell_bounds = TensorField( Dyn( "nb_cells" ), "3 * dim + 1" ) # cell index -> min pt, max pt, poly bound
+
+    if TYPE_CHECKING:
+        nb_vertices_capacity : int
+        nb_cells_capacity : int
+        nb_vertices : int
+        nb_cells : int
+
 
     @staticmethod
     def make_from( positions, weights = None, max_points_per_cell = 30 ):

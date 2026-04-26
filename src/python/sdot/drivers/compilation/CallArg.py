@@ -189,9 +189,9 @@ class CallArg:
 
         self.python_ctor = _python_ctor
 
-    def configure_as_return( self, fai, driver, return_type, *type_args, **type_kwargs ):
+    def configure_as_return( self, fai, driver, io_category, return_type, *type_args, **type_kwargs ):
         """ complete self, with information for return """
-        self.io_category = 2
+        self.io_category = io_category
 
         # method
         if callable( getattr( return_type, "configure_call_ret_for", None ) ):
@@ -267,9 +267,10 @@ class CallArg:
         self.sub_list = []
         for name, value in collect_attributes( return_type, use_annotations = True ):
             if isinstance( value, Annotation ):
-                info( name, value )
-                import sys
-                sys.exit( 0 )
+                value = value.value
+                # info( name, value )
+                # import sys
+                # sys.exit( 0 )
             self.sub_list.append( self.return_child( fai, driver, name, value, *type_args, **type_kwargs ) )
 
     def return_child( self, fai, driver, attribute_name: str, return_type: any, *type_args, **type_kwargs ) -> Self:
@@ -282,7 +283,7 @@ class CallArg:
         res.parent = weakref.ref( self )
 
         # analysis
-        res.configure_as_return( fai, driver, return_type, *type_args, **type_kwargs )
+        res.configure_as_return( fai, driver, 2, return_type, *type_args, **type_kwargs )
 
         return res
 
@@ -308,7 +309,7 @@ class CallArg:
                     else:
                         lst.append( f".{ a.attribute_name } = { a.assembled_code() }" )
                 for dynamic_axis in self.dynamic_axes:
-                    lst.append( f".{ dynamic_axis.name } = {{  { dynamic_axis.ctor_code() } }}" )
+                    lst.append( f".{ dynamic_axis.name } = { dynamic_axis.ctor_code() }" )
                 res += "{ " + str.join( ", ", lst ) + " }"
             else:
                 res += "( " + str.join( ", ", [ a.assembled_code() for a in self.sub_list ] ) + " )"

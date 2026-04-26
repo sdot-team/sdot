@@ -1,13 +1,14 @@
 #pragma once
 
 #include "../support/SimpleSquareMatrix.h"
+#include "../support/DynamicAxis.h"
 #include "../support/TensorView.h"
-#include "../support/P.h"
+// #include "../support/P.h"
 
 namespace sdot {
 
 ///
-template<class TF,int ct_dim,class Arch>
+template<class TF,class Arch>
 struct Cell {
     static constexpr SI   INFINITE          = -2;
     static constexpr SI   BOUNDARY          = -1;
@@ -21,24 +22,52 @@ struct Cell {
     TensorView<SI,1,Arch> cut_ids;          ///< ( cut_capacity )
 
     TensorView<SI,0,Arch> is_fully_closed;
-    TensorView<SI,0,Arch> nb_vertices;
-    TensorView<SI,0,Arch> nb_edges;
-    TensorView<SI,0,Arch> nb_cuts;
+
+    DynamicAxis           nb_vertices;
+    DynamicAxis           nb_edges;
+    DynamicAxis           nb_cuts;
 };
 
-#define UTP2 template<class TF,class Arch>
-#define DTP2 Cell<TF,2,Arch>
+template<class TF,class Arch>
+struct BatchOfCell {
+    Cell<TF,Arch> row( PI batch_index ) {
+        return {
+            vertex_positions.row( batch_index ),
+            vertex_indices.row( batch_index ),
+            edge_indices.row( batch_index ),
+            cut_planes.row( batch_index ),
+            cut_ids.row( batch_index ),
+            is_fully_closed.row( batch_index ),
+            nb_vertices, // .row( batch_index ),
+            nb_edges, // .row( batch_index ),
+            nb_cuts, // .row( batch_index )
+        };
+    }
 
-#define UTP1 template<class TF,class Arch>
-#define DTP1 Cell<TF,2,Arch>
+    TensorView<TF,3,Arch> vertex_positions; ///< ( batch_index, vertex_capacity, dim )
+    TensorView<SI,3,Arch> vertex_indices;   ///< ( batch_index, vertex_capacity, dim ) : sorted cut indices for each vertex
+    TensorView<SI,3,Arch> edge_indices;     ///< ( batch_index, edge_capacity, dim + 1 ) : edge index -> vertex indices (vertex on each side) + cut_indices
+    TensorView<TF,3,Arch> cut_planes;       ///< ( batch_index, cut_capacity, dim + 1 )
+    TensorView<SI,2,Arch> cut_ids;          ///< ( batch_index, cut_capacity )
 
-#define UTP template<class TF,int ct_dim,class Arch>
-#define DTP Cell<TF,ct_dim,Arch>
+    TensorView<SI,1,Arch> is_fully_closed;
+
+    DynamicAxis           nb_vertices;
+    DynamicAxis           nb_edges;
+    DynamicAxis           nb_cuts;
+};
+
+// #define UTP2 template<class TF,class Arch>
+// #define DTP2 Cell<TF,2,Arch>
+
+// #define UTP1 template<class TF,class Arch>
+// #define DTP1 Cell<TF,2,Arch>
+
+#define UTP template<class TF,class Arch,int ct_dim>
+#define DTP Cell<TF,Arch>
 
 
-
-
-UTP void make_aligned_simplex( DTP &cell, SI cut_id ) {
+UTP void make_aligned_simplex( DTP &cell, SI cut_id, CtInt<ct_dim> ) {
     const PI dim = cell.vertex_positions.size( 1 );
     const PI nb_edges = ( dim + 1 ) * dim / 2;
     const PI nb_vertices = dim + 1;
@@ -90,14 +119,14 @@ UTP void make_aligned_simplex( DTP &cell, SI cut_id ) {
 }
 
 void make_empty_cell( auto &&p ) {
-    make_aligned_simplex( p.cell, p.cell.INFINITE );
+    make_aligned_simplex( p.cell, p.cell.INFINITE, p.ct_dim );
 }
 
 void make_empty_cell_backward( auto && ) {
     TODO; // make_aligned_simplex( p.cell, p.cell.INFINITE );
 }
 
-UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
+UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id, CtInt<ct_dim> ) {
     const PI dim = cell.vertex_positions.size( 1 );
     const PI nb_vertices = PI( 1 ) << dim;
 
@@ -175,7 +204,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     }
 }
 
-UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_id*/, auto &grad_inp_frame, const auto &grad_out_vertex_positions, const auto &grad_out_cut_planes ) {
+UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_id*/, CtInt<ct_dim>, auto &grad_inp_frame, const auto &grad_out_vertex_positions, const auto &grad_out_cut_planes ) {
     const PI dim = cell.dim();
     const PI nb_vertices = PI(1) << dim;
 
@@ -238,10 +267,6 @@ UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_i
 }
 
 
-#undef UTP2
-#undef DTP2
-#undef UTP1
-#undef DTP1
 #undef UTP
 #undef DTP
 

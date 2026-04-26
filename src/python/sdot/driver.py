@@ -1,3 +1,4 @@
+from .drivers.compilation.Workspace import Workspace as Workspace
 from .drivers.compilation.Mutable import Mutable as Mutable
 from .drivers.compilation.Return import Return as Return
 from .drivers.compilation.Tensor import Tensor as Tensor

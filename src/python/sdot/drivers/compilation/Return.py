@@ -24,4 +24,4 @@ class Return:
         self.type_args   = args
 
     def configure_call_arg( self, call_arg, fai, mutable, driver ):
-        return call_arg.configure_as_return( fai, driver, self.return_type, *self.type_args, **self.type_kwargs )
+        return call_arg.configure_as_return( fai, driver, 2, self.return_type, *self.type_args, **self.type_kwargs )

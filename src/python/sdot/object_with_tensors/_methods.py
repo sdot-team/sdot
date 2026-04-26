@@ -1,13 +1,14 @@
+from ..drivers.compilation.collect_attributes import collect_attributes
 from .ListOfTensorFields import ListOfTensorFields
 from .TensorField import TensorField, _axis_names
 
 from ..driver import driver
 
-from typing import TypeVar, Type, cast
+from typing import TypeVar #, Type, cast
 # import numpy
-import re
+# import re
 
-_D = TypeVar( '_D' ) # , bound=Distribution
+# _D = TypeVar( '_D' ) # , bound=Distribution
 _T = TypeVar( '_T' )
 
 
@@ -39,7 +40,7 @@ def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
 
     """
     # fields
-    fields = _collect_attributes( cls )
+    fields = collect_attributes( cls )
 
     # all the axis names
     static_axis_names = [ "batch_size" ]
@@ -97,57 +98,29 @@ def variants_of( cls ): # : Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[
 
 
 def _make_variant( cls, fields, batch_version : int, unidimensional_version : int ):
-    class_name = cls.__name__
+    variant_name = cls.__name__
     if batch_version:
-        class_name = 'BatchOf' + class_name
+        variant_name = 'BatchOf' + variant_name
     if unidimensional_version:
-        class_name += "1d"
+        variant_name += "1d"
 
-    # parents = ( Distribution, )
-    # if batch_version:
-    #     parents = ( BatchOfDistributions, )
     parents = ()
 
-    res = type( class_name, parents, { '__annotations__': { "pouet": int } } )
-    for class_name, field in fields:
+    res = type( variant_name, parents, { '__annotations__': cls.__annotations__ } )
+    for field_name, field in fields:
         new_field = field
+        if isinstance( new_field, ( TensorField, ListOfTensorFields ) ):
+            new_field = new_field.make_variant( batch_version, unidimensional_version )
 
-        # if ListOfTensorFields, add/remove axes
-        comes_from_a_dim_list = False
-        if isinstance( new_field, ListOfTensorFields ):
-            if unidimensional_version and new_field.main_axis_name == "dim":
-                tensor_axis_names = []
-                for tensor_axis_name in new_field.tensor_axis_names:
-                    n = tensor_axis_name.replace( ' ', '' ).replace( "[index]", "," )
-                    tensor_axis_names.append( n )
-                new_field = TensorField( *tensor_axis_names )
-                comes_from_a_dim_list = True
-            else:
-                new_tensor_axis_names = [ "batch_size" ] * batch_version + list( new_field.tensor_axis_names )
-                if unidimensional_version:
-                    new_tensor_axis_names = list( filter( lambda x: x != "dim", new_tensor_axis_names ) )
-                new_field = ListOfTensorFields( new_field.main_axis_name, new_tensor_axis_names )
-
-        # if TensorField, add/remove axes
-        if isinstance( new_field, TensorField ):
-            removed_dim_axes = []
-            new_axis_names = [ "batch_size" ] * batch_version + list( new_field.axis_names )
-            if unidimensional_version:
-                removed_dim_axes = [ i for i, x in enumerate( new_axis_names ) if x == "dim" ]
-                new_axis_names = list( filter( lambda x: x != "dim", new_axis_names ) )
-            new_field = TensorField( *new_axis_names )
-            new_field.removed_dim_axes = removed_dim_axes
-            new_field.comes_from_a_dim_list = comes_from_a_dim_list
-
-        setattr( res, class_name, new_field )
+        setattr( res, field_name, new_field )
         if hasattr( new_field, '__set_name__' ):
-            new_field.__set_name__( res, class_name )
+            new_field.__set_name__( res, field_name )
 
     return res
 
 
 def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axis_names : list[ str ] ):
-    fields = _collect_attributes( cls )
+    fields = collect_attributes( cls )
 
     # --- __init__ -----------------------------------------------------------
     if '__default_init__' not in vars( cls ):
@@ -205,12 +178,12 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
 
     # --- dynamic_axes: {axis_name -> actual_size} for all Dyn axes -----------
     if 'dynamic_axes' not in vars( cls ):
-        def _dynamic_axes( self ) -> list[ str ]:
-            res = []
-            for name, field in fields:
-                if isinstance( field, TensorField ) and field.dynamic_axis_names:
-                    if axis_name not in res:
-                        res.append( axis_name )
+        def _dynamic_axes( self ) -> dict[ str, int ]:
+            res = {}
+            for dyn_name in dynamic_axis_names:
+                val = getattr( self, dyn_name, None )
+                if val is not None:
+                    res[ dyn_name ] = int( val )
             return res
         setattr( cls, 'dynamic_axes', property( _dynamic_axes ) )
 
@@ -289,29 +262,29 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axi
 # Helpers used by @generate_distribution_methods
 # ---------------------------------------------------------------------------
 
-def _collect_attributes( cls, stop_classes = [] ):
-    """ All attributes visible from cls (MRO), excluding stop_classes. """
-    res = []
-    name_indices = {} # if attribute appears in a subclass and in a parent class, we want to take
-    for klass in reversed( cls.__mro__ ):
-        if klass in stop_classes:
-            continue
-        for name, val in vars( klass ).items():
-            if name.startswith( '_' ) or isinstance( val, ( classmethod, staticmethod ) ) or callable( val ):
-                continue
-            if isinstance( val, property ) and val.fset is None:
-                continue
+# def _collect_attributes( cls, stop_classes = [] ):
+#     """ All attributes visible from cls (MRO), excluding stop_classes. """
+#     res = []
+#     name_indices = {} # if attribute appears in a subclass and in a parent class, we want to take
+#     for klass in reversed( cls.__mro__ ):
+#         if klass in stop_classes:
+#             continue
+#         for name, val in vars( klass ).items():
+#             if name.startswith( '_' ) or isinstance( val, ( classmethod, staticmethod ) ) or callable( val ):
+#                 continue
+#             if isinstance( val, property ) and val.fset is None:
+#                 continue
 
-            if name in name_indices:
-                res[ name_indices[ name ] ] = ( name, val )
-            else:
-                name_indices[ name ] = len( res )
-                res.append( ( name, val ) )
-    return res
+#             if name in name_indices:
+#                 res[ name_indices[ name ] ] = ( name, val )
+#             else:
+#                 name_indices[ name ] = len( res )
+#                 res.append( ( name, val ) )
+#     return res
 
 
 def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
-    for tensor_name, tensor_field in _collect_attributes( type( distribution ) ):
+    for tensor_name, tensor_field in collect_attributes( type( distribution ) ):
         if isinstance( tensor_field, TensorField ):
             # if we have a value for this tensor field (to get the shape)
             tensor_value = distribution.__dict__.get( f'_{ tensor_name }' )

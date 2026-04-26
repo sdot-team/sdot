@@ -30,6 +30,7 @@ class TensorField:
     """
 
     def __init__( self, *axis_names, dtype = None ):
+        self._ctor_args = axis_names  # original args (with Dyn objects), used to reconstruct variants
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = [] # used in variants like 1d version, ...
         self.dtype = dtype
@@ -151,6 +152,28 @@ class TensorField:
                 return 0
             return kwargs[ attr ]
         return _shape( self, get_value )
+
+    def make_variant( self, batch_version: int, unidimensional_version: int ) -> 'TensorField':
+        ctor_args = list( self._ctor_args )
+
+        if batch_version:
+            ctor_args = [ "batch_size" ] + ctor_args
+
+        removed_dim_axes = []
+        if unidimensional_version:
+            new_ctor_args = []
+            for i, arg in enumerate( ctor_args ):
+                name = arg.name if isinstance( arg, Dyn ) else arg
+                if name == "dim":
+                    removed_dim_axes.append( i )
+                else:
+                    new_ctor_args.append( arg )
+            ctor_args = new_ctor_args
+
+        new_field = TensorField( *ctor_args, dtype = self.dtype )
+        new_field.removed_dim_axes = removed_dim_axes
+        new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
+        return new_field
 
     def _rank( self, distribution ):
         return _rank( distribution, self.axis_names )

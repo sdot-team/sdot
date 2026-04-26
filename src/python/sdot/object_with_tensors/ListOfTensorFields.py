@@ -1,4 +1,4 @@
-from .TensorField import GenericTensor, _rank
+from .TensorField import TensorField, GenericTensor, _rank
 from typing import Self, overload
 from ..driver import driver
 
@@ -76,6 +76,23 @@ class ListOfTensorFields:
 
         # register the tensor list
         enclosing.__dict__[ f'_{ self.name }' ] = tensors
+
+    def make_variant( self, batch_version: int, unidimensional_version: int ):
+        if unidimensional_version and self.main_axis_name == "dim":
+            # Convert list-of-tensors indexed by dim into a flat TensorField
+            ctor_args = []
+            if batch_version:
+                ctor_args.append( "batch_size" )
+            for tensor_axis_name in self.tensor_axis_names:
+                ctor_args.append( tensor_axis_name.replace( ' ', '' ).replace( "[index]", "," ) )
+            new_field = TensorField( *ctor_args, dtype = self.dtype )
+            new_field.comes_from_a_dim_list = True
+            return new_field
+        else:
+            new_tensor_axis_names = [ "batch_size" ] * batch_version + list( self.tensor_axis_names )
+            if unidimensional_version:
+                new_tensor_axis_names = list( filter( lambda x: x != "dim", new_tensor_axis_names ) )
+            return ListOfTensorFields( self.main_axis_name, new_tensor_axis_names, dtype = self.dtype )
 
     def _rank( self, enclosing ):
         return _rank( enclosing, self.tensor_axis_names )
