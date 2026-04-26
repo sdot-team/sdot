@@ -14,7 +14,7 @@ public:
     /**/         DynamicAxis( Sizes sizes, PI capacity ) : capacity( capacity ), sizes( sizes ) {}
 
     // slicing/subparts
-    auto         operator() ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<new_rank,Arch>( sizes( indices... ), capacity ); }
+    auto         operator() ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<new_rank,Arch>( sizes.partial( indices... ), capacity ); }
 
     // assuming rank == 0
     PI           operator++ () { if ( ++sizes() > capacity ) overflow(); return sizes(); }

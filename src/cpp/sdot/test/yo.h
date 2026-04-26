@@ -15,7 +15,7 @@ struct BatchOfYo {
 };
 
 void yo( auto &&p ) {
-    p.ret.nb_points() = 1;
+    p.ret.nb_points( 0 ) = 2;
 }
 
 void yo_backward( auto && ) {

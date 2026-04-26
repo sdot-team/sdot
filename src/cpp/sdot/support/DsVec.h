@@ -51,6 +51,7 @@ public:
 
     auto         with_pushed_value       ( T value ) const;
     auto         without_index           ( PI ind_to_remove ) const;
+    T_d auto     from                    () const { return DsVec<T,ct_size-d,Arch>( std::span( begin() + d, end() ) ); }
     PI           size                    () const;
 
     const T*     data                    () const;

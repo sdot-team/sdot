@@ -48,6 +48,12 @@ UTP T& DTP::operator()() const {
     return *reinterpret_cast<T *>( _ptr );
 }
 
+UTP auto DTP::partial( auto ...indices ) const {
+    PI i = 0;
+    T *ptr = data() + ( ( _strides[ i++ ] * indices ) + ... + 0 );
+    return TensorView<T,ct_rank-sizeof...(indices),Arch>( ptr, _sizes.template from<sizeof...(indices)>(), _strides.template from<sizeof...(indices)>() );
+}
+
 UTP T& DTP::operator[]( const auto &index ) const {
     return operator()( index );
 }

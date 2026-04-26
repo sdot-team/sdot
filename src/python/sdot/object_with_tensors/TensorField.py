@@ -136,43 +136,10 @@ class TensorField:
         shape = self.shape_for( **kwargs )
         call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, self.axis_names, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
-    # def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
-    #     """ surdef for CallArgs """
-    #     if self.represents_a_dynamic_axis:
-    #         from ..drivers.compilation.FfiDynamicAxis import FfiDynamicAxis as _FfiDynamicAxis
-    #         # Always mutable: C++ always writes updated sizes alongside reading initial ones
-    #         res = CallArg.analysis_of_python_arg( python_value, name, fai, True, driver, parent )
-    #         # Wrap the ffi_input/output just created — no duplicate FFI tensors
-    #         fda = _FfiDynamicAxis( name, res.ffi_input, res.ffi_output )
-    #         if parent is not None:
-    #             parent.dynamic_axes.append( fda )
-    #         res.base_code = fda.ctor_code  # callable, resolved at assembled_code time
-    #         res.signature = f"DA{ res.ffi_input.python_value.ndim }"
-    #         return res
-
-    #     res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent )
-
-    #     # add DynamicAxis members for input tensors that have dynamic axes
-    #     dyn_by_name = { a.name: a for a in self._ctor_args if isinstance( a, Dyn ) }
-    #     for axis_name in self.dynamic_axis_names:
-    #         num_axis = self.axis_names.index( axis_name + "_capacity" )
-    #         dyn = dyn_by_name[ axis_name ]
-
-    #         raw = getattr( parent.python_value, axis_name, None ) if parent is not None else None
-
-    #         if driver.is_a_tensor( raw ):
-    #             iv = raw  # driver tensor (JAX / Torch / numpy), pass directly
-    #         elif dyn.one_value_for_each:
-    #             iv_shape = [ python_value.shape[ self.axis_names.index( d ) ] for d in dyn.one_value_for_each ]
-    #             iv = numpy.zeros( iv_shape, dtype = numpy.uint64 )
-    #         else:
-    #             iv = numpy.array( int( raw ) if raw is not None else 0, dtype = numpy.uint64 )
-
-    #         fda = fai.add_dynamic_axis( axis_name, iv, parent.dynamic_axes, driver )
-    #         if res.ffi_input:
-    #             fda.add_input_capacity_source( res.ffi_input, num_axis, res.ffi_input.differentiable )
-
-    #     return res
+    def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
+        res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent, configure = False )
+        res.configure_as_input_tensor( python_value, mutable, fai, driver, True, self.represents_a_dynamic_axis )
+        return res
 
     def shape_for( self, mandatory = True, **kwargs ):
         def get_value( attr ):

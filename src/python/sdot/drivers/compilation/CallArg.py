@@ -44,7 +44,7 @@ class CallArg:
         self.parent = None
 
     @staticmethod
-    def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver, parent = None ):
+    def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: bool, driver, parent = None, configure = True ):
         """ recursively construct a CallArg """
 
         # common info
@@ -56,7 +56,8 @@ class CallArg:
             res.parent = weakref.ref( parent )
 
         # fill the remaining arguments
-        res.configure( python_value, fai, mutable, driver )
+        if configure:
+            res.configure( python_value, fai, mutable, driver )
 
         return res
 
@@ -129,7 +130,7 @@ class CallArg:
             self.base_code = ffi_parameter.arg_name
             self.signature = cpp_type
 
-    def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver, valid = True ) -> Self:
+    def configure_as_input_tensor( self, python_value: any, mutable: bool, fai, driver, valid = True, represents_a_dynamic_axis = False ) -> Self:
         if driver.is_zero_tensor( python_value ):
             return self.configure( UndefinedTensor( python_value.shape, python_value.dtype ), fai, mutable, driver )
 
@@ -137,9 +138,10 @@ class CallArg:
         self.signature = f"T{ ndim }{ driver.normalized_type_for( python_value.dtype ) }"
 
         if mutable:
-            ffi_output = fai.add_output_tensor( driver, python_value.shape, python_value.dtype, valid )
-            ffi_input = fai.add_input_tensor( python_value, driver, valid )
+            ffi_output = fai.add_output_tensor( driver, python_value.shape, python_value.dtype, valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
+            ffi_input = fai.add_input_tensor( python_value, driver, valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
 
+            raise NotImplementedError
             self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_output.arg_name }, { ffi_input.arg_name }, ( u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ) && ( u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } ) )"
             self.ffi_output = ffi_output
             self.ffi_input = ffi_input
@@ -151,9 +153,12 @@ class CallArg:
                 )
             self.updated_value = updated_value
         else:
-            ffi_input = fai.add_input_tensor( python_value, driver, valid )
+            ffi_input = fai.add_input_tensor( python_value, driver, valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
 
-            self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } )"
+            if represents_a_dynamic_axis:
+                self.base_code = f"DynamicAxis<{ ndim },Arch>( tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } ), 0 )"
+            else:
+                self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } )"
             self.ffi_input = ffi_input
 
     @staticmethod
@@ -238,7 +243,7 @@ class CallArg:
             if analysis_of_python_arg:
                 sc = analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
             else:
-                sc = self.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
+                sc = CallArg.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
             self.sub_list.append( sc )
 
 

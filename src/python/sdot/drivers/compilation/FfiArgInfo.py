@@ -58,6 +58,7 @@ class FfiArgInfo:
         # register u64_input
         if self.u64_input_values:
             self.u64_ffi_input = FfiInput(
+                represents_a_dynamic_axis = False,
                 num_in_sub_list = -1,
                 differentiable = False,
                 validity_index = -1,
@@ -103,22 +104,7 @@ class FfiArgInfo:
 
         return res
 
-    # def add_dynamic_axis( self, name: str, initial_values, local_list_of_dynamic_axes: list, driver ) -> FfiDynamicAxis:
-    #     """ Register a named dynamic axis backed by dedicated non-diff tensors (numpy or driver tensor). """
-    #     todo()
-    #     # find
-    #     # res = next( ( da for da in local_list_of_dynamic_axes if da.name == name ), None )
-    #     # if res is None:
-    #     #     shape = list( initial_values.shape )
-    #     #     ffi_input = self.add_input_tensor( initial_values, driver )
-    #     #     ffi_output = self.add_output_tensor( driver, shape, numpy.uint64 )
-    #     #     res = FfiDynamicAxis( name = name, ffi_input = ffi_input, ffi_output = ffi_output )
-    #     #     local_list_of_dynamic_axes.append( res )
-    #     # else:
-    #     #     res.ffi_input.python_value = initial_values
-    #     # return res
-
-    def add_input_tensor( self, python_value: any, driver, valid = None ) -> tuple[ str, int, FfiInput ]:
+    def add_input_tensor( self, python_value: any, driver, valid = None, represents_a_dynamic_axis = False ) -> tuple[ str, int, FfiInput ]:
         if valid is None:
             valid = True
             if driver.is_zero_tensor( python_value ):
@@ -144,6 +130,7 @@ class FfiArgInfo:
             arg_name = f"ni{ num_in_sub_list }"
 
         ffi_input = FfiInput(
+            represents_a_dynamic_axis = represents_a_dynamic_axis,
             num_in_sub_list = num_in_sub_list,
             validity_index = validity_index,
             differentiable = differentiable,

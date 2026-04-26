@@ -34,6 +34,8 @@ public:
 
     HD T&          operator[]        ( const auto &index ) const;
 
+    HD auto        partial           ( auto ...indices ) const;
+
     static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
     HD Strides     strides           () const;
     HD SI          stride            ( PI d ) const;
