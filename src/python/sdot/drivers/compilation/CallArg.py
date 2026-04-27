@@ -63,25 +63,38 @@ class CallArg:
 
     @staticmethod
     def second_pass_analysis( call_args: list[ 'CallArg' ], fai, driver ):
-        # s'il y a des axes dynamiques en input, pas grand chose à faire
-        # s'il y a des axes dynamiques en output,
+        # dynamic output axes
         #   remplacer __capacity__
-        #   faire un python_ctor qui utilise le retour
+        #   update python_ctor
         for call_arg in call_args:
             if call_arg.ffi_output and call_arg.ffi_output.represents_a_dynamic_axis:
                 axis_name = call_arg.attribute_name + "_capacity"
-                # remplacer __capacity__
                 capacity_list = []
                 for gra_llac in call_args:
                     if gra_llac.ffi_output:
                         num_axis = index( gra_llac.ffi_output.axis_names, axis_name )
                         if num_axis >= 0:
+                            # __capacity__ inputs
                             capacity_list.append( gra_llac.ffi_output.arg_name )
                             capacity_list.append( f"u64_input[ { gra_llac.ffi_output.validity_index // 64 } ] & { 1 << ( gra_llac.ffi_output.validity_index % 64 ) }" )
                             capacity_list.append( str( num_axis ) )
+
+                            # resize outputs with this axis (is one_value_for_each was [])
+                            info( call_arg.ffi_output.axis_names )
+                            if len( call_arg.ffi_output.axis_names ) == 0:
+                                def new_python_ctor( fai, outputs, n = num_axis, o = gra_llac.python_ctor, i = call_arg.ffi_output.num_in_sub_list ):
+                                    res = o( fai, outputs )
+                                    if i >= len( outputs ):
+                                        return res
+                                    slices = [ slice( None ) for _ in range( res.ndim ) ]
+                                    slices[ n ] = slice( None, outputs[ i ].item() )
+                                    return res[ tuple( slices ) ]
+                                gra_llac.python_ctor = new_python_ctor
+
                 capacity = f"first_valid_dimension( u64_input, { str.join( ", ", capacity_list ) } )"
                 call_arg.base_code = call_arg.base_code.replace( "__capacity__", capacity )
 
+        # recursion
         if call_arg.sub_list:
             CallArg.second_pass_analysis( call_arg.sub_list, fai, driver )
 

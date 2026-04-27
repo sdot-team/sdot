@@ -2,10 +2,10 @@
 #include "../support/P.h"
 using namespace sdot;
 
-template<class TF,class PI,class Arch>
+template<class TF,class Arch>
 struct Yo {
     TensorView<TF,2,Arch> a;
-    TensorView<PI,0,Arch> nb_points;
+    DynamicAxis<0,Arch> nb_points;
 };
 
 template<class TF,class Arch>
@@ -15,7 +15,7 @@ struct BatchOfYo {
 };
 
 void yo( auto &&p ) {
-    p.ret.nb_points( 0 ) = 2;
+    p.ret.nb_points() = 2;
 }
 
 void yo_backward( auto && ) {

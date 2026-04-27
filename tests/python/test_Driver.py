@@ -68,7 +68,7 @@ def test_fields():
     class Yo:
         a = sdot.TensorField( sdot.Dyn( "nb_points" ), "dim" )
 
-    yo = sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Return( Yo.BatchVersion, batch_size = 1, nb_points_capacity = 4, dim = 2 ) )
+    yo = sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Return( Yo, batch_size = 1, nb_points_capacity = 4, dim = 2 ) )
     info( yo )
 
 
