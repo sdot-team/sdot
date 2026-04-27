@@ -50,7 +50,7 @@ class FfiArgInfo:
 
         # recursive analysis
         for arg_name, arg_value in call_args.items():
-            self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, False, driver ) )
+            self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, None, driver ) )
 
         # second pass : updates for dynamic axes, ...
         CallArg.second_pass_analysis( self.call_args, self, driver )

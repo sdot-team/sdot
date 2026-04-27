@@ -68,7 +68,12 @@ def test_fields():
     class Yo:
         a = sdot.TensorField( sdot.Dyn( "nb_points" ), "dim" )
 
-    yo = sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Return( Yo, batch_size = 1, nb_points_capacity = 4, dim = 2 ) )
+    # Pb avec mutable : si on ne garde que les sliced versions,
+    #  + on ne copie que ce qui est nécessaire
+    #  - on n'a plus de réservation
+    # Prop: on passe dans mutable des capacity. Ça pourrait ête obligatoire
+    yo = Yo( [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ], nb_points = 3 )
+    sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Mutable( yo, nb_points_capacity = 5 ) )
     info( yo )
 
 

@@ -1,6 +1,7 @@
 
 class UndefinedTensor:
-    def __init__( self, shape, dtype = None ):
+    def __init__( self, shape, dtype, axis_names ):
+        self.axis_names = axis_names
         self.shape = [ s or 0 for s in shape ]
         self.dtype = dtype
 
@@ -13,7 +14,7 @@ class UndefinedTensor:
 
     def configure_call_arg( self, call_arg, fai, mutable, driver ):
         python_value = driver.array( [ 0 for _ in self.shape ], dtype = self.dtype )
-        return call_arg.configure_as_input_tensor( python_value, mutable, fai, driver, valid = False )
+        return call_arg.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, valid = False )
 
     def to_nanobind_compatible_objects( self ):
         if self.dtype == int:

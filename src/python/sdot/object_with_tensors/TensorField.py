@@ -108,7 +108,7 @@ class TensorField:
         # not found -> make an UndefinedTensor with shape and dtype
         def get_value( attr ):
             return getattr( enclosing, attr, None )
-        return UndefinedTensor( _shape( self, get_value ), self.dtype )
+        return UndefinedTensor( _shape( self, get_value ), self.dtype, self.axis_names )
 
     def __set__( self, distribution, value ):
         if value is None:
@@ -118,13 +118,14 @@ class TensorField:
         tensor = driver.tn( value, _rank( distribution, self.axis_names ), self.name, self.dtype )
 
         # check the dimensions
-        for axis_name in _axis_names( self.axis_names ):
-            size = getattr( distribution, axis_name )
-            if size is not None:
-                currs = distribution._axis_count_for( self, tensor, axis_name, [] )
-                for curr in currs:
-                    if curr is not None and curr != size:
-                        raise RuntimeError( f"tensor used to define the '{ self.name }' attribute is not of the correct size along the '{ axis_name }' axis (expecting { size }, provided tensor shape is { curr })" )
+        # for axis_name in _axis_names( self.axis_names ):
+        #     size = getattr( distribution, axis_name )
+        #     if size is not None:
+        #         currs = distribution._axis_count_for( self, tensor, axis_name, [] )
+        #         for curr in currs:
+        #             if curr is not None:
+        #                 if curr != size:
+        #                     raise RuntimeError( f"tensor used to define the '{ self.name }' attribute is not of the correct size along the '{ axis_name }' axis (expecting { size }, provided tensor shape is { curr }). If you want to bypass the test, you can clear the TensorFields by assigning None to the in a first step." )
 
         # register the tensor
         distribution.__dict__[ f'_{ self.name }' ] = tensor
@@ -138,7 +139,7 @@ class TensorField:
 
     def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
         res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent, configure = False )
-        res.configure_as_input_tensor( python_value, mutable, fai, driver, True, self.represents_a_dynamic_axis )
+        res.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, valid = True, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
         return res
 
     def shape_for( self, mandatory = True, **kwargs ):
