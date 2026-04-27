@@ -11,13 +11,13 @@ class Tensor:
     """
 
     @staticmethod
-    def configure_call_ret_for( call_arg, fai, driver, shape, dtype = None, axis_names = None ):
+    def configure_call_ret_for( call_arg, fai, driver, shape, dtype = None, axis_names = None, represents_a_dynamic_axis = False ):
         if axis_names is None:
             axis_names = []
             for size in shape:
                 if isinstance( size, Dyn ):
-                    axis_names.append( size.name )
+                    axis_names.append( size.name + "_capacity" )
                 else:
                     axis_names.append( "" )
 
-        call_arg.configure_as_output_tensor( fai, driver, shape, dtype, axis_names = axis_names )
+        call_arg.configure_as_output_tensor( fai, driver, shape, dtype, axis_names = axis_names, represents_a_dynamic_axis = represents_a_dynamic_axis )

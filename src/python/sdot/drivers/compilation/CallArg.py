@@ -1,6 +1,7 @@
 from .collect_attributes import collect_attributes_inst, collect_attributes #, Annotation
 from ...UndefinedTensor import UndefinedTensor
 from ...util import index
+from ...Dyn import Dyn
 
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
@@ -64,8 +65,8 @@ class CallArg:
     @staticmethod
     def second_pass_analysis( call_args: list[ 'CallArg' ], fai, driver ):
         # dynamic output axes
-        #   remplacer __capacity__
-        #   update python_ctor
+        #   replace __capacity__
+        #   update python_ctor and updated_value
         for call_arg in call_args:
             if call_arg.ffi_output and call_arg.ffi_output.represents_a_dynamic_axis:
                 axis_name = call_arg.attribute_name + "_capacity"
@@ -102,11 +103,12 @@ class CallArg:
                                     gra_llac.updated_value = new_updated_value
 
                 capacity = f"first_valid_dimension( u64_input, { str.join( ", ", capacity_list ) } )"
-                call_arg.base_code = call_arg.base_code.replace( "__capacity__", capacity )
+                while "__capacity__" in call_arg.base_code:
+                    call_arg.base_code = call_arg.base_code.replace( "__capacity__", capacity )
 
-        # recursion
-        if call_arg.sub_list:
-            CallArg.second_pass_analysis( call_arg.sub_list, fai, driver )
+            # recursion
+            if call_arg.sub_list:
+                CallArg.second_pass_analysis( call_arg.sub_list, fai, driver )
 
     def configure( self, python_value: any, fai, mutable: dict[ int ] | None, driver ):
         assert not isinstance( mutable, bool )
@@ -198,7 +200,16 @@ class CallArg:
             if represents_a_dynamic_axis:
                 self.base_code = f"DynamicAxis<{ ndim },Arch>( { self.base_code }, 0 )"
 
-    def configure_as_output_tensor( self, fai, driver, shape, dtype, axis_names, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_axis = False ):
+    def configure_as_output_tensor( self, fai, driver, _shape, dtype, axis_names, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_axis = False ):
+        shape = []
+        for s in _shape:
+            if isinstance( s, Dyn ):
+                if s.capacity is None:
+                    raise RuntimeError( "for output tensors, capacity must be specified for dynamic axes (in this case for '{ s.name }')" )
+                shape.append( s.capacity )
+            else:
+                shape.append( s )
+
         # create and register the ffi_output
         ffi_output = fai.add_output_tensor( driver, shape, dtype, axis_names, represents_a_dynamic_axis = represents_a_dynamic_axis )
         self.ffi_output = ffi_output

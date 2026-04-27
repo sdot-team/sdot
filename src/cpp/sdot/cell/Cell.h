@@ -23,9 +23,9 @@ struct Cell {
 
     TensorView<SI,0,Arch> is_fully_closed;
 
-    DynamicAxis           nb_vertices;
-    DynamicAxis           nb_edges;
-    DynamicAxis           nb_cuts;
+    DynamicAxis<0,Arch>   nb_vertices;
+    DynamicAxis<0,Arch>   nb_edges;
+    DynamicAxis<0,Arch>   nb_cuts;
 };
 
 template<class TF,class Arch>
@@ -38,9 +38,9 @@ struct BatchOfCell {
             cut_planes.row( batch_index ),
             cut_ids.row( batch_index ),
             is_fully_closed.row( batch_index ),
-            nb_vertices, // .row( batch_index ),
-            nb_edges, // .row( batch_index ),
-            nb_cuts, // .row( batch_index )
+            nb_vertices.row( batch_index ),
+            nb_edges.row( batch_index ),
+            nb_cuts.row( batch_index )
         };
     }
 
@@ -52,9 +52,9 @@ struct BatchOfCell {
 
     TensorView<SI,1,Arch> is_fully_closed;
 
-    DynamicAxis           nb_vertices;
-    DynamicAxis           nb_edges;
-    DynamicAxis           nb_cuts;
+    DynamicAxis<1,Arch>   nb_vertices;
+    DynamicAxis<1,Arch>   nb_edges;
+    DynamicAxis<1,Arch>   nb_cuts;
 };
 
 // #define UTP2 template<class TF,class Arch>

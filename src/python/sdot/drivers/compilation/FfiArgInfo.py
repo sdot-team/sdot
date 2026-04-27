@@ -1,8 +1,11 @@
 from .FfiParameter import FfiParameter
+from .Workspace import Workspace
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .CallArg import CallArg
-from ...util import find
+from .Return import Return
+from .Tensor import Tensor
+from ...Dyn import Dyn
 
 import numpy
 
@@ -48,6 +51,9 @@ class FfiArgInfo:
         self.u64_output_size = 0
         self.u64_ffi_output = None
 
+        # update call_arg with DynamicSizes if some args contain dynamic axes
+        FfiArgInfo.add_dynamic_size_tensors_to( call_args, driver )
+
         # recursive analysis
         for arg_name, arg_value in call_args.items():
             self.call_args.append( CallArg.analysis_of_python_arg( arg_value, arg_name, self, None, driver ) )
@@ -86,6 +92,35 @@ class FfiArgInfo:
                 bind = driver.ffi_tensor_output_bind_code( 1, numpy.uint64 ),
             )
             self.ffi_outputs.append( self.u64_ffi_output )
+
+    @staticmethod
+    def add_dynamic_size_tensors_to( call_args: dict, driver ):
+        dynamic_axes: list[ Dyn ] = []
+        for call_arg in call_args.values():
+            if isinstance( call_arg, Return ) and call_arg.return_type == Tensor:
+                def get_shape( shape, **kwargs ):
+                    return shape
+                shape = get_shape( *call_arg.type_args, **call_arg.type_kwargs )
+                for s in shape:
+                    if isinstance( s, Dyn ):
+                        item = next( ( da for da in dynamic_axes if da.name == s.name ), None )
+                        if item is None:
+                            dynamic_axes.append( s )
+
+        for dynamic_axis in dynamic_axes:
+            if dynamic_axis.name not in call_args:
+                shape = []
+                for a in dynamic_axis.one_value_for_each:
+                    def get_shape():
+                        for call_arg in call_args.values():
+                            attr = getattr( call_arg, a, None )
+                            if attr is not None:
+                                return attr
+                        raise RuntimeError( f"Unable to get '{ a }' axis size " )
+                    shape.append( get_shape() )
+                tf = Workspace( Tensor, shape = shape, axis_names = dynamic_axis.one_value_for_each, dtype = driver.uint64, represents_a_dynamic_axis = True )
+                call_args[ dynamic_axis.name ] = tf
+
 
     def append_u64_input_bit( self, value ) -> int:
         """ append a bit in u64_input. return index """

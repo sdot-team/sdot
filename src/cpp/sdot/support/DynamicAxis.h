@@ -15,6 +15,7 @@ public:
 
     // slicing/subparts
     auto         operator() ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<new_rank,Arch>( sizes.partial( indices... ), capacity ); }
+    auto         row        ( auto index ) const { return operator()( index ); }
 
     // assuming rank == 0
     PI           operator++ () { if ( ++sizes() > capacity ) overflow(); return sizes(); }
@@ -22,7 +23,7 @@ public:
     DynamicAxis& operator=  ( PI value ) { if ( value > capacity ) overflow(); sizes() = value; return *this; }
     operator     PI         () const { return sizes(); }
 
-private:
+// private:
     void         overflow   () { throw std::runtime_error( "DynamicAxis: capacity exceeded" ); }
 
     const PI     capacity;

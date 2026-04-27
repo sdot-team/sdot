@@ -17,18 +17,20 @@ void vtk_cell_faces( auto &&p ) {
     //     } );
     // } );
 
+    P( p.nb_points.sizes.rank() );
     p.points( p.nb_points, 0 ) = 0; p.points( p.nb_points, 1 ) = 0; p.nb_points++;
     p.points( p.nb_points, 0 ) = 1; p.points( p.nb_points, 1 ) = 0; p.nb_points++;
     p.points( p.nb_points, 0 ) = 1; p.points( p.nb_points, 1 ) = 1; p.nb_points++;
     p.points( p.nb_points, 0 ) = 0; p.points( p.nb_points, 1 ) = 1; p.nb_points++;
 
+    P( p.nb_faces.sizes.rank() );
     p.faces( p.nb_faces ) = 4; p.nb_faces++;
     p.faces( p.nb_faces ) = 0; p.nb_faces++;
     p.faces( p.nb_faces ) = 1; p.nb_faces++;
     p.faces( p.nb_faces ) = 2; p.nb_faces++;
     p.faces( p.nb_faces ) = 3; p.nb_faces++;
 
-    P( p.cells.nb_vertices );
+    // P( p.cells.nb_vertices );
 }
 
 void vtk_cell_faces_backward( auto &&p ) {
