@@ -14,7 +14,7 @@ class UndefinedTensor:
 
     def configure_call_arg( self, call_arg, fai, mutable, driver ):
         python_value = driver.array( [ 0 for _ in self.shape ], dtype = self.dtype )
-        return call_arg.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, valid = False )
+        return call_arg.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, ct_axes = {}, valid = False )
 
     # def to_nanobind_compatible_objects( self ):
     #     if self.dtype == int:

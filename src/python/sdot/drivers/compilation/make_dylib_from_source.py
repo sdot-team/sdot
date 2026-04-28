@@ -49,6 +49,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
             "Run: xmake update"
         )
 
+    # info( compilation_directories.() )
     env = {
         **os.environ,
         "SDOT_XMAKE_OUTPUT_DIR" : str( compilation_directories.dylib_dir() ),
@@ -59,6 +60,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
                                       nanobind_include_dir,
                                       python_include,
                                       project_root / "src" / "cpp",
+                                      compilation_directories.additional_includes_dir()
                                   ] + jax_include ) ),
         "SDOT_XMAKE_CXXFLAGS"   : str.join( ",", [ "-fdiagnostics-absolute-paths", "-fno-strict-aliasing" ] ),
         "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, list( src_paths ) + [ nanobind_source ] ) ),

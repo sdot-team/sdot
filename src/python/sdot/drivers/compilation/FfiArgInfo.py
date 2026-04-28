@@ -94,6 +94,7 @@ class FfiArgInfo:
                 differentiable = False,
                 validity_index = -1,
                 axis_names = [ "" ],
+                ct_axes = {},
                 arg_name = "u64_output_buffer",
                 cpp_type = driver.ffi_tensor_output_arg_code( 1, numpy.uint64 ),
                 valid = None,
@@ -105,7 +106,12 @@ class FfiArgInfo:
     def generate_structures( self ):
         for name, call_arg in self.aggregates.items():
             code = call_arg.generated_structure()
-            infox( code )
+            incl = f"{ name }.h"
+
+            from ...generated_files.compilation_directories import generated_includes_dir
+            path = generated_includes_dir() / incl
+            path.write_text( code )
+
 
     def reserve_u64_output_bit( self ):
         self.u64_output_bit_offset += 1
@@ -218,7 +224,7 @@ class FfiArgInfo:
 
         return ffi_input
 
-    def add_output_tensor( self, driver, shape, dtype, axis_names, valid = None, represents_a_dynamic_axis = False ) -> FfiOutput:
+    def add_output_tensor( self, driver, shape, dtype, axis_names, ct_axes: dict[ int ], valid = None, represents_a_dynamic_axis = False ) -> FfiOutput:
         """ return name, validity index """
 
         if valid is None:
@@ -244,12 +250,14 @@ class FfiArgInfo:
             num_in_sub_list = num_in_sub_list,
             validity_index = validity_index,
             differentiable = differentiable, # we keep this information because we're not going to pass non differentiable outputs to the C++ call
-            axis_names = axis_names,
             arg_name = arg_name,
             cpp_type = driver.ffi_tensor_output_arg_code( len( shape ), dtype ),
             valid = valid,
             bind = driver.ffi_tensor_output_bind_code( len( shape ), dtype ),
             spec = driver.ffi_tensor_output_spec( shape, dtype ),
+
+            axis_names = axis_names,
+            ct_axes = ct_axes,
         )
 
         self.ffi_outputs.append( ffi_output )

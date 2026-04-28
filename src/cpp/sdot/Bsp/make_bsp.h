@@ -1,32 +1,31 @@
 #pragma once
 
-#include "../support/SimpleSquareMatrix.h"
+#include <sdot/support/SimpleSquareMatrix.h>
+#include <sdot/generated_includes/Bsp.h>
 // #include "../support/P.h"
 #include <numeric>
-#include "Bsp.h"
 
 namespace sdot {
 
-template<class TF,class Arch,int ct_dim_>
+template<class Arch,class TI,class TF,int ct_dim>
 struct BspMaker {
-    Bsp<TF,Arch>          bsp;
-    SI                    max_points_per_cell;
-    TensorView<TF,2,Arch> positions;
-    TensorView<TF,1,Arch> weights;
-    CtInt<ct_dim_>        ct_dim;
+    SI                     max_points_per_cell;
+    TensorView<TF,2,Arch>  positions;
+    TensorView<TF,1,Arch>  weights;
+    Bsp<Arch,TI,TF,ct_dim> bsp;
 
     enum { degree_w_approx       = 1 };
-    enum { ct_nb_coeffs_w_approx = 1 + ct_dim_ * ( degree_w_approx >= 1 ) + ct_dim_ * ( ct_dim_ + 1 ) / 2 * ( degree_w_approx >= 2 ) };
-    using                 Pt = DsVec<TF,ct_dim_>;
+    enum { ct_nb_coeffs_w_approx = 1 + ct_dim * ( degree_w_approx >= 1 ) + ct_dim * ( ct_dim + 1 ) / 2 * ( degree_w_approx >= 2 ) };
+    using                 Pt = DsVec<TF,ct_dim>;
 
-    std::pair<DsVec<TF,ct_dim_>,DsVec<TF,ct_dim_>> min_max( SI beg_in_sorted_vertex_indices, SI end_in_sorted_vertex_indices ) {
+    std::pair<DsVec<TF,ct_dim>,DsVec<TF,ct_dim>> min_max( SI beg_in_sorted_vertex_indices, SI end_in_sorted_vertex_indices ) {
         using namespace std;
 
         const PI ind = bsp.sorted_vertex_indices( beg_in_sorted_vertex_indices );
-        DsVec<TF,ct_dim_> mi( positions.row( ind ) );
-        DsVec<TF,ct_dim_> ma = mi;
+        DsVec<TF,ct_dim> mi( positions.row( ind ) );
+        DsVec<TF,ct_dim> ma = mi;
 
-        const PI dim = ct_dim_ >= 0 ? ct_dim_ : positions.size( 0 );
+        const PI dim = ct_dim >= 0 ? ct_dim : positions.size( 0 );
         for( SI i = beg_in_sorted_vertex_indices + 1; i < end_in_sorted_vertex_indices; ++i ) {
             const PI ind = bsp.sorted_vertex_indices( i );
             for( PI d = 0; d < dim; ++d ) {
@@ -47,7 +46,7 @@ struct BspMaker {
         const SI end_si = bsp.cell_indices( num_cell_to_update, 3 );
         const auto [ min_pos, max_pos ] = min_max( beg_si, end_si );
 
-        const PI dim = ct_dim_ >= 0 ? ct_dim_ : positions.size( 0 );
+        const PI dim = ct_dim >= 0 ? ct_dim : positions.size( 0 );
         for( int d = 0; d < dim; ++d ) {
             bsp.cell_bounds( num_cell_to_update, 0 * dim + d ) = min_pos[ d ];
             bsp.cell_bounds( num_cell_to_update, 1 * dim + d ) = min_pos[ d ];
@@ -128,7 +127,7 @@ struct BspMaker {
     }
 
     void update_weights( SI num_cell_to_update, SI beg_si, SI end_si ) {
-        const PI dim = ct_dim_ >= 0 ? ct_dim_ : positions.size( 0 );
+        const PI dim = ct_dim >= 0 ? ct_dim : positions.size( 0 );
         const int nb_coeffs_w_approx = 1 + dim * ( degree_w_approx >= 1 ) + dim * ( dim + 1 ) / 2 * ( degree_w_approx >= 2 );
 
         // M, V
@@ -200,7 +199,13 @@ struct BspMaker {
     }
 };
 
-void make_bsp( auto &&bm ) {
+void make_bsp( auto &&p ) {
+    BspMaker bm{
+        .max_points_per_cell = p.max_points_per_cell,
+        .positions = p.positions,
+        .weights = p.weights,
+        .bsp = p.bsp,
+    };
     bm.exec();
 }
 

@@ -36,10 +36,11 @@ class TensorField:
     static_axis_names : list[ str ]
     removed_dim_axes: list[ int ]
     dynamic_axes : list[ Dyn ]
-    axis_names : list[ str ]
-    ct_knowns : list[ tuple[ str, int ] ] # name, limit
     dtype: any
     name: str
+
+    axis_names : list[ str ]
+    ct_axes : dict[ int ] # name -> limit
 
     def __init__( self, *axes, dtype = None, represents_a_dynamic_axis = False ):
         self.represents_a_dynamic_axis = represents_a_dynamic_axis  # original args (with Dyn objects), used to reconstruct variants
@@ -53,10 +54,10 @@ class TensorField:
         self.static_axis_names = []
         self.dynamic_axes = []
         self.axis_names = []
-        self.ct_knowns = []
+        self.ct_axes = {}
         for axis in axes:
             if isinstance( axis, CtKnown ):
-                self.ct_knowns.append( ( axis.name, axis.limit ) )
+                self.ct_axes[ axis.name ] = axis.limit
                 axis = axis.name
 
             if isinstance( axis, Dyn ):
@@ -142,11 +143,11 @@ class TensorField:
     def configure_call_ret_for( self, call_arg, fai, driver, *args, **kwargs ):
         """ surdef for Return( ObjWithTensorFields ) """
         shape = self.shape_for( **kwargs )
-        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, self.axis_names, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
+        call_arg.configure_as_output_tensor( fai, driver, shape, self.dtype or driver.dtype, self.axis_names, ct_axes = self.ct_axes, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
     def analysis_of_python_arg( self, python_value, name, fai, mutable, driver, parent = None ):
         res = CallArg.analysis_of_python_arg( python_value, name, fai, mutable, driver, parent, configure = False )
-        res.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, valid = True, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
+        res.configure_as_input_tensor( python_value, mutable, fai, driver, axis_names = self.axis_names, ct_axes = self.ct_axes, valid = True, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
         return res
 
     def shape_for( self, mandatory = True, **kwargs ):
@@ -245,6 +246,9 @@ def _shape( field, get_value: callable ):
             raise NotImplementedError
         res.append( _axis_value( axis_name, get_value ) )
     return res
+
+# def analysis_of_axis_formula( axis_name ) -> tuple[ int, int, str ]:
+
 
 def _axis_names( axis_names: tuple[ str, ... ] ) -> list[ str ]:
     res = []
