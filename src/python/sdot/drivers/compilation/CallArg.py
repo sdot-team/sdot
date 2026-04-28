@@ -1,4 +1,4 @@
-from .collect_attributes import collect_attributes_inst, collect_attributes #, Annotation
+from .collect_attributes import collect_attributes_inst, collect_attributes, Annotation
 from ...UndefinedTensor import UndefinedTensor
 from ...util import index
 from ...Dyn import Dyn
@@ -27,9 +27,11 @@ class CallArg:
     python_value   : any #
     io_category    : int # 0 => pure input, 1 => mutable, 2 => return
     python_ctor    : callable # for reassembly of python objects. Called using an object that contains lists like differentiable_ffi_outputs, ...
-    brace_ctor     : bool # true to use '{}' in generated code for instanciation
     ffi_output     : FfiOutput | None #
     ffi_input      : FfiInput | None #
+
+    struct_name    : str # Cell
+    brace_ctor     : bool # true to use '{}' in generated code for instanciation
     base_code      : str # name of function or class for assembly of C++ objects (e.g. "Cell<TF,2>")
     signature      : str # name used to make the signature of the module (e.g. T0F64 for a tensor)
     sub_list       : list[ Self ] | None # arguments for python_ctor or base_code
@@ -51,6 +53,7 @@ class CallArg:
         # common info
         res = CallArg()
         res.attribute_name = attribute_name
+        res.struct_name = ""
         res.sub_list = None
 
         if parent is not None:
@@ -263,8 +266,12 @@ class CallArg:
 
         self.brace_ctor = True
 
+        self.struct_name = python_value.__class__.__name__
+        if self.struct_name not in fai.aggregates:
+            fai.aggregates[ self.struct_name ] = self
+
         self.sub_list = []
-        for name, inst in collect_attributes_inst( python_value, use_annotations = True ):
+        for name, inst in collect_attributes_inst( python_value ): # , use_annotations = True
             analysis_of_python_arg = getattr( inst, "analysis_of_python_arg", None )
             if analysis_of_python_arg:
                 sc = analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
@@ -284,6 +291,10 @@ class CallArg:
         else:
             self.signature = self.base_code
 
+        self.struct_name = return_type.__name__
+        if self.struct_name not in fai.aggregates:
+            fai.aggregates[ self.struct_name ] = self
+
         def python_ctor( fai, outputs ):
             args = {}
             for item in self.sub_list:
@@ -302,12 +313,9 @@ class CallArg:
         self.brace_ctor = True
 
         self.sub_list = []
-        for name, value in collect_attributes( return_type, use_annotations = True ):
-            # if isinstance( value, Annotation ):
-            #     value = value.value
-            #     # info( name, value )
-            #     # import sys
-            #     # sys.exit( 0 )
+        for name, value in collect_attributes( return_type, use_annotations = True ): #
+            if isinstance( value, Annotation ):
+                value = value.value
             self.sub_list.append( self.return_child( fai, driver, name, value, *type_args, **type_kwargs ) )
 
     def return_child( self, fai, driver, attribute_name: str, return_type: any, *type_args, **type_kwargs ) -> Self:
@@ -386,3 +394,29 @@ class CallArg:
         if self.sub_list is not None:
             for s in self.sub_list:
                 s.update_differentiable_input_values()
+
+    def generated_structure( self ):
+        includes = [ "sdot/support/DynamicAxis.h" ]
+        lines = [ "namespace sdot {" ]
+
+        lines.append( f"struct { self.struct_name } {{" )
+
+
+
+        lines.append( "};" )
+
+        # template<class TF,class Arch,int ct_dim_>
+        # struct PowerDiagram {
+        #     TensorView<TF,2,Arch> positions;
+        #     TensorView<TF,1,Arch> weights;
+        #     CtInt<ct_dim_>        ct_dim;
+        #     Bsp<TF,Arch>          bsp;
+
+        #     PI                    dim() const { return ct_dim_; }
+        # };
+
+        # }
+
+        lines.append( "} // namespace sdot" )
+        include_lines = [ f"#include <{ include }>" for include in includes ]
+        return str.join( "\n", [ "#pragma once" ] + include_lines + lines )

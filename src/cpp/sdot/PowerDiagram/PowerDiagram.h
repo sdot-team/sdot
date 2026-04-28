@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../support/DynamicAxis.h"
-#include "../geometry/Bsp.h"
+#include "../Bsp/Bsp.h"
 
 namespace sdot {
 

@@ -25,7 +25,7 @@ class Bsp:
         nb_cells_capacity = nb_vertices
         ct_dim = CtInt( dim )
 
-        return driver.call( "make_bsp", "sdot/geometry/make_bsp.h",
+        return driver.call( "make_bsp", "sdot/Bsp/make_bsp.h",
             bsp = Return( Bsp, nb_vertices = nb_vertices, nb_cells_capacity = nb_cells_capacity, dim = dim ),
             max_points_per_cell = max_points_per_cell,
             positions = positions,

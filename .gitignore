@@ -48,3 +48,5 @@ node_modules/
 results/
 octave*
 *.vtk
+
+attic

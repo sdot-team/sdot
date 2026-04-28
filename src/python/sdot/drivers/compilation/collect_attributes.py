@@ -5,13 +5,7 @@ class Annotation:
         self.value = value
 
 def collect_attributes_inst( obj, add_dict = False, use_annotations = False ) -> list[ tuple[ str, any ] ]:
-    res = []
-    for name, value in collect_attributes( type( obj ), obj.__dict__, use_annotations = use_annotations ):
-        if isinstance( value, Annotation ):
-            res.append( ( name, value.value ) )
-        else:
-            res.append( ( name, value ) )
-    return res
+    return collect_attributes( type( obj ), obj.__dict__, use_annotations = use_annotations )
 
 _NON_VALUES = ( classmethod, staticmethod, property, type, _types.FunctionType, _types.ModuleType )
 

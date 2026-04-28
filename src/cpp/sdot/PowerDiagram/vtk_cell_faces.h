@@ -1,7 +1,6 @@
-#include "../cell/for_each_face.h"
+#include "../Cell/for_each_face.h"
 #include "../support/P.h"
 #include "PowerDiagram.h"
-#include "../cell/Cell.h"
 
 namespace sdot {
 

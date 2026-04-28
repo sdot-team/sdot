@@ -38,6 +38,9 @@ class FfiArgInfo:
         # python/cpp values (for the user)
         self.call_args: list[ CallArg ] = [] # one for each call arg
 
+        # code generation
+        self.aggregates: dict[ CallArg ] = {} # type -> instance for each aggregate, i.e. object handled using collect_attributes
+
         # configuration
         self.parameters_struct = parameters_struct # struct name to use instead of the parameter list
 
@@ -98,6 +101,11 @@ class FfiArgInfo:
                 bind = driver.ffi_tensor_output_bind_code( 1, numpy.uint64 ),
             )
             self.ffi_outputs.append( self.u64_ffi_output )
+
+    def generate_structures( self ):
+        for name, call_arg in self.aggregates.items():
+            code = call_arg.generated_structure()
+            infox( code )
 
     def reserve_u64_output_bit( self ):
         self.u64_output_bit_offset += 1

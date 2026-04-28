@@ -1,5 +1,6 @@
 from ..drivers.compilation.CallArg import CallArg
 from ..UndefinedTensor import UndefinedTensor
+from ..CtKnown import CtKnown
 from ..driver import driver
 from ..util import find
 from ..Dyn import Dyn
@@ -36,6 +37,7 @@ class TensorField:
     removed_dim_axes: list[ int ]
     dynamic_axes : list[ Dyn ]
     axis_names : list[ str ]
+    ct_knowns : list[ tuple[ str, int ] ] # name, limit
     dtype: any
     name: str
 
@@ -51,7 +53,12 @@ class TensorField:
         self.static_axis_names = []
         self.dynamic_axes = []
         self.axis_names = []
+        self.ct_knowns = []
         for axis in axes:
+            if isinstance( axis, CtKnown ):
+                self.ct_knowns.append( ( axis.name, axis.limit ) )
+                axis = axis.name
+
             if isinstance( axis, Dyn ):
                 if not axis.name.isidentifier():
                     raise RuntimeError( f"dynamic axes do not support operations like +, *, ... (for axis { axis.name } which is not an identifier)" )

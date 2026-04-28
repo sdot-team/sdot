@@ -1,12 +1,13 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
-from .driver import driver, Workspace, Return, Tensor, CtInt, Dyn
-from .distributions.Distribution import Distribution
+from .driver import driver, Workspace, Return, Tensor, CtKnown, Dyn
 from .Cell import BatchOfCell
 from .Plotter import Plotter
+from .Norm2 import Norm2
 from .Bsp import Bsp
 
 from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
+if TYPE_CHECKING:
+    from .distributions.Distribution import Distribution
 
 
 @object_with_tensors
@@ -15,10 +16,9 @@ class PowerDiagram:
 
     """
 
-    positions = TensorField( "nb_vertices", "dim" ) # vertex index ->
+    positions = TensorField( "nb_vertices", CtKnown( "dim" ) ) # vertex index ->
     weights = TensorField( "nb_vertices" ) # vertex index ->
-    ct_dim = CtInt( -1 ) #
-
+    norm : Norm2 #
     bsp : Bsp
 
 
@@ -27,10 +27,10 @@ class PowerDiagram:
         nb_vertices : int
         dim : int
 
-    def __init__( self, positions, weights = None ):
+    def __init__( self, positions, weights = None, norm = Norm2 ):
         self.positions = positions
         self.weights = weights
-        self.ct_dim = CtInt( positions.shape[ 1 ] )
+        self.norm = norm
 
         self.bsp = Bsp.make_from( self.positions, self.weights )
 
@@ -54,7 +54,7 @@ class PowerDiagram:
             power_diagram = self
         )
 
-    def newton_dir( self, g: Distribution ):
+    def newton_dir( self, g: 'Distribution' ):
         """ On a la pos """
-        res = driver.call( "newton_dir", "sdot/PowerDiagram/newton_dir.h", ct_dim = CtInt( self.dim ), res = Return( Tensor, [ ] ), pd = self )
+        res = driver.call( "newton_dir", "sdot/PowerDiagram/newton_dir.h", res = Return( Tensor, [ ] ), pd = self )
         info( res )

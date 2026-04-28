@@ -21,7 +21,7 @@ def custom_printer_impl( obj, nl ):
         res = type( obj ).__name__
         nnl = nl + "  "
         for n, _ in collect_attributes_inst( obj, use_annotations = True ):
-            res += nnl + n + ": " + custom_printer_impl( getattr( obj, n ), nnl )
+            res += nnl + n + ": " + custom_printer_impl( getattr( obj, n, None ), nnl )
         return str(res)
 
     return str( obj )
