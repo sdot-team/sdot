@@ -3,6 +3,7 @@
 #include "../support/SimpleSquareMatrix.h"
 #include "../support/DynamicAxis.h"
 #include "../support/TensorView.h"
+#include "../support/P.h"
 // #include "../support/P.h"
 
 namespace sdot {
@@ -57,12 +58,6 @@ struct BatchOfCell {
     DynamicAxis<1,Arch>   nb_cuts;
 };
 
-// #define UTP2 template<class TF,class Arch>
-// #define DTP2 Cell<TF,2,Arch>
-
-// #define UTP1 template<class TF,class Arch>
-// #define DTP1 Cell<TF,2,Arch>
-
 #define UTP template<class TF,class Arch,int ct_dim>
 #define DTP Cell<TF,Arch>
 
@@ -74,9 +69,9 @@ UTP void make_aligned_simplex( DTP &cell, SI cut_id, CtInt<ct_dim> ) {
     const PI nb_cuts = dim + 1;
 
     cell.is_fully_closed() = cut_id != DTP::INFINITE;
-    cell.nb_vertices() = nb_vertices;
-    cell.nb_edges() = nb_edges;
-    cell.nb_cuts() = nb_cuts;
+    cell.nb_vertices = nb_vertices;
+    cell.nb_edges = nb_edges;
+    cell.nb_cuts = nb_cuts;
 
     // vertex_positions
     for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex )

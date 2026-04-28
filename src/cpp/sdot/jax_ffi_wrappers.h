@@ -13,7 +13,8 @@
 
 namespace sdot {
 
-// // convenience aliases for the two most common dtypes
+
+// convenience aliases for the two most common dtypes
 template<xla::ffi::DataType dtype> struct SdotTypeFor;
 template<> struct SdotTypeFor<xla::ffi::DataType::F32> { using type = FP32; };
 template<> struct SdotTypeFor<xla::ffi::DataType::F64> { using type = FP64; };

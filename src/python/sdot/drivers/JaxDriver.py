@@ -243,11 +243,39 @@ class JaxDriver:
             # update fai content with the actua values
             fai.update_differentiable_input_values_with( differentiable_input_values )
 
-            # make the call
-            func = jax.ffi.ffi_call( module_name, fai.output_specs )
+            # loop until capacities are large enough
+            while True:
+                # make the call
+                func = jax.ffi.ffi_call( module_name, fai.output_specs )
 
-            # normalize the output
-            ret = func( *fai.input_values, **fai.attributes )
+                # normalize the output
+                ret = func( *fai.input_values, **fai.attributes )
+
+                # break if ok
+                u64_output = ret[ fai.u64_ffi_output.num_in_sub_list ]
+                if ( u64_output[ fai.bit_offset_dynamic_size_exception // 64 ] & ( 1 << fai.bit_offset_dynamic_size_exception ) ) == 0:
+                    break
+
+                # else delete outputs
+                del ret
+
+                # get faulty data
+                raw = numpy.array( u64_output[ fai.offset_dynamic_size_name : fai.end_dynamic_size_name ], dtype = numpy.uint64 ).view( numpy.uint8 )
+                faulty_axis_name = raw.tobytes().split( b'\x00' )[ 0 ].decode() + "_capacity"
+
+                needed_size = int( u64_output[ fai.offset_needed_dynamic_size ] )
+
+                # update output shape
+                for ffi_output in fai.ffi_outputs:
+                    shape = list( ffi_output.spec.shape )
+                    for n, axis_name in enumerate( ffi_output.axis_names ):
+                        if axis_name == faulty_axis_name:
+                            old_value = ffi_output.spec.shape[ n ]
+                            new_value = max( needed_size, 2 * old_value )
+                            shape[ n ] = new_value
+
+                    ffi_output.spec = self.ffi_tensor_output_spec( shape, ffi_output.spec.dtype )
+
 
             # always return a tuple
             if isinstance( ret, jax.Array ):
@@ -467,12 +495,30 @@ class JaxDriver:
             lines.append( "    const PI64 *u64_input = u64_input_buffer.typed_data();" )
         if fai.u64_output_size:
             lines.append( "    PI64 *u64_output = u64_output_buffer->typed_data();" )
+            lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof(PI64) );" )
+
+        # zero-init DynamicAxis output tensors (counters must start at 0 on each call)
+        for ffi_output in fai.ffi_outputs:
+            if ffi_output.represents_a_dynamic_axis:
+                lines.append( f'    std::memset( { ffi_output.arg_name }->typed_data(), 0, { ffi_output.arg_name }->element_count() * sizeof(PI64) );' )
+
+        # beg try block
+        lines.append( "    try {" )
 
         # call the function
         lines.append( f"    { func_name }( { parameters_struct }{{" )
         for call_arg in fai.call_args:
             lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
         lines.append( "    } );" )
+
+        # end try block
+
+        lines.append( '    } catch ( DynamicSizeException de ) {' )
+        lines.append( f'        u64_output[ { fai.bit_offset_dynamic_size_exception // 64 } ] |= { 1 << ( fai.bit_offset_dynamic_size_exception % 64 ) };' )
+        lines.append( f'        u64_output[ { fai.offset_needed_dynamic_size } ] = de.needed_size;' )
+        lines.append( '        const char *s = de.name.c_str();' )
+        lines.append( f'        std::memcpy( u64_output + { fai.offset_dynamic_size_name }, s, std::min( (PI)de.name.size() + 1, (PI){ ( fai.end_dynamic_size_name - fai.offset_dynamic_size_name ) * 8 } ) );' )
+        lines.append( '    }' )
 
         # end impl
         lines.append( "    return xla::ffi::Error::Success();" )

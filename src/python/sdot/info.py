@@ -1,5 +1,6 @@
 from .drivers.compilation.collect_attributes import collect_attributes_inst
 from devtools import debug, sformat
+import sys
 
 def custom_printer_impl( obj, nl ):
     if isinstance( obj, ( list, tuple ) ):
@@ -35,3 +36,15 @@ def info( *arg, **kwargs ):
             s += "  "
         s += sformat( argument.name, sformat.green ) + ": " + custom_printer_impl( argument.value, "\n  " )
     print( s )
+
+def infox( *arg, **kwargs ):
+    f = debug._process( arg, kwargs, frame_depth = 2 )
+    s = sformat( f"{ f.filename }:{ f.lineno }:", sformat.blue )
+    for argument in f.arguments:
+        if s:
+            s += "\n  "
+        else:
+            s += "  "
+        s += sformat( argument.name, sformat.green ) + ": " + custom_printer_impl( argument.value, "\n  " )
+    print( s )
+    sys.exit( 0 )

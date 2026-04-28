@@ -47,7 +47,7 @@ class FfiArgInfo:
         self.u64_ffi_input = None
 
         # input u64 value
-        self.u64_output_bit_offset = 0 # where to set the next output bit (multiple of 64 means that we will have to allocate a new U64)
+        self.u64_output_bit_offset = -1 # where to set the next output bit (multiple of 64 means that we will have to allocate a new U64)
         self.u64_output_size = 0
         self.u64_ffi_output = None
 
@@ -60,6 +60,12 @@ class FfiArgInfo:
 
         # second pass : updates for dynamic axes, ...
         CallArg.second_pass_analysis( self.call_args, self, driver )
+
+        # reservation of a bit to get info on dynamic size exception
+        self.bit_offset_dynamic_size_exception = self.reserve_u64_output_bit()
+        self.offset_needed_dynamic_size = self.reserve_u64_output( 1 )
+        self.offset_dynamic_size_name = self.reserve_u64_output( ( self.max_axis_name_size() + 8 ) // 8 )
+        self.end_dynamic_size_name = self.u64_output_size
 
         # register u64_input
         if self.u64_input_values:
@@ -84,7 +90,7 @@ class FfiArgInfo:
                 num_in_sub_list = len( self.ffi_outputs ),
                 differentiable = False,
                 validity_index = -1,
-                axes_names = [ "" ],
+                axis_names = [ "" ],
                 arg_name = "u64_output_buffer",
                 cpp_type = driver.ffi_tensor_output_arg_code( 1, numpy.uint64 ),
                 valid = None,
@@ -92,6 +98,26 @@ class FfiArgInfo:
                 bind = driver.ffi_tensor_output_bind_code( 1, numpy.uint64 ),
             )
             self.ffi_outputs.append( self.u64_ffi_output )
+
+    def reserve_u64_output_bit( self ):
+        self.u64_output_bit_offset += 1
+        if self.u64_output_bit_offset % 64 == 0:
+            self.u64_output_bit_offset = 64 * self.u64_output_size
+            self.u64_output_size += 1
+
+        return self.u64_output_bit_offset
+
+    def reserve_u64_output( self, nb_u64s = 1 ):
+        res = self.u64_output_size
+        self.u64_output_size += nb_u64s
+        return res
+
+    def max_axis_name_size( self ):
+        max_size = 0
+        for fo in self.ffi_outputs:
+            for an in fo.axis_names:
+                max_size = max( max_size, len( an ) )
+        return max_size
 
     @staticmethod
     def add_dynamic_size_tensors_to( call_args: dict, driver ):

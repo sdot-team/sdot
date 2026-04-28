@@ -77,7 +77,7 @@ class CallArg:
                         if num_axis >= 0:
                             # __capacity__ inputs
                             capacity_list.append( gra_llac.ffi_output.arg_name )
-                            capacity_list.append( f"u64_input[ { gra_llac.ffi_output.validity_index // 64 } ] & { 1 << ( gra_llac.ffi_output.validity_index % 64 ) }" )
+                            capacity_list.append( str( gra_llac.ffi_output.validity_index ) )
                             capacity_list.append( str( num_axis ) )
 
                             # resize outputs with this axis (is one_value_for_each was [])
@@ -187,7 +187,7 @@ class CallArg:
 
             self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_output.arg_name }, { ffi_input.arg_name }, ( u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } ) && ( u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } ) )"
             if represents_a_dynamic_axis:
-                self.base_code = f"DynamicAxis<{ ndim },Arch>( { self.base_code }, __capacity__ )"
+                self.base_code = f"DynamicAxis<{ ndim },Arch>( \"{ self.attribute_name }\", { self.attribute_name }, { self.base_code }, __capacity__ )"
 
             def updated_value( fai, outputs ):
                 return CallArg.get_output_tensor( ffi_output, fai, driver, outputs, fallback_shape = python_value.shape, fallback_dtype = python_value.dtype )
@@ -198,7 +198,7 @@ class CallArg:
 
             self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } )"
             if represents_a_dynamic_axis:
-                self.base_code = f"DynamicAxis<{ ndim },Arch>( { self.base_code }, 0 )"
+                self.base_code = f"DynamicAxis<{ ndim },Arch>( \"{ self.attribute_name }\", { self.base_code }, 0 )"
 
     def configure_as_output_tensor( self, fai, driver, _shape, dtype, axis_names, for_single_item = False, resize_dyn_axes = True, list_of_dynamic_axes = None, represents_a_dynamic_axis = False ):
         shape = []
@@ -216,7 +216,7 @@ class CallArg:
 
         self.base_code = f"tensor_view( CtInt<{ len( shape ) }>(), { ffi_output.arg_name }, u64_input[ { ffi_output.validity_index // 64 } ] & { 1 << ( ffi_output.validity_index % 64 ) } )"
         if represents_a_dynamic_axis:
-            self.base_code = f"DynamicAxis<{ len( shape ) },Arch>( { self.base_code }, __capacity__ )"
+            self.base_code = f"DynamicAxis<{ len( shape ) },Arch>( \"{ self.attribute_name }\", { self.base_code }, __capacity__ )"
 
         self.signature = f"T{ len( shape ) }{ driver.normalized_type_for( dtype or driver.dtype ) }"
 

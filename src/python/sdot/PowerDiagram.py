@@ -19,7 +19,6 @@ class PowerDiagram:
     weights = TensorField( "nb_vertices" ) # vertex index ->
     ct_dim = CtInt( -1 ) #
 
-    # wp_cells : BatchOfCells
     bsp : Bsp
 
 
@@ -40,11 +39,11 @@ class PowerDiagram:
             p.plot_mesh( *self.vtk_cell_faces() )
 
     def vtk_cell_faces( self ):
-        reservation = 10 * self.nb_vertices # TODO better approx
+        reservation = 1 # 10 * self.nb_vertices # TODO better approx
 
         return driver.call( "vtk_cell_faces", "sdot/PowerDiagram/vtk_cell_faces.h",
             points = Return( Tensor, [ Dyn( "nb_points", reservation ), self.dim ] ),
-            faces = Return( Tensor, [ Dyn( "nb_faces", reservation ) ] ),
+            faces = Return( Tensor, [ Dyn( "nb_faces", 1 ) ] ),
             cells = Workspace( BatchOfCell,
                 nb_vertices_capacity = 50,
                 nb_edges_capacity = 50,
