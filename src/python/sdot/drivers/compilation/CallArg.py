@@ -5,6 +5,7 @@ from ...Dyn import Dyn
 
 from .StructInfo import StructInfo
 from .FfiOutput import FfiOutput
+from .Workspace import Workspace
 from .FfiInput import FfiInput
 from .Return import Return
 from .Tensor import Tensor
@@ -31,7 +32,7 @@ class CallArg:
     ffi_output     : FfiOutput | None #
     ffi_input      : FfiInput | None #
 
-    struct_info    : StructInfo # Cell
+    struct_info    : StructInfo #
 
     brace_ctor     : bool # true to use '{}' in generated code for instanciation
     base_code      : str # name of function or class for assembly of C++ objects (e.g. "Cell<TF,2>")
@@ -41,7 +42,7 @@ class CallArg:
 
     def __init__( self ):
         self.updated_value = None
-        self.struct_info = StructInfo( name = "", params = {} )
+        self.struct_info = StructInfo( name = "", params = {}, include = "", includes = set() )
         self.python_ctor = None
         self.brace_ctor = False
         self.ffi_output = None
@@ -188,7 +189,7 @@ class CallArg:
                     shape[ n ] = mutable[ axis_name ]
 
             ffi_output = fai.add_output_tensor( driver, shape, python_value.dtype, axis_names = axis_names, ct_axes = ct_axes, valid = valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
-            ffi_input = fai.add_input_tensor( python_value, driver, valid = valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
+            ffi_input = fai.add_input_tensor( python_value, driver, axis_names = axis_names, ct_axes = ct_axes, valid = valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
             self.ffi_output = ffi_output
             self.ffi_input = ffi_input
 
@@ -200,7 +201,7 @@ class CallArg:
                 return CallArg.get_output_tensor( ffi_output, fai, driver, outputs, fallback_shape = python_value.shape, fallback_dtype = python_value.dtype )
             self.updated_value = updated_value
         else:
-            ffi_input = fai.add_input_tensor( python_value, driver, valid = valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
+            ffi_input = fai.add_input_tensor( python_value, driver, axis_names = axis_names, ct_axes = ct_axes, valid = valid, represents_a_dynamic_axis = represents_a_dynamic_axis )
             self.ffi_input = ffi_input
 
             self.base_code = f"tensor_view( CtInt<{ ndim }>(), { ffi_input.arg_name }, u64_input[ { ffi_input.validity_index // 64 } ] & { 1 << ( ffi_input.validity_index % 64 ) } )"
@@ -243,15 +244,13 @@ class CallArg:
     @staticmethod
     def struct_info_for( ndim, dtype, represents_a_dynamic_axis, driver ) -> StructInfo:
         if represents_a_dynamic_axis:
-            return StructInfo( name = f"DynamicAxis<{ ndim },Arch>", params = { "Arch": "typename" } )
+            return StructInfo( name = "DynamicAxis", params = { str( ndim ): "", "Arch": "typename" }, include = "sdot/support/DynamicAxis.h", includes = set() )
 
         dtype = driver.find_dtype( dtype )
-        params = { "Arch" : "typename" }
+        params = {}
         if dtype == driver.dtype:
-            params[ "TF" ] = "typename"
             ndtype = "TF"
         elif dtype == driver.itype:
-            params[ "TI" ] = "typename"
             ndtype = "TI"
         elif dtype == driver.uint64:
             ndtype = "PI64"
@@ -259,7 +258,11 @@ class CallArg:
             info( dtype )
             raise NotImplementedError
 
-        return StructInfo( name = f"TensorView<{ ndtype },{ ndim },Arch>", params = params )
+        params[ ndtype ] = "typename"
+        params[ str( ndim ) ] = ""
+        params[ "Arch" ] = "typename"
+
+        return StructInfo( name = "TensorView", params = params, include = "sdot/support/TensorView.h", includes = set() )
 
     def configure_as_return( self, fai, driver, io_category, return_type, *type_args, **type_kwargs ):
         """ complete self, with information for return """
@@ -294,6 +297,7 @@ class CallArg:
         self.brace_ctor = True
 
         self.struct_info.name = python_value.__class__.__name__
+        self.struct_info.include = f"sdot/generated_includes/{ python_value.__class__.__name__ }.h"
         if self.struct_info.name not in fai.aggregates:
             fai.aggregates[ self.struct_info.name ] = self
 
@@ -306,8 +310,14 @@ class CallArg:
                 sc = CallArg.analysis_of_python_arg( getattr( python_value, name ), name, fai, mutable, driver, parent = self )
             self.sub_list.append( sc )
 
-            for param in sc.struct_info.params.items():
-                self.struct_info.add_param( *param )
+            for param_name, param_kind in sc.struct_info.params.items():
+                if param_kind:
+                    self.struct_info.add_param( param_name, param_kind )
+
+            if sc.struct_info.include:
+                self.struct_info.includes.add( sc.struct_info.include )
+            for include in sc.struct_info.includes:
+                self.struct_info.includes.add( include )
 
 
     def configure_as_output_object_with_collect_attributes( self, fai, driver, return_type, *type_args, **type_kwargs ):
@@ -322,6 +332,7 @@ class CallArg:
             self.signature = self.base_code
 
         self.struct_info.name = return_type.__name__
+        self.struct_info.include = f"sdot/generated_includes/{ return_type.__name__ }.h"
         if self.struct_info.name not in fai.aggregates:
             fai.aggregates[ self.struct_info.name ] = self
 
@@ -351,6 +362,11 @@ class CallArg:
 
             for param in sc.struct_info.params.items():
                 self.struct_info.add_param( *param )
+
+            if sc.struct_info.include:
+                self.struct_info.includes.add( sc.struct_info.include )
+            for include in sc.struct_info.includes:
+                self.struct_info.includes.add( include )
 
     def return_child( self, fai, driver, attribute_name: str, return_type: any, *type_args, **type_kwargs ) -> Self:
         # base attributes
@@ -392,11 +408,16 @@ class CallArg:
                 for a in self.sub_list:
                     if a.ffi_output:
                         for ct_axis_name, ct_axis_limit in a.ffi_output.ct_axes.items():
-                            ct_axes[ ct_axis_name ] = ct_axis_limit
+                            c, o, n = CallArg.axis_analysis( ct_axis_name )
+                            ct_axes[ n ] = ct_axis_limit
                 for ct_axis_name, ct_axis_limit in ct_axes.items():
                     c, o, n = CallArg.axis_analysis( ct_axis_name )
-                    value = getattr( self.python_ctor, n )
-                    lst.append( f".{ ct_axis_name } = CtInt<{ c * value + o }>()" )
+                    value = getattr( self.python_ctor, n, None )
+                    if value is None:
+                        if not isinstance( self.python_value, ( Return, Workspace ) ):
+                            raise RuntimeError( f"expecting a return of an object with a '{ n }' property for '{ self.python_value }" )
+                        value = self.python_value.type_kwargs[ n ]
+                    lst.append( f".ct_{ n } = CtInt<{ value }>()" )
 
                 res += "{ " + str.join( ", ", lst ) + " }"
             else:
@@ -463,7 +484,7 @@ class CallArg:
         return ( 1, 0, axis_name )
 
     def generated_structure( self ):
-        includes = [ "sdot/support/DynamicAxis.h" ]
+        includes = set( [ "sdot/support/DynamicAxis.h" ] )
         lines = [ "", "namespace sdot {", "" ]
 
         # get all the axes
@@ -489,15 +510,17 @@ class CallArg:
 
         ct_axes = {} # name -> limit
         for item in self.sub_list:
-            if item.ffi_output:
-                for ct_axis_name, ct_axis_limit in item.ffi_output.ct_axes.items():
-                    coeff, offset, name = CallArg.axis_analysis( ct_axis_name )
-                    ct_axes[ name ] = ct_axis_limit
+            for ffi in [ item.ffi_output, item.ffi_input ]:
+                if ffi:
+                    for ct_axis_name, ct_axis_limit in ffi.ct_axes.items():
+                        coeff, offset, name = CallArg.axis_analysis( ct_axis_name )
+                        ct_axes[ name ] = ct_axis_limit
 
         for item in self.sub_list:
-            if item.ffi_output:
-                for num_axis, axis_name in enumerate( item.ffi_output.axis_names ):
-                    add_axis( item.attribute_name, num_axis, axis_name )
+            for ffi in [ item.ffi_output, item.ffi_input ]:
+                if ffi:
+                    for num_axis, axis_name in enumerate( ffi.axis_names ):
+                        add_axis( item.attribute_name, num_axis, axis_name )
 
         #
         params = {}
@@ -508,12 +531,22 @@ class CallArg:
 
         # decl
         if len( self.struct_info.params ):
-            lines.append( f"template<{ str.join( ", ", [ kind + " " + name for name, kind in params.items() ] ) }>" )
+            lines.append( f"template<{ str.join( ",", [ kind + " " + name for name, kind in params.items() if kind ] ) }>" ) #
         lines.append( f"struct { self.struct_info.name } {{" )
 
         # attributes
         for item in self.sub_list:
-            lines.append( f"    { item.struct_info.name } { item.attribute_name };" )
+            struct_name = item.struct_info.name
+            if self.struct_info.params:
+                struct_name += f"<{ str.join( ",", [ key for key, kind in item.struct_info.params.items() ] ) }>" #  if kind
+
+            lines.append( f"    { struct_name } { item.attribute_name };" )
+
+            if item.struct_info.include:
+                includes.add( item.struct_info.include )
+            for include in item.struct_info.includes:
+                if include not in includes:
+                    includes.add( include )
         for ct_axis_name, ct_axis_limit in ct_axes.items():
             lines.append( f"    CtInt<ct_{ ct_axis_name }_> ct_{ ct_axis_name };" )
 
@@ -527,7 +560,10 @@ class CallArg:
                     lines.append( f"    auto { axis_name }() const {{ return first_positive( { str.join( ", ", places ) } ); }}" )
 
         lines.append( "};" )
+        lines.append( "" )
 
         lines.append( "} // namespace sdot" )
+        lines.append( "" )
+
         include_lines = [ f"#include <{ include }>" for include in includes ]
         return str.join( "\n", [ "#pragma once", "" ] + include_lines + lines )

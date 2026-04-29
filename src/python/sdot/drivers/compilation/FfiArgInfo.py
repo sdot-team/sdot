@@ -83,6 +83,8 @@ class FfiArgInfo:
                 cpp_type = driver.ffi_tensor_input_arg_code( 1, numpy.uint64 ),
                 valid = None,
                 bind = driver.ffi_tensor_input_bind_code( 1, numpy.uint64 ),
+                axis_names = [ "" ],
+                ct_axes = {},
             )
             self.non_differentiable_ffi_inputs.append( self.u64_ffi_input )
 
@@ -179,7 +181,7 @@ class FfiArgInfo:
 
         return res
 
-    def add_input_tensor( self, python_value: any, driver, valid = None, represents_a_dynamic_axis = False ) -> tuple[ str, int, FfiInput ]:
+    def add_input_tensor( self, python_value: any, driver, axis_names, ct_axes: dict[ int ], valid = None, represents_a_dynamic_axis = False ) -> tuple[ str, int, FfiInput ]:
         if valid is None:
             valid = True
             if driver.is_zero_tensor( python_value ):
@@ -215,6 +217,8 @@ class FfiArgInfo:
             cpp_type = driver.ffi_tensor_input_arg_code( len( python_value.shape ), python_value.dtype ),
             bind = driver.ffi_tensor_input_bind_code( len( python_value.shape ), python_value.dtype ),
             valid = valid,
+            axis_names = axis_names,
+            ct_axes = ct_axes,
         )
 
         if differentiable:

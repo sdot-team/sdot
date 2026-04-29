@@ -17,3 +17,6 @@ class FfiInput:
     cpp_type                 : str # the cpp argument type (like xla::ffi::ResultBuffer<FP32>)
     valid                    : bool # False if comes from UndefinedTensor, Zero grad, etc...
     bind                     : str # binding name (like Ret<xla::ffi::Buffer<FP32>>)
+
+    axis_names               : list[ str ] #
+    ct_axes                  : dict[ int ] # name -> limit

@@ -160,6 +160,7 @@ class TensorField:
         return _shape( self, get_value )
 
     def make_variant( self, batch_version: int, unidimensional_version: int ) -> 'TensorField':
+        ct_axes = self.ct_axes.copy()
         ctor_args = []
         for name in self.axis_names:
             if ad := find( self.dynamic_axes, lambda x: x.name == name ):
@@ -192,9 +193,13 @@ class TensorField:
                     new_ctor_args.append( arg )
             ctor_args = new_ctor_args
 
+            if "dim" in ct_axes:
+                del ct_axes[ "dim" ]
+
         new_field = TensorField( *ctor_args, dtype = self.dtype, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
         new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
         new_field.removed_dim_axes = removed_dim_axes
+        new_field.ct_axes = ct_axes
         new_field.name = self.name
         return new_field
 

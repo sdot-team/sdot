@@ -2,11 +2,11 @@
 from ...Dyn import Dyn
 
 class Tensor:
-    """Sentinel type for returning a array from driver.call.
+    """
 
     Usage:
         driver.call( "measure", includes,
-            Return( Tensor, shape=[], dtype=float ),
+            Return( Tensor( shape=[], dtype=float ) ),
             cell
         )
     """

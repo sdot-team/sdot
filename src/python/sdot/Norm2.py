@@ -1,4 +1,4 @@
-from sdot.object_with_tensors import object_with_tensors, TensorField
+from sdot.object_with_tensors import object_with_tensors, TensorField, CtKnown
 # from .driver import driver, Workspace, Return, Tensor, CtInt, Dyn
 # from .distributions.Distribution import Distribution
 # from .Cell import BatchOfCell
@@ -17,7 +17,7 @@ class Norm2:
     Possibility to handle periodicity using transformations
     """
 
-    transformations = TensorField( "nb_transformations", "dim + 1", "dim + 1" )
+    transformations = TensorField( "nb_transformations", CtKnown( "dim + 1" ), CtKnown( "dim + 1" ) )
 
     if TYPE_CHECKING:
         nb_transformations : int
@@ -25,4 +25,3 @@ class Norm2:
 
     def __init__( self ):
         self.transformations = None
-        

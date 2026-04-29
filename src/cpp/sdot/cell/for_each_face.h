@@ -1,14 +1,14 @@
 #pragma once
 
+#include <sdot/generated_includes/BatchOfCell.h>
 #include <algorithm>
 #include <numeric>
-#include "Cell.h"
 
 namespace sdot {
 
 /// Call ``func( face )`` for every non-empty face of ``cell``.
-template<class TF,int ct_dim,class Arch>
-void for_each_face( const Cell<TF,Arch> &cell, CtInt<ct_dim>, auto &&func ) {
+template<typename Arch, typename TF, typename TI,int ct_dim>
+void for_each_face( const BatchOfCell<Arch,TF,TI,ct_dim> &cell, auto &&func ) {
     // const PI dim        = cell.dim();
     // const PI nb_verts   = cell.nb_vertices();
     // const PI nb_cuts    = cell.nb_cuts();

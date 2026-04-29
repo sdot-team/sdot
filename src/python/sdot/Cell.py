@@ -1,5 +1,5 @@
 from sdot.object_with_tensors import object_with_tensors, TensorField
-from .driver import driver, Return, Mutable, Dyn
+from .driver import driver, Return, Mutable, Dyn, CtKnown
 from typing import TYPE_CHECKING
 import numpy
 
@@ -14,10 +14,10 @@ class Cell:
 
     """
 
-    vertex_positions = TensorField( Dyn( "nb_vertices" ), "dim" )
-    vertex_indices   = TensorField( Dyn( "nb_vertices" ), "dim", dtype = int ) # vertex index -> sorted cut indices
-    edge_indices     = TensorField( Dyn( "nb_edges" ), "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
-    cut_planes       = TensorField( Dyn( "nb_cuts" ), "dim + 1" )
+    vertex_positions = TensorField( Dyn( "nb_vertices" ), CtKnown( "dim" ) )
+    vertex_indices   = TensorField( Dyn( "nb_vertices" ), CtKnown( "dim" ), dtype = int ) # vertex index -> sorted cut indices
+    edge_indices     = TensorField( Dyn( "nb_edges" ), CtKnown( "dim + 1" ), dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
+    cut_planes       = TensorField( Dyn( "nb_cuts" ), CtKnown( "dim + 1" ) )
     cut_ids          = TensorField( Dyn( "nb_cuts" ), dtype = int )
 
     is_fully_closed  = TensorField( dtype = int )
