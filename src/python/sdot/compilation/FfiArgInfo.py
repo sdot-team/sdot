@@ -1,11 +1,8 @@
+from sdot.aggregate import Workspace, Return, Tensor, Dyn
 from .FfiParameter import FfiParameter
-from .Workspace import Workspace
 from .FfiOutput import FfiOutput
 from .FfiInput import FfiInput
 from .CallArg import CallArg
-from .Return import Return
-from .Tensor import Tensor
-from ...Dyn import Dyn
 
 import numpy
 

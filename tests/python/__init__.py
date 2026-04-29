@@ -1,4 +1,4 @@
-from sdot.info import info, infox
+from sdot.util.info import info, infox
 
 builtins = __import__( 'builtins' )
 setattr( builtins, "infox", infox )

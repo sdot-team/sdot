@@ -1,4 +1,4 @@
-from .drivers.compilation.collect_attributes import collect_attributes_inst
+from .collect_attributes import collect_attributes_inst
 from devtools import debug, sformat
 import sys
 

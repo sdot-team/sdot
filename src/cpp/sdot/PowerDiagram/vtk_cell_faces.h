@@ -5,8 +5,8 @@
 
 namespace sdot {
 
-template<typename Arch,typename TF,typename TI,int ct_dim>
-void for_each_cell( const PowerDiagram<Arch,TF,TI,ct_dim> &pd, BatchOfCell<Arch,TF,TI,ct_dim> &cells, auto &&func ) {
+template<typename Arch,typename TF,int ct_dim,typename TI>
+void for_each_cell( const PowerDiagram<Arch,TF,ct_dim,TI> &pd, BatchOfCell<Arch,TF,ct_dim,TI> &cells, auto &&func ) {
     Cell<TF,Arch> cell = cells.row( 0 );
     make_aligned_simplex( cell, Cell<TF,Arch>::INFINITE, CtInt<ct_dim>() );
     func( cell );

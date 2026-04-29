@@ -1,8 +1,10 @@
-from sdot.drivers.compilation.FfiArgInfo import FfiArgInfo
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
 import jax.numpy as jnp
+
+from sdot.compilation import FfiArgInfo
+
 import importlib
 import numpy
 import jax

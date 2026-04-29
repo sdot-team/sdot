@@ -1,12 +1,13 @@
-from ..drivers.compilation.CallArg import CallArg
-from ..UndefinedTensor import UndefinedTensor
-from ..CtKnown import CtKnown
-from ..driver import driver
-from ..util import find
-from ..Dyn import Dyn
+from sdot.compilation import CallArg
+# from .driver import driver
+from sdot.util.find import find
+
+from .UndefinedTensor import UndefinedTensor
+from .CtKnown import CtKnown
+from .Dyn import Dyn
 
 from typing import Self, overload, TYPE_CHECKING
-from inspect import signature
+# from inspect import signature
 import numpy
 
 class GenericTensor( numpy.ndarray ):
@@ -14,9 +15,9 @@ class GenericTensor( numpy.ndarray ):
     requires_grad : bool
 
 
-class TensorField:
+class Tensor:
     """
-    Descriptor for a tensor field in a Distribution (or BatchOfDistributions, ...).
+    Descriptor for a tensor in an aggrate, Return of Workspace (or BatchOfDistributions, ...).
 
     axis_names : names of each axis (e.g. "nb_diracs", "dim").
 

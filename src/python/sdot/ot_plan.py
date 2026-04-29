@@ -1,6 +1,6 @@
 # from sdot.object_with_tensors._methods import _collect_attributes
-from sdot.object_with_tensors.ListOfTensorFields import ListOfTensorFields
-from sdot.object_with_tensors.TensorField import TensorField
+# from sdot.object_with_tensors.ListOfTensorFields import ListOfTensorFields
+# from sdot.object_with_tensors.TensorField import TensorField
 
 from .distributions.BatchOfDistributions import BatchOfDistributions
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs

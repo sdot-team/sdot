@@ -1,19 +1,16 @@
-from ..drivers.compilation.collect_attributes import collect_attributes
-from .ListOfTensorFields import ListOfTensorFields
-from .TensorField import TensorField, _axis_names
-from ..Dyn import Dyn
+from sdot.util.collect_attributes import collect_attributes
+# from .ListOfTensorFields import ListOfTensorFields
+# from .TensorField import TensorField, _axis_names
+# from ..Dyn import Dyn
 
 from ..driver import driver
 
-from typing import TypeVar #, Type, cast
-# import numpy
-# import re
+from typing import TypeVar
 
-# _D = TypeVar( '_D' ) # , bound=Distribution
 _T = TypeVar( '_T' )
 
 
-def object_with_tensors( cls: type[ _T ] ) -> type[ _T ]:
+def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     """
     Class decorator that auto-generates boilerplate for classes with TensorField or ListOfTensorFields
     based on their attribute declarations
@@ -132,7 +129,7 @@ def _make_variant( cls, fields, batch_version : int, unidimensional_version : in
     return res
 
 
-def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axes : list[ Dyn ] ):
+def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axes : list[ 'Dyn' ] ):
     fields = collect_attributes( cls )
 
     # --- __init__ -----------------------------------------------------------

@@ -1,7 +1,7 @@
-from sdot.object_with_tensors._methods import object_with_tensors
+# from sdot.aggregate import aggregate
 from .SplineGrid import SplineGrid
 
-@object_with_tensors
+# @aggregate
 class PiecewiseConstantGrid( SplineGrid ):
     """
     SplineGrid with order = 0
