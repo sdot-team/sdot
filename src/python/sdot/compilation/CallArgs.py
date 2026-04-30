@@ -27,8 +27,16 @@ class CallArgs:
         from .CallArg_Aggregate import CallArg_Aggregate
         CallArg_Aggregate.get_code( struct_name, self.arguments, includes, lines )
 
+    def arg_decl( self ) -> str:
+        non_differentiable_inputs = []
+        differentiable_inputs = []
+        parameters = []
+        outputs = []
 
+        for name, argument in self.arguments.items():
+            argument.get_arg_decl( non_differentiable_inputs, differentiable_inputs, parameters, outputs )
 
+        return ", ".join( differentiable_inputs + non_differentiable_inputs + parameters + outputs )
 
 
 

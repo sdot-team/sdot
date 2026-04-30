@@ -78,3 +78,15 @@ class CallArg_Tensor( CallArg ):
 
             vector.append( s.offset )
             matrix.append( row )
+
+    def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
+        if self.io_category <= 1: # input or mutable
+            lst = differentiable_inputs
+            bn = "di"
+            if driver.is_int_dtype( self.dtype ):
+                lst = non_differentiable_inputs
+                bn = "ni"
+            lst.append( f"{ driver.ffi_tensor_input_arg_code( self.ndim(), self.dtype ) } { bn }{ len( lst ) }" )
+
+        if self.io_category >= 1: # mutable, return or workspace
+            outputs.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim(), self.dtype ) } o{ len( outputs ) }" )

@@ -477,12 +477,12 @@ class JaxDriver:
             fai.make_parameters_struct( includes, lines, parameters_struct )
         else:
             parameters_struct = fai.parameters_struct
+        lines.append( "" )
 
         # start impl: declaration
-        arg_decls = []
-        for name, arg in fai.named_ffi_args:
-            arg_decls.append( f"{ arg.cpp_type } { name }" )
-        lines.append( f"xla::ffi::Error impl_{ func_name }( { str.join( ", ", arg_decls ) } ) {{" )
+        lines.append( f"xla::ffi::Error impl_{ func_name }( { fai.arg_decl() } ) {{" )
+
+        infox( lines )
 
         # read the validity_mask
         if len( fai.u64_input_values ):

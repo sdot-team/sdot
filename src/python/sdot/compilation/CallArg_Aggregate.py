@@ -146,8 +146,6 @@ class CallArg_Aggregate( CallArg ):
         # en of the struct --------------------------------------------------------------------------------------------
         lines.append( "};" )
 
-        lines += [ "", "} // namespace sdot", "" ]
-
         return "\n".join( [ f"#include <{ include }>" for include in includes ] + lines )
 
     def generate_structures( self ):
@@ -163,3 +161,8 @@ class CallArg_Aggregate( CallArg ):
     def get_all_the_ways_to_get( self, axis_names, attributes, tensor_names, tensor_axes, matrix, vector ):
         for name, argument in self.sub_dict.items():
             argument.get_all_the_ways_to_get( axis_names, attributes + [ name ], tensor_names, tensor_axes, matrix, vector )
+
+    def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
+        for argument in self.sub_dict.values():
+            argument.get_arg_decl( non_differentiable_inputs, differentiable_inputs, parameters, outputs )
+

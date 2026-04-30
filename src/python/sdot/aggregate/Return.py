@@ -22,4 +22,4 @@ class Return:
         self.type_args   = args
 
     def call_arg_factory( self, io_category: int ):
-        return CallArg.factory( self.return_type, None, io_category ) # , *self.type_args, **self.type_kwargs
+        return CallArg.factory( self.return_type, None, io_category = 2 ) # , *self.type_args, **self.type_kwargs
