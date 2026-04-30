@@ -446,12 +446,12 @@ class JaxDriver:
         lines.append( "" )
 
         # --- forward handler ---
-        lines += self._handler_source( func_name, fai )
+        self._handler_source( includes, lines, func_name, fai )
         lines.append( "" )
 
         # --- backward handler ---
         if make_backward_binding:
-            lines += self._handler_source( func_name + "_backward", fai.backward_version( self ) )
+            self._handler_source( includes, lines, func_name + "_backward", fai.backward_version( self ) )
             lines.append( "" )
 
         lines.append( "" )
@@ -471,14 +471,11 @@ class JaxDriver:
         from .compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-    def _handler_source( self, func_name: str, fai: CallArg_MainList ) -> list[ str ]:
-        #
-        lines = []
-
+    def _handler_source( self, includes, lines, func_name: str, fai: CallArg_MainList ) -> list[ str ]:
         # make a structure with the names
         if fai.parameters_struct is None:
             parameters_struct = f"Parameters_{ func_name }"
-            fai.make_parameters_struct( lines, parameters_struct )
+            fai.make_parameters_struct( includes, lines, parameters_struct )
         else:
             parameters_struct = fai.parameters_struct
 
@@ -525,8 +522,6 @@ class JaxDriver:
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain
         lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( ".", bind_chain ) } );" )
-
-        return lines
 
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):

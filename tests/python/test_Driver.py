@@ -69,7 +69,7 @@ def test_fields():
 
     @aggregate
     class Ya:
-        a : sdot.Tensor( "nb_points[ _ < smurf, _ < dim ]", "smurf", "dim" )
+        a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", sdot.CtKnown( "dim" ) )
 
     @aggregate
     class Yo( Ya ):

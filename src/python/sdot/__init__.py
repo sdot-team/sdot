@@ -11,6 +11,7 @@
 
 # cpp bindings
 # from .aggregate.Mutable import Mutable as Mutable
+from .aggregate.CtKnown import CtKnown as CtKnown
 from .aggregate.Return import Return as Return
 from .aggregate.Tensor import Tensor as Tensor
 

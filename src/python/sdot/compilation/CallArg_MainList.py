@@ -23,16 +23,9 @@ class CallArg_MainList:
         for name, argument in self.arguments.items():
             argument.generate_structures()
 
-    def make_parameters_struct( self, lines: list[ str ], struct_name: str ):
-        template_args : dict[ str ] = {}
-        for argument in self.arguments.values():
-            argument.get_template_args( template_args )
-
-        lines.append( f"template<{ str.join( ",", [ f"{ t } { n }" for n, t in template_args.items() ] ) }>" )
-        lines.append( f"struct { struct_name } {{" )
-        for name, argument in self.arguments.items():
-            lines.append( f"    { argument.cpp_type_name( self ) } { name };" )
-        lines.append( "};" )
+    def make_parameters_struct( self, includes, lines: list[ str ], struct_name: str ):
+        from .CallArg_Aggregate import CallArg_Aggregate
+        CallArg_Aggregate.get_code( struct_name, self.arguments, includes, lines )
 
         infox( lines )
 

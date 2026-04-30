@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
+from .CtKnown import CtKnown
 import ast
 
 class ShapeItem:
@@ -13,14 +14,23 @@ class ShapeItem:
         coeff: int = 1
         name: str = ''
 
+    ct_known_limit: int
+    ct_known: bool
     offset: int # constant offset
     terms: list[ ShapeItem.Term ] = []
     index: ShapeItem | None # e.g. "index" in "index < dim"
 
     def __init__( self, value ):
+        self.ct_known_limit = -1
+        self.ct_known = False
         self.index = None
         self.terms = []
         self.offset = 0
+
+        if isinstance( value, CtKnown ):
+            self.ct_known_limit = value.limit
+            self.ct_known = True
+            value = value.value
 
         if isinstance( value, int ):
             self.offset = int( value )
@@ -39,6 +49,13 @@ class ShapeItem:
                 name = "max_of_" + name
 
             axis_names.add( name )
+
+    def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
+        for term in self.terms:
+            axes[ term.name ] = term.selection
+        if self.ct_known:
+            for term in self.terms:
+                ct_axes[ term.name ] = self.ct_known_limit
 
     def _parse( self, node ):
         match node:

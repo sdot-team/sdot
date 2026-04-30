@@ -94,4 +94,8 @@ PI first_valid_dimension( const PI64 *u64_input, xla::ffi::ResultBuffer<dtype> &
     return first_valid_dimension( u64_input, FORWARD( tail )... );
 }
 
+// ------------------- first_positive -------------------
+SI first_positive() { throw std::runtime_error( "no positive value" ); }
+SI first_positive( SI head, auto...tail ) { return head >= 0 ? head : first_positive( tail... ); }
+
 } // namespace sdot

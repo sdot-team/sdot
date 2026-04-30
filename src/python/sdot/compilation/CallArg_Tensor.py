@@ -1,5 +1,6 @@
 from ..aggregate.ShapeItem import ShapeItem
 from ..driver import driver
+from ..util import index
 
 from .CallArg import CallArg
 
@@ -58,3 +59,22 @@ class CallArg_Tensor( CallArg ):
         if self.dtype is int:
             return "TI"
         return driver.normalized_type_for( self.dtype )
+
+    def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
+        for s in self.shape:
+            s.get_axes( axes, ct_axes )
+
+    def get_all_the_ways_to_get( self, axis_names, attributes, tensor_names, tensor_axes, matrix, vector ):
+        for n, s in enumerate( self.shape ):
+            if len( s.terms ) == 0:
+                continue
+
+            tensor_names.append( ".".join( attributes ) )
+            tensor_axes.append( n )
+
+            row = [ 0 ] * len( axis_names )
+            for term in s.terms:
+                row[ index( axis_names, term.name ) ] = term.coeff
+
+            vector.append( s.offset )
+            matrix.append( row )

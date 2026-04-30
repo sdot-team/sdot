@@ -9,6 +9,7 @@ class CtKnown:
     If specified, "limit" says from which value axis stops to be compile time known
     """
 
-    def __init__( self, name: str, limit = None ):
+    def __init__( self, value: str, limit = None ):
         self.limit = limit
-        self.name = name
+        self.value = value
+
