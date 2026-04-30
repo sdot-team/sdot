@@ -3,7 +3,7 @@ from jax._src import ad_util
 import jax.core as jax_core
 import jax.numpy as jnp
 
-from sdot.compilation.CallArg_MainList import CallArg_MainList
+from sdot.compilation.CallArgs import CallArgs
 
 import importlib
 import numpy
@@ -236,7 +236,7 @@ class JaxDriver:
             includes = [ includes ]
 
         # get a jax compatible set of arg lists
-        fai = CallArg_MainList.factory( args = args, axis_values = axes )
+        fai = CallArgs.factory( args = args, axis_values = axes )
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
@@ -380,7 +380,7 @@ class JaxDriver:
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
 
-    def _module_name_for( self, func_name: str, includes: list[ str ], main_list: CallArg_MainList ):
+    def _module_name_for( self, func_name: str, includes: list[ str ], main_list: CallArgs ):
         # get signature
         base_signature = [ func_name ] + [ name + "_" + arg.signature() for name, arg in main_list.arguments.items() ] + includes
 
@@ -394,7 +394,7 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: CallArg_MainList, make_backward_binding = True ):
+    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: CallArgs, make_backward_binding = True ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -410,7 +410,8 @@ class JaxDriver:
                 return None
 
         # else, make the dylib
-        self._make_dylib( func_name, includes, args, module_name, make_backward_binding )
+        includes_set = set( includes )
+        self._make_dylib( func_name, includes_set, args, module_name, make_backward_binding )
 
         # and try again to import it
         self._try_to_import_and_register_ffi_target( module_name, func_name, make_backward_binding )
@@ -423,20 +424,16 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, func_name: str, includes: list[ str ], fai: CallArg_MainList, module_name: str, make_backward_binding: bool ):
+    def _make_dylib( self, func_name: str, includes: set, fai: CallArgs, module_name: str, make_backward_binding: bool ):
         # generate structs
         fai.generate_structures()
 
         # include list
-        std_includes = [
-            "sdot/jax_ffi_wrappers.h",
-            "nanobind/nanobind.h",
-        ]
+        includes.add( "sdot/jax_ffi_wrappers.h" )
+        includes.add( "nanobind/nanobind.h" )
 
         # declaration
         lines = []
-        for include in std_includes + includes:
-            lines.append( f"#include <{ include }>" )
         lines.append( "" )
         lines.append( "namespace nb = nanobind;" )
         lines.append( "using namespace sdot;" )
@@ -467,11 +464,13 @@ class JaxDriver:
             lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
         lines.append( "}" )
 
+        include_lines = [ f"#include <{ include }>" for include in includes ]
+
         #
         from .compilation.make_dylib_from_source import make_dylib_from_source
-        return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
 
-    def _handler_source( self, includes, lines, func_name: str, fai: CallArg_MainList ) -> list[ str ]:
+    def _handler_source( self, includes, lines, func_name: str, fai: CallArgs ) -> list[ str ]:
         # make a structure with the names
         if fai.parameters_struct is None:
             parameters_struct = f"Parameters_{ func_name }"

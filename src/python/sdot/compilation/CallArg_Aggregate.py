@@ -61,12 +61,15 @@ class CallArg_Aggregate( CallArg ):
 
         code = CallArg_Aggregate.get_code( self.base_cpp_name(), self.sub_dict, includes, lines )
 
-        infox( code )
-
         #
         from ..generated_files.compilation_directories import generated_includes_dir
         path = generated_includes_dir() / f"{ self.base_cpp_name() }.h"
-        path.write_text( code )
+        try:
+            old_text = path.read_text()
+        except FileNotFoundError:
+            old_text = ""
+        if code != old_text:
+            path.write_text( code )
 
     @staticmethod
     def get_code( base_cpp_name, sub_dict : dict[ CallArg ], includes: list[ str ], lines : list[ str ] ):
@@ -83,6 +86,8 @@ class CallArg_Aggregate( CallArg ):
 
         lines.append( f"template<{ str.join( ",", [ f"{ t } { n }" for n, t in template_args.items() ] ) }>" )
         lines.append( f"struct { base_cpp_name } {{" )
+
+        # axis dim methods ---------------------------------------------------------------------------------------------
         if len( axes ):
             tensor_names = []
             tensor_axes = []
@@ -124,10 +129,21 @@ class CallArg_Aggregate( CallArg ):
                 lines.append( f"    auto { complete_axis_name }() const {{ { ct_code }return first_positive( { ", ".join( cases ) } ); }}" )
 
             lines.append( "" )
+
+        # base attributes ---------------------------------------------------------------------------------------------
         for name, argument in sub_dict.items():
             lines.append( f"    { argument.cpp_type_name( None ) } { name };" )
+
+        # dynamic axis ------------------------------------------------------------------------------------------------
+        for axis_name, axis_selection in axes.items():
+            if axis_selection is not None:
+                lines.append( f"    DynamicAxis<{ len( axis_selection ) },Arch> { axis_name };" )
+
+        # ct axis ------------------------------------------------------------------------------------------------
         for ct_axis_name in ct_axes.keys():
             lines.append( f"    CtInt<ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
+
+        # en of the struct --------------------------------------------------------------------------------------------
         lines.append( "};" )
 
         lines += [ "", "} // namespace sdot", "" ]
@@ -137,7 +153,7 @@ class CallArg_Aggregate( CallArg ):
     def generate_structures( self ):
         self.generate_structure()
 
-        for argument in self.arguments.values():
+        for argument in self.sub_dict.values():
             argument.generate_structures()
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):

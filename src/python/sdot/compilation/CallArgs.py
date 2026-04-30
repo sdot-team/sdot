@@ -1,6 +1,6 @@
 from .CallArg import CallArg
 
-class CallArg_MainList:
+class CallArgs:
     """
     """
 
@@ -11,7 +11,7 @@ class CallArg_MainList:
 
     @staticmethod
     def factory( args : dict, axis_values : dict[ int ] ):
-        res = CallArg_MainList()
+        res = CallArgs()
         res.parameters_struct = None
         res.axis_values = axis_values
         res.arguments = {}
@@ -23,11 +23,14 @@ class CallArg_MainList:
         for name, argument in self.arguments.items():
             argument.generate_structures()
 
-    def make_parameters_struct( self, includes, lines: list[ str ], struct_name: str ):
+    def make_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
         from .CallArg_Aggregate import CallArg_Aggregate
         CallArg_Aggregate.get_code( struct_name, self.arguments, includes, lines )
 
-        infox( lines )
+
+
+
+
 
     # @staticmethod
     # def analysis_of_python_arg( python_value: any, attribute_name: str, fai, mutable: dict[ int ] | bool, driver, parent = None, configure = True ):
