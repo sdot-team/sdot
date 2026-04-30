@@ -3,7 +3,7 @@ from jax._src import ad_util
 import jax.core as jax_core
 import jax.numpy as jnp
 
-from sdot.compilation import FfiArgInfo
+from sdot.compilation.CallArg_MainList import CallArg_MainList
 
 import importlib
 import numpy
@@ -84,6 +84,8 @@ class JaxDriver:
         return jnp.issubdtype( dtype, jnp.integer )
 
     def array( self, data, dtype = None ):
+        if data is None:
+            return None
         return jnp.asarray( data, dtype = dtype or self.dtype, device = self.device )
 
     def t3( self, tensor, dtype = None ):
@@ -221,7 +223,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, func_name: str, includes: str | list[ str ], *, _no_grad = False, _parameters_struct = None, **args ):
+    def call( self, func_name: str, includes: str | list[ str ], *, args: list, axes = {}, grad = True, parameters_struct = None ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -234,11 +236,11 @@ class JaxDriver:
             includes = [ includes ]
 
         # get a jax compatible set of arg lists
-        fai = FfiArgInfo( args, self, parameters_struct = _parameters_struct )
+        fai = CallArg_MainList.factory( args = args, axis_values = axes )
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
-        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = not _no_grad )
+        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = grad )
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
@@ -286,7 +288,7 @@ class JaxDriver:
                 return ret
             return tuple( ret )
 
-        if _no_grad:
+        if not grad:
             outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
@@ -378,16 +380,13 @@ class JaxDriver:
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
 
-    def _module_name_for( self, func_name: str, includes: list[ str ], args: FfiArgInfo ):
+    def _module_name_for( self, func_name: str, includes: list[ str ], main_list: CallArg_MainList ):
         # get signature
-        signature_items = [ func_name ]
-        for arg in args.call_args:
-            signature_items.append( arg.signature )
-        signature_items += includes
+        base_signature = [ func_name ] + [ name + "_" + arg.signature() for name, arg in main_list.arguments.items() ] + includes
 
         # module name
-        from .compilation.encode_base_62 import encode_base_62
-        res = re.sub( r'[^\w]', '_', str.join( "__", signature_items ) )
+        from sdot.util.encode_base_62 import encode_base_62
+        res = re.sub( r'[^\w]', '_', str.join( "__", base_signature ) )
         if len( res ) > 40:
             res = res[ : 40 - 11 ] + encode_base_62( res[ 40 - 11: ] )
 
@@ -395,14 +394,14 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: FfiArgInfo, make_backward_binding = True ):
+    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: CallArg_MainList, make_backward_binding = True ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
         JaxDriver._registered_ffi_targets.add( module_name )
 
         # else, try to load it from the disk
-        from .compilation.force_build import force_build
+        from ..compilation.force_build import force_build
         if not force_build():
             try:
                 self._try_to_import_and_register_ffi_target( module_name, func_name, make_backward_binding )
@@ -424,7 +423,7 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, func_name: str, includes: list[ str ], fai: FfiArgInfo, module_name: str, make_backward_binding: bool ):
+    def _make_dylib( self, func_name: str, includes: list[ str ], fai: CallArg_MainList, module_name: str, make_backward_binding: bool ):
         # generate structs
         fai.generate_structures()
 
@@ -472,19 +471,14 @@ class JaxDriver:
         from .compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", lines ), module_name, [], "yo" )
 
-    def _handler_source( self, func_name: str, fai: FfiArgInfo ) -> list[ str ]:
+    def _handler_source( self, func_name: str, fai: CallArg_MainList ) -> list[ str ]:
         #
         lines = []
 
         # make a structure with the names
         if fai.parameters_struct is None:
             parameters_struct = f"Parameters_{ func_name }"
-
-            lines.append( f"template<{ str.join( ",", [ f"typename T{ n }" for n in range( len( fai.call_args ) ) ] ) }>" )
-            lines.append( f"struct Parameters_{ func_name } {{" )
-            for n, call_arg in enumerate( fai.call_args ):
-                lines.append( f"    T{ n } { call_arg.attribute_name };" )
-            lines.append( "};" )
+            fai.make_parameters_struct( lines, parameters_struct )
         else:
             parameters_struct = fai.parameters_struct
 

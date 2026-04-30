@@ -1,14 +1,8 @@
-from sdot.util.collect_attributes import collect_attributes
-# from .ListOfTensorFields import ListOfTensorFields
-# from .TensorField import TensorField, _axis_names
-# from ..Dyn import Dyn
-
+from sdot.util.get_all_annotations import get_all_annotations
 from ..driver import driver
 
 from typing import TypeVar
-
 _T = TypeVar( '_T' )
-
 
 def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     """
@@ -30,48 +24,15 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
 
         @object_with_tensors
         class MyDist:
-            positions = TensorField("nb_points", "dim")
-            weights   = TensorField("nb_points")
+            positions = Tensor( "nb_points", "dim")
+            weights   = Tensor( "nb_points" )
 
             def default_weights(self,batch_version):
                 return driver.ones(self.nb_points)
 
     """
     # base fields
-    fields = collect_attributes( cls )
-
-    # all the static axes
-    static_axes_names = [ "batch_size" ]
-    for _, field in fields:
-        if isinstance( field, TensorField ):
-            for name in _axis_names( field.static_axis_names ):
-                if name not in static_axes_names:
-                    static_axes_names.append( name )
-
-    # all the dynamic axes
-    dynamic_axes = []  # name -> Dyn object (preserves one_value_for_each and other metadata)
-    for _, field in fields:
-        if isinstance( field, TensorField ):
-            for dynamic_axis in field.dynamic_axes:
-                # already registered ?
-                item = next( ( da for da in dynamic_axes if da.name == dynamic_axis.name ), None )
-                if item is not None:
-                    assert item.one_value_for_each == dynamic_axis.one_value_for_each
-                    continue
-
-                # else, check if not presetn in static args and register it
-                if dynamic_axis.name in static_axes_names:
-                    raise RuntimeError( f"axes can't be both dynamic and static (for axis '{ name }')" )
-                dynamic_axes.append( dynamic_axis )
-
-    # add a TensorField for each Dynamic axis — inserted at the beginning of fields so they are
-    for dynamic_axis in dynamic_axes:
-        if dynamic_axis.name not in vars( cls ):
-            tf = TensorField( *dynamic_axis.one_value_for_each, dtype = driver.uint64, represents_a_dynamic_axis = True )
-            tf.__set_name__( cls, dynamic_axis.name )
-
-            fields.append( ( dynamic_axis.name, tf ) )
-            setattr( cls, dynamic_axis.name, tf )
+    fields = get_all_annotations( cls )
 
     # make the variants (batch, unidim, ...)
     clu = _make_variant( cls, fields, batch_version = 0, unidimensional_version = 1 )
@@ -96,10 +57,10 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     clt.BaseVersion = cls
 
     # add generated methods and properties for these variants
-    _setup_distribution_class( cls.UnidimensionalBatchVersion, static_axes_names, dynamic_axes )
-    _setup_distribution_class( cls.UnidimensionalVersion, static_axes_names, dynamic_axes )
-    _setup_distribution_class( cls.BatchVersion, static_axes_names, dynamic_axes )
-    _setup_distribution_class( cls, static_axes_names, dynamic_axes )
+    _setup_distribution_class( cls.UnidimensionalBatchVersion )
+    _setup_distribution_class( cls.UnidimensionalVersion )
+    _setup_distribution_class( cls.BatchVersion )
+    _setup_distribution_class( cls )
 
     return cls
 
@@ -111,7 +72,7 @@ def variants_of( cls ): # : Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[
     return u, b, t
 
 
-def _make_variant( cls, fields, batch_version : int, unidimensional_version : int ):
+def _make_variant( cls, fields: dict, batch_version : int, unidimensional_version : int ):
     variant_name = cls.__name__
     if batch_version:
         variant_name = 'BatchOf' + variant_name
@@ -121,37 +82,51 @@ def _make_variant( cls, fields, batch_version : int, unidimensional_version : in
     parents = ()
 
     res = type( variant_name, parents, { '__annotations__': cls.__annotations__ } )
-    for name, field in fields:
-        if isinstance( field, ( TensorField, ListOfTensorFields ) ):
-            field = field.make_variant( batch_version, unidimensional_version )
+    for name, field in fields.items():
+        if unidimensional_version and getattr( field, "unidimensional_version", None ):
+            field = field.unidimensional_version()
+        if batch_version and getattr( field, "batch_version", None ):
+            field = field.batch_version()
         setattr( res, name, field )
 
     return res
 
 
-def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axes : list[ 'Dyn' ] ):
-    fields = collect_attributes( cls )
+def _setup_distribution_class( cls ):
+    fields = get_all_annotations( cls )
 
     # --- __init__ -----------------------------------------------------------
-    if '__default_init__' not in vars( cls ):
-        def __default_init__( self, *args, **kwargs ):
-            for i, ( name, _ ) in enumerate( fields ):
-                if i < len( args ):
-                    kwargs.setdefault( name, args[ i ] )
-            # basic setattr
+    if '__aggregate_init__' not in vars( cls ):
+        def __aggregate_init__( self, *args, **kwargs ):
+            # make a dict
+            values = {}
             for name, value in kwargs.items():
-                setattr( self, name, value )
+                values[ name ] = value
+            for i, name in enumerate( fields.keys() ):
+                if i >= len( args ):
+                    break
+                if name in values:
+                    raise RuntimeError( f"argument '{ name }' has already been specified" )
+                values[ name ] = args[ i ]
 
-            # init fields if not already done
-            for name, val in fields:
-                if name not in kwargs and isinstance( val, ( ListOfTensorFields, TensorField ) ):
-                    setattr( self, name, None )
+            # check that all arguments correspond to a field
+            for name in values.keys():
+                if name not in fields:
+                    raise RuntimeError( f"'{ name } is no a valid argument for ctor of '{ cls.__name__ }''" )
 
-        cls.__default_init__ = __default_init__
+            # set values
+            for name, field in fields.items():
+                if name in values:
+                    cted = field( values[ name ] )
+                else:
+                    cted = field()
+                setattr( self, name, cted )
+
+        cls.__aggregate_init__ = __aggregate_init__
 
     # --- __init__ -----------------------------------------------------------
     if '__init__' not in vars( cls ):
-        cls.__init__ = cls.__default_init__
+        cls.__init__ = cls.__aggregate_init__
 
     # --- dim -----------
     if 'dim' not in vars( cls ) and cls.__name__.endswith( "1d" ):
@@ -159,32 +134,11 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axe
 
     # --- getters for axes (dim, nb_points, ...) --------------------------
     # for dynamic axes, $name refers to a dynamic tensor. Shape are refered as $( name + "_capacity" )
-    for axis_name in static_axis_names + [ a.name + "_capacity" for a in dynamic_axes ]:
+    for axis_name in _axis_names_of( cls ):
         if axis_name not in vars( cls ):
             def get_axis_size( self, a = axis_name ):
                 return _axis_count( self, a )
             setattr( cls, axis_name, property( get_axis_size ) )
-
-    # --- tensor_list -----------
-    if 'tensors' not in vars( cls ):
-        def tensors( self ):
-            res = []
-            for name, field in fields:
-                if isinstance( field, TensorField ):
-                    res.append( ( name, getattr( self, name ) ) )
-            return res
-        setattr( cls, 'tensors', property( tensors ) )
-
-    # --- dynamic_axes: {axis_name -> size} — int for scalar axes, list for per-item axes -----------
-    # if 'dynamic_axes' not in vars( cls ):
-    #     def _dynamic_axes( self, _info = dynamic_axes_info ) -> dict:
-    #         res = {}
-    #         for dyn_name, dyn in _info.items():
-    #             val = getattr( self, dyn_name, None )
-    #             if val is not None:
-    #                 res[ dyn_name ] = val  # int for scalar, list/array for per-item
-    #         return res
-    #     setattr( cls, 'dynamic_axes', property( _dynamic_axes ) )
 
     # --- batch_version -----------
     if hasattr( cls, "BatchVersion" ) and "batch_version" not in vars( cls ):
@@ -229,10 +183,6 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axe
             return cls.BatchItemVersion( **kw )
         setattr( cls, 'batch_item', batch_item )
 
-    # --- _axis_count_for -----------
-    if "_axis_count_for" not in vars( cls ):
-        setattr( cls, '_axis_count_for', _axis_count_for )
-
     # --- multidimensional_version -----------
     if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):
         def multidimensional_version( self ):
@@ -261,29 +211,15 @@ def _setup_distribution_class( cls, static_axis_names : list[ str ], dynamic_axe
 # Helpers used by @generate_distribution_methods
 # ---------------------------------------------------------------------------
 
-# def _collect_attributes( cls, stop_classes = [] ):
-#     """ All attributes visible from cls (MRO), excluding stop_classes. """
-#     res = []
-#     name_indices = {} # if attribute appears in a subclass and in a parent class, we want to take
-#     for klass in reversed( cls.__mro__ ):
-#         if klass in stop_classes:
-#             continue
-#         for name, val in vars( klass ).items():
-#             if name.startswith( '_' ) or isinstance( val, ( classmethod, staticmethod ) ) or callable( val ):
-#                 continue
-#             if isinstance( val, property ) and val.fset is None:
-#                 continue
-
-#             if name in name_indices:
-#                 res[ name_indices[ name ] ] = ( name, val )
-#             else:
-#                 name_indices[ name ] = len( res )
-#                 res.append( ( name, val ) )
-#     return res
-
+def _axis_names_of( cls ) -> set[ str ]:
+    res = set()
+    for _, attr in get_all_annotations( cls ).items():
+        if getattr( attr, "get_axis_names", None ):
+            attr.get_axis_names( res )
+    return res
 
 def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
-    for tensor_name, tensor_field in collect_attributes( type( distribution ) ):
+    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ):
         if isinstance( tensor_field, TensorField ):
             # if we have a value for this tensor field (to get the shape)
             tensor_value = distribution.__dict__.get( f'_{ tensor_name }' )
@@ -295,61 +231,3 @@ def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
     return None
 
 
-def _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields_to_avoid ) -> list[ tuple[ int, ... ] | int ]:
-    if tensor_value is None:
-        return []
-
-    # count nb fields with "*"
-    nb_fields_with_mul = 0
-    for field_axis_name in tensor_field.axis_names:
-        nb_fields_with_mul += "*" in field_axis_name
-
-    # try
-    out = []
-    num_axis = 0
-    for field_axis_name in tensor_field.axis_names:
-        field_axis_name = field_axis_name.replace( ' ', '' )
-
-        if "," in field_axis_name:
-            lhs = field_axis_name.split( "," )[ 0 ]
-
-            if axis_name == lhs:
-                out.append( ( tensor_value.shape[ num_axis ], ) )
-            num_axis += 1
-            continue
-
-        if "+" in field_axis_name:
-            lhs, rhs = field_axis_name.split( "+" )
-            rhs = int( rhs )
-
-            if axis_name == lhs:
-                out.append( tensor_value.shape[ num_axis ] - rhs )
-            num_axis += 1
-            continue
-
-        if "*" in field_axis_name:
-            if nb_fields_with_mul > 1:
-                raise NotImplementedError( "handle tensors with multiple a * b axes" )
-
-            # ex shape * dim -> "shape", "dim"
-            name_shape, name_dim = map( str.strip, field_axis_name.split( "*" ) )
-
-            # want "dim"
-            dim = tensor_value.ndim - ( len( tensor_field.axis_names ) - 1 )
-            if axis_name == name_dim:
-                out.append( dim )
-
-            # want "shape"
-            if axis_name == name_shape:
-                res = [ tensor_value.shape[ num_axis + d ] for d in range( dim ) ]
-                out.append( tuple( res ) )
-
-            num_axis += dim
-            continue
-
-        if axis_name == field_axis_name:
-            out.append( tensor_value.shape[ num_axis ] )
-
-        num_axis += 1
-
-    return out

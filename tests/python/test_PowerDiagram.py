@@ -7,9 +7,16 @@ def test_bsp():
     # pd = sdot.PowerDiagram( positions, weights )
 
     # pd.plot()
-    from sdot.aggregate.ShapeItem import ShapeItem
+    from sdot.compilation.CallArg_MainList import CallArg_MainList
+    args = {
+        "out": sdot.driver.array( [ 1, 2 ] ),
+        "ret": sdot.Return( sdot.Tensor, "dim" ),
+    }
+    axis_values = {
+        "dim": 2
+    }
 
-    info( ShapeItem( "2 * index + 1 < dim" ) )
+    info( CallArg_MainList.factory( args, axis_values ) )
 
 if __name__ == "__main__":
     test_bsp()

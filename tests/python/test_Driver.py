@@ -63,18 +63,25 @@ def test_codegen():
     info( pouet )
     info( res )
 
-def test_fields():
-    @sdot.object_with_tensors
-    class Yo:
-        a = sdot.TensorField( sdot.Dyn( "nb_points" ), "dim" )
 
-    # Pb avec mutable : si on ne garde que les sliced versions,
-    #  + on ne copie que ce qui est nécessaire
-    #  - on n'a plus de réservation
-    # Prop: on passe dans mutable des capacity. Ça pourrait ête obligatoire
-    yo = Yo( [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ], nb_points = 3 )
-    sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Mutable( yo, nb_points_capacity = 5 ) )
-    info( yo )
+def test_fields():
+    from sdot.aggregate.aggregate import aggregate
+
+    @aggregate
+    class Ya:
+        a : sdot.Tensor( "nb_points[ _ < smurf, _ < dim ]", "smurf", "dim" )
+
+    @aggregate
+    class Yo( Ya ):
+        b : sdot.Tensor( "smurf", "dim" )
+
+    yo = Yo()
+    # yo = Yo( [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ], nb_points = 3 )
+    # sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Mutable( yo, nb_points_capacity = 5 ) )
+    # info( yo )
+
+    res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "dim" ) ), "inp": yo }, axes = { "dim": 2 } )
+    info( res )
 
 
 

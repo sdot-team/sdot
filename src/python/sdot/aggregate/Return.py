@@ -1,6 +1,4 @@
-# from .fake_instance import fake_instance
-# from .CallArg import CallArg
-
+from ..compilation.CallArg import CallArg
 
 class Return:
     """Declares what type a C++ function returns.
@@ -23,5 +21,5 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def configure_call_arg( self, call_arg, fai, mutable, driver ):
-        return call_arg.configure_as_return( fai, driver, 2, self.return_type, *self.type_args, **self.type_kwargs )
+    def call_arg_factory( self, io_category: int ):
+        return CallArg.factory( self.return_type, None, io_category ) # , *self.type_args, **self.type_kwargs

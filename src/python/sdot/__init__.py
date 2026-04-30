@@ -10,9 +10,9 @@
 # from .distributions.Distribution import Distribution as Distribution
 
 # cpp bindings
-# from .drivers.compilation.Mutable import Mutable as Mutable
-# from .drivers.compilation.Return import Return as Return
-# from .drivers.compilation.Tensor import Tensor as Tensor
+# from .aggregate.Mutable import Mutable as Mutable
+from .aggregate.Return import Return as Return
+from .aggregate.Tensor import Tensor as Tensor
 
 # from .object_with_tensors import object_with_tensors as object_with_tensors, TensorField as TensorField
 # from .UndefinedTensor import UndefinedTensor as UndefinedTensor
@@ -36,7 +36,7 @@
 # from .OtSolver import OtSolver as OtSolver
 
 # hardware/framework interfaces
-# from .driver import driver as driver
+from .driver import driver as driver
 
 # variants
 # from sdot.object_with_tensors._methods import variants_of

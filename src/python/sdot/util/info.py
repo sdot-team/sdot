@@ -14,8 +14,12 @@ def custom_printer_impl( obj, nl ):
             res += nnl + custom_printer_impl( v, nnl )
         return res
 
-    if type( obj ).__str__ is not object.__str__:
-        return obj.__str__()
+    if isinstance( obj, dict ):
+        nnl = nl + "  "
+        res = ""
+        for n, v in obj.items():
+            res += nnl + n + ": " + custom_printer_impl( v, nnl )
+        return res
 
     if hasattr( obj, "__dict__" ):
         res = type( obj ).__name__
@@ -23,6 +27,9 @@ def custom_printer_impl( obj, nl ):
         for n, _ in collect_attributes_inst( obj, use_annotations = True ):
             res += nnl + n + ": " + custom_printer_impl( getattr( obj, n, None ), nnl )
         return str(res)
+
+    if type( obj ).__str__ is not object.__str__:
+        return obj.__str__()
 
     return str( obj )
 
