@@ -57,6 +57,8 @@ class JaxDriver:
             return jnp.float32
         if dtype == "FP64":
             return jnp.float64
+        if dtype == "PI8":
+            return jnp.uint8
         if dtype == "PI32":
             return jnp.uint32
         if dtype == "PI64":
@@ -244,7 +246,7 @@ class JaxDriver:
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
-            # update fai content with the actua values
+            # update fai content with the actual values
             fai.update_differentiable_input_values_with( differentiable_input_values )
 
             # loop until capacities are large enough
@@ -337,13 +339,13 @@ class JaxDriver:
         return res
 
     def ffi_tensor_input_bind_code( self, ndim, dtype ) -> str:
-        return f"Arg<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>"
+        return f"Arg<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>()"
 
     def ffi_tensor_input_arg_code( self, ndim, dtype ) -> str:
         return f"xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>"
 
     def ffi_tensor_output_bind_code( self, ndim, dtype ) -> str:
-        return f"Ret<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>"
+        return f"Ret<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>()"
 
     def ffi_tensor_output_arg_code( self, ndim, dtype ) -> str:
         return f"xla::ffi::ResultBuffer<{ self.ffi_tensor_type_code( dtype ) }>"
@@ -370,6 +372,8 @@ class JaxDriver:
             return "xla::ffi::S32"
         if dtype == jax.numpy.int64 or dtype == "SI64":
             return "xla::ffi::S64"
+        if dtype == jax.numpy.uint8 or dtype == "PI8":
+            return "xla::ffi::U8"
         if dtype == jax.numpy.uint32 or dtype == "PI32":
             return "xla::ffi::U32"
         if dtype == jax.numpy.uint64 or dtype == "PI64":
@@ -382,7 +386,7 @@ class JaxDriver:
 
     def _module_name_for( self, func_name: str, includes: list[ str ], main_list: CallArgs ):
         # get signature
-        base_signature = [ func_name ] + [ name + "_" + arg.signature() for name, arg in main_list.arguments.items() ] + includes
+        base_signature = [ func_name ] + [ name + "_" + arg.signature() for name, arg in main_list.sub_dict.items() ] + includes
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
@@ -467,7 +471,7 @@ class JaxDriver:
         include_lines = [ f"#include <{ include }>" for include in includes ]
 
         #
-        from .compilation.make_dylib_from_source import make_dylib_from_source
+        from ..compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
 
     def _handler_source( self, includes, lines, func_name: str, fai: CallArgs ) -> list[ str ]:
@@ -482,36 +486,30 @@ class JaxDriver:
         # start impl: declaration
         lines.append( f"xla::ffi::Error impl_{ func_name }( { fai.arg_decl() } ) {{" )
 
-        infox( lines )
+        # u8_...
+        if len( fai.u8_input_values ):
+            lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )
 
-        # read the validity_mask
-        if len( fai.u64_input_values ):
-            lines.append( "    const PI64 *u64_input = u64_input_buffer.typed_data();" )
-        if fai.u64_output_size:
-            lines.append( "    PI64 *u64_output = u64_output_buffer->typed_data();" )
-            lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof(PI64) );" )
+        if fai.u8_output_size:
+            lines.append( "    PI8 *u8_output = u8_output_buffer->typed_data();" )
+            lines.append( "    std::memset( u8_output, 0, u8_output_buffer->element_count() );" )
 
-        # zero-init DynamicAxis output tensors (counters must start at 0 on each call)
-        for ffi_output in fai.ffi_outputs:
-            if ffi_output.represents_a_dynamic_axis:
-                lines.append( f'    std::memset( { ffi_output.arg_name }->typed_data(), 0, { ffi_output.arg_name }->element_count() * sizeof(PI64) );' )
+        # conversions
+        fai.tensor_conversions( lines )
 
         # beg try block
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"    { func_name }( { parameters_struct }{{" )
-        for call_arg in fai.call_args:
-            lines.append( f"        .{ call_arg.attribute_name } = { call_arg.assembled_code() }," )
-        lines.append( "    } );" )
+        lines.append( f"        { func_name }( { parameters_struct }{{" )
+        for arg_name, call_arg in fai.sub_dict.items():
+            lines.append( f"            .{ arg_name } = { call_arg.assembled_code( "            ", fai ) }," )
+        lines.append( "        } );" )
 
         # end try block
 
         lines.append( '    } catch ( DynamicSizeException de ) {' )
-        lines.append( f'        u64_output[ { fai.bit_offset_dynamic_size_exception // 64 } ] |= { 1 << ( fai.bit_offset_dynamic_size_exception % 64 ) };' )
-        lines.append( f'        u64_output[ { fai.offset_needed_dynamic_size } ] = de.needed_size;' )
-        lines.append( '        const char *s = de.name.c_str();' )
-        lines.append( f'        std::memcpy( u64_output + { fai.offset_dynamic_size_name }, s, std::min( (PI)de.name.size() + 1, (PI){ ( fai.end_dynamic_size_name - fai.offset_dynamic_size_name ) * 8 } ) );' )
+        lines.append( f'        u8_output[ { fai.index_dynamic_size_exception } ] = 1 + de.num_dynamic_axis;' )
         lines.append( '    }' )
 
         # end impl
@@ -519,7 +517,7 @@ class JaxDriver:
         lines.append( "}" )
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
-        bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain
+        bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain()
         lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( ".", bind_chain ) } );" )
 
 

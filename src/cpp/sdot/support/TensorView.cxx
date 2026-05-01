@@ -33,6 +33,13 @@ UTP DTP &DTP::get_data_from( const TensorView<T,ct_rank,Arch> &that ) {
     TODO;
 }
 
+UTP void DTP::fill_with( T value ) {
+    for_each_index( [&]( auto ...indices ) {
+        operator()( indices... ) = value;
+    } );
+}
+
+
 UTP T& DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
     if ( indices.size() )
         return operator()( indices[ 0 ], indices.without_index( 0 ), rem... );

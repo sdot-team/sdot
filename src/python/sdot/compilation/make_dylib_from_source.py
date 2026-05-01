@@ -1,5 +1,5 @@
 from sdot.generated_files import compilation_directories
-from ...driver import driver
+from ..driver import driver
 from pathlib import Path
 import subprocess
 import sysconfig
@@ -22,7 +22,7 @@ def make_dylib_from_source( src: str, dylib_name: str, other_src_paths: list, de
 def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
     """Invoke xmake to build *dylib_name* from *src_paths*."""
 
-    project_root = Path( __file__ ).absolute().parents[ 5 ]
+    project_root = Path( __file__ ).absolute().parents[ 4 ]
     nanobind_include_dir = Path( nanobind.include_dir() )
 
     nanobind_ext_include = nanobind_include_dir.parent / "ext" / "robin_map" / "include"
@@ -49,7 +49,6 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
             "Run: xmake update"
         )
 
-    # info( compilation_directories.() )
     env = {
         **os.environ,
         "SDOT_XMAKE_OUTPUT_DIR" : str( compilation_directories.dylib_dir() ),

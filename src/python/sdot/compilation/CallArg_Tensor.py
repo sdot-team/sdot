@@ -1,40 +1,78 @@
-from ..aggregate.ShapeItem import ShapeItem
+from ..aggregate.AxisExpr import AxisExpr
 from ..driver import driver
 from ..util import index
 
+from .IoCategory import IoCategory
 from .CallArg import CallArg
 
 from typing import Optional
+import weakref
 
 class CallArg_Tensor( CallArg ):
     """ input or mutable
     """
 
-    python_class: any #
-    python_value: any # optional tensor
-    io_category : int
+    python_class              : any #
+    python_value              : any # optional tensor
+    io_category               : IoCategory
+    parent                    : CallArg #
 
-    shape       : list[ ShapeItem ]
-    dtype       : any
+    is_differentiable         : bool
+    shape                     : list[ AxisExpr ]
+    dtype                     : any
 
-    # def configure_as_input_tensor( self, python_value: any, mutable: dict[ int ] | None, fai, driver, axis_names, ct_axes: dict[ int ], valid = True, represents_a_dynamic_axis = False ) -> Self:
+    represents_a_dynamic_axis : str
+
+    validity_output_index     : int
+    validity_input_index      : int
+
+    num_in_input_sub_list     : int
+    num_in_outputs            : int
+
     @staticmethod
-    def factory( python_class, python_value, io_category: int, shape: Optional[ list[ ShapeItem ] ] = None, dtype = None ):
+    def factory( call_args, parent, python_class, python_value, io_category: IoCategory, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
         """  """
         if shape is None:
             orig = getattr( python_class, shape, None ) or python_value.shape
-            shape = [ ShapeItem( s ) for s in orig ]
+            shape = [ AxisExpr( s ) for s in orig ]
 
         if dtype is None:
             dtype = float
 
         res = CallArg_Tensor()
+
         res.python_class = python_class
         res.python_value = python_value
         res.io_category = io_category
+        res.parent = weakref.ref( parent )
+
+        res.is_differentiable = not driver.is_int_dtype( dtype )
         res.shape = shape
         res.dtype = dtype
+
+        res.represents_a_dynamic_axis = represents_a_dynamic_axis
+
+        res.validity_output_index = -1
+        res.validity_input_index = -1
+
+        res.num_in_input_sub_list = -1
+        res.num_in_outputs = -1
+
+        # input or mutable -> need an input tensor
+        if io_category.want_input:
+            res.validity_input_index = call_args.get_u8_input( [ CallArg_Tensor.is_valid( python_class ) ] )
+            res.num_in_input_sub_list = call_args.add_tensor_input( res )
+
+        # mutable, return or workspace -> need an output tensor
+        if io_category.want_output:
+            res.validity_output_index = call_args.get_u8_input( [ True ] )
+            res.num_in_outputs = call_args.add_tensor_output( res )
+
         return res
+
+    @staticmethod
+    def is_valid( python_class ):
+        return True
 
     def ndim( self ) -> int:
         res = 0
@@ -51,6 +89,8 @@ class CallArg_Tensor( CallArg ):
         template_args[ "Arch" ] = "typename"
 
     def cpp_type_name( self, main_list ):
+        if self.represents_a_dynamic_axis:
+            return f"DynamicAxis<{ self.dtype_name() },{ self.ndim() },Arch>"
         return f"TensorView<{ self.dtype_name() },{ self.ndim() },Arch>"
 
     def dtype_name( self ):
@@ -64,29 +104,86 @@ class CallArg_Tensor( CallArg ):
         for s in self.shape:
             s.get_axes( axes, ct_axes )
 
-    def get_all_the_ways_to_get( self, axis_names, attributes, tensor_names, tensor_axes, matrix, vector ):
+    def get_all_the_ways_to_get( self, axis_names, attributes, use_attributes, tensor_names, tensor_axes, matrix, vector ):
         for n, s in enumerate( self.shape ):
             if len( s.terms ) == 0:
                 continue
 
-            tensor_names.append( ".".join( attributes ) )
+            if use_attributes:
+                name = ".".join( attributes )
+            else:
+                name = "t_" + self.ffi_name()
+
+            tensor_names.append( name )
             tensor_axes.append( n )
 
             row = [ 0 ] * len( axis_names )
             for term in s.terms:
-                row[ index( axis_names, term.name ) ] = term.coeff
+                row[ index( axis_names, term.variable.name ) ] = term.coeff
 
             vector.append( s.offset )
             matrix.append( row )
 
-    def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
-        if self.io_category <= 1: # input or mutable
-            lst = differentiable_inputs
-            bn = "di"
-            if driver.is_int_dtype( self.dtype ):
-                lst = non_differentiable_inputs
-                bn = "ni"
-            lst.append( f"{ driver.ffi_tensor_input_arg_code( self.ndim(), self.dtype ) } { bn }{ len( lst ) }" )
+    def ffi_output_name( self ):
+        return f"o{ self.num_in_outputs }"
 
-        if self.io_category >= 1: # mutable, return or workspace
-            outputs.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim(), self.dtype ) } o{ len( outputs ) }" )
+    def ffi_input_name( self ):
+        bn = "di" if self.is_differentiable else "ni"
+        return f"{ bn }{ self.num_in_input_sub_list }"
+
+    def ffi_name( self ):
+        if self.io_category.want_output:
+            return self.ffi_output_name()
+        return self.ffi_input_name()
+
+    def ffi_conversion_code( self ):
+        base = "tensor_view"
+        extr = ""
+        if self.represents_a_dynamic_axis:
+            from .CallArg_Aggregate import CallArg_Aggregate
+            p = self.parent()
+
+            axes = {}
+            ct_axes = {}
+            for argument in p.sub_dict.values():
+                argument.get_axes( axes, ct_axes )
+
+            tensor_names, tensor_axes, matrix, vector = CallArg_Aggregate.axis_variable_equation( p.sub_dict, axes, False )
+            axis_selection = axes[ self.represents_a_dynamic_axis ]
+
+            capa = CallArg_Aggregate.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
+            numa = index( axes.keys(), self.represents_a_dynamic_axis )
+            extr = f", { numa }, { capa }"
+            base = "dynamic_axis"
+
+        # mutable
+        if self.io_category.want_input and self.io_category.want_output:
+            return f"{ base }_mutable( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+
+        # pure output
+        if not self.io_category.want_input and self.io_category.want_output:
+            return f"{ base }_output( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+
+        # pure input
+        if self.io_category.want_input and not self.io_category.want_output:
+            return f"{ base }_input( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
+
+        raise NotImplementedError
+
+
+    def get_output_arg_decl( self, declarations: list ):
+        declarations.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim(), self.dtype ) } { self.ffi_output_name() }" )
+
+    def get_input_arg_decl( self, declarations: list ):
+        declarations.append( f"{ driver.ffi_tensor_input_arg_code( self.ndim(), self.dtype ) } { self.ffi_input_name() }" )
+
+    def get_output_bind_chain( self, bind_chain: list ):
+        bind_chain.append( driver.ffi_tensor_output_bind_code( self.ndim(), self.dtype ) )
+
+    def get_input_bind_chain( self, bind_chain: list ):
+        bind_chain.append( driver.ffi_tensor_input_bind_code( self.ndim(), self.dtype ) )
+
+    def assembled_code( self, beg_line, parent ):
+        return f"t_{ self.ffi_name() }"
+
+        raise NotImplementedError

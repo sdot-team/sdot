@@ -68,11 +68,8 @@ def test_fields():
     from sdot.aggregate.aggregate import aggregate
 
     @aggregate
-    class Ya:
-        a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", sdot.CtKnown( "dim" ) )
-
-    @aggregate
-    class Yo( Ya ):
+    class Yo:
+        a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", "dim", ct_axes = [ "dim" ] )
         b : sdot.Tensor( "smurf", "dim" )
 
     yo = Yo()
@@ -80,7 +77,7 @@ def test_fields():
     # sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Mutable( yo, nb_points_capacity = 5 ) )
     # info( yo )
 
-    res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "dim" ) ), "inp": yo }, axes = { "dim": 2 } )
+    res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems[ dim ]", "dim" ) ), "inp": yo }, axes = { "dim": 2 }, grad = False )
     info( res )
 
 

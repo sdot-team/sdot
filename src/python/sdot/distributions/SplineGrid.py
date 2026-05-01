@@ -16,7 +16,7 @@ class SplineGrid( Distribution ):
     continuity=1  →  natural cubic spline (C2), tensor-product 1D solve per axis
     """
 
-#     values      = Tensor( "shape[ index < dim ]", ct_axes = [ "dim" ] )
+    values      : Tensor( "dim => shape" )
 #     frame       = Tensor( "dim + 1", "dim" )
 #     knots       = ListOfTensorFields( "index < dim", [ "shape[ index ]" ] )
 #     continuity  = 0

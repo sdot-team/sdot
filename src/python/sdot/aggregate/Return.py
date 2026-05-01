@@ -1,3 +1,4 @@
+from ..compilation.IoCategory import IoCategory
 from ..compilation.CallArg import CallArg
 
 class Return:
@@ -21,5 +22,10 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def call_arg_factory( self, io_category: int ):
-        return CallArg.factory( self.return_type, None, io_category = 2 ) # , *self.type_args, **self.type_kwargs
+    def call_arg_factory( self, call_args, parent, io_category: IoCategory ):
+        new_io_category = IoCategory(
+            want_return = True,
+            want_output = True,
+            want_input = False
+        )
+        return CallArg.factory( call_args, parent, self.return_type, None, io_category = new_io_category )

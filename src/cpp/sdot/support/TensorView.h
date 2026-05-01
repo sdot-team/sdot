@@ -18,7 +18,6 @@ public:
     using          Sizes             = DsVec<PI,ct_rank,Arch>;
     using          Ptr               = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
 
-
     static HD auto make_invalid      ( PI rank = ct_rank ); ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
     HD             TensorView        ( T *data, Sizes sizes, Strides strides );
@@ -26,7 +25,6 @@ public:
     HD             TensorView        ( T *data, PI size );
     HD             TensorView        ( Rank, PI rank );
 
-    HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
 
     HD T&          operator()        ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
     HD T&          operator()        ( PI index, auto ...rem ) const;
@@ -35,6 +33,9 @@ public:
     HD T&          operator[]        ( const auto &index ) const;
 
     HD auto        partial           ( auto ...indices ) const;
+
+    HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
+    void           fill_with         ( T value );
 
     static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
     HD Strides     strides           () const;

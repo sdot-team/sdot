@@ -1,11 +1,9 @@
-from sdot.compilation.CallArg_Tensor import CallArg_Tensor
-from sdot.aggregate.ShapeItem import ShapeItem
-from sdot.util.find import find
+from ..compilation.CallArg_Tensor import CallArg_Tensor
+from ..compilation.IoCategory import IoCategory
+from ..util.find import find
+from .AxisExpr import AxisExpr
 from ..driver import driver
 
-# from .UndefinedTensor import UndefinedTensor
-
-# from typing import Self, overload, TYPE_CHECKING
 import numpy
 
 class GenericTensor( numpy.ndarray ):
@@ -15,35 +13,31 @@ class GenericTensor( numpy.ndarray ):
 
 class Tensor:
     """
-    Descriptor for a tensor in an aggrate, Return of Workspace (or BatchOfDistributions, ...).
+    Descriptor for a tensor in an aggrate (e.g. SplineGrid, BatchOfDistributions, ...), Return of Workspace
 
-    axis_names : names of each axis (e.g. "nb_diracs", "dim").
+    axes : names of each axis (e.g. "nb_diracs", "dim").
 
-    The tensor rank equals len( axis_names ) excepted if there's a "*dim" in the axis names
-
-    If the field value is None and the host class defines a method
-    ``default_<name>(self)``, that method is called to supply the value. ``default_<name>`` can take an additionnal argument,
-    ``default_<name>( self, batch_version )``
-
-    In distribution, we store the tensor value in 'distribution._{ name }'.
-
-    When we set a Tensor, we update 'distribution._{ name }' with a tensor compatible with the choices in sdot.driver
+    ct_axes is a list of
+    - str -> name of ct_axis
+    - ( str, int ) -> name of ct_axis with a limit (axis becomes runtime after that limit)
     """
 
-    represents_a_dynamic_axis: bool
-    comes_from_a_dim_list: bool
-    removed_dim_axes: list[ int ]
+    represents_a_dynamic_axis : str
+    comes_from_a_dim_list : bool
+    removed_dim_axes : list[ int ]
 
-    shape : list[ ShapeItem ]
-    dtype: any
-    name: str
+    ct_axes : list
+    shape : list[ AxisExpr ]
+    dtype : any
+    name : str
 
-    def __init__( self, *axes, dtype = None, represents_a_dynamic_axis = False ):
-        self.represents_a_dynamic_axis = represents_a_dynamic_axis  # original args (with Dyn objects), used to reconstruct variants
+    def __init__( self, *axis_exprs, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
+        self.represents_a_dynamic_axis = represents_a_dynamic_axis
         self.comes_from_a_dim_list = False
-        self.removed_dim_axes = [] # used in variants like 1d version, ...
+        self.removed_dim_axes = []
 
-        self.shape = [ ShapeItem( axis ) for axis in axes ]
+        self.ct_axes = ct_axes
+        self.shape = [ AxisExpr( s ) for s in axis_exprs ]
         self.dtype = dtype
 
     def __call__( self, array = None, dtype = None ):
@@ -101,7 +95,7 @@ class Tensor:
             if "dim" in ct_axes:
                 del ct_axes[ "dim" ]
 
-        new_field = Tensor( *ctor_args, dtype = self.dtype, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
+        new_field = Tensor( *ctor_args, dtype = self.dtype )
         new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
         new_field.removed_dim_axes = removed_dim_axes
         new_field.ct_axes = ct_axes
@@ -109,8 +103,8 @@ class Tensor:
         return new_field
 
 
-    def call_arg_factory( self, python_value, io_category: int ):
-        return CallArg_Tensor.factory( self, python_value, io_category, self.shape, self.dtype )
+    def call_arg_factory( self, call_args, parent, python_value, io_category: IoCategory ):
+        return CallArg_Tensor.factory( call_args, parent, self, python_value, io_category, self.shape, self.dtype, self.ct_axes, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
     def get_axis_names( self, axis_names: set[ str ] ):
         for s in self.shape:

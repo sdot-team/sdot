@@ -1,29 +1,24 @@
 #pragma once
 
-// #include <stdexcept>
 #include "TensorView.h"
-#include "P.h"
 
 namespace sdot {
 
 //
 struct DynamicSizeException {
-    PI          needed_size;
-    std::string name;
+    PI num_dynamic_axis;
+    PI needed_size;
 };
 
 
 //
-template<int rank,class Arch>
+template<class TI,int rank,class Arch>
 class DynamicAxis {
 public:
-    using        Sizes         = TensorView<PI64,rank,Arch>;
-
-    /**/         DynamicAxis   ( const char *name, Sizes sizes, PI capacity, Sizes src ) : DynamicAxis( name, sizes, capacity ) { sizes.get_data_from( src ); } // convenience ctor
-    /**/         DynamicAxis   ( const char *name, Sizes sizes, PI capacity ) : capacity( capacity ), sizes( sizes ), name( name ) {}
+    using        Sizes         = TensorView<TI,rank,Arch>;
 
     // slicing/subparts
-    auto         operator()    ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<new_rank,Arch>( name, sizes.partial( indices... ), capacity ); }
+    auto         operator()    ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<TI,new_rank,Arch>( num_dynamic_axis, sizes.partial( indices... ), capacity ); }
     auto         row           ( auto index ) const { return operator()( index ); }
 
     // assuming rank == 0
@@ -33,11 +28,11 @@ public:
     DynamicAxis& operator=     ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes() = new_size; return *this; }
     operator     PI            () const { return sizes(); }
 
-    void         overflow      ( PI needed_size ) { throw DynamicSizeException( needed_size, name ); }
+    void         overflow      ( PI needed_size ) { throw DynamicSizeException( num_dynamic_axis, needed_size ); }
 
+    const PI     num_dynamic_axis;
     const PI     capacity;
     Sizes        sizes;
-    const char*  name;
 };
 
 } // namespace sdot

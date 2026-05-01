@@ -1,3 +1,5 @@
+-I/Users/hugo.leclerc/Library/Caches/sdot/dylibs/cpython-313-arm64/include
+-Isrc/cpp/
 -Isrc/cpp/
 -std=c++20
 -xc++

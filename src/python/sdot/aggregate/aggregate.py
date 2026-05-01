@@ -1,5 +1,6 @@
-from sdot.util.get_all_annotations import get_all_annotations
+from ..util.get_all_annotations import get_all_annotations
 from ..driver import driver
+from .Tensor import Tensor
 
 from typing import TypeVar
 _T = TypeVar( '_T' )
@@ -33,6 +34,21 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     """
     # base fields
     fields = get_all_annotations( cls )
+
+    # add tensors for dynamic shapes
+    dynamic_shapes = {}
+    for field in fields.values():
+        if isinstance( field, Tensor ):
+            for expr in field.shape:
+                for term in expr.terms:
+                    if term.variable.selection is not None:
+                        dynamic_shapes[ term.variable.name ] = term.variable.selection
+
+    for name, selection in dynamic_shapes.items():
+        if name not in fields:
+            t = Tensor( *selection, dtype = int, represents_a_dynamic_axis = name )
+            cls.__annotations__[ name ] = t
+            fields[ name ] = t
 
     # make the variants (batch, unidim, ...)
     clu = _make_variant( cls, fields, batch_version = 0, unidimensional_version = 1 )

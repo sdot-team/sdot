@@ -1,7 +1,8 @@
 from ..util.get_all_annotations import get_all_annotations
 from ..util.index import index
+
+from .IoCategory import IoCategory
 from .CallArg import CallArg
-# from typing import Optional
 
 class CallArg_Aggregate( CallArg ):
     """ input or mutable
@@ -9,11 +10,11 @@ class CallArg_Aggregate( CallArg ):
 
     python_class: any #
     python_value: any #
-    io_category : int #
+    io_category : IoCategory #
     sub_dict    : dict[ CallArg ] #
 
     @staticmethod
-    def factory( python_class, python_value, io_category: int ):
+    def factory( call_args, parent, python_class, python_value, io_category: IoCategory ):
         res = CallArg_Aggregate()
 
         res.python_class = python_class
@@ -25,7 +26,7 @@ class CallArg_Aggregate( CallArg ):
             value = None
             if python_value is not None:
                 value = getattr( python_value, name )
-            res.sub_dict[ name ] = CallArg.factory( annotation, value, io_category )
+            res.sub_dict[ name ] = CallArg.factory( call_args, res, annotation, value, io_category )
 
         return res
 
@@ -57,9 +58,10 @@ class CallArg_Aggregate( CallArg ):
 
     def generate_structure( self ):
         includes = set( [ "sdot/support/DynamicAxis.h" ] )
-        lines = [ "", "namespace sdot {", "" ]
+        beg_lines = [ "", "namespace sdot {", "" ]
+        end_lines = [ "", "} // namespace sdot", "" ]
 
-        code = CallArg_Aggregate.get_code( self.base_cpp_name(), self.sub_dict, includes, lines )
+        code = CallArg_Aggregate.get_code( self.base_cpp_name(), self.sub_dict, includes, beg_lines, end_lines )
 
         #
         from ..generated_files.compilation_directories import generated_includes_dir
@@ -72,7 +74,42 @@ class CallArg_Aggregate( CallArg ):
             path.write_text( code )
 
     @staticmethod
-    def get_code( base_cpp_name, sub_dict : dict[ CallArg ], includes: list[ str ], lines : list[ str ] ):
+    def get_axis_variable( axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector ):
+        cases = []
+        num_axis = index( list( axes.keys() ), axis_name )
+        for num_case in range( len( tensor_names ) ):
+            coeff = matrix[ num_case ][ num_axis ]
+            if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
+                continue
+            op = f"{ tensor_names[ num_case ] }[ { tensor_axes[ num_case ] } ]"
+            if vector[ num_case ]:
+                if coeff != 1:
+                    op = f"( { op } - { vector[ num_case ] } ) / { coeff }"
+                else:
+                    op = f"{ op } - { vector[ num_case ] }"
+            elif coeff != 1:
+                op = f"{ op } / { coeff }"
+            cases.append( f"{ tensor_names[ num_case ] }.is_valid() ? { op } : -1" )
+
+        return f"first_positive( { ", ".join( cases ) } )"
+
+    @staticmethod
+    def axis_variable_equation( sub_dict : dict[ CallArg ], axes, use_attributes ):
+        tensor_names = []
+        tensor_axes = []
+        matrix = []
+        vector = []
+        for name, argument in sub_dict.items():
+            argument.get_all_the_ways_to_get( list( axes.keys() ), [ name ], use_attributes, tensor_names, tensor_axes, matrix, vector )
+
+        import numpy
+        matrix = numpy.array( matrix )
+        vector = numpy.array( vector )
+
+        return tensor_names, tensor_axes, matrix, vector
+
+    @staticmethod
+    def get_code( base_cpp_name, sub_dict : dict[ CallArg ], includes: list[ str ], lines : list[ str ], end_lines: list[ str ] = [] ):
         template_args : dict[ str ] = {}
         ct_axes : dict[ int ] = {}
         axes = {}
@@ -89,34 +126,10 @@ class CallArg_Aggregate( CallArg ):
 
         # axis dim methods ---------------------------------------------------------------------------------------------
         if len( axes ):
-            tensor_names = []
-            tensor_axes = []
-            matrix = []
-            vector = []
-            for name, argument in sub_dict.items():
-                argument.get_all_the_ways_to_get( list( axes.keys() ), [ name ], tensor_names, tensor_axes, matrix, vector )
-            import numpy
-            matrix = numpy.array( matrix )
-            vector = numpy.array( vector )
-
-            # infox( axes.keys(), tensor_names, tensor_axes, matrix, vector )
-
+            tensor_names, tensor_axes, matrix, vector = CallArg_Aggregate.axis_variable_equation( sub_dict, axes, True )
             for axis_name, axis_selection in axes.items():
-                cases = []
-                num_axis = index( list( axes.keys() ), axis_name )
-                for num_case in range( len( tensor_names ) ):
-                    coeff = matrix[ num_case ][ num_axis ]
-                    if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
-                        continue
-                    op = f"{ tensor_names[ num_case ] }[ { tensor_axes[ num_case ] } ]"
-                    if vector[ num_case ]:
-                        if coeff != 1:
-                            op = f"( { op } - { vector[ num_case ] } ) / { coeff }"
-                        else:
-                            op = f"{ op } - { vector[ num_case ] }"
-                    elif coeff != 1:
-                        op = f"{ op } / { coeff }"
-                    cases.append( f"{ tensor_names[ num_case ] }.is_valid() ? { op } : -1" )
+                # def get_axis_variable( self, axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector ):
+                dv = CallArg_Aggregate.get_axis_variable( axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector )
 
                 complete_axis_name = axis_name
                 if axis_selection is not None:
@@ -126,7 +139,7 @@ class CallArg_Aggregate( CallArg ):
                 if axis_name in ct_axes:
                     ct_code = f"if constexpr ( ct_{ axis_name }_value >= 0 ) return ct_{ axis_name }; else "
 
-                lines.append( f"    auto { complete_axis_name }() const {{ { ct_code }return first_positive( { ", ".join( cases ) } ); }}" )
+                lines.append( f"    auto { complete_axis_name }() const {{ { ct_code }return { dv }; }}" )
 
             lines.append( "" )
 
@@ -134,17 +147,14 @@ class CallArg_Aggregate( CallArg ):
         for name, argument in sub_dict.items():
             lines.append( f"    { argument.cpp_type_name( None ) } { name };" )
 
-        # dynamic axis ------------------------------------------------------------------------------------------------
-        for axis_name, axis_selection in axes.items():
-            if axis_selection is not None:
-                lines.append( f"    DynamicAxis<{ len( axis_selection ) },Arch> { axis_name };" )
-
         # ct axis ------------------------------------------------------------------------------------------------
         for ct_axis_name in ct_axes.keys():
             lines.append( f"    CtInt<ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
 
         # en of the struct --------------------------------------------------------------------------------------------
         lines.append( "};" )
+
+        lines.extend( end_lines )
 
         return "\n".join( [ f"#include <{ include }>" for include in includes ] + lines )
 
@@ -155,14 +165,20 @@ class CallArg_Aggregate( CallArg ):
             argument.generate_structures()
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
-        for argument in self.sub_dict.values():
-            argument.get_axes( axes, ct_axes )
+        pass
 
-    def get_all_the_ways_to_get( self, axis_names, attributes, tensor_names, tensor_axes, matrix, vector ):
+    def get_all_the_ways_to_get( self, axis_names, attributes, use_attributes, tensor_names, tensor_axes, matrix, vector ):
         for name, argument in self.sub_dict.items():
-            argument.get_all_the_ways_to_get( axis_names, attributes + [ name ], tensor_names, tensor_axes, matrix, vector )
+            argument.get_all_the_ways_to_get( axis_names, attributes + [ name ], use_attributes, tensor_names, tensor_axes, matrix, vector )
 
     def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
         for argument in self.sub_dict.values():
             argument.get_arg_decl( non_differentiable_inputs, differentiable_inputs, parameters, outputs )
 
+    def assembled_code( self, beg_line, parent ):
+        lines = [ self.base_cpp_name() + "{" ]
+        for name, argument in self.sub_dict.items():
+            lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + "    ", self ) }," )
+        lines.append( beg_line + "}" )
+
+        return "\n".join( lines )

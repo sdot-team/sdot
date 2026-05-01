@@ -7,9 +7,8 @@
 ///   auto tv = ffi_tv<TF,2>( arg_0 );   // ffi::Buffer<ffi::DataType::F64> → TensorView<TF,2,Cpu>
 ///   auto tv = ffi_tv<TF,1>( *res_0 );  // dereference Result<Buffer> first
 
-#include "support/TensorView.h"
+#include "support/DynamicAxis.h"
 #include <xla/ffi/api/ffi.h>
-// #include "support/P.h"
 
 namespace sdot {
 
@@ -24,9 +23,10 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S32> { using type = SI32; };
 template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 
-// xla::ffi::Buffer
+// ------------------- tensor_view -------------------
+
 template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
+auto tensor_view_input( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
 
     if ( ! valid )
@@ -44,7 +44,7 @@ auto tensor_view( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) 
 
 // xla::ffi::ResultBuffer
 template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
+auto tensor_view_output( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
 
     if ( ! valid )
@@ -61,7 +61,7 @@ auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = t
 
 // mutable
 template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
+auto tensor_view_mutable( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
     if ( ! valid )
         return tensor_view( CtInt<ndim>(), buf_out, false );
 
@@ -71,27 +71,30 @@ auto tensor_view( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::
     return out;
 }
 
-bool test_and_shift( auto &mask ) {
-    bool res = mask & 1;
-    mask >>= 1;
+// ------------------- dynamic_axis -------------------
+template<int ndim,xla::ffi::DataType dtype>
+auto dynamic_axis_input( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf, bool valid ) {
+    return DynamicAxis( num_dynamic_axis, capacity, tensor_view_input( cd, buf, valid ) );
+}
+
+
+// xla::ffi::ResultBuffer
+template<int ndim,xla::ffi::DataType dtype>
+auto dynamic_axis_output( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid ) {
+    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
+    res.sizes.fill_with( 0 );
     return res;
 }
 
-// ------------------- first_valid_dimension -------------------
-PI first_valid_dimension( const PI64 */* u64_input */ ) {
-    return 0;
-}
-template<xla::ffi::DataType dtype>
-PI first_valid_dimension( const PI64 *u64_input, const xla::ffi::Buffer<dtype> &buffer, PI validity_index, PI num_axis, auto&& ...tail ) {
-    if ( u64_input[ validity_index / 64 ] & ( PI64( 1 ) << ( validity_index % 64 ) ) )
-        return buffer.dimensions()[ num_axis ];
-    return first_valid_dimension( u64_input, FORWARD( tail )... );
-}
-template<xla::ffi::DataType dtype>
-PI first_valid_dimension( const PI64 *u64_input, xla::ffi::ResultBuffer<dtype> &buffer, PI validity_index, PI num_axis, auto&& ...tail ) {
-    if ( u64_input[ validity_index / 64 ] & ( PI64( 1 ) << ( validity_index % 64 ) ) )
-        return buffer->dimensions()[ num_axis ];
-    return first_valid_dimension( u64_input, FORWARD( tail )... );
+// mutable
+template<int ndim,xla::ffi::DataType dtype>
+auto dynamic_axis_mutable( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {
+    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf_out ) );
+    if ( valid_inp ) {
+        auto inp = tensor_view_output( cd, buf_inp );
+        res.sizes.get_data_from( inp );
+    }
+    return res;
 }
 
 // ------------------- first_positive -------------------
