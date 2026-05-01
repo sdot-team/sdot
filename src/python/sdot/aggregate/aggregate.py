@@ -23,7 +23,7 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
 
     Usage::
 
-        @object_with_tensors
+        @aggregate
         class MyDist:
             positions = Tensor( "nb_points", "dim")
             weights   = Tensor( "nb_points" )

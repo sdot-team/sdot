@@ -1,4 +1,4 @@
-from sdot.object_with_tensors._methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
+from sdot.aggregate._methods import _collect_attributes, ListOfTensorFields, TensorField, flat_tensor_list, unflat_tensor_list
 from .driver import driver, tensor_conv_for
 from .distributions.Distribution import Distribution
 from .LinearSolver import LinearSolver

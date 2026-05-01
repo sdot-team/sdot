@@ -1,15 +1,8 @@
-from sdot.object_with_tensors import object_with_tensors, TensorField, CtKnown
-# from .driver import driver, Workspace, Return, Tensor, CtInt, Dyn
-# from .distributions.Distribution import Distribution
-# from .Cell import BatchOfCell
-# from .Plotter import Plotter
-# from .Bsp import Bsp
-
+from .aggregate import aggregate, Tensor, Return
 from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
 
 
-@object_with_tensors
+@aggregate
 class Norm2:
     """
     Distance norm
@@ -17,7 +10,7 @@ class Norm2:
     Possibility to handle periodicity using transformations
     """
 
-    transformations = TensorField( "nb_transformations", CtKnown( "dim + 1" ), CtKnown( "dim + 1" ) )
+    transformations : Tensor( "nb_transformations", "dim + 1", "dim + 1", ct_axes = [ "dim" ] )
 
     if TYPE_CHECKING:
         nb_transformations : int

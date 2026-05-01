@@ -1,11 +1,11 @@
-# from .object_with_tensors._methods import object_with_tensors, TensorField, ListOfTensorFields, driver
+# from .aggregate._methods import aggregate, TensorField, ListOfTensorFields, driver
 # from .distributions.BatchOfDistributions import BatchOfDistributions
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
 from .distributions.Distribution import Distribution
 from .PowerDiagram import PowerDiagram
 from .OtPlan1d import OtPlan1d
 
-# @object_with_tensors
+# @aggregate
 class OtPlan:
     """
     """

@@ -1,9 +1,9 @@
-# from sdot.object_with_tensors._methods import TensorField, object_with_tensors
+# from sdot.aggregate._methods import TensorField, aggregate
 from .Distribution import Distribution
 from ..driver import driver
 
 
-# @object_with_tensors
+# @aggregate
 class SumOfWeightedDiracs( Distribution ):
     """
     positions : tensor[ nb_diracs, dim ]

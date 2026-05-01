@@ -1,4 +1,5 @@
-from .CallArg import CallArg
+from ..compilation.IoCategory import IoCategory
+from ..compilation.CallArg import CallArg
 
 class Mutable:
     """Marks an existing object as read+write in driver.call.
@@ -15,3 +16,10 @@ class Mutable:
     def configure_call_arg( self, call_arg: CallArg, fai, mutable, driver ):
         return call_arg.configure( self.value, fai, self.dyn_axis_capacities, driver )
 
+    def call_arg_factory( self, call_args, parent, name_in_parent, io_category: IoCategory, ctor_args, ctor_kwargs ):
+        new_io_category = IoCategory(
+            want_return = False,
+            want_output = True,
+            has_input = True
+        )
+        return CallArg.factory( call_args, parent, name_in_parent, type( self.value ), self.value, io_category = new_io_category, ctor_args = self.type_args, ctor_kwargs = self.type_kwargs )

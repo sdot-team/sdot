@@ -1,10 +1,10 @@
 # from sdot.drivers.compilation.collect_attributes import collect_attributes
 # from sdot.drivers.compilation.FfiArgInfo import FfiArgInfo
-from sdot.object_with_tensors import object_with_tensors, TensorField
+from sdot.aggregate import aggregate, TensorField
 import numpy
 import sdot
 
-@object_with_tensors
+@aggregate
 class Pouet:
     positions = TensorField( sdot.Dyn( "nb_points" ), "dim" )
     nb_points : int

@@ -1,4 +1,4 @@
-"""Default XLA-FFI protocol helpers for classes decorated with @object_with_tensors.
+"""Default XLA-FFI protocol helpers for classes decorated with @aggregate.
 
 output_specs(cls, drv, **params)  -> list[ (name, shape, dtype) ]
 from_outputs(cls, arrays, **params) -> new instance
@@ -7,8 +7,8 @@ assign_outputs(obj, arrays, **params)  -> mutate obj in-place
 Classes may override these as classmethods; these functions provide the default
 by introspecting TensorField descriptors.
 """
-from ..object_with_tensors.TensorField import TensorField, _shape, _axis_names
-from ..object_with_tensors._methods import _collect_attributes
+from ..aggregate.TensorField import TensorField, _shape, _axis_names
+from ..aggregate._methods import _collect_attributes
 
 
 def output_specs( cls, drv, **params ):

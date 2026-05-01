@@ -14,7 +14,7 @@
 from .aggregate.Return import Return as Return
 from .aggregate.Tensor import Tensor as Tensor
 
-# from .object_with_tensors import object_with_tensors as object_with_tensors, TensorField as TensorField
+# from .aggregate import aggregate as aggregate, TensorField as TensorField
 # from .UndefinedTensor import UndefinedTensor as UndefinedTensor
 # from .CtInt import CtInt as CtInt
 
@@ -26,9 +26,9 @@ from .aggregate.Tensor import Tensor as Tensor
 # from .OtPlan import OtPlan as OtPlan
 
 # from .Polynomial import Polynomial as Polynomial
-# from .PowerDiagram import PowerDiagram as PowerDiagram
-# from .Cell import Cell as Cell
-# from .Bsp import Bsp as Bsp
+from .PowerDiagram import PowerDiagram as PowerDiagram
+from .Cell import Cell as Cell
+from .Bsp import Bsp as Bsp
 
 # from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters
 
@@ -39,7 +39,7 @@ from .aggregate.Tensor import Tensor as Tensor
 from .driver import driver as driver
 
 # variants
-# from sdot.object_with_tensors._methods import variants_of
+# from sdot.aggregate._methods import variants_of
 # SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d = variants_of( SumOfWeightedDiracs )
 # PiecewiseAffineGrid1d, BatchOfPiecewiseAffineGrid, BatchOfPiecewiseAffineGrid1d = variants_of( PiecewiseAffineGrid )
 
