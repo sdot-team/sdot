@@ -4,4 +4,4 @@ from dataclasses import dataclass
 class IoCategory:
     want_return : bool
     want_output : bool
-    want_input : bool
+    has_input : bool

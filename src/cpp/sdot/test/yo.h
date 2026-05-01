@@ -3,7 +3,8 @@
 using namespace sdot;
 
 void yo( auto &&p ) {
-    P( p.ret.size( 0 ) );
+    p.ret.fill_with( 0 );
+    P( p.ret );
 }
 
 void yo_backward( auto && ) {

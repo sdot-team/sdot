@@ -14,7 +14,7 @@ class CallArg_Aggregate( CallArg ):
     sub_dict    : dict[ CallArg ] #
 
     @staticmethod
-    def factory( call_args, parent, python_class, python_value, io_category: IoCategory ):
+    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
         res = CallArg_Aggregate()
 
         res.python_class = python_class
@@ -26,7 +26,7 @@ class CallArg_Aggregate( CallArg ):
             value = None
             if python_value is not None:
                 value = getattr( python_value, name )
-            res.sub_dict[ name ] = CallArg.factory( call_args, res, annotation, value, io_category )
+            res.sub_dict[ name ] = CallArg.factory( call_args, res, name, annotation, value, io_category, ctor_args, ctor_kwargs )
 
         return res
 
@@ -52,6 +52,12 @@ class CallArg_Aggregate( CallArg ):
 
     def base_cpp_name( self ) -> str:
         return self.python_class.__name__
+
+    def assemble_return( self, outputs ):
+        ctor_args = {}
+        for name, call_arg in self.sub_dict.items():
+            ctor_args[ name ] = call_arg.assemble_return( outputs )
+        return self.python_class( **ctor_args )
 
     def get_includes( self, includes: set ):
         includes.add( f"sdot/generated_includes/{ self.base_cpp_name() }.h" )
@@ -81,7 +87,7 @@ class CallArg_Aggregate( CallArg ):
             coeff = matrix[ num_case ][ num_axis ]
             if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
                 continue
-            op = f"{ tensor_names[ num_case ] }[ { tensor_axes[ num_case ] } ]"
+            op = f"{ tensor_names[ num_case ] }.size( { tensor_axes[ num_case ] } )"
             if vector[ num_case ]:
                 if coeff != 1:
                     op = f"( { op } - { vector[ num_case ] } ) / { coeff }"

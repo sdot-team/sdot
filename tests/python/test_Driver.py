@@ -72,12 +72,8 @@ def test_fields():
         a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", "dim", ct_axes = [ "dim" ] )
         b : sdot.Tensor( "smurf", "dim" )
 
-    yo = Yo()
-    # yo = Yo( [ [ 1, 2 ], [ 3, 4 ], [ 5, 6 ] ], nb_points = 3 )
-    # sdot.driver.call( "yo", "sdot/test/yo.h", ret = sdot.Mutable( yo, nb_points_capacity = 5 ) )
-    # info( yo )
-
-    res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems[ dim ]", "dim" ) ), "inp": yo }, axes = { "dim": 2 }, grad = False )
+    yo = Yo( b = [ [ 1 ] ] )
+    res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems", "dim" ), max_of_nb_elems = 5, dim = 2 ), "inp": yo }, axes = { "dim": 2 }, grad = False )
     info( res )
 
 

@@ -144,6 +144,15 @@ def _setup_distribution_class( cls ):
     if '__init__' not in vars( cls ):
         cls.__init__ = cls.__aggregate_init__
 
+    # --- __setattr__ --------------------------------------------------------
+    if '__setattr__' not in vars( cls ):
+        def __setattr__( self, name, value ):
+            field = fields.get( name )
+            if coerce := getattr( field, "coerce", None ):
+                value = coerce( value )
+            object.__setattr__( self, name, value )
+        cls.__setattr__ = __setattr__
+
     # --- dim -----------
     if 'dim' not in vars( cls ) and cls.__name__.endswith( "1d" ):
         cls.dim = property( lambda self: 1 )

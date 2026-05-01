@@ -1,10 +1,11 @@
 from __future__ import annotations
-from dataclasses import dataclass
+# from dataclasses import dataclass
 
 # from ..aggregate.AxisVariable import AxisVariable
 # from ..aggregate.AxisExpr import AxisExpr
-from ..aggregate.Tensor import Tensor
+from ..aggregate.Workspace import Workspace
 from ..aggregate.Return import Return
+from ..aggregate.Tensor import Tensor
 from .IoCategory import IoCategory
 from .CallArg import CallArg
 
@@ -33,7 +34,7 @@ class CallArgs:
         # add tensors for output dynamic shapes
         dynamic_shapes = {}
         for arg in nargs.values():
-            if isinstance( arg, Return ) and isinstance( arg.return_type, Tensor ):
+            if isinstance( arg, ( Return, Workspace ) ) and isinstance( arg.return_type, Tensor ):
                 for expr in arg.return_type.shape:
                     for term in expr.terms:
                         if term.variable.selection is not None:
@@ -41,7 +42,7 @@ class CallArgs:
 
         for name, selection in dynamic_shapes.items():
             if name not in nargs:
-                nargs[ name ] = Return( Tensor( *selection, dtype = int, represents_a_dynamic_axis = name ) )
+                nargs[ name ] = Workspace( Tensor( *selection, dtype = int, represents_a_dynamic_axis = name ) )
 
 
         # make the analysis
@@ -61,9 +62,54 @@ class CallArgs:
         res.index_dynamic_size_exception = res.get_u8_output()
 
         for name, arg in nargs.items():
-            io_category = IoCategory( want_return = False, want_output = False, want_input = True )
-            res.sub_dict[ name ] = CallArg.factory( res, res, type( arg ), arg, io_category = io_category )
+            io_category = IoCategory( want_return = False, want_output = False, has_input = True )
+            res.sub_dict[ name ] = CallArg.factory( res, res, name, type( arg ), arg, io_category, [], {} )
 
+        return res
+
+    @property
+    def differentiable_ffi_inputs( self ):
+        return [ fi.ffi_value for fi in self.differentiable_tensor_inputs ]
+
+    @property
+    def ffi_inputs( self ):
+        from ..driver import driver
+
+        import numpy
+        res = [ fi.ffi_value for fi in self.differentiable_tensor_inputs + self.non_differentiable_tensor_inputs ]
+        res.append( driver.array( self.u8_input_values, dtype = numpy.uint8 ) )
+        return res
+
+    @property
+    def index_u8_output( self ):
+        return len( self.tensor_outputs )
+
+    @property
+    def ffi_outputs( self ):
+        from ..driver import driver
+
+        res = [ fi.output_spec for fi in self.tensor_outputs ]
+        res.append( driver.ffi_tensor_output_spec( [ self.u8_output_size ], "PI8" ) )
+        return res
+
+    @property
+    def ffi_attributes( self ):
+        return {}
+
+    def update_differentiable_input_values_with( self, differentiable_input_values ):
+        for n, value in enumerate( differentiable_input_values ):
+            self.differentiable_tensor_inputs[ n ].python_value = value
+
+    def update_mutable_objects( self, outputs ):
+        for name, call_arg in self.sub_dict.items():
+            if call_arg.io_category.want_output and call_arg.io_category.has_input:
+                call_arg.update_mutable_objects( outputs )
+
+    def assemble_returns( self, outputs ):
+        res = []
+        for name, call_arg in self.sub_dict.items():
+            if call_arg.io_category.want_return:
+                res.append( call_arg.assemble_return( outputs ) )
         return res
 
     def add_tensor_output( self, call_arg_tensor ):

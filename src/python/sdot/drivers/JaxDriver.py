@@ -252,14 +252,14 @@ class JaxDriver:
             # loop until capacities are large enough
             while True:
                 # make the call
-                func = jax.ffi.ffi_call( module_name, fai.output_specs )
+                func = jax.ffi.ffi_call( module_name, fai.ffi_outputs )
 
                 # normalize the output
-                ret = func( *fai.input_values, **fai.attributes )
+                ret = func( *fai.ffi_inputs, **fai.ffi_attributes )
 
                 # break if ok
-                u64_output = ret[ fai.u64_ffi_output.num_in_sub_list ]
-                if ( u64_output[ fai.bit_offset_dynamic_size_exception // 64 ] & ( 1 << fai.bit_offset_dynamic_size_exception ) ) == 0:
+                u8_output = ret[ fai.index_u8_output ]
+                if u8_output[ fai.index_dynamic_size_exception ] == 0:
                     break
 
                 # else delete outputs
@@ -291,7 +291,7 @@ class JaxDriver:
             return tuple( ret )
 
         if not grad:
-            outputs = _call_ffi( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
+            outputs = _call_ffi( tuple( fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
             def my_ffi_op( differentiable_inputs ):
@@ -324,12 +324,8 @@ class JaxDriver:
             outputs = my_ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
 
         # ret assembly
-        res = []
-        for call_arg in fai.call_args:
-            if call_arg.io_category == 1: # Mutable
-                call_arg.update( fai, outputs )
-            if call_arg.io_category == 2: # Return
-                res.append( call_arg.construct( fai, outputs ) )
+        fai.update_mutable_objects( outputs )
+        res = fai.assemble_returns( outputs )
 
         # item or list
         if len( res ) == 0:

@@ -17,6 +17,9 @@ class CallArg_Tensor( CallArg ):
     io_category               : IoCategory
     parent                    : CallArg #
 
+    ctor_kwargs               : dict
+    ctor_args                 : list
+
     is_differentiable         : bool
     shape                     : list[ AxisExpr ]
     dtype                     : any
@@ -30,7 +33,7 @@ class CallArg_Tensor( CallArg ):
     num_in_outputs            : int
 
     @staticmethod
-    def factory( call_args, parent, python_class, python_value, io_category: IoCategory, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
+    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
         """  """
         if shape is None:
             orig = getattr( python_class, shape, None ) or python_value.shape
@@ -46,6 +49,9 @@ class CallArg_Tensor( CallArg ):
         res.io_category = io_category
         res.parent = weakref.ref( parent )
 
+        res.ctor_kwargs = ctor_kwargs
+        res.ctor_args = ctor_args
+
         res.is_differentiable = not driver.is_int_dtype( dtype )
         res.shape = shape
         res.dtype = dtype
@@ -59,7 +65,7 @@ class CallArg_Tensor( CallArg ):
         res.num_in_outputs = -1
 
         # input or mutable -> need an input tensor
-        if io_category.want_input:
+        if io_category.has_input:
             res.validity_input_index = call_args.get_u8_input( [ CallArg_Tensor.is_valid( python_class ) ] )
             res.num_in_input_sub_list = call_args.add_tensor_input( res )
 
@@ -74,6 +80,40 @@ class CallArg_Tensor( CallArg ):
     def is_valid( python_class ):
         return True
 
+    @property
+    def ffi_value( self ):
+        if self.python_value is None:
+            return driver.empty( [ 0 ] * self.ndim, dtype = self.dtype )
+        return self.python_value
+
+    @property
+    def output_spec( self ):
+        return driver.ffi_tensor_output_spec( self.shape_values(), self.dtype )
+
+    def assemble_return( self, outputs ):
+        if self.num_in_outputs > len( outputs ):
+            return driver.empty( [ 0 ] * self.ndim, dtype = self.dtype )
+
+        res = outputs[ self.num_in_outputs ]
+
+        if
+
+        return res
+
+    def shape_values( self ):
+        def get_axis_variable( name ):
+            if name in self.ctor_kwargs:
+                return int( self.ctor_kwargs[ name ] )
+            info( self.ctor_kwargs )
+            info( name )
+            raise NotImplementedError
+
+        res = []
+        for expr in self.shape:
+            res.append( expr.value( get_axis_variable ) )
+        return res
+
+    @property
     def ndim( self ) -> int:
         res = 0
         for s in self.shape:
@@ -81,7 +121,7 @@ class CallArg_Tensor( CallArg ):
         return res
 
     def signature( self ) -> str:
-        return f"T{ self.ndim() }{ driver.normalized_type_for( self.dtype ) }"
+        return f"T{ self.ndim }{ driver.normalized_type_for( self.dtype ) }"
 
     def get_template_args( self, template_args ):
         if ( self.dtype is float ) or ( self.dtype is int ) or ( self.dtype is None ):
@@ -90,8 +130,8 @@ class CallArg_Tensor( CallArg ):
 
     def cpp_type_name( self, main_list ):
         if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<{ self.dtype_name() },{ self.ndim() },Arch>"
-        return f"TensorView<{ self.dtype_name() },{ self.ndim() },Arch>"
+            return f"DynamicAxis<{ self.dtype_name() },{ self.ndim },Arch>"
+        return f"TensorView<{ self.dtype_name() },{ self.ndim },Arch>"
 
     def dtype_name( self ):
         if self.dtype is float or self.dtype is None:
@@ -157,31 +197,31 @@ class CallArg_Tensor( CallArg ):
             base = "dynamic_axis"
 
         # mutable
-        if self.io_category.want_input and self.io_category.want_output:
-            return f"{ base }_mutable( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+        if self.io_category.has_input and self.io_category.want_output:
+            return f"{ base }_mutable( CtInt<{ self.ndim }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
 
         # pure output
-        if not self.io_category.want_input and self.io_category.want_output:
-            return f"{ base }_output( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+        if not self.io_category.has_input and self.io_category.want_output:
+            return f"{ base }_output( CtInt<{ self.ndim }>(){ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
 
         # pure input
-        if self.io_category.want_input and not self.io_category.want_output:
-            return f"{ base }_input( CtInt<{ self.ndim() }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
+        if self.io_category.has_input and not self.io_category.want_output:
+            return f"{ base }_input( CtInt<{ self.ndim }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
 
         raise NotImplementedError
 
 
     def get_output_arg_decl( self, declarations: list ):
-        declarations.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim(), self.dtype ) } { self.ffi_output_name() }" )
+        declarations.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim, self.dtype ) } { self.ffi_output_name() }" )
 
     def get_input_arg_decl( self, declarations: list ):
-        declarations.append( f"{ driver.ffi_tensor_input_arg_code( self.ndim(), self.dtype ) } { self.ffi_input_name() }" )
+        declarations.append( f"{ driver.ffi_tensor_input_arg_code( self.ndim, self.dtype ) } { self.ffi_input_name() }" )
 
     def get_output_bind_chain( self, bind_chain: list ):
-        bind_chain.append( driver.ffi_tensor_output_bind_code( self.ndim(), self.dtype ) )
+        bind_chain.append( driver.ffi_tensor_output_bind_code( self.ndim, self.dtype ) )
 
     def get_input_bind_chain( self, bind_chain: list ):
-        bind_chain.append( driver.ffi_tensor_input_bind_code( self.ndim(), self.dtype ) )
+        bind_chain.append( driver.ffi_tensor_input_bind_code( self.ndim, self.dtype ) )
 
     def assembled_code( self, beg_line, parent ):
         return f"t_{ self.ffi_name() }"

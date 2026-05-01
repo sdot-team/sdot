@@ -22,10 +22,10 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def call_arg_factory( self, call_args, parent, io_category: IoCategory ):
+    def call_arg_factory( self, call_args, parent, name_in_parent, io_category: IoCategory, ctor_args, ctor_kwargs ):
         new_io_category = IoCategory(
             want_return = True,
             want_output = True,
-            want_input = False
+            has_input = False
         )
-        return CallArg.factory( call_args, parent, self.return_type, None, io_category = new_io_category )
+        return CallArg.factory( call_args, parent, name_in_parent, self.return_type, None, io_category = new_io_category, ctor_args = self.type_args, ctor_kwargs = self.type_kwargs )

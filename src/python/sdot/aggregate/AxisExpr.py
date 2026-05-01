@@ -45,6 +45,12 @@ class AxisExpr:
     def ndim( self ) -> int:
         return 1
 
+    def value( self, get_axis_variable ):
+        res = self.offset
+        for term in self.terms:
+            res += term.coeff * term.variable.value( get_axis_variable )
+        return res
+
     def get_axis_names( self, axis_names: set[ str ] ):
         for term in self.terms:
             name = term.variable.name

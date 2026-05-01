@@ -41,15 +41,14 @@ class Tensor:
         self.dtype = dtype
 
     def __call__( self, array = None, dtype = None ):
-        class TensorProxy:
-            def __init__( self, array, dtype ):
-                self.dtype = dtype
-                self.__set__( array )
-            def __get__( self, enclosing = None ):
-                return self.array
-            def __set__( self, array, enclosing = None ):
-                self.array = driver.array( array, dtype = self.dtype )
-        return TensorProxy( array, self.dtype )
+        if array is None:
+            return None
+        return driver.array( array, dtype = dtype or self.dtype )
+
+    def coerce( self, value ):
+        if value is None:
+            return None
+        return driver.array( value, dtype = self.dtype )
 
     @property
     def ndim( self ):
@@ -103,8 +102,8 @@ class Tensor:
         return new_field
 
 
-    def call_arg_factory( self, call_args, parent, python_value, io_category: IoCategory ):
-        return CallArg_Tensor.factory( call_args, parent, self, python_value, io_category, self.shape, self.dtype, self.ct_axes, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
+    def call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
+        return CallArg_Tensor.factory( call_args, parent, name_in_parent, self, python_value, io_category, ctor_args, ctor_kwargs, self.shape, self.dtype, self.ct_axes, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
     def get_axis_names( self, axis_names: set[ str ] ):
         for s in self.shape:
