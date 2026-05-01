@@ -100,16 +100,16 @@ class CallArgs:
         for n, value in enumerate( differentiable_input_values ):
             self.differentiable_tensor_inputs[ n ].python_value = value
 
-    def update_mutable_objects( self, outputs ):
-        for name, call_arg in self.sub_dict.items():
-            if call_arg.io_category.want_output and call_arg.io_category.has_input:
-                call_arg.update_mutable_objects( outputs )
+    def update_objects( self, outputs ):
+        for call_arg in self.tensor_outputs:
+            if call_arg.io_category.want_output and call_arg.num_in_outputs < len( outputs ):
+                call_arg.python_value = outputs[ call_arg.num_in_outputs ]
 
-    def assemble_returns( self, outputs ):
+    def assemble_returns( self ):
         res = []
         for name, call_arg in self.sub_dict.items():
             if call_arg.io_category.want_return:
-                res.append( call_arg.assemble_return( outputs ) )
+                res.append( call_arg.assemble_return() )
         return res
 
     def add_tensor_output( self, call_arg_tensor ):

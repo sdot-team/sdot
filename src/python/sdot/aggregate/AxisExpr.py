@@ -3,6 +3,7 @@ from __future__ import annotations
 from .AxisVariable import AxisVariable
 from dataclasses import dataclass
 import ast
+import re
 
 class AxisExpr:
     """
@@ -40,15 +41,15 @@ class AxisExpr:
             return
 
         if isinstance( value, str ):
-            self._parse( ast.parse( value, mode='eval' ).body )
+            self._parse( ast.parse( re.sub( r'\[\s*\]', '[()]', value ), mode='eval' ).body )
 
     def ndim( self ) -> int:
         return 1
 
-    def value( self, get_axis_variable ):
+    def value( self, get_axis_variable, use_dyn_size ):
         res = self.offset
         for term in self.terms:
-            res += term.coeff * term.variable.value( get_axis_variable )
+            res += term.coeff * term.variable.value( get_axis_variable, use_dyn_size )
         return res
 
     def get_axis_names( self, axis_names: set[ str ] ):

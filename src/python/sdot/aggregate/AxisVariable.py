@@ -11,11 +11,13 @@ class AxisVariable:
     `selection`  set by `[ ... ]` — dynamic tensor indexed by these expressions.
     """
 
-    def value( self, get_axis_variable ):
+    def value( self, get_axis_variable, use_dyn_size ):
         name = self.name
         if self.selection is not None:
+            if use_dyn_size:
+                return get_axis_variable( name, True )
             name = "max_of_" + name
-        return get_axis_variable( name )
+        return get_axis_variable( name, False )
 
     arguments: list | None  # list[ AxisExpr ] ( dim ) — one axis per value of dim
     selection: list | None  # list[ AxisExpr ] [ dim, nb_points ] — dynamic tensor index

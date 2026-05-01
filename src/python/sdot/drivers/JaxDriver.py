@@ -324,8 +324,8 @@ class JaxDriver:
             outputs = my_ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
 
         # ret assembly
-        fai.update_mutable_objects( outputs )
-        res = fai.assemble_returns( outputs )
+        fai.update_objects( outputs )
+        res = fai.assemble_returns()
 
         # item or list
         if len( res ) == 0:

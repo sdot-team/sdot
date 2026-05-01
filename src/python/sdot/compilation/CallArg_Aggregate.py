@@ -53,10 +53,10 @@ class CallArg_Aggregate( CallArg ):
     def base_cpp_name( self ) -> str:
         return self.python_class.__name__
 
-    def assemble_return( self, outputs ):
+    def assemble_return( self ):
         ctor_args = {}
         for name, call_arg in self.sub_dict.items():
-            ctor_args[ name ] = call_arg.assemble_return( outputs )
+            ctor_args[ name ] = call_arg.assemble_return()
         return self.python_class( **ctor_args )
 
     def get_includes( self, includes: set ):

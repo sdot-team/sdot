@@ -1,6 +1,7 @@
 from ..aggregate.AxisExpr import AxisExpr
 from ..driver import driver
 from ..util import index
+from ..util import find
 
 from .IoCategory import IoCategory
 from .CallArg import CallArg
@@ -15,6 +16,8 @@ class CallArg_Tensor( CallArg ):
     python_class              : any #
     python_value              : any # optional tensor
     io_category               : IoCategory
+
+    name_in_parent            : str
     parent                    : CallArg #
 
     ctor_kwargs               : dict
@@ -44,6 +47,7 @@ class CallArg_Tensor( CallArg ):
 
         res = CallArg_Tensor()
 
+        res.name_in_parent = name_in_parent
         res.python_class = python_class
         res.python_value = python_value
         res.io_category = io_category
@@ -90,27 +94,51 @@ class CallArg_Tensor( CallArg ):
     def output_spec( self ):
         return driver.ffi_tensor_output_spec( self.shape_values(), self.dtype )
 
-    def assemble_return( self, outputs ):
-        if self.num_in_outputs > len( outputs ):
-            return driver.empty( [ 0 ] * self.ndim, dtype = self.dtype )
+    def assemble_return( self ):
+        res = self.python_value
+        if res is None:
+            return res
 
-        res = outputs[ self.num_in_outputs ]
+        # if we have a dynamic size, make a slice
+        slices = []
+        for expr in self.shape:
+            axes, ct_axes = {}, {}
+            expr.get_axes( axes, ct_axes )
+            da = find( axes.values(), lambda x: x is not None )
+            if da is not None and len( da ) == 0:
+                slices.append( slice( 0, expr.value( self.get_axis_variable, True ) ) )
+            else:
+                slices.append( slice( None ) )
 
-        if
+        res = res[ tuple( slices ) ]
 
         return res
 
-    def shape_values( self ):
-        def get_axis_variable( name ):
-            if name in self.ctor_kwargs:
-                return int( self.ctor_kwargs[ name ] )
-            info( self.ctor_kwargs )
-            info( name )
-            raise NotImplementedError
+    def get_axis_variable( self, name, is_a_dyn_size ):
+        # Return( ..., dim = 2 )
+        if name in self.ctor_kwargs:
+            return int( self.ctor_kwargs[ name ] )
 
+        # tensor
+        if is_a_dyn_size and name in self.parent().sub_dict:
+            return self.parent().sub_dict[ name ].python_value.item()
+
+        # if use_dyn_size:
+        #     dt = outputs[ num_in_outputs ]
+        #     return dt.item()
+
+
+        raise RuntimeError( f"Unable to find { name }" )
+        # res = getattr( self.parent(), name )
+        # if use_dyn_size:
+        #     res = res.item()
+        # return res
+
+
+    def shape_values( self, use_dyn_size = False ):
         res = []
         for expr in self.shape:
-            res.append( expr.value( get_axis_variable ) )
+            res.append( expr.value( self.get_axis_variable, use_dyn_size ) )
         return res
 
     @property

@@ -4,7 +4,7 @@ using namespace sdot;
 
 void yo( auto &&p ) {
     p.ret.fill_with( 0 );
-    P( p.ret );
+    p.nb_elems = 3;
 }
 
 void yo_backward( auto && ) {
