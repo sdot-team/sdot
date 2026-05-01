@@ -497,10 +497,7 @@ class JaxDriver:
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"        { func_name }( { parameters_struct }{{" )
-        for arg_name, call_arg in fai.sub_dict.items():
-            lines.append( f"            .{ arg_name } = { call_arg.assembled_code( "            ", fai ) }," )
-        lines.append( "        } );" )
+        lines.append( f"        { func_name }( { fai.assembled_code( parameters_struct, "        " )  } );" )
 
         # end try block
 

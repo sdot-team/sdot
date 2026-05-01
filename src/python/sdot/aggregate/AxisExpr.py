@@ -59,7 +59,7 @@ class AxisExpr:
                 name = "max_of_" + name
             axis_names.add( name )
 
-    def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
+    def get_axes( self, axes: dict ):
         for term in self.terms:
             axes[ term.variable.name ] = term.variable.selection
 

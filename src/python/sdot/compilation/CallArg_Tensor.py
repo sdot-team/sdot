@@ -17,6 +17,8 @@ class CallArg_Tensor( CallArg ):
     python_value              : any # optional tensor
     io_category               : IoCategory
 
+    ct_axes                   : dict
+
     name_in_parent            : str
     parent                    : CallArg #
 
@@ -78,6 +80,13 @@ class CallArg_Tensor( CallArg ):
             res.validity_output_index = call_args.get_u8_input( [ True ] )
             res.num_in_outputs = call_args.add_tensor_output( res )
 
+        #
+        res.ct_axes = {}
+        if ct_axes is not None:
+            for name in ct_axes:
+                assert isinstance( name, str )
+                res.ct_axes[ name ] = None
+
         return res
 
     @staticmethod
@@ -102,8 +111,8 @@ class CallArg_Tensor( CallArg ):
         # if we have a dynamic size, make a slice
         slices = []
         for expr in self.shape:
-            axes, ct_axes = {}, {}
-            expr.get_axes( axes, ct_axes )
+            axes = {}
+            expr.get_axes( axes )
             da = find( axes.values(), lambda x: x is not None )
             if da is not None and len( da ) == 0:
                 slices.append( slice( 0, expr.value( self.get_axis_variable, True ) ) )
@@ -151,10 +160,16 @@ class CallArg_Tensor( CallArg ):
     def signature( self ) -> str:
         return f"T{ self.ndim }{ driver.normalized_type_for( self.dtype ) }"
 
-    def get_template_args( self, template_args ):
+    def get_template_args( self, template_args, names ):
+        for name in self.ct_axes.keys():
+            lst = names[ : -1 ] + [ name ]
+            template_args[ f"ct_{ "_".join( lst ) }_value" ] = "int"
+
         if ( self.dtype is float ) or ( self.dtype is int ) or ( self.dtype is None ):
             template_args[ self.dtype_name() ] = "typename"
+
         template_args[ "Arch" ] = "typename"
+
 
     def cpp_type_name( self, main_list ):
         if self.represents_a_dynamic_axis:
@@ -170,7 +185,10 @@ class CallArg_Tensor( CallArg ):
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
         for s in self.shape:
-            s.get_axes( axes, ct_axes )
+            s.get_axes( axes )
+
+        for name, limit in self.ct_axes.items():
+            ct_axes[ name ] = limit
 
     def get_all_the_ways_to_get( self, axis_names, attributes, use_attributes, tensor_names, tensor_axes, matrix, vector ):
         for n, s in enumerate( self.shape ):
@@ -216,7 +234,7 @@ class CallArg_Tensor( CallArg ):
             for argument in p.sub_dict.values():
                 argument.get_axes( axes, ct_axes )
 
-            tensor_names, tensor_axes, matrix, vector = CallArg_Aggregate.axis_variable_equation( p.sub_dict, axes, False )
+            tensor_names, tensor_axes, matrix, vector = p.axis_variable_equation( axes, False )
             axis_selection = axes[ self.represents_a_dynamic_axis ]
 
             capa = CallArg_Aggregate.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
@@ -251,7 +269,5 @@ class CallArg_Tensor( CallArg ):
     def get_input_bind_chain( self, bind_chain: list ):
         bind_chain.append( driver.ffi_tensor_input_bind_code( self.ndim, self.dtype ) )
 
-    def assembled_code( self, beg_line, parent ):
+    def assembled_code( self, beg_line ):
         return f"t_{ self.ffi_name() }"
-
-        raise NotImplementedError

@@ -6,15 +6,17 @@ from __future__ import annotations
 from ..aggregate.Workspace import Workspace
 from ..aggregate.Return import Return
 from ..aggregate.Tensor import Tensor
+from .SubDictContainer import SubDictContainer
 from .IoCategory import IoCategory
 from .CallArg import CallArg
 
 
-class CallArgs:
+class CallArgs( SubDictContainer ):
     """
     """
 
     sub_dict : dict[ CallArg ]
+    ct_axes : dict
 
     non_differentiable_tensor_inputs : list # list[ CallArgTensor ]
     differentiable_tensor_inputs : list # list[ CallArgTensor ]
@@ -26,6 +28,7 @@ class CallArgs:
     u8_output_size : int
 
     index_dynamic_size_exception : int
+
 
     @staticmethod
     def factory( args : dict, axis_values : dict[ int ] ):
@@ -44,11 +47,11 @@ class CallArgs:
             if name not in nargs:
                 nargs[ name ] = Workspace( Tensor( *selection, dtype = int, represents_a_dynamic_axis = name ) )
 
-
         # make the analysis
         res = CallArgs()
 
         res.sub_dict = {}
+        res.ct_axes = {}
 
         res.non_differentiable_tensor_inputs = []
         res.differentiable_tensor_inputs = []
@@ -152,8 +155,7 @@ class CallArgs:
             argument.generate_structures()
 
     def make_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
-        from .CallArg_Aggregate import CallArg_Aggregate
-        CallArg_Aggregate.get_code( struct_name, self.sub_dict, includes, lines )
+        self.struct_decl( struct_name, includes, lines )
 
     def arg_decl( self ) -> str:
         declarations = []
