@@ -37,18 +37,13 @@ class CallArg:
             return CallArg_Tensor.factory( call_args, parent, name_in_parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
 
         # std objects
-        if isinstance( python_value, float ):
-            # return self.configure_as_parameter( python_value, "FP64", mutable, fai, driver )
-            raise NotADirectoryError
-
-        if isinstance( python_value, int ):
-            #     return self.configure_as_parameter( python_value, "SI64", mutable, fai, driver )
-            raise NotADirectoryError
+        if isinstance( python_value, ( int, float ) ):
+            if io_category.want_output:
+                raise NotImplementedError # A tensor returning item() ?
+            from .CallArg_Parameter import CallArg_Parameter
+            return CallArg_Parameter.factory( call_args, name_in_parent, python_value )
 
         if isinstance( python_value, ( list, tuple ) ):
-            raise NotImplementedError
-
-        if python_value is None:
             raise NotImplementedError
 
         # else, get attributes

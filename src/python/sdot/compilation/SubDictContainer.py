@@ -144,7 +144,7 @@ class SubDictContainer:
         lines.append( "};" )
         lines.extend( end_lines )
 
-        return "\n".join( [ f"#include <{ inc }>" for inc in includes ] + lines )
+        return "\n".join( [ "#pragma once" ] + [ f"#include <{ inc }>" for inc in includes ] + lines )
 
     def assembled_code( self, struct_name: str, beg_line: str ) -> str:
         """

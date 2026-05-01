@@ -46,7 +46,11 @@ class CallArg_Aggregate( SubDictContainer, CallArg ):
         template_args = {}
         self.get_template_args( template_args, names )
 
-        res = self.python_value.__class__.__name__
+        if self.python_value:
+            res = self.python_value.__class__.__name__
+        else:
+            res = self.python_class.__name__
+
         if len( template_args ):
             res += f"<{ ','.join( template_args ) }>"
 

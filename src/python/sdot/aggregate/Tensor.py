@@ -32,6 +32,8 @@ class Tensor:
     name : str
 
     def __init__( self, *axis_exprs, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
+        assert isinstance( ct_axes, list )
+        
         self.represents_a_dynamic_axis = represents_a_dynamic_axis
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = []
@@ -58,48 +60,25 @@ class Tensor:
         return res
 
     def make_variant( self, batch_version: int, unidimensional_version: int ) -> 'Tensor':
-        ct_axes = self.ct_axes.copy()
-        ctor_args = []
-        for name in self.axis_names:
-            if ad := find( self.dynamic_axes, lambda x: x.name == name ):
-                ctor_args.append( ad )
-            else:
-                ctor_args.append( name )
+        res = Tensor()
+        res.represents_a_dynamic_axis = self.represents_a_dynamic_axis
+        res.comes_from_a_dim_list = False
+        res.removed_dim_axes = []
+        res.ct_axes = [ ct_axis for ct_axis in self.ct_axes if ct_axis != "dim" ]
+        res.dtype = self.dtype
 
+        res.shape = []
         if batch_version:
-            new_ctor_args = [ "batch_size" ]
-            for ctor_arg in ctor_args:
-                if isinstance( ctor_arg, Dyn ):
-                    if ctor_arg.capacity is not None:
-                        raise NotImplementedError
-                    new_ctor_args.append( Dyn(
-                        one_value_for_each = [ "batch_size" ] + ctor_arg.one_value_for_each,
-                        name = ctor_arg.name,
-                    ) )
-                else:
-                    new_ctor_args.append( ctor_arg )
-            ctor_args = new_ctor_args
+            res.shape.append( AxisExpr( "batch_size" ) )
+        for n, expr in enumerate( self.shape ):
+            nexpr = expr
+            if unidimensional_version:
+                nexpr = nexpr.unidimensional_version()
+                if nexpr.always_one and not expr.always_one:
+                    res.removed_dim_axes.append( n )
+                    res.shape.append( nexpr )
 
-        removed_dim_axes = self.removed_dim_axes.copy()
-        if unidimensional_version:
-            new_ctor_args = []
-            for i, arg in enumerate( ctor_args ):
-                name = arg.name if isinstance( arg, Dyn ) else arg
-                if name == "dim":
-                    removed_dim_axes.append( i )
-                else:
-                    new_ctor_args.append( arg )
-            ctor_args = new_ctor_args
-
-            if "dim" in ct_axes:
-                del ct_axes[ "dim" ]
-
-        new_field = Tensor( *ctor_args, dtype = self.dtype )
-        new_field.comes_from_a_dim_list = self.comes_from_a_dim_list
-        new_field.removed_dim_axes = removed_dim_axes
-        new_field.ct_axes = ct_axes
-        new_field.name = self.name
-        return new_field
+        return res
 
 
     def call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):

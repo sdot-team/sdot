@@ -225,7 +225,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, func_name: str, includes: str | list[ str ], *, args: list, axes = {}, grad = True, parameters_struct = None ):
+    def call( self, func_name: str, includes: str | list[ str ], grad = True, parameters_struct = None, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -238,7 +238,7 @@ class JaxDriver:
             includes = [ includes ]
 
         # get a jax compatible set of arg lists
-        fai = CallArgs.factory( args = args, axis_values = axes )
+        fai = CallArgs.factory( args = args )
 
         # check ffi function is registered
         module_name = self._module_name_for( func_name, includes, fai )
@@ -348,6 +348,9 @@ class JaxDriver:
 
     def ffi_tensor_output_spec( self, shape, dtype ):
         return jax.ShapeDtypeStruct( shape, self.find_dtype( dtype ) )
+
+    def ffi_parameter_bind_code( self, dtype, name: str ) -> str:
+        return f"Attr<{ self.normalized_type_for( dtype ) }>( \"{ name }\" )"
 
     def ffi_tensor_type_code( self, dtype ) -> str:
         """ C++ jax name for dtype """

@@ -21,6 +21,7 @@ class CallArgs( SubDictContainer ):
     non_differentiable_tensor_inputs : list # list[ CallArgTensor ]
     differentiable_tensor_inputs : list # list[ CallArgTensor ]
     tensor_outputs : list # list[ CallArgTensor ]
+    parameters : list #
 
     parameters_struct : str
 
@@ -31,7 +32,7 @@ class CallArgs( SubDictContainer ):
 
 
     @staticmethod
-    def factory( args : dict, axis_values : dict[ int ] ):
+    def factory( args : dict ):
         nargs = args.copy()
 
         # add tensors for output dynamic shapes
@@ -56,6 +57,7 @@ class CallArgs( SubDictContainer ):
         res.non_differentiable_tensor_inputs = []
         res.differentiable_tensor_inputs = []
         res.tensor_outputs = []
+        res.parameters = []
 
         res.parameters_struct = None
 
@@ -97,7 +99,10 @@ class CallArgs( SubDictContainer ):
 
     @property
     def ffi_attributes( self ):
-        return {}
+        res = {}
+        for parameter in self.parameters:
+            res[ parameter.name ] = parameter.python_value
+        return res
 
     def update_differentiable_input_values_with( self, differentiable_input_values ):
         for n, value in enumerate( differentiable_input_values ):
@@ -126,6 +131,11 @@ class CallArgs( SubDictContainer ):
             lst = self.differentiable_tensor_inputs
         res = len( lst )
         lst.append( call_arg_tensor )
+        return res
+
+    def add_parameter( self, call_arg_parameter ):
+        res = len( self.parameters )
+        self.parameters.append( call_arg_parameter )
         return res
 
     def get_u8_output( self, nb_u8 = 1 ):
@@ -173,6 +183,10 @@ class CallArgs( SubDictContainer ):
             from ..driver import driver
             declarations.append( driver.ffi_tensor_input_arg_code( 1, "PI8" ) + " u8_input_buffer" )
 
+        # parameters
+        for parameter in self.parameters:
+            parameter.get_input_arg_decl( declarations )
+
         # outputs
         for out in self.tensor_outputs:
             out.get_output_arg_decl( declarations )
@@ -196,6 +210,9 @@ class CallArgs( SubDictContainer ):
         if len( self.u8_input_values ):
             from ..driver import driver
             items.append( driver.ffi_tensor_input_bind_code( 1, "PI8" ) )
+
+        for parameter in self.parameters:
+            parameter.get_input_bind_chain( items )
 
         for out in self.tensor_outputs:
             out.get_output_bind_chain( items )

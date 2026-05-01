@@ -9,9 +9,9 @@ class Bsp:
 
     """
 
-    sorted_vertex_indices = Tensor( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
-    cell_indices = Tensor( "nb_cells[]", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
-    cell_bounds = Tensor( "nb_cells[]", "3 * dim + 1", ct_axes = "dim" ) # cell index -> min pt, max pt, poly bound
+    sorted_vertex_indices : Tensor( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
+    cell_indices : Tensor( "nb_cells[]", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
+    cell_bounds : Tensor( "nb_cells[]", "3 * dim + 1", ct_axes = [ "dim" ] ) # cell index -> min pt, max pt, poly bound
 
     if TYPE_CHECKING:
         nb_vertices_capacity : int
@@ -26,12 +26,12 @@ class Bsp:
         nb_cells_capacity = nb_vertices
 
         return driver.call( "make_bsp", "sdot/Bsp/make_bsp.h",
-            bsp = Return( Bsp, nb_vertices = nb_vertices, nb_cells_capacity = nb_cells_capacity, dim = dim ),
+            bsp = Return( Bsp, nb_vertices = nb_vertices, max_of_nb_cells = nb_cells_capacity, dim = dim ),
             max_points_per_cell = max_points_per_cell,
             positions = positions,
             weights = weights,
 
-            _no_grad = True,
+            grad = False,
         )
 
 

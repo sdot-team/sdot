@@ -12,7 +12,7 @@ struct BspMaker {
     SI                     max_points_per_cell;
     TensorView<TF,2,Arch>  positions;
     TensorView<TF,1,Arch>  weights;
-    Bsp<TI,Arch,TF,ct_dim> bsp;
+    Bsp<TI,Arch,ct_dim,TF> bsp;
 
     enum { degree_w_approx       = 1 };
     enum { ct_nb_coeffs_w_approx = 1 + ct_dim * ( degree_w_approx >= 1 ) + ct_dim * ( ct_dim + 1 ) / 2 * ( degree_w_approx >= 2 ) };

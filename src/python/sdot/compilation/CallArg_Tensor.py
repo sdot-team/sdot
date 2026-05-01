@@ -41,8 +41,11 @@ class CallArg_Tensor( CallArg ):
     def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
         """  """
         if shape is None:
-            orig = getattr( python_class, shape, None ) or python_value.shape
-            shape = [ AxisExpr( s ) for s in orig ]
+            if python_value is not None:
+                orig = python_value.shape
+            else:
+                orig = python_class.shape
+            shape = [ AxisExpr( s ) for s in list( orig ) ]
 
         if dtype is None:
             dtype = float

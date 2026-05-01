@@ -43,6 +43,20 @@ class AxisExpr:
         if isinstance( value, str ):
             self._parse( ast.parse( re.sub( r'\[\s*\]', '[()]', value ), mode='eval' ).body )
 
+    @property
+    def always_one( self ):
+        return self.offset == 1 and len( self.terms ) == 0
+
+    def unidimensional_version( self ):
+        res = AxisExpr( self.offset )
+        for term in self.terms:
+            if term.variable.name == "dim":
+                res.offset += term.coeff
+                continue
+            nterm = AxisExpr.Term( variable = term.variable.unidimensional_version(), coeff = term.coeff )
+            res.terms.append( nterm )
+        return res
+
     def ndim( self ) -> int:
         return 1
 

@@ -97,13 +97,14 @@ def _make_variant( cls, fields: dict, batch_version : int, unidimensional_versio
 
     parents = ()
 
-    res = type( variant_name, parents, { '__annotations__': cls.__annotations__ } )
+    res = type( variant_name, parents, {} )
     for name, field in fields.items():
-        if unidimensional_version and getattr( field, "unidimensional_version", None ):
-            field = field.unidimensional_version()
-        if batch_version and getattr( field, "batch_version", None ):
-            field = field.batch_version()
-        setattr( res, name, field )
+        # make the new field
+        if make_variant := getattr( field, "make_variant", None ):
+            field = make_variant( batch_version, unidimensional_version )
+
+        # store it
+        res.__annotations__[ name ] = field
 
     return res
 
