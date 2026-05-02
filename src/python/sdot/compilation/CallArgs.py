@@ -25,11 +25,11 @@ class CallArgs( SubDictContainer ):
 
     parameters_struct : str
 
-    u8_input_values : list[ int ]
-    u8_output_size : int
+    u8_input_values  : list[ int ]
+    u64_output_size  : int
 
     index_dynamic_size_exception : int
-
+    dynamix_axes : list
 
     @staticmethod
     def factory( args : dict ):
@@ -62,9 +62,10 @@ class CallArgs( SubDictContainer ):
         res.parameters_struct = None
 
         res.u8_input_values = []
-        res.u8_output_size = 0
+        res.u64_output_size = 0
 
-        res.index_dynamic_size_exception = res.get_u8_output()
+        res.index_dynamic_size_exception = res.get_u64_output( 2 )
+        res.dynamix_axes = []
 
         for name, arg in nargs.items():
             io_category = IoCategory( want_return = False, want_output = False, has_input = True )
@@ -86,7 +87,7 @@ class CallArgs( SubDictContainer ):
         return res
 
     @property
-    def index_u8_output( self ):
+    def index_u64_output( self ):
         return len( self.tensor_outputs )
 
     @property
@@ -94,7 +95,7 @@ class CallArgs( SubDictContainer ):
         from ..driver import driver
 
         res = [ fi.output_spec for fi in self.tensor_outputs ]
-        res.append( driver.ffi_tensor_output_spec( [ self.u8_output_size ], "PI8" ) )
+        res.append( driver.ffi_tensor_output_spec( [ self.u64_output_size ], "PI64" ) )
         return res
 
     @property
@@ -138,9 +139,9 @@ class CallArgs( SubDictContainer ):
         self.parameters.append( call_arg_parameter )
         return res
 
-    def get_u8_output( self, nb_u8 = 1 ):
-        res = self.u8_output_size
-        self.u8_output_size += nb_u8
+    def get_u64_output( self, nb_u64 = 1 ):
+        res = self.u64_output_size
+        self.u64_output_size += nb_u64
         return res
 
     def get_u8_input( self, u8_values: list[ int ] ):
@@ -191,10 +192,10 @@ class CallArgs( SubDictContainer ):
         for out in self.tensor_outputs:
             out.get_output_arg_decl( declarations )
 
-        # u8_output
-        if self.u8_output_size:
+        # u64_output
+        if self.u64_output_size:
             from ..driver import driver
-            declarations.append( driver.ffi_tensor_output_arg_code( 1, "PI8" ) + " u8_output_buffer" )
+            declarations.append( driver.ffi_tensor_output_arg_code( 1, "PI64" ) + " u64_output_buffer" )
 
         return ", ".join( declarations )
 
@@ -217,9 +218,9 @@ class CallArgs( SubDictContainer ):
         for out in self.tensor_outputs:
             out.get_output_bind_chain( items )
 
-        if self.u8_output_size:
+        if self.u64_output_size:
             from ..driver import driver
-            items.append( driver.ffi_tensor_output_bind_code( 1, "PI8" ) )
+            items.append( driver.ffi_tensor_output_bind_code( 1, "PI64" ) )
 
 
         return items

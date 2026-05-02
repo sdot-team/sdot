@@ -44,7 +44,7 @@ class PowerDiagram:
         reservation = 1 # 10 * self.nb_vertices # TODO better approx
 
         return driver.call( "vtk_cell_faces", "sdot/PowerDiagram/vtk_cell_faces.h",
-            points = Return( Tensor( "nb_points[]", "dim" ), max_of_nb_points = reservation ),
+            points = Return( Tensor( "nb_points[]", "dim" ), max_of_nb_points = reservation, dim = self.dim ),
             faces = Return( Tensor( "nb_faces[]" ), max_of_nb_faces = reservation ),
             cells = Workspace( BatchOfCell,
                 max_of_nb_vertices = 50,

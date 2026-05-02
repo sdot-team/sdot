@@ -35,6 +35,7 @@ class CallArg_Tensor( CallArg ):
     validity_input_index      : int
 
     num_in_input_sub_list     : int
+    num_in_dynamic_axes       : int
     num_in_outputs            : int
 
     @staticmethod
@@ -72,6 +73,11 @@ class CallArg_Tensor( CallArg ):
 
         res.num_in_input_sub_list = -1
         res.num_in_outputs = -1
+
+        res.num_in_dynamic_axes = -1
+        if call_args and represents_a_dynamic_axis:
+            res.num_in_dynamic_axes = len( call_args.dynamix_axes )
+            call_args.dynamix_axes.append( res )
 
         # input or mutable -> need an input tensor
         if io_category.has_input:
@@ -140,7 +146,7 @@ class CallArg_Tensor( CallArg ):
         #     return dt.item()
 
 
-        raise RuntimeError( f"Unable to find { name }" )
+        raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }'" )
         # res = getattr( self.parent(), name )
         # if use_dyn_size:
         #     res = res.item()
@@ -244,8 +250,7 @@ class CallArg_Tensor( CallArg ):
             axis_selection = axes[ self.represents_a_dynamic_axis ]
 
             capa = CallArg_Aggregate.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
-            numa = index( axes.keys(), self.represents_a_dynamic_axis )
-            extr = f", { numa }, { capa }"
+            extr = f", { self.num_in_dynamic_axes }, { capa }"
             base = "dynamic_axis"
 
         # mutable

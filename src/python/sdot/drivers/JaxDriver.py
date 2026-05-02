@@ -258,30 +258,31 @@ class JaxDriver:
                 ret = func( *fai.ffi_inputs, **fai.ffi_attributes )
 
                 # break if ok
-                u8_output = ret[ fai.index_u8_output ]
-                if u8_output[ fai.index_dynamic_size_exception ] == 0:
+                u64_output = ret[ fai.index_u64_output ]
+                if u64_output[ fai.index_dynamic_size_exception ] == 0:
                     break
 
                 # else delete outputs
                 del ret
 
                 # get faulty data
-                raw = numpy.array( u64_output[ fai.offset_dynamic_size_name : fai.end_dynamic_size_name ], dtype = numpy.uint64 ).view( numpy.uint8 )
-                faulty_axis_name = raw.tobytes().split( b'\x00' )[ 0 ].decode() + "_capacity"
-
-                needed_size = int( u64_output[ fai.offset_needed_dynamic_size ] )
+                da = fai.dynamix_axes[ u64_output[ fai.index_dynamic_size_exception + 0 ] - 1 ]
+                needed_size = int( u64_output[ fai.index_dynamic_size_exception + 1 ] )
+                faulty_axis_name = "max_of_" + da.name_in_parent
 
                 # update output shape
-                for ffi_output in fai.ffi_outputs:
-                    shape = list( ffi_output.spec.shape )
-                    for n, axis_name in enumerate( ffi_output.axis_names ):
-                        if axis_name == faulty_axis_name:
-                            old_value = ffi_output.spec.shape[ n ]
-                            new_value = max( needed_size, 2 * old_value )
-                            shape[ n ] = new_value
+                made_a_change = False
+                for tensor_output in fai.tensor_outputs:
+                    if tensor_output.parent() != da.parent():
+                        continue
+                    if faulty_axis_name in tensor_output.ctor_kwargs:
+                        old_value = int( tensor_output.ctor_kwargs[ faulty_axis_name ] )
+                        new_value = max( needed_size, 2 * old_value )
 
-                    ffi_output.spec = self.ffi_tensor_output_spec( shape, ffi_output.spec.dtype )
+                        tensor_output.ctor_kwargs[ faulty_axis_name ] = new_value
+                        made_a_change = True
 
+                assert( made_a_change )
 
             # always return a tuple
             if isinstance( ret, jax.Array ):
@@ -490,9 +491,9 @@ class JaxDriver:
         if len( fai.u8_input_values ):
             lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )
 
-        if fai.u8_output_size:
-            lines.append( "    PI8 *u8_output = u8_output_buffer->typed_data();" )
-            lines.append( "    std::memset( u8_output, 0, u8_output_buffer->element_count() );" )
+        if fai.u64_output_size:
+            lines.append( "    PI64 *u64_output = u64_output_buffer->typed_data();" )
+            lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
 
         # conversions
         fai.tensor_conversions( lines )
@@ -506,7 +507,8 @@ class JaxDriver:
         # end try block
 
         lines.append( '    } catch ( DynamicSizeException de ) {' )
-        lines.append( f'        u8_output[ { fai.index_dynamic_size_exception } ] = 1 + de.num_dynamic_axis;' )
+        lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 0 } ] = 1 + de.num_dynamic_axis;' )
+        lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 1 } ] = de.needed_size;' )
         lines.append( '    }' )
 
         # end impl
