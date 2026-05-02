@@ -17,6 +17,7 @@ void for_each_cell( const PowerDiagram<ct_dim,ct_dim,ct_dim,Arch,TF,TI> &pd, Bat
     Cell<ct_dim,Arch,TF,TI> cell = cells.row( 0 );
 
     for_each_point_in_bsp( pd.bsp, [&]( auto i0 ) {
+        // make_aligned_simplex( cell, CellBoundary::INFINITE, CtInt<ct_dim>() );
         make_aligned_simplex( cell, CellBoundary::INFINITE, CtInt<ct_dim>() );
 
         const Pt p0 = pd.positions.row( i0 );

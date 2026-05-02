@@ -45,13 +45,19 @@ UTP void make_aligned_simplex( DTP &cell, SI cut_id, CtInt<ct_dim> ) {
     }
 
     // cut_planes
-    for( PI num_cut = 0; num_cut < dim; ++num_cut ) {
-        for( PI d = 0; d < dim; ++d )
-            cell.cut_planes( num_cut, d ) = - ( d == num_cut );
-        cell.cut_planes( num_cut, dim ) = 0;
+    if ( dim != 2 ) {
+        for( PI num_cut = 0; num_cut < dim; ++num_cut ) {
+            for( PI d = 0; d < dim; ++d )
+                cell.cut_planes( num_cut, d ) = - ( d == num_cut );
+            cell.cut_planes( num_cut, dim ) = 0;
+        }
+        for( PI d = 0; d < dim + 1; ++d )
+            cell.cut_planes( dim, d ) = 1;
+    } else {
+        cell.cut_planes( 0, 0 ) =  0; cell.cut_planes( 0, 1 ) = -1; cell.cut_planes( 0, 2 ) = 0;
+        cell.cut_planes( 1, 0 ) = +1; cell.cut_planes( 1, 1 ) = +1; cell.cut_planes( 1, 2 ) = 1;
+        cell.cut_planes( 2, 0 ) = -1; cell.cut_planes( 2, 1 ) =  0; cell.cut_planes( 2, 2 ) = 0;
     }
-    for( PI d = 0; d < dim + 1; ++d )
-        cell.cut_planes( dim, d ) = 1;
 
     // cut_ids
     for( PI num_cut = 0; num_cut < nb_cuts; ++num_cut )

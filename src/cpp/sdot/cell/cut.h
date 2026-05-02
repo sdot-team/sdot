@@ -1,10 +1,13 @@
 #pragma once
 
-#include <sdot/generated_includes/CutWorkspace.h>
 #include "../support/MapOfUniqueSortedIndices.h"
-#include <sdot/generated_includes/Cell.h>
-// #include "CutWorkspace.h"
+#include "../support/SimpleSquareMatrix.h"
+#include "../support/index.h"
 #include "../support/P.h"
+#include "CellBoundary.h"
+
+#include <sdot/generated_includes/CutWorkspace.h>
+#include <sdot/generated_includes/Cell.h>
 #include <numeric>
 
 namespace sdot::_cut_detail {
@@ -181,104 +184,164 @@ void apply_cut_corr( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws
 
 // 2D shortcut: vertices ordered CCW, cut_planes(k,:) = edge k→(k+1)%nb invariant
 template<int ct_dim,class Arch,class TF,class TI>
-void cut_2d( Cell<ct_dim,Arch,TF,TI> &cell, const auto &cut_dir, auto cut_dot, SI cut_id, CutWorkspace<Arch,TF,TI> &ws ) {
-    const PI nb = cell.nb_vertices();
+void cut_2d( Cell<ct_dim,Arch,TF,TI> &cell, const auto &cut_dir, auto cut_dot, SI cut_id, CutWorkspace<Arch,TF,TI> &ws, PI nb_out ) {
+    const SI old_nb_vertices = cell.nb_vertices;
 
-    // find int→out (n0) and out→int (n2) transitions
-    PI n0 = 0, n2 = 0;
-    for ( PI k = 0; k < nb; ++k ) {
-        if ( ws.sps[ k ] <= 0 && ws.sps[ ( k + 1 ) % nb ] > 0 ) n0 = k;
-        if ( ws.sps[ k ] >  0 && ws.sps[ ( k + 1 ) % nb ] <= 0 ) n2 = k;
-    }
-    const PI n1 = ( n0 + 1 ) % nb;
-    const PI n3 = ( n2 + 1 ) % nb;
-
-    // compute new vertex positions
-    const TF s0 = ws.sps[ n0 ], s1 = ws.sps[ n1 ], s2 = ws.sps[ n2 ], s3 = ws.sps[ n3 ];
-    TF nv1_pos[ 2 ], nv2_pos[ 2 ];
-    for ( PI d = 0; d < 2; ++d ) {
-        nv1_pos[ d ] = cell.vertex_positions( n0, d ) - s0 / ( s1 - s0 ) * ( cell.vertex_positions( n1, d ) - cell.vertex_positions( n0, d ) );
-        nv2_pos[ d ] = cell.vertex_positions( n2, d ) - s2 / ( s3 - s2 ) * ( cell.vertex_positions( n3, d ) - cell.vertex_positions( n2, d ) );
-    }
-
-    // save NC and cut_n2 plane data before any writes (n2 may alias a write target)
-    TF n2_plane[ 3 ];
-    for ( PI d = 0; d < 3; ++d ) {
-        n2_plane[ d ] = cell.cut_planes( n2, d );
-    }
-    const SI nc_id_val = cut_id;
-    const SI n2_id_val = cell.cut_ids( n2 );
-
-    // copy vertex_positions and cut_planes/cut_ids together
-    auto copy_vc = [&]( PI dst, PI src ) {
+    // helper to copy vertex_positions and cut_planes/cut_ids together
+    auto copy_vertex_data = [&]( PI dst, PI src ) {
         for ( PI d = 0; d < 2; ++d )
             cell.vertex_positions( dst, d ) = cell.vertex_positions( src, d );
+    };
+    auto copy_cut_data = [&]( PI dst, PI src ) {
         for ( PI d = 0; d < 3; ++d )
             cell.cut_planes( dst, d ) = cell.cut_planes( src, d );
         cell.cut_ids( dst ) = cell.cut_ids( src );
     };
+    auto copy_vertex_and_cut_data = [&]( PI dst, PI src ) {
+        copy_vertex_data( dst, src );
+        copy_cut_data( dst, src );
+    };
 
-    if ( n0 < n3 ) {
-        // non-wrapping: new = [0..n0, nv1, nv2, n3..nb-1]
-        //               cuts = [0..n0, NC, cut_n2, n3..nb-1]
-        const PI nb_after  = nb - n3;
-        const PI dst_after = n0 + 3;
-        if ( n3 > dst_after )
-            for ( PI k = 0; k < nb_after; ++k )
-                copy_vc( dst_after + k, n3 + k );
-        else if ( n3 < dst_after )
-            for ( PI k = nb_after; k-- > 0; )
-                copy_vc( dst_after + k, n3 + k );
+    auto ext = [&]( PI num_vertex ) {
+        return ws.sps[ num_vertex ] > 0;
+    };
 
-        for ( PI d = 0; d < 2; ++d )
-            cell.vertex_positions( n0 + 1, d ) = nv1_pos[ d ];
-        for ( PI d = 0; d < 2; ++d )
-            cell.cut_planes( n0 + 1, d ) = cut_dir[ d ];
-        cell.cut_planes( n0 + 1, 2 ) = cut_dot;
-        cell.cut_ids( n0 + 1 ) = nc_id_val;
-        for ( PI d = 0; d < 2; ++d )
-            cell.vertex_positions( n0 + 2, d ) = nv2_pos[ d ];
-        for ( PI d = 0; d < 3; ++d )
-            cell.cut_planes( n0 + 2, d ) = n2_plane[ d ];
-        cell.cut_ids( n0 + 2 ) = n2_id_val;
+    // need to add a vertex
+    if ( nb_out == 1 ) {
+        const SI n1 = index( ws.sps, []( TF sp ) { return sp > 0; } );
+        const SI n0 = ( n1 + old_nb_vertices - 1 ) % old_nb_vertices;
+        const SI n2 = ( n1 + 1 ) % old_nb_vertices;
 
-        const PI new_nb = n0 + 3 + nb_after;
-        cell.nb_vertices() = new_nb;
-        cell.nb_cuts() = new_nb;
-    } else {
-        // wrapping: new = [nv2, n3..n0, nv1]
-        //           cuts = [cut_n2, n3..n0, NC]
-        const PI nb_interior = n0 - n3 + 1;
-        // n3==0 → right shift → iterate backward to avoid overlap
-        if ( n3 > 0 )
-            for ( PI k = 0; k < nb_interior; ++k )
-                copy_vc( 1 + k, n3 + k );
-        else
-            for ( PI k = nb_interior; k-- > 0; )
-                copy_vc( 1 + k, k );
+        // compute new vertex positions
+        const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ];
+        const TF d01 = sp0 / ( sp1 - sp0 );
+        const TF d12 = sp1 / ( sp2 - sp1 );
+        TF p01[ 2 ], p12[ 2 ];
+        for ( PI d = 0; d < 2; ++d ) {
+            const TF p0 = cell.vertex_positions( n0, d );
+            const TF p1 = cell.vertex_positions( n1, d );
+            const TF p2 = cell.vertex_positions( n2, d );
+            p01[ d ] = p0 - d01 * ( p1 - p0 );
+            p12[ d ] = p1 - d12 * ( p2 - p1 );
+        }
 
-        for ( PI d = 0; d < 2; ++d )
-            cell.vertex_positions( 0, d ) = nv2_pos[ d ];
-        for ( PI d = 0; d < 3; ++d )
-            cell.cut_planes( 0, d ) = n2_plane[ d ];
-        cell.cut_ids( 0 ) = n2_id_val;
-        for ( PI d = 0; d < 2; ++d )
-            cell.vertex_positions( nb_interior + 1, d ) = nv1_pos[ d ];
-        for ( PI d = 0; d < 2; ++d )
-            cell.cut_planes( nb_interior + 1, d ) = cut_dir[ d ];
-        cell.cut_planes( nb_interior + 1, 2 ) = cut_dot;
-        cell.cut_ids( nb_interior + 1 ) = nc_id_val;
+        // get room for the new point and the new cut
+        cell.nb_vertices = old_nb_vertices + 1;
+        cell.nb_edges = old_nb_vertices + 1;
+        cell.nb_cuts = old_nb_vertices + 1;
+        for( SI nn = old_nb_vertices; --nn > n1; )
+            copy_vertex_and_cut_data( nn + 1, nn );
+        copy_cut_data( n1 + 1, n1 );
 
-        const PI new_nb = nb_interior + 2;
-        cell.nb_vertices() = new_nb;
-        cell.nb_cuts() = new_nb;
+        // set data for the new point and the new cut
+        for ( PI d = 0; d < 2; ++d ) {
+            cell.vertex_positions( n1 + 0, d ) = p01[ d ];
+            cell.vertex_positions( n1 + 1, d ) = p12[ d ];
+            cell.cut_planes( n1, d ) = cut_dir[ d ];
+        }
+        cell.cut_planes( n1, 2 ) = cut_dot;
+        cell.cut_ids[ n1 ] = cut_id;
+        return;
     }
 
-    const PI new_nb = cell.nb_vertices();
-    cell.nb_edges() = new_nb;
+    // we stay on the same number of vertices
+    if ( nb_out == 2 ) {
+        const SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
+        const SI n1 = ( n0 + 1 ) % old_nb_vertices;
+        const SI n2 = ( n0 + 2 ) % old_nb_vertices;
+        const SI n3 = ( n0 + 3 ) % old_nb_vertices;
+
+        // compute new vertex positions
+        const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ], sp3 = ws.sps[ n3 ];
+        const TF d01 = sp0 / ( sp1 - sp0 );
+        const TF d23 = sp2 / ( sp3 - sp2 );
+        TF p01[ 2 ], p23[ 2 ];
+        for ( PI d = 0; d < 2; ++d ) {
+            const TF p0 = cell.vertex_positions( n0, d );
+            const TF p1 = cell.vertex_positions( n1, d );
+            const TF p2 = cell.vertex_positions( n2, d );
+            const TF p3 = cell.vertex_positions( n3, d );
+            p01[ d ] = p0 - d01 * ( p1 - p0 );
+            p23[ d ] = p2 - d23 * ( p3 - p2 );
+        }
+
+        // set data for the new point and the new cut
+        for ( PI d = 0; d < 2; ++d ) {
+            cell.vertex_positions( n1, d ) = p01[ d ];
+            cell.vertex_positions( n2, d ) = p23[ d ];
+            cell.cut_planes( n1, d ) = cut_dir[ d ];
+        }
+        cell.cut_planes( n1, 2 ) = cut_dot;
+        cell.cut_ids[ n1 ] = cut_id;
+        return;
+    }
+
+    SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
+    SI n1 = ( n0 + 1 ) % old_nb_vertices;
+    SI n2 = index( [&]( SI n2 ) { return ext( n2 ) && ! ext( ( n2 + 1 ) % old_nb_vertices ); } );
+    SI n3 = ( n2 + 1 ) % old_nb_vertices;
+
+    // compute new vertex positions
+    const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ], sp3 = ws.sps[ n3 ];
+    const TF d01 = sp0 / ( sp1 - sp0 );
+    const TF d23 = sp2 / ( sp3 - sp2 );
+    TF p01[ 2 ], p23[ 2 ];
+    for ( PI d = 0; d < 2; ++d ) {
+        const TF p0 = cell.vertex_positions( n0, d );
+        const TF p1 = cell.vertex_positions( n1, d );
+        const TF p2 = cell.vertex_positions( n2, d );
+        const TF p3 = cell.vertex_positions( n3, d );
+        p01[ d ] = p0 - d01 * ( p1 - p0 );
+        p23[ d ] = p2 - d23 * ( p3 - p2 );
+    }
+
+    // remove intermediate points
+    if ( n1 < n2 ) {
+        const PI nb_to_remove = n2 - ( n1 + 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
+        cell.nb_vertices = nb_new_vertices;
+        cell.nb_edges = nb_new_vertices;
+        cell.nb_cuts = nb_new_vertices;
+
+        copy_cut_data( n2 - nb_to_remove, n2 );
+        for( SI nn = n2 + 1; nn < old_nb_vertices; ++nn )
+            copy_vertex_and_cut_data( nn - nb_to_remove, nn );
+
+        // set data for the new point and the new cut
+        n2 = n1 + 1;
+        for ( PI d = 0; d < 2; ++d ) {
+            cell.vertex_positions( n1, d ) = p01[ d ];
+            cell.vertex_positions( n2, d ) = p23[ d ];
+            cell.cut_planes( n1, d ) = cut_dir[ d ];
+        }
+        cell.cut_planes( n1, 2 ) = cut_dot;
+        cell.cut_ids[ n1 ] = cut_id;
+    } else {
+        const PI nb_to_remove = n2 + ( old_nb_vertices - n1 - 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
+        cell.nb_vertices = nb_new_vertices;
+        cell.nb_edges = nb_new_vertices;
+        cell.nb_cuts = nb_new_vertices;
+
+        if ( n2 ) {
+            for( SI nn = n2; nn <= n1; ++nn )
+                copy_vertex_and_cut_data( nn - n2, nn );
+            n0 -= n2;
+            n1 -= n2;
+            n2 = 0;
+            n3 = 1;
+        }
+
+        // set data for the new point and the new cut
+        for ( PI d = 0; d < 2; ++d ) {
+            cell.vertex_positions( n1, d ) = p01[ d ];
+            cell.vertex_positions( n2, d ) = p23[ d ];
+            cell.cut_planes( n1, d ) = cut_dir[ d ];
+        }
+        cell.cut_planes( n1, 2 ) = cut_dot;
+        cell.cut_ids[ n1 ] = cut_id;
+    }
 }
 
-void clear_cell( auto &cell, PI dim ) {
+void clear_cell( auto &cell ) {
     cell.is_fully_closed() = 1;
     cell.nb_vertices() = 0;
     cell.nb_edges() = 0;
@@ -294,28 +357,138 @@ PI register_the_new_cut( auto &cell, PI dim, const auto &cut_dir, auto cut_dot, 
     return res;
 }
 
+// grow_infinite_cuts: parametrise by a scalar s such that INFINITE cut i gains s * norm_2( n_i )
+// added to its offset (uniform spatial growth). sp(s) = cut_dir · v(s) - cut_dot is linear in s;
+// evaluate at s=0 and s=1 via SimpleSquareMatrix::solve_ge. For each vertex with sp(0)<0 and
+// sp(1)>0 the crossing is at s* = -sp(0)/(sp(1)-sp(0)). Apply s_grow = max(s*) to all INFINITE cuts.
+template<int ct_dim,class Arch,class TF,class TI>
+void grow_infinite_cuts( Cell<ct_dim,Arch,TF,TI> &cell, const auto &cut_dir, auto cut_dot ) {
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
+
+    // In 2D: vertex v is at intersection of cut (v-1+nb)%nb and cut v.
+    // In nD: vertex v stores its dim adjacent cut indices in vertex_indices(v, 0..dim-1).
+    auto get_cut_inds = [&]( PI v, PI *out ) {
+        if ( dim == 2 ) {
+            out[ 0 ] = ( v + nb_vertices - 1 ) % nb_vertices;
+            out[ 1 ] = v;
+        } else {
+            for ( PI d = 0; d < dim; ++d )
+                out[ d ] = cell.vertex_indices( v, d );
+        }
+    };
+
+    auto norm_dir = [&]( PI num_cut ) {
+        auto n = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI d ) { return TF( cell.cut_planes( num_cut, d ) ); } );
+        return norm_2( n );
+    };
+
+    TF s_grow = std::numeric_limits<TF>::max();
+    bool need_to_grow = false;
+    for ( PI v = 0; v < nb_vertices; ++v ) {
+        PI ci[ ct_dim ];
+        get_cut_inds( v, ci );
+
+        bool any_inf = false;
+        for ( PI d = 0; d < dim; ++d )
+            any_inf |= ( cell.cut_ids( ci[ d ] ) == CellBoundary::INFINITE );
+        if ( ! any_inf )
+            continue;
+
+        TF sp0 = -cut_dot;
+        for ( PI d = 0; d < dim; ++d )
+            sp0 += cut_dir[ d ] * cell.vertex_positions( v, d );
+
+        // Solve M * v1 = b1 where b1[i] = b[i] + norm_2( n_i ) for INFINITE cuts (s = 1)
+        auto M  = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
+            return TF( cell.cut_planes( ci[ r ], c ) );
+        } );
+        auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) {
+            TF val = cell.cut_planes( ci[ i ], dim );
+            if ( cell.cut_ids( ci[ i ] ) == CellBoundary::INFINITE )
+                val += norm_dir( ci[ i ] );
+            return val;
+        } );
+        const auto v1 = M.solve_ge( V );
+
+        TF sp1 = -cut_dot;
+        for ( PI d = 0; d < dim; ++d )
+            sp1 += cut_dir[ d ] * v1[ d ];
+
+        // if it can cross 0
+        const TF ds = sp1 - sp0;
+        if ( ds && ( sp0 > 0 ) != ( ds > 0 )  ) {
+            const TF s_trial = - sp0 / ( sp1 - sp0 );
+            if ( s_grow > s_trial )
+                s_grow = s_trial;
+            need_to_grow = true;
+            break;
+        }
+    }
+
+    if ( ! need_to_grow )
+        return;
+
+    s_grow += 1;
+
+    // add s_grow * norm_2( n_c ) to each INFINITE cut's offset
+    for ( PI c = 0; c < cell.nb_cuts(); ++c )
+        if ( cell.cut_ids( c ) == CellBoundary::INFINITE )
+            cell.cut_planes( c, dim ) += s_grow * norm_dir( c );
+
+    // for ( PI c = 0; c < nb_vertices; ++c )
+    //     P( DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cell.vertex_positions( c, i ); } ) );
+
+    // recompute vertex positions for all vertices with any INFINITE adjacent cut
+    for ( PI v = 0; v < nb_vertices; ++v ) {
+        PI ci[ ct_dim ];
+        get_cut_inds( v, ci );
+
+        bool any_inf = false;
+        for ( PI d = 0; d < dim; ++d )
+            any_inf |= ( cell.cut_ids( ci[ d ] ) == CellBoundary::INFINITE );
+        if ( ! any_inf )
+            continue;
+
+        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) { return cell.cut_planes( ci[ r ], c ); } );
+        auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cell.cut_planes( ci[ i ], dim ); } );
+        const auto pos = M.solve_ge( V );
+
+        for ( PI d = 0; d < dim; ++d )
+            cell.vertex_positions( v, d ) = pos[ d ];
+    }
+
+    // for ( PI c = 0; c < nb_vertices; ++c )
+    //     P( DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cell.vertex_positions( c, i ); } ) );
+}
+
 } // namespace sdot::_cut_detail
 
 namespace sdot {
 
 template<int ct_dim,class Arch,class TF,class TI>
-void cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
+void _cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
     const PI nb_vertices = cell.nb_vertices();
     const PI dim = cell.dim();
 
-    const PI nb_out = _cut_detail::scalar_products( cell, cut_dir, cut_dot, ws );
+    PI nb_out = _cut_detail::scalar_products( cell, cut_dir, cut_dot, ws );
 
-    // no change -> do nothing
+    // if nothing or everything is cut and the cell has infinite boundaries,
+    // grow them so the cut has its correct effect, then recompute
+    if ( ! cell.is_fully_closed() && ( nb_out == nb_vertices || nb_out == 0 ) ) {
+        _cut_detail::grow_infinite_cuts( cell, cut_dir, cut_dot );
+        nb_out = _cut_detail::scalar_products( cell, cut_dir, cut_dot, ws );
+    }
+
     if ( nb_out == 0 )
         return;
 
-    // everything is outside
     if ( nb_out == nb_vertices )
-        return _cut_detail::clear_cell( cell, dim );
+        return _cut_detail::clear_cell( cell );
 
     // 2D shortcut: vertices ordered CCW, cut_planes(k,:) = edge k→(k+1)%nb invariant maintained by cut_2d
     if ( dim == 2 )
-        return _cut_detail::cut_2d( cell, cut_dir, cut_dot, cut_id, ws );
+        return _cut_detail::cut_2d( cell, cut_dir, cut_dot, cut_id, ws, nb_out );
 
     // else, store the new cut
     const PI new_cut_index = _cut_detail::register_the_new_cut( cell, dim, cut_dir, cut_dot, cut_id );
@@ -333,6 +506,66 @@ void cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const aut
     // remove unused cuts, ws.corr = cut old->new; apply to vertex_indices and edge cut indices
     _cut_detail::remove_unused_cuts( cell, ws );
     _cut_detail::apply_cut_corr( cell, ws );
+}
+
+template<int ct_dim,class Arch,class TF,class TI>
+void disp_cell( const Cell<ct_dim,Arch,TF,TI> &cell ) {
+    P( cell.nb_vertices() );
+    for( PI i = 0; i < cell.nb_vertices(); ++i ) {
+        auto pos = DsVec<TF,ct_dim,Arch>::with_func( 2, [&]( PI d ) { return cell.vertex_positions( i, d ); } );
+        auto cut = DsVec<TF,ct_dim+1,Arch>::with_func( 3, [&]( PI d ) { return cell.cut_planes( i, d ); } );
+        P( pos, cut );
+    }
+}
+
+template<int ct_dim,class Arch,class TF,class TI>
+void check_consistency( const Cell<ct_dim,Arch,TF,TI> &cell ) {
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
+
+    auto get_cut_inds = [&]( PI v, PI *out ) {
+        if ( dim == 2 ) {
+            out[ 0 ] = ( v + nb_vertices - 1 ) % nb_vertices;
+            out[ 1 ] = v;
+        } else {
+            for ( PI d = 0; d < dim; ++d )
+                out[ d ] = cell.vertex_indices( v, d );
+        }
+    };
+
+    for( PI v = 0; v < cell.nb_vertices(); ++v ) {
+        PI ci[ ct_dim ];
+        get_cut_inds( v, ci );
+
+        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) { return cell.cut_planes( ci[ r ], c ); } );
+        auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cell.cut_planes( ci[ i ], dim ); } );
+        const auto pos = M.solve_ge( V );
+
+        for ( PI d = 0; d < dim; ++d )
+            P( cell.vertex_positions( v, d ), pos[ d ] );
+    }
+}
+
+template<int ct_dim,class Arch,class TF,class TI>
+void cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
+    // disp_cell( cell );
+    // check_consistency( cell );
+
+    // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 0 ), 0.5, 1 );
+    // disp_cell( cell );
+    // check_consistency( cell );
+
+    // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 0 ), 0.3, 2 );
+    // disp_cell( cell );
+    // check_consistency( cell );
+
+    // // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 1 ), 0.1, 3 );
+    // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), -1, +1 ), -0.25, 3 );
+    // disp_cell( cell );
+    // check_consistency( cell );
+
+    // exit( 0 );
+    _cut( cell, ws, cut_dir, cut_dot, cut_id );
 }
 
 } // namespace sdot

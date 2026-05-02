@@ -2,10 +2,12 @@ import numpy
 import sdot
 
 def test_bsp():
-    n = 20
-    d = 3
+    n = 16
+    d = 2
 
-    positions = numpy.random.random( [ n, d ] ) * 0.5
+    positions = numpy.random.random( [ n, d ] ) * 1.5
+    # positions = [ [ 10, 0 ], [ 11, 0 ] ]
+    # positions = [ [ 0, 0 ], [ 1, 0 ] ]
     weights = numpy.full( [ n ], 0 )
 
     pd = sdot.PowerDiagram( positions, weights )

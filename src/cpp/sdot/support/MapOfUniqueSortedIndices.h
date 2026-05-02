@@ -29,9 +29,7 @@ struct MapOfUniqueSortedIndices;
 // Od
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<0,TI,Arch> {
-    using TV = TensorView<TI,0,Arch>;
-
-    /**/ MapOfUniqueSortedIndices( const TV &/* map_items */, auto &/* nb_map_items */, int /* dim */ ) {
+    /**/ MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, int /* dim */, TI /* max_inp_value */ ) {
     }
 
     void reserve_full_capacity() {
@@ -50,7 +48,7 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
 
     void for_each_item( auto &&func ) const {
         if ( value >= offset )
-            func( value - offset );
+            func( DsVec<TI,0,Arch>( Values() ), value - offset );
     }
 
     TI offset; ///<

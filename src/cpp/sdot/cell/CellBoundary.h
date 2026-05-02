@@ -1,3 +1,5 @@
+#pragma once
+
 namespace sdot {
 
 namespace CellBoundary {
