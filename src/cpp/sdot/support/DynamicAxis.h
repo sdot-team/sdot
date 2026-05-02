@@ -30,6 +30,8 @@ public:
     PI           post_increment( PI value ) { PI res = sizes(); operator=( res + value ); return res; }
     PI           operator++    () { PI res = sizes() + 1; operator=( res ); return res; }
     PI           operator++    ( int ) { PI res = sizes(); operator=( res + 1 ); return res; }
+    PI           operator--    () { PI res = sizes() - 1; operator=( res ); return res; }
+    PI           operator--    ( int ) { PI res = sizes(); operator=( res - 1 ); return res; }
     DynamicAxis& operator=     ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes() = new_size; return *this; }
     operator     PI            () const { return sizes(); }
 

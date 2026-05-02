@@ -8,6 +8,7 @@
 ///   auto tv = ffi_tv<TF,1>( *res_0 );  // dereference Result<Buffer> first
 
 #include "support/DynamicAxis.h"
+#include "support/P.h"
 #include <xla/ffi/api/ffi.h>
 
 namespace sdot {

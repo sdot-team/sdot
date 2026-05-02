@@ -2,6 +2,7 @@ from .aggregate import aggregate, Workspace, Tensor, Return
 from .distributions.Distribution import Distribution
 from .driver import driver
 
+from .CutWorkspace import BatchOfCutWorkspace
 from .Cell import BatchOfCell
 from .Plotter import Plotter
 from .Norm2 import Norm2
@@ -41,11 +42,18 @@ class PowerDiagram:
             p.plot_mesh( *self.vtk_cell_faces() )
 
     def vtk_cell_faces( self ):
-        reservation = 1 # 10 * self.nb_vertices # TODO better approx
+        reservation = 64 * self.nb_vertices # TODO better approx
 
         return driver.call( "vtk_cell_faces", "sdot/PowerDiagram/vtk_cell_faces.h",
             points = Return( Tensor( "nb_points[]", "dim" ), max_of_nb_points = reservation, dim = self.dim ),
             faces = Return( Tensor( "nb_faces[]" ), max_of_nb_faces = reservation ),
+            cut_workspace = Workspace( BatchOfCutWorkspace,
+                max_of_nb_indices_to_remove = 256,
+                max_of_nb_map_items = 256,
+                max_of_reservation = 256,
+                max_of_nb_links = 512,
+                batch_size = 1,
+            ),
             cells = Workspace( BatchOfCell,
                 max_of_nb_vertices = 50,
                 max_of_nb_edges = 50,

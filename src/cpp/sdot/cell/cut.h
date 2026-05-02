@@ -1,24 +1,25 @@
 #pragma once
 
+#include <sdot/generated_includes/CutWorkspace.h>
 #include "../support/MapOfUniqueSortedIndices.h"
+#include <sdot/generated_includes/Cell.h>
+// #include "CutWorkspace.h"
 #include "../support/P.h"
-#include "CutWorkspace.h"
 #include <numeric>
-#include "Cell.h"
 
 namespace sdot::_cut_detail {
 
-template<class TF, int ct_dim, class Arch>
-PI scalar_products( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+PI scalar_products( const Cell<ct_dim,Arch,TF,TI> &cell, const auto &cut_dir, auto cut_dot, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI nb_vertices = cell.nb_vertices();
     const PI dim = cell.dim();
-    ws.sps.resize( nb_vertices );
+    ws.reservation = nb_vertices;
     PI nb_out = 0;
     for ( PI v = 0; v < nb_vertices; ++v ) {
-        TF sp = cell.vertex_positions( v, 0 ) * cut_plane[ 0 ];
+        TF sp = cell.vertex_positions( v, 0 ) * cut_dir[ 0 ];
         for ( PI d = 1; d < dim; ++d )
-            sp += cell.vertex_positions( v, d ) * cut_plane[ d ];
-        sp -= cut_plane[ dim ];
+            sp += cell.vertex_positions( v, d ) * cut_dir[ d ];
+        sp -= cut_dot;
         ws.sps[ v ] = sp;
         nb_out += ( sp > 0 );
     }
@@ -26,28 +27,37 @@ PI scalar_products( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, CutWorkspa
 }
 
 // generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
-template<class MoveRow, class TF, class Arch>
-void swap_and_pop( std::vector<PI> &indices_to_remove, SI &nb, MoveRow move_row, CutWorkspace<TF,Arch> &ws ) {
-    ws.corr.resize( nb );
-    std::iota( ws.corr.begin(), ws.corr.end(), 0 );
-    while ( ! indices_to_remove.empty() ) {
-        const PI dst = indices_to_remove.back();
+template<class Arch,class TF,class TI>
+void swap_and_pop( CutWorkspace<Arch,TF,TI> &ws, auto &nb, auto &&move_row ) {
+    const PI nb_initial = PI( nb );
+    ws.reservation = nb_initial;
+    std::iota( ws.corr.data(), ws.corr.data() + nb_initial, 0 );
+    while ( ws.nb_indices_to_remove() ) {
+        const PI dst = ws.indices_to_remove[ --ws.nb_indices_to_remove ];
         const PI src = --nb;
-        indices_to_remove.pop_back();
         ws.corr[ src ] = dst;
         if ( dst != src )
             move_row( dst, src );
     }
+    // When a src was itself placed there by a prior step, corr[src]=dst only records
+    // the intermediate hop. Follow each chain to its fixed point (corr[j]==j).
+    // Chains are strictly decreasing (dst<src in every non-trivial step) so no cycles.
+    for ( PI i = 0; i < nb_initial; ++i ) {
+        PI j = ws.corr[ i ];
+        while ( ws.corr[ j ] != j )
+            j = ws.corr[ j ];
+        ws.corr[ i ] = j;
+    }
 }
 
-template<class TF, int ct_dim, class Arch>
-void process_edges( const Cell<TF,ct_dim,Arch> &cell, PI nc, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void process_edges( const Cell<ct_dim,Arch,TF,TI> &cell, PI nc, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI nb_edges = cell.nb_edges();
     const PI dim = cell.dim();
-    MapOfUniqueSortedIndices<PI32,ct_dim-2,Arch> face_map( dim - 2 );
-    face_map.prepare_for( nc, cell.nb_vertices() + nb_edges );
+    MapOfUniqueSortedIndices<ct_dim-2,TI,Arch> face_map( ws.map_items, ws.nb_map_items, dim - 2, nc );
+    face_map.reserve( cell.nb_vertices() + nb_edges );
 
-    ws.indices_to_remove.clear();
+    ws.nb_indices_to_remove = 0;
     for ( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
         const PI n0 = cell.edge_indices( num_edge, 0 );
         const PI n1 = cell.edge_indices( num_edge, 1 );
@@ -57,7 +67,7 @@ void process_edges( const Cell<TF,ct_dim,Arch> &cell, PI nc, CutWorkspace<TF,Arc
         const bool e1 = s1 > 0;
         if ( e0 == e1 ) {
             if ( e0 )
-                ws.indices_to_remove.push_back( num_edge );
+                ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = num_edge;
             continue;
         }
 
@@ -98,64 +108,66 @@ void process_edges( const Cell<TF,ct_dim,Arch> &cell, PI nc, CutWorkspace<TF,Arc
     }
 }
 
-template<class TF, int ct_dim, class Arch>
-void remove_unused_edges( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws ) {
-    _cut_detail::swap_and_pop( ws.indices_to_remove, cell.nb_edges(), [&]( PI dst, PI src ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void remove_unused_edges( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws ) {
+    _cut_detail::swap_and_pop( ws, cell.nb_edges, [&]( PI dst, PI src ) {
         for ( PI d = 0; d < cell.edge_indices.size( 1 ); ++d )
             cell.edge_indices( dst, d ) = std::move( cell.edge_indices( src, d ) );
-    }, ws );
+    } );
 }
 
-template<class TF, int ct_dim, class Arch>
-void remove_unused_vertices( const Cell<TF,ct_dim,Arch> &cell, PI nb_vertices_orig, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void remove_unused_vertices( Cell<ct_dim,Arch,TF,TI> &cell, PI nb_vertices_orig, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI dim = cell.dim();
-    ws.indices_to_remove.clear();
+    ws.nb_indices_to_remove = 0;
     for ( PI n = 0; n < nb_vertices_orig; ++n )
         if ( ws.sps[ n ] > 0 )
-            ws.indices_to_remove.push_back( n );
+            ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = n;
 
     // -> update ws.corr
-    swap_and_pop( ws.indices_to_remove, cell.nb_vertices(), [&]( PI dst, PI src ) {
+    swap_and_pop( ws, cell.nb_vertices, [&]( PI dst, PI src ) {
         for ( PI d = 0; d < dim; ++d )
             cell.vertex_positions( dst, d ) = std::move( cell.vertex_positions( src, d ) );
         for ( PI d = 0; d < dim; ++d )
             cell.vertex_indices( dst, d ) = std::move( cell.vertex_indices( src, d ) );
-    }, ws );
+    } );
 
 }
 
-template<class TF, int ct_dim, class Arch>
-void apply_vertex_corr( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void apply_vertex_corr( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws ) {
     // update edge vertex references
-    for ( PI e = 0; e < cell.nb_edges(); ++e ) {
+    for ( PI e = 0; e < cell.nb_edges; ++e ) {
         cell.edge_indices( e, 0 ) = ws.corr[ cell.edge_indices( e, 0 ) ];
         cell.edge_indices( e, 1 ) = ws.corr[ cell.edge_indices( e, 1 ) ];
     }
 }
 
-template<class TF, int ct_dim, class Arch>
-void remove_unused_cuts( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void remove_unused_cuts( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI dim = cell.dim();
 
-    ws.used_flags.assign( cell.nb_cuts(), false );
+    for( PI i = 0; i < cell.nb_cuts(); ++i )
+       ws.used_flags[ i ] = false;
+
     for ( PI v = 0; v < cell.nb_vertices(); ++v )
         for ( PI d = 0; d < dim; ++d )
             ws.used_flags[ cell.vertex_indices( v, d ) ] = true;
 
-    ws.indices_to_remove.clear();
+    ws.nb_indices_to_remove = 0;
     for ( PI c = 0; c < cell.nb_cuts(); ++c )
         if ( ! ws.used_flags[ c ] )
-            ws.indices_to_remove.push_back( c );
+            ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = c;
 
-    swap_and_pop( ws.indices_to_remove, cell.nb_cuts(), [&]( PI dst, PI src ) {
+    swap_and_pop( ws, cell.nb_cuts, [&]( PI dst, PI src ) {
         for ( PI d = 0; d <= dim; ++d )
             cell.cut_planes( dst, d ) = std::move( cell.cut_planes( src, d ) );
         cell.cut_ids( dst ) = std::move( cell.cut_ids( src ) );
-    }, ws );
+    } );
 }
 
-template<class TF, int ct_dim, class Arch>
-void apply_cut_corr( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void apply_cut_corr( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI dim = cell.dim();
 
     for ( PI v = 0; v < cell.nb_vertices(); ++v )
@@ -168,10 +180,9 @@ void apply_cut_corr( const Cell<TF,ct_dim,Arch> &cell, CutWorkspace<TF,Arch> &ws
 }
 
 // 2D shortcut: vertices ordered CCW, cut_planes(k,:) = edge k→(k+1)%nb invariant
-template<class TF, int ct_dim, class Arch>
-void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void cut_2d( Cell<ct_dim,Arch,TF,TI> &cell, const auto &cut_dir, auto cut_dot, SI cut_id, CutWorkspace<Arch,TF,TI> &ws ) {
     const PI nb = cell.nb_vertices();
-    P( cut_plane );
 
     // find int→out (n0) and out→int (n2) transitions
     PI n0 = 0, n2 = 0;
@@ -221,8 +232,9 @@ void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWor
 
         for ( PI d = 0; d < 2; ++d )
             cell.vertex_positions( n0 + 1, d ) = nv1_pos[ d ];
-        for ( PI d = 0; d < 3; ++d )
-            cell.cut_planes( n0 + 1, d ) = cut_plane[ d ];
+        for ( PI d = 0; d < 2; ++d )
+            cell.cut_planes( n0 + 1, d ) = cut_dir[ d ];
+        cell.cut_planes( n0 + 1, 2 ) = cut_dot;
         cell.cut_ids( n0 + 1 ) = nc_id_val;
         for ( PI d = 0; d < 2; ++d )
             cell.vertex_positions( n0 + 2, d ) = nv2_pos[ d ];
@@ -252,8 +264,9 @@ void cut_2d( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id, CutWor
         cell.cut_ids( 0 ) = n2_id_val;
         for ( PI d = 0; d < 2; ++d )
             cell.vertex_positions( nb_interior + 1, d ) = nv1_pos[ d ];
-        for ( PI d = 0; d < 3; ++d )
-            cell.cut_planes( nb_interior + 1, d ) = cut_plane[ d ];
+        for ( PI d = 0; d < 2; ++d )
+            cell.cut_planes( nb_interior + 1, d ) = cut_dir[ d ];
+        cell.cut_planes( nb_interior + 1, 2 ) = cut_dot;
         cell.cut_ids( nb_interior + 1 ) = nc_id_val;
 
         const PI new_nb = nb_interior + 2;
@@ -272,11 +285,12 @@ void clear_cell( auto &cell, PI dim ) {
     cell.nb_cuts() = 0;
 }
 
-PI register_the_new_cut( auto &cell, PI dim, const auto &cut_plane, SI cut_id ) {
+PI register_the_new_cut( auto &cell, PI dim, const auto &cut_dir, auto cut_dot, SI cut_id ) {
     PI res = cell.nb_cuts()++;
-    for ( PI d = 0; d <= dim; ++d )
-        cell.cut_planes( res, d ) = cut_plane[ d ];
-    cell.cut_ids[ res ] = cut_id;
+    for ( PI d = 0; d < dim; ++d )
+        cell.cut_planes( res, d ) = cut_dir[ d ];
+    cell.cut_planes( res, dim ) = cut_dot;
+    cell.cut_ids( res ) = cut_id;
     return res;
 }
 
@@ -284,12 +298,12 @@ PI register_the_new_cut( auto &cell, PI dim, const auto &cut_plane, SI cut_id ) 
 
 namespace sdot {
 
-template<class TF, int ct_dim, class Arch>
-void cut( const Cell<TF,ct_dim,Arch> &cell, const auto &cut_plane, SI cut_id, CutWorkspace<TF,Arch> &ws ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
     const PI nb_vertices = cell.nb_vertices();
     const PI dim = cell.dim();
 
-    const PI nb_out = _cut_detail::scalar_products( cell, cut_plane, ws );
+    const PI nb_out = _cut_detail::scalar_products( cell, cut_dir, cut_dot, ws );
 
     // no change -> do nothing
     if ( nb_out == 0 )
@@ -301,10 +315,10 @@ void cut( const Cell<TF,ct_dim,Arch> &cell, const auto &cut_plane, SI cut_id, Cu
 
     // 2D shortcut: vertices ordered CCW, cut_planes(k,:) = edge k→(k+1)%nb invariant maintained by cut_2d
     if ( dim == 2 )
-        return _cut_detail::cut_2d( cell, cut_plane, cut_id, ws );
+        return _cut_detail::cut_2d( cell, cut_dir, cut_dot, cut_id, ws );
 
     // else, store the new cut
-    const PI new_cut_index = _cut_detail::register_the_new_cut( cell, dim, cut_plane, cut_id );
+    const PI new_cut_index = _cut_detail::register_the_new_cut( cell, dim, cut_dir, cut_dot, cut_id );
 
     // process edges: add new vertices on cut, collect exterior edges into ws.indices_to_remove
     _cut_detail::process_edges( cell, new_cut_index, ws );
@@ -319,13 +333,6 @@ void cut( const Cell<TF,ct_dim,Arch> &cell, const auto &cut_plane, SI cut_id, Cu
     // remove unused cuts, ws.corr = cut old->new; apply to vertex_indices and edge cut indices
     _cut_detail::remove_unused_cuts( cell, ws );
     _cut_detail::apply_cut_corr( cell, ws );
-}
-
-// overload without workspace: creates a temporary one
-template<class TF, int ct_dim, class Arch>
-void cut( const Cell<TF,ct_dim,Arch> &cell, auto cut_plane, SI cut_id ) {
-    CutWorkspace<TF, Arch> ws;
-    cut( cell, cut_plane, cut_id, ws );
 }
 
 } // namespace sdot

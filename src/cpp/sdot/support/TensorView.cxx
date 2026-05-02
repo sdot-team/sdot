@@ -7,6 +7,7 @@
 #include "TODO.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace sdot {
 

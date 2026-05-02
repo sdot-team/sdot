@@ -270,6 +270,7 @@ class JaxDriver:
                 needed_size = int( u64_output[ fai.index_dynamic_size_exception + 1 ] )
                 faulty_axis_name = "max_of_" + da.name_in_parent
 
+
                 # update output shape
                 made_a_change = False
                 for tensor_output in fai.tensor_outputs:
@@ -278,6 +279,8 @@ class JaxDriver:
                     if faulty_axis_name in tensor_output.ctor_kwargs:
                         old_value = int( tensor_output.ctor_kwargs[ faulty_axis_name ] )
                         new_value = max( needed_size, 2 * old_value )
+
+                        print( "resize", da.name_in_parent, "to", new_value )
 
                         tensor_output.ctor_kwargs[ faulty_axis_name ] = new_value
                         made_a_change = True

@@ -1,27 +1,12 @@
 from sdot.Cell import Cell
 import sdot
-# import faulthandler
-# faulthandler.enable()
 
-# import numpy
-
-# def test_cell_2D():
-#     c = Cell.aligned_simplex( 2 )
-#     c.cut( [ 1, 1 ], 0.5 )
-#     ic( c.vertex_positions )
-#     ic( c.vertex_indices )
-#     ic( c.edge_indices )
-#     ic( c.cut_planes )
-#     ic( c.measure )
-
-def test_cell_2D():
-    # import torch
+def test_cell_2D_basic():
     c = Cell.aligned_hypercube( 2 )
 
     c.cut( [ 1, 0 ], 0.3 )
     ic( c.vertex_positions )
     ic( c.vertex_indices )
-    # ic( c.edge_indices )
     ic( c.cut_planes )
     ic( c.measure )
     # ic( c.faces )
@@ -76,6 +61,6 @@ def test_cell_3D():
     info( c.measure )
 
 if __name__ == "__main__":
-    test_cell_2D_diff()
-    # test_cell_2D()
+    test_cell_2D_basic()
+    # test_cell_2D_diff()
     # test_cell_3D()

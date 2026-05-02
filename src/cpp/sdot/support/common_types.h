@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <array>
+#include <span>
 
 namespace sdot {
 
@@ -58,6 +59,12 @@ T_Up std::ostream &operator<<( std::ostream &os, const std::array<U,p> &v ) {
 }
 
 T_T std::ostream &operator<<( std::ostream &os, const std::vector<T> &p ) {
+    for( sdot::PI i = 0; i < p.size(); ++i )
+        os << ( i ? ", " : "" ) << p[ i ];
+    return os;
+}
+
+T_T std::ostream &operator<<( std::ostream &os, const std::span<T> &p ) {
     for( sdot::PI i = 0; i < p.size(); ++i )
         os << ( i ? ", " : "" ) << p[ i ];
     return os;
