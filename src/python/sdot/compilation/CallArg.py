@@ -50,7 +50,7 @@ class CallArg:
         from .CallArg_Aggregate import CallArg_Aggregate
         return CallArg_Aggregate.factory( call_args, parent, name_in_parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
 
-    def generate_structures( self ):
+    def generate_structures( self, already_visited ):
         pass
 
     def get_includes( self, includes: set ):

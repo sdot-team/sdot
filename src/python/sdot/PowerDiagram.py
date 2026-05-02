@@ -26,9 +26,12 @@ class PowerDiagram:
         nb_vertices : int
         dim : int
 
-    def __init__( self, positions, weights = None, norm = Norm2 ):
+    def __init__( self, positions, weights = None, norm = None ):
         self.positions = positions
         self.weights = weights
+
+        if norm is None:
+            norm = Norm2( driver.empty( [ 0, self.dim + 1, self.dim + 1 ] ) )
         self.norm = norm
 
         self.bsp = Bsp.make_from( self.positions, self.weights )
@@ -50,7 +53,9 @@ class PowerDiagram:
                 batch_size = 1,
                 dim = self.dim
             ),
-            power_diagram = self
+            power_diagram = self,
+
+            grad = False
         )
 
     def newton_dir( self, g: Distribution ):

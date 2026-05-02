@@ -99,6 +99,10 @@ def _make_variant( cls, fields: dict, batch_version : int, unidimensional_versio
 
     res = type( variant_name, parents, {} )
     for name, field in fields.items():
+        # synthetic attribtues
+        # if getattr( field, "represents_a_dynamic_axis", None ):
+        #     continue
+
         # make the new field
         if make_variant := getattr( field, "make_variant", None ):
             field = make_variant( batch_version, unidimensional_version )
@@ -148,9 +152,11 @@ def _setup_distribution_class( cls ):
     # --- __setattr__ --------------------------------------------------------
     if '__setattr__' not in vars( cls ):
         def __setattr__( self, name, value ):
-            field = fields.get( name )
-            if coerce := getattr( field, "coerce", None ):
+            annotation = fields.get( name )
+            if coerce := getattr( annotation, "coerce", None ):
                 value = coerce( value )
+            else:
+                assert isinstance( value, annotation )
             object.__setattr__( self, name, value )
         cls.__setattr__ = __setattr__
 
@@ -245,15 +251,15 @@ def _axis_names_of( cls ) -> set[ str ]:
     return res
 
 def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
-    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ):
-        if isinstance( tensor_field, TensorField ):
-            # if we have a value for this tensor field (to get the shape)
-            tensor_value = distribution.__dict__.get( f'_{ tensor_name }' )
-            if tensor_value is not None:
-                # -> we can try to use the shape
-                res = _axis_count_for( distribution, tensor_field, tensor_value, axis_name, fields_to_avoid )
-                if len( res ):
-                    return res[ 0 ]
+    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
+        if tensor_field in fields_to_avoid:
+            continue
+        if isinstance( tensor_field, Tensor ):
+            for n, expr in enumerate( tensor_field.shape ):
+                if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name:
+                    array = getattr( distribution, tensor_name )
+                    return ( array.shape[ n ] - expr.offset ) // expr.terms[ 0 ].coeff
+
     return None
 
 

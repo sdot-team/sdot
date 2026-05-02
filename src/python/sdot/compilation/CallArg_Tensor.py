@@ -166,12 +166,15 @@ class CallArg_Tensor( CallArg ):
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
             lst = names[ : -1 ] + [ name ]
-            template_args[ f"ct_{ "_".join( lst ) }_value" ] = "int"
+            template_args.add( f"ct_{ "_".join( lst ) }_value", "int", 0 )
 
-        if ( self.dtype is float ) or ( self.dtype is int ) or ( self.dtype is None ):
-            template_args[ self.dtype_name() ] = "typename"
+        if ( self.dtype is float ) or ( self.dtype is None ):
+            template_args.add( self.dtype_name(), "typename", 2 )
 
-        template_args[ "Arch" ] = "typename"
+        if self.dtype is int:
+            template_args.add( self.dtype_name(), "typename", 3 )
+
+        template_args.add( "Arch", "typename", 1 )
 
 
     def cpp_type_name( self, main_list ):

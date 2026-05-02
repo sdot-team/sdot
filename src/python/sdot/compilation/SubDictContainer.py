@@ -31,6 +31,12 @@ class SubDictContainer:
         """
         from ..util.index import index
 
+        # in argument ctor_kwargs ?
+        if ka := getattr( self, "ctor_kwargs", None ):
+            if axis_name in ka:
+                return int( ka[ axis_name ] )
+
+        # in argument ctor_kwargs ?
         axes, ct_axes = {}, {}
         for argument in self.sub_dict.values():
             if ka := getattr( argument, "ctor_kwargs", None ):
@@ -38,6 +44,7 @@ class SubDictContainer:
                     return int( ka[ axis_name ] )
             argument.get_axes( axes, ct_axes )
 
+        # else, make the system using python_value.shape
         tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, True )
 
         num_axis = index( list( axes.keys() ), axis_name )
@@ -50,7 +57,7 @@ class SubDictContainer:
                 res = val.shape[ tensor_axes[ num_case ] ]
                 return ( res - int( vector[ num_case ] ) ) // int( coeff )
 
-        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }'" )
+        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self.python_value }'" )
 
     def axis_variable_equation( self, axes: dict, use_attributes: bool ):
         """
@@ -101,14 +108,16 @@ class SubDictContainer:
 
         return f"first_positive( { ', '.join( cases ) } )"
 
-    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = [] ) -> str:
+    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = [], unbatch_version = None ) -> str:
         """
         Generate the C++ struct declaration for this container's sub_dict.
 
         Appends to `lines` and `includes` in place; also returns the full source as a string
         (includes + lines + end_lines joined by newlines).
         """
-        template_args : dict[ str, str ] = {}
+        from .TemplateArgs import TemplateArgs
+
+        template_args = TemplateArgs()
         ct_axes       : dict[ str, int ] = {}
         axes          : dict             = {}
 
@@ -118,10 +127,24 @@ class SubDictContainer:
             argument.get_axes( axes, ct_axes )
 
         for ct_axis_name in ct_axes:
-            template_args[ f"ct_{ ct_axis_name }_value" ] = "int"
+            template_args.add( f"ct_{ ct_axis_name }_value", "int", 0 )
 
-        lines.append( f"template<{ ', '.join( f'{ t } { n }' for n, t in template_args.items() ) }>" )
+        lines.append( f"template<{ ', '.join( f'{ ta.cpp_type } { n }' for n, ta in template_args ) }>" )
         lines.append( f"struct { base_cpp_name } {{" )
+
+        # row
+        if unbatch_version is not None:
+            includes.add( f"./{ unbatch_version.__name__ }.h" )
+
+            lines.append(  "    auto row( PI index ) const {" )
+            lines.append( f"        return { unbatch_version.__name__ }{{" )
+            for ct_axis_name in ct_axes:
+                lines.append( f"            .ct_{ ct_axis_name } = CtInt<ct_{ ct_axis_name }_value>()," )
+            for name, argument in self.sub_dict.items():
+                lines.append( f"            .{ name } = { name }.row( index )," )
+            lines.append(  "        };" )
+            lines.append(  "    }" )
+
 
         # axis accessor methods
         if axes:
@@ -144,7 +167,14 @@ class SubDictContainer:
         lines.append( "};" )
         lines.extend( end_lines )
 
-        return "\n".join( [ "#pragma once" ] + [ f"#include <{ inc }>" for inc in includes ] + lines )
+        beg_lines = [ "#pragma once", "" ]
+        for inc in includes:
+            if inc.startswith( "." ):
+                beg_lines.append( f"#include \"{ inc }\"" )
+            else:
+                beg_lines.append( f"#include <{ inc }>" )
+
+        return "\n".join( beg_lines + lines )
 
     def assembled_code( self, struct_name: str, beg_line: str ) -> str:
         """

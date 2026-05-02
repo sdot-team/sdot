@@ -160,9 +160,9 @@ class CallArgs( SubDictContainer ):
             if tensor.represents_a_dynamic_axis:
                 lines.append( f"    auto t_{ tensor.ffi_name() } = { tensor.ffi_conversion_code() };" )
 
-    def generate_structures( self ):
+    def generate_structures( self, already_visited ):
         for name, argument in self.sub_dict.items():
-            argument.generate_structures()
+            argument.generate_structures( already_visited )
 
     def make_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
         self.struct_decl( struct_name, includes, lines )

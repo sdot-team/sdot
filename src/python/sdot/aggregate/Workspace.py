@@ -12,6 +12,8 @@ class Workspace:
 
     Works like a Return excepted that call does not output the python object
     """
+
+
     def __init__( self, return_type, *args, **kwargs ):
         self.return_type = return_type
         self.type_kwargs = kwargs
@@ -23,4 +25,4 @@ class Workspace:
             want_output = True,
             has_input = False
         )
-        return CallArg.factory( call_args, parent, name_in_parent, self.return_type, None, new_io_category, ctor_args, ctor_kwargs )
+        return CallArg.factory( call_args, parent, name_in_parent, self.return_type, None, io_category = new_io_category, ctor_args = self.type_args, ctor_kwargs = self.type_kwargs )

@@ -25,9 +25,9 @@ class Cell:
 
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
-        nb_vertices_capacity: int
-        nb_edges_capacity: int
-        nb_cuts_capacity: int
+        max_of_nb_vertices: int
+        max_of_nb_edges: int
+        max_of_nb_cuts: int
         dim: int
 
 

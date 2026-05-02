@@ -429,7 +429,8 @@ class JaxDriver:
 
     def _make_dylib( self, func_name: str, includes: set, fai: CallArgs, module_name: str, make_backward_binding: bool ):
         # generate structs
-        fai.generate_structures()
+        already_visited = set()
+        fai.generate_structures( already_visited )
 
         # include list
         includes.add( "sdot/jax_ffi_wrappers.h" )

@@ -1,14 +1,15 @@
 #include <sdot/generated_includes/PowerDiagram.h>
 #include <sdot/generated_includes/BatchOfCell.h>
 #include "../Cell/for_each_face.h"
+#include "../Cell/CellBoundary.h"
 #include "../support/P.h"
 
 namespace sdot {
 
-template<typename Arch,typename TF,int ct_dim,typename TI>
-void for_each_cell( const PowerDiagram<Arch,TF,ct_dim,TI> &pd, BatchOfCell<Arch,TF,ct_dim,TI> &cells, auto &&func ) {
-    Cell<TF,Arch> cell = cells.row( 0 );
-    make_aligned_simplex( cell, Cell<TF,Arch>::INFINITE, CtInt<ct_dim>() );
+template<int ct_dim,typename Arch,typename TF,typename TI>
+void for_each_cell( const PowerDiagram<ct_dim,ct_dim,ct_dim,Arch,TF,TI> &pd, BatchOfCell<ct_dim,Arch,TF,TI> &cells, auto &&func ) {
+    Cell<ct_dim,Arch,TF,TI> cell = cells.row( 0 );
+    make_aligned_simplex( cell, CellBoundary::INFINITE, CtInt<ct_dim>() );
     func( cell );
 }
 

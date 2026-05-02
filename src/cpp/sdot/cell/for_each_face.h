@@ -7,8 +7,8 @@
 namespace sdot {
 
 /// Call ``func( face )`` for every non-empty face of ``cell``.
-template<typename Arch, typename TF,int ct_dim,typename TI>
-void for_each_face( const BatchOfCell<Arch,TF,ct_dim,TI> &cell, auto &&func ) {
+template<int ct_dim,typename TF,typename Arch,typename TI>
+void for_each_face( const BatchOfCell<ct_dim,TF,Arch,TI> &cell, auto &&func ) {
     // const PI dim        = cell.dim();
     // const PI nb_verts   = cell.nb_vertices();
     // const PI nb_cuts    = cell.nb_cuts();

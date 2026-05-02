@@ -1,4 +1,5 @@
-from .aggregate import aggregate, Tensor, Return
+from .aggregate import aggregate, Tensor
+from .driver import driver
 from typing import TYPE_CHECKING
 
 
@@ -16,5 +17,7 @@ class Norm2:
         nb_transformations : int
         dim : int
 
-    def __init__( self ):
-        self.transformations = None
+    def __init__( self, transformations = None ):
+        if transformations is None:
+            transformations = driver.empty( [ 0, 1, 1 ] )
+        self.transformations = transformations
