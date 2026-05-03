@@ -105,8 +105,7 @@ class SubDictContainer:
 
         return tensor_names, tensor_axes, numpy.array( matrix ), numpy.array( vector )
 
-    @staticmethod
-    def get_axis_variable( axes: dict, axis_name: str, axis_selection, tensor_names, tensor_axes, matrix, vector ) -> str:
+    def get_axis_variable( self, axes: dict, axis_name: str, axis_selection, tensor_names, tensor_axes, matrix, vector ) -> str:
         """
         Return C++ expression that evaluates to the value of `axis_name` at runtime,
         by picking the first tensor whose single non-zero coefficient matches this axis.
@@ -117,6 +116,35 @@ class SubDictContainer:
         from ..util.index import index
 
         cases = []
+
+        # using ct_axes
+        for name, field in self.sub_dict.items():
+            if ct_axes := getattr( field, "ct_axes", None ):
+                if axis_name in ct_axes:
+                    cases.append( f"ct_{ axis_name }_value" )
+
+        # all_the_arguments = [] # e.g. dim in shape( dim )
+        # for term in expr.terms:
+        #     for argument in term.variable.arguments:
+        #         all_the_arguments.append( argument )
+        # if len( all_the_arguments ) == 1:
+        #     argument = all_the_arguments[ 0 ]
+        #     arg_name, arg_offset, arg_coeff = argument.as_single_name()
+        #     if arg_name == axis_name:
+        #         nb_without_argument = 0
+        #         nb_with_argument = 0
+        #         for rpxe in tensor_field.shape:
+        #             has_argument = rpxe.has_argument()
+        #             if has_argument:
+        #                 nb_with_argument += 1
+        #             else:
+        #                 nb_without_argument += 1
+
+        #         if nb_with_argument == 1:
+        #             return ( array.ndim - nb_without_argument - arg_offset ) // arg_coeff
+
+
+        # using shapes
         num_axis = index( list( axes.keys() ), axis_name )
         for num_case in range( len( tensor_names ) ):
             coeff = matrix[ num_case ][ num_axis ]
@@ -132,7 +160,7 @@ class SubDictContainer:
                 op = f"{ op } / { coeff }"
             cases.append( f"{ tensor_names[ num_case ] }.is_valid() ? { op } : -1" )
 
-        return f"first_positive( { ', '.join( cases ) } )"
+        return f"first_positive( \"{ axis_name }\", { ', '.join( cases ) } )"
 
     def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = [], unbatch_version = None ) -> str:
         """
@@ -176,7 +204,7 @@ class SubDictContainer:
         if axes:
             tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, True )
             for axis_name, axis_selection in axes.items():
-                dv = SubDictContainer.get_axis_variable( axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector )
+                dv = self.get_axis_variable( axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector )
                 complete_name = f"max_of_{ axis_name }" if axis_selection is not None else axis_name
                 ct_code = f"if constexpr ( ct_{ axis_name }_value >= 0 ) return ct_{ axis_name }; else " if axis_name in ct_axes else ""
                 lines.append( f"    auto { complete_name }() const {{ { ct_code }return { dv }; }}" )

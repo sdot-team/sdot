@@ -5,7 +5,7 @@ def test_bsp():
     # n = 16
     # d = 2
 
-    image = sdot.PolynomialGrid( values = [ [ [ 1 ], [ 2 ] ] ] )
+    image = sdot.PolynomialGrid( values = [ [ [ 1 ], [ 1 ] ] ] )
     info( image.mass() )
 
     # positions = numpy.random.random( [ n, d ] ) * 1.5

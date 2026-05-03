@@ -99,7 +99,7 @@ auto dynamic_axis_mutable( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla
 }
 
 // ------------------- first_positive -------------------
-SI first_positive() { throw std::runtime_error( "no positive value" ); }
-SI first_positive( SI head, auto...tail ) { return head >= 0 ? head : first_positive( tail... ); }
+SI first_positive( const std::string &name ) { return 0; } // throw std::runtime_error( "no positive value for " + name );
+SI first_positive( const std::string &name, SI head, auto...tail ) { return head >= 0 ? head : first_positive( name, tail... ); }
 
 } // namespace sdot

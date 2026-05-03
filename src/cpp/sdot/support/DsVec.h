@@ -89,6 +89,7 @@ public:
 
     friend void  _for_each_in_range      ( const DsVec &beg, const DsVec &end, DsVec &cur, int i, const auto &func ) { if ( i == beg.size() ) { func( cur ); return; } for( T v = beg[ i ]; v < end[ i ]; ++v ) { cur[ i ] = v; _for_each_in_range( beg, end, cur, i + 1, func ); } }
     friend void  for_each_in_range       ( const DsVec &beg, const DsVec &end, auto &&func ) { DsVec cur = beg; _for_each_in_range( beg, end, cur, 0, func ); }
+    friend void  for_each_in_range       ( const DsVec &end, auto &&func ) { DsVec beg( Size(), end.size(), 0 ); for_each_in_range( beg, end, func ); }
 
     #ifdef       USE_ZPP
     using        serialize               = zpp::bits::members<1>;

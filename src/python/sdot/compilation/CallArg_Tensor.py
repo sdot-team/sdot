@@ -81,12 +81,12 @@ class CallArg_Tensor( CallArg ):
 
         # input or mutable -> need an input tensor
         if io_category.has_input:
-            res.validity_input_index = call_args.get_u8_input( [ CallArg_Tensor.is_valid( python_class ) ] )
+            res.validity_input_index = call_args.get_u8_input( [ CallArg_Tensor.is_valid( python_value ) ] )
             res.num_in_input_sub_list = call_args.add_tensor_input( res )
 
         # mutable, return or workspace -> need an output tensor
         if io_category.want_output:
-            res.validity_output_index = call_args.get_u8_input( [ True ] )
+            res.validity_output_index = call_args.get_u8_input( [ 1 ] )
             res.num_in_outputs = call_args.add_tensor_output( res )
 
         #
@@ -99,8 +99,10 @@ class CallArg_Tensor( CallArg ):
         return res
 
     @staticmethod
-    def is_valid( python_class ):
-        return True
+    def is_valid( python_value ):
+        if python_value is None:
+            return 0
+        return 1
 
     @property
     def ffi_value( self ):
@@ -232,7 +234,6 @@ class CallArg_Tensor( CallArg ):
         base = "tensor_view"
         extr = ""
         if self.represents_a_dynamic_axis:
-            from .CallArg_Aggregate import CallArg_Aggregate
             p = self.parent()
 
             axes = {}
@@ -243,7 +244,7 @@ class CallArg_Tensor( CallArg ):
             tensor_names, tensor_axes, matrix, vector = p.axis_variable_equation( axes, False )
             axis_selection = axes[ self.represents_a_dynamic_axis ]
 
-            capa = CallArg_Aggregate.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
+            capa = p.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
             extr = f", { self.num_in_dynamic_axes }, { capa }"
             base = "dynamic_axis"
 
