@@ -28,6 +28,7 @@ struct CellWorker {
     void  apply_vertex_corr     ();
     void  apply_cut_corr        ();
 
+    void  check_if_fully_closed ();
     PI    register_the_new_cut  ( const auto &cut_dir, auto cut_dot, SI cut_id );
     void  grow_infinite_cuts    ( const auto &cut_dir, auto cut_dot );
     PI    scalar_products       ( const auto &cut_dir, auto cut_dot );

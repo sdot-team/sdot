@@ -1,6 +1,5 @@
 from ..compilation.CallArg_Tensor import CallArg_Tensor
 from ..compilation.IoCategory import IoCategory
-from ..util.find import find
 from .AxisExpr import AxisExpr
 from ..driver import driver
 

@@ -26,7 +26,14 @@ class AxisVariable:
     def unidimensional_version( self ):
         arguments = None
         if self.arguments is not None:
-            raise NotImplementedError
+            arguments = []
+            for expr in self.arguments:
+                nexpr = expr.unidimensional_version()
+                if nexpr.always_one:
+                    continue
+                arguments.append( nexpr )
+            if len( arguments ) == 0:
+                arguments = None
 
         selection = None
         if self.selection is not None:

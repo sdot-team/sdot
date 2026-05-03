@@ -1,4 +1,4 @@
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 class Distribution:
     """
@@ -9,17 +9,19 @@ class Distribution:
     is_a_1d_version, and one property per TensorField axis name.
     """
 
-    UnidimensionalBatchVersion : type
-    MultidimensionalVersion    : type
-    UnidimensionalVersion      : type
-    BatchVersion               : type
-    BaseVersion                : type
-    batch_size                 : int
-    dim                        : int
+    if TYPE_CHECKING:
+        UnidimensionalBatchVersion : type
+        MultidimensionalVersion    : type
+        UnidimensionalVersion      : type
+        BatchVersion               : type
+        BaseVersion                : type
+        batch_size                 : int
+        dim                        : int
 
-    def multidimensional_version( self, *_ ) -> Self: ...
-    def unidimensional_version( self, *_ ) -> Self: ...
-    def batch_version( self, *_ ) -> Self: ...
+        def multidimensional_version( self, *_ ) -> Self: ...
+        def unidimensional_version( self, *_ ) -> Self: ...
+        def batch_version( self, *_ ) -> Self: ...
+
 
     @property
     def always_1d( self ) -> bool:

@@ -254,11 +254,63 @@ def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
     for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
         if tensor_field in fields_to_avoid:
             continue
+
         if isinstance( tensor_field, Tensor ):
-            for n, expr in enumerate( tensor_field.shape ):
+            array = getattr( distribution, tensor_name, None )
+            if array is None:
+                continue
+
+            n = 0
+            for expr in tensor_field.shape:
+                # using shape
                 if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name:
-                    array = getattr( distribution, tensor_name )
+                    # if arguments
+                    variable = expr.terms[ 0 ].variable
+                    if variable.arguments:
+                        ndim = 1
+                        for argument in variable.arguments:
+                            name, offset, coeff = argument.as_single_name()
+                            if name is None:
+                                ndim = 0
+                                continue
+                            ac = _axis_count( distribution, name )
+                            if ac is None:
+                                ndim = 0
+                                continue
+                            ndim *= offset + coeff * ac
+                        if ndim == 0:
+                            continue
+
+                        res = []
+                        for i in range( ndim ):
+                            res.append( ( array.shape[ n + i ] - expr.offset ) // expr.terms[ 0 ].coeff )
+                        return res
+
+                    # no arguments
                     return ( array.shape[ n ] - expr.offset ) // expr.terms[ 0 ].coeff
+
+                # using ndim
+                all_the_arguments = [] # e.g. dim in shape( dim )
+                for term in expr.terms:
+                    for argument in term.variable.arguments:
+                        all_the_arguments.append( argument )
+                if len( all_the_arguments ) == 1:
+                    argument = all_the_arguments[ 0 ]
+                    arg_name, arg_offset, arg_coeff = argument.as_single_name()
+                    if arg_name == axis_name:
+                        nb_without_argument = 0
+                        nb_with_argument = 0
+                        for rpxe in tensor_field.shape:
+                            has_argument = rpxe.has_argument()
+                            if has_argument:
+                                nb_with_argument += 1
+                            else:
+                                nb_without_argument += 1
+
+                        if nb_with_argument == 1:
+                            return ( array.ndim - nb_without_argument - arg_offset ) // arg_coeff
+
+                n += expr.ndim( lambda n, _: getattr( distribution, n ) )
 
     return None
 

@@ -1,9 +1,9 @@
 # distributions (1d and batch version are generated after)
+# from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 # from .distributions.PiecewiseConstantGrid import PiecewiseConstantGrid as PiecewiseConstantGrid
 # from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseAffineGrid
-# from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
-# from .distributions.PolynomialGrid import PolynomialGrid as PolynomialGrid
-# from .distributions.SplineGrid import SplineGrid as SplineGrid
+from .distributions.PolynomialGrid import PolynomialGrid as PolynomialGrid
+from .distributions.SplineGrid import SplineGrid as SplineGrid
 
 # base classes
 # from .distributions.BatchOfDistributions import BatchOfDistributions as BatchOfDistributions

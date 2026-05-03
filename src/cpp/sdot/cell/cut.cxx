@@ -41,6 +41,13 @@ UTP TF DTP::cut_dot( PI num_cut ) const {
     return cell.cut_planes( num_cut, dim );
 }
 
+UTP void DTP::check_if_fully_closed() {
+    for( PI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
+        if ( cell.cut_ids[ num_cut ] == CellBoundary::INFINITE )
+            return;
+    cell.is_fully_closed() = true;
+}
+
 UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
     const PI nb_vertices = cell.nb_vertices();
 
@@ -49,6 +56,7 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
     if ( ! cell.is_fully_closed() )
         grow_infinite_cuts( cut_dir, cut_dot );
 
+    //
     PI nb_out = scalar_products( cut_dir, cut_dot );
 
     if ( nb_out == 0 )
@@ -58,25 +66,30 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         return clear_cell();
 
     // 2D shortcut: vertices ordered CCW, cut_planes(k,:) = edge k→(k+1)%nb invariant maintained by cut_2d
-    if ( dim == 2 )
-        return cut_2d( cut_dir, cut_dot, cut_id, nb_out );
+    if ( dim == 2 ) {
+        cut_2d( cut_dir, cut_dot, cut_id, nb_out );
+    } else {
+        // store the new cut
+        const PI new_cut_index = register_the_new_cut( cut_dir, cut_dot, cut_id );
 
-    // else, store the new cut
-    const PI new_cut_index = register_the_new_cut( cut_dir, cut_dot, cut_id );
+        // process edges: add new vertices on cut, collect exterior edges into ws.indices_to_remove
+        process_edges( new_cut_index );
 
-    // process edges: add new vertices on cut, collect exterior edges into ws.indices_to_remove
-    process_edges( new_cut_index );
+        // remove exterior edges (ws.corr unused here)
+        remove_unused_edges();
 
-    // remove exterior edges (ws.corr unused here)
-    remove_unused_edges();
+        // remove exterior vertices, ws.corr = vertex old->new (also updates edge vertex refs)
+        remove_unused_vertices( nb_vertices );
+        apply_vertex_corr();
 
-    // remove exterior vertices, ws.corr = vertex old->new (also updates edge vertex refs)
-    remove_unused_vertices( nb_vertices );
-    apply_vertex_corr();
+        // remove unused cuts, ws.corr = cut old->new; apply to vertex_indices and edge cut indices
+        remove_unused_cuts();
+        apply_cut_corr();
+    }
 
-    // remove unused cuts, ws.corr = cut old->new; apply to vertex_indices and edge cut indices
-    remove_unused_cuts();
-    apply_cut_corr();
+    // check if closed
+    if ( ! cell.is_fully_closed() )
+        check_if_fully_closed();
 }
 
 UTP PI DTP::scalar_products( const auto &cut_dir, auto cut_dot ) {
@@ -459,9 +472,6 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
             break;
         }
     }
-
-    // check to grow enough so that all the new vertices are inside the infinite planes
-
 
     //
     if ( need_to_grow ) {

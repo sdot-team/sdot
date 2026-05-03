@@ -57,8 +57,13 @@ class AxisExpr:
             res.terms.append( nterm )
         return res
 
-    def ndim( self ) -> int:
-        return 1
+    def ndim( self, get_axis_variable ) -> int:
+        res = 1
+        for term in self.terms:
+            if term.variable.arguments:
+                for argument in term.variable.arguments:
+                    res *= argument.value( get_axis_variable, False )
+        return res
 
     def value( self, get_axis_variable, use_dyn_size ):
         res = self.offset
@@ -76,6 +81,17 @@ class AxisExpr:
     def get_axes( self, axes: dict ):
         for term in self.terms:
             axes[ term.variable.name ] = term.variable.selection
+
+    def has_argument( self ):
+        for term in self.terms:
+            if term.variable.arguments:
+                return True
+        return False
+
+    def as_single_name( self ):
+        if len( self.terms ) == 1 and not self.terms[ 0 ].variable.selection and not self.terms[ 0 ].variable.arguments:
+           return self.terms[ 0 ].variable.name, self.offset, self.terms[ 0 ].coeff
+        return None, None, None
 
     def _parse( self, node ):
         match node:
