@@ -12,13 +12,25 @@ namespace sdot {
 
 void vtk_cell_faces( auto &&p ) {
     for_each_cell( p.power_diagram, p.cells, p.cut_workspace, [&]( const auto &cell, PI batch_index ) {
-        for_each_face( cell, p.cut_workspace.row( batch_index ), [&]( const auto &face_indices ) {
+        for_each_face( cell, p.cut_workspace.row( batch_index ), [&]( const auto &face_indices, const auto &face_cuts ) {
+            // we do not display pure infinite faces
+            if ( face_cuts.size() ) {
+                bool no_disp = true;
+                for( PI num_cut : face_cuts )
+                    if ( cell.cut_ids( num_cut ) != CellBoundary::INFINITE )
+                        no_disp = false;
+                if ( no_disp )
+                    return;
+            }
+
+            // add vertices
             PI np = p.nb_points.post_increment( face_indices.size() );
             for( PI i = 0; i < face_indices.size(); ++i ) {
                 for( PI d = 0; d < p.power_diagram.dim(); ++d )
                     p.points( np + i, d ) = cell.vertex_positions( face_indices[ i ], d );
             }
 
+            // add connectivity
             PI nf = p.nb_faces.post_increment( 1 + face_indices.size() );
             p.faces( nf++ ) = face_indices.size();
             for( PI i = 0; i < face_indices.size(); ++i )

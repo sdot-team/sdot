@@ -15,7 +15,7 @@ void for_each_face( const Cell<ct_dim,Arch,TF,TI> &cell, auto workspace, auto &&
     if ( dim == 2 ) {
         std::vector<PI> indices( cell.nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
-        func( indices );
+        func( indices, DsVec<TI,0,Arch>( Values() ) );
         return;
     }
 
@@ -39,7 +39,7 @@ void for_each_face( const Cell<ct_dim,Arch,TF,TI> &cell, auto workspace, auto &&
         }
     }
 
-    face_map.for_each_item( [&]( auto /*face_cut_indices*/, TI index_in_links ) {
+    face_map.for_each_item( [&]( auto face_cut_indices, TI index_in_links ) {
         // reserve some room to store the vertices
         PI nb_vertices = 0;
         for ( TI idx = index_in_links; idx != TI( -1 ); idx = workspace.links[ idx ] )
@@ -79,7 +79,7 @@ void for_each_face( const Cell<ct_dim,Arch,TF,TI> &cell, auto workspace, auto &&
             workspace.links[ scratch + nb_vertices++ ] = vc;
         } while ( vc != vs );
 
-        func( std::span( &workspace.links[ scratch ], nb_vertices - 1 ) );
+        func( std::span( &workspace.links[ scratch ], nb_vertices - 1 ), face_cut_indices );
     } );
 }
 

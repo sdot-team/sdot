@@ -3,7 +3,7 @@ import sdot
 
 def test_bsp():
     n = 16
-    d = 2
+    d = 3
 
     positions = numpy.random.random( [ n, d ] ) * 1.5
     # positions = [ [ 10, 0 ], [ 11, 0 ] ]
