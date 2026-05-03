@@ -9,7 +9,7 @@ namespace sdot {
 #define DTP SimpleSquareMatrix<T,ct_size,Arch>
 
 UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> DTP::without_row_and_col( PI wr, PI wc ) const {
-    SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> res( size() - 1 );
+    SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> res( Size(), size() - 1 );
     for( PI r = 0; r < res.size(); ++r )
         for( PI c = 0; c < res.size(); ++c )
             res( r, c ) = operator()( r + ( r >= wr ), c + ( c >= wc ) );
@@ -148,18 +148,10 @@ UTP DTP DTP::inverse() const {
     return inv;
 }
 
+
 #undef UTP
 #undef DTP
 
 } // namespace sdot
 
 
-template<class T,int dim,class Arch>
-std::ostream &operator<<( std::ostream &os, const sdot::SimpleSquareMatrix<T,dim,Arch> &p ) {
-    for( sdot::PI r = 0; r < p.size(); ++r ) {
-        os << "\n  ";
-        for( sdot::PI c = 0; c < p.size(); ++c )
-            os << ( c ? ", " : "" ) << p( r, c );
-    }
-    return os;
-}

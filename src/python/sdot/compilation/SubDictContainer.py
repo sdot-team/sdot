@@ -83,6 +83,9 @@ class SubDictContainer:
                     res = val.shape[ tensor_axes[ num_case ] ]
                     return ( res - int( vector[ num_case ] ) ) // int( coeff )
 
+        # name = "CallArgs"
+        # if v := getattr( self,  )
+        # infox( axis_name, self )
         raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self }'" )
 
     def axis_variable_equation( self, axes: dict, use_attributes: bool ):
@@ -162,7 +165,7 @@ class SubDictContainer:
 
         return f"first_positive( \"{ axis_name }\", { ', '.join( cases ) } )"
 
-    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = [], unbatch_version = None ) -> str:
+    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = None, unbatch_version = None ) -> str:
         """
         Generate the C++ struct declaration for this container's sub_dict.
 
@@ -170,6 +173,9 @@ class SubDictContainer:
         (includes + lines + end_lines joined by newlines).
         """
         from .TemplateArgs import TemplateArgs
+
+        if end_lines is None:
+            end_lines = []
 
         template_args = TemplateArgs()
         ct_axes       : dict[ str, int ] = {}
@@ -242,8 +248,12 @@ class SubDictContainer:
 
         ct_axes : dict[ str, int ] = {}
         axes : dict = {}
-        for argument in self.sub_dict.values():
+        for name, argument in self.sub_dict.items():
             argument.get_axes( axes, ct_axes )
+
+        # for argument in self.sub_dict.values():
+        #     info( self.sub_dict.keys(), self.sub_dict.values(), ct_axes )
+        # info( self.sub_dict.keys(), self.sub_dict.values(), ct_axes )
 
         for ct_axis_name in ct_axes:
             lines.append( f"{ beg_line }    .ct_{ ct_axis_name } = CtInt<{ self.get_variable_value( ct_axis_name ) }>()," )

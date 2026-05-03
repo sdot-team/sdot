@@ -47,6 +47,7 @@ public:
     HD bool        is_valid          () const; ///< false iff constructed from None/nullopt (_ptr == nullptr)
     HD bool        empty             () const;
     Sizes          sizes             () const;
+    HD PI          shape             ( PI d ) const { return size( d ); }
     Sizes          shape             () const { return sizes(); }
     HD PI          size              ( PI d ) const;
     HD PI          size              () const;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <sdot/generated_includes/CutWorkspace.h>
+#include <sdot/generated_includes/CellWorkspace.h>
 #include <sdot/generated_includes/Cell.h>
 
 namespace sdot {
@@ -43,12 +43,12 @@ struct CellWorker {
     void  cut                   ( const auto &cut_dir, auto cut_dot, SI cut_id );
 
     Cell<ct_dim,Arch,TF,TI>&   cell;
-    CutWorkspace<Arch,TF,TI>&  ws;
+    CellWorkspace<Arch,TF,TI>&  ws;
     const PI                   dim;
 };
 
 template<int ct_dim,class Arch,class TF,class TI>
-void cut( Cell<ct_dim,Arch,TF,TI> &cell, CutWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
+void cut( Cell<ct_dim,Arch,TF,TI> &cell, CellWorkspace<Arch,TF,TI> &ws, const auto &cut_dir, auto cut_dot, SI cut_id ) {
     CellWorker<ct_dim,Arch,TF,TI> cw( cell, ws, cell.dim() );
     cw.cut( cut_dir, cut_dot, cut_id );
 }

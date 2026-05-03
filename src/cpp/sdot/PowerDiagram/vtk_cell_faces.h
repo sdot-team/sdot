@@ -11,8 +11,8 @@ namespace sdot {
 // }
 
 void vtk_cell_faces( auto &&p ) {
-    for_each_cell( p.power_diagram, p.cells, p.cut_workspace, [&]( const auto &cell, PI batch_index ) {
-        for_each_face( cell, p.cut_workspace.row( batch_index ), [&]( const auto &face_indices, const auto &face_cuts ) {
+    for_each_cell( p.power_diagram, p.cells, p.cell_workspace, [&]( const auto &cell, PI batch_index ) {
+        for_each_face( cell, p.cell_workspace.row( batch_index ), [&]( const auto &face_indices, const auto &face_cuts ) {
             // we do not display pure infinite faces
             if ( face_cuts.size() ) {
                 bool no_disp = true;

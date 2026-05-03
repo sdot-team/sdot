@@ -250,7 +250,10 @@ def _axis_names_of( cls ) -> set[ str ]:
             attr.get_axis_names( res )
     return res
 
-def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
+def _axis_count( distribution, axis_name, fields_to_avoid = None ):
+    if fields_to_avoid is None:
+        fields_to_avoid = []
+
     for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
         if tensor_field in fields_to_avoid:
             continue
@@ -292,8 +295,9 @@ def _axis_count( distribution, axis_name, fields_to_avoid = [] ):
                 # using ndim
                 all_the_arguments = [] # e.g. dim in shape( dim )
                 for term in expr.terms:
-                    for argument in term.variable.arguments:
-                        all_the_arguments.append( argument )
+                    if term.variable.arguments:
+                        for argument in term.variable.arguments:
+                            all_the_arguments.append( argument )
                 if len( all_the_arguments ) == 1:
                     argument = all_the_arguments[ 0 ]
                     arg_name, arg_offset, arg_coeff = argument.as_single_name()

@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 
 @aggregate
-class CutWorkspace:
+class CellWorkspace:
     """
 
     """
@@ -24,4 +24,4 @@ class CutWorkspace:
         max_of_nb_links: int
 
 
-BatchOfCutWorkspace = CutWorkspace.BatchVersion
+BatchOfCellWorkspace = CellWorkspace.BatchVersion

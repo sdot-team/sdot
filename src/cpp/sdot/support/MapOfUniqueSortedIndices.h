@@ -61,7 +61,7 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
     using TV = TensorView<TI,1,Arch>;
 
     /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : values( map_items ) {
-        nb_map_items = max_inp_value;
+        offset_in_map_items = nb_map_items.post_increment( max_inp_value );
         next_offset = 1;
         offset = 0;
     }
@@ -83,15 +83,64 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
     }
 
     IntWithOffset<TI> operator[]( const DsVec<TI,1,Arch> &key ) {
-        return { offset, values[ key[ 0 ] ] };
+        return { offset, values[ key[ 0 ] - offset_in_map_items ] };
     }
 
     void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
-            if ( values[ i ] >= offset )
-                func( DsVec<TI,1,Arch>( Values(), i ), values[ i ] - offset );
+            if ( values[ offset_in_map_items + i ] >= offset )
+                func( DsVec<TI,1,Arch>( Values(), i ), values[ offset_in_map_items + i ] - offset );
     }
 
+    TI offset_in_map_items; ///<
+    TI next_offset; ///<
+    TI offset; ///<
+    TV values; ///<
+};
+
+// 2d. TODO: hash table ?
+template<class TI,class Arch>
+struct MapOfUniqueSortedIndices<2,TI,Arch> {
+    using TV = TensorView<TI,1,Arch>;
+
+    /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
+        offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
+        next_offset = 1;
+        offset = 0;
+    }
+
+    void reserve_full_capacity() {
+        next_offset = 1;
+        offset = 1;
+        for( auto &value : values )
+            value = 0;
+    }
+
+    void reserve( TI reservation ) {
+        if ( next_offset == 1 )
+            for( auto &value : values )
+                value = 0;
+
+        offset = next_offset;
+        next_offset += reservation;
+    }
+
+    IntWithOffset<TI> operator[]( const DsVec<TI,2,Arch> &key ) {
+        return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
+    }
+
+    void for_each_item( auto &&func ) const {
+        for( PI i = 0; i < values.size(); ++i ) {
+            for( PI j = 0; j < values.size(); ++j ) {
+                PI k = offset_in_map_items + i * max_inp_value + j;
+                if ( values[ k ] >= offset )
+                    func( DsVec<TI,1,Arch>( Values(), i, j ), values[ k ] - offset );
+            }
+        }
+    }
+
+    TI offset_in_map_items; ///<
+    TI max_inp_value; ///<
     TI next_offset; ///<
     TI offset; ///<
     TV values; ///<

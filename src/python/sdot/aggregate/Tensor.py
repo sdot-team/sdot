@@ -30,14 +30,14 @@ class Tensor:
     dtype : any
     name : str
 
-    def __init__( self, *axis_exprs, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
-        assert isinstance( ct_axes, list )
+    def __init__( self, *axis_exprs, dtype = None, ct_axes = None, represents_a_dynamic_axis = "" ):
+        assert ct_axes is None or isinstance( ct_axes, list )
 
         self.represents_a_dynamic_axis = represents_a_dynamic_axis
         self.comes_from_a_dim_list = False
         self.removed_dim_axes = []
 
-        self.ct_axes = ct_axes
+        self.ct_axes = list( ct_axes ) if ct_axes is not None else []
         self.shape = [ AxisExpr( s ) for s in axis_exprs ]
         self.dtype = dtype
 
@@ -75,9 +75,10 @@ class Tensor:
         res.removed_dim_axes = []
         res.dtype = self.dtype
 
-        res.ct_axes = self.ct_axes
         if unidimensional_version:
             res.ct_axes = [ ct_axis for ct_axis in self.ct_axes if ct_axis != "dim" ]
+        else:
+            res.ct_axes = list( self.ct_axes )
 
         res.shape = []
         if batch_version:

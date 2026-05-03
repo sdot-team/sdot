@@ -54,3 +54,15 @@ class PolynomialGrid( Distribution ):
             grad = False
         )
 
+    def normalized_version( self, **kwargs ):
+        if "mass" in kwargs:
+            target_mass = kwargs[ "mass" ]
+            current_mass = self.mass()
+            if abs( current_mass - target_mass ) > 1e-6 * target_mass:
+                return PolynomialGrid(
+                    values = target_mass / current_mass * self.values,
+                    frame = self.frame,
+                    knots = self.knots
+                )
+
+        return self

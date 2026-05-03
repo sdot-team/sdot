@@ -43,7 +43,9 @@ class CppBinding:
             return output
 
 
-    def __call__( self, func_name, includes: str | list[ str ] = [] ):
-        if isinstance( includes, str ):
+    def __call__( self, func_name, includes: str | list[ str ] | None = None ):
+        if includes is None:
+            includes = []
+        elif isinstance( includes, str ):
             includes = [ includes ]
         return CppBinding.Item( func_name, includes )

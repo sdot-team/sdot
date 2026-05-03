@@ -39,8 +39,11 @@ class CallArg_Tensor( CallArg ):
     num_in_outputs            : int
 
     @staticmethod
-    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = [], represents_a_dynamic_axis = "" ):
+    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = None, represents_a_dynamic_axis = "" ):
         """  """
+        if ct_axes is None:
+            ct_axes = []
+
         if shape is None:
             if python_value is not None:
                 orig = python_value.shape

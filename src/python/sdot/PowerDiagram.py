@@ -2,7 +2,8 @@ from .aggregate import aggregate, Workspace, Tensor, Return
 from .distributions.Distribution import Distribution
 from .driver import driver
 
-from .CutWorkspace import BatchOfCutWorkspace
+from .CellWorkspace import BatchOfCellWorkspace
+from .MatrixTerms import MatrixTerms
 from .Cell import BatchOfCell
 from .Plotter import Plotter
 from .Norm2 import Norm2
@@ -47,7 +48,7 @@ class PowerDiagram:
         return driver.call( "vtk_cell_faces", "sdot/PowerDiagram/vtk_cell_faces.h",
             points = Return( Tensor( "nb_points[]", "dim" ), max_of_nb_points = reservation, dim = self.dim ),
             faces = Return( Tensor( "nb_faces[]" ), max_of_nb_faces = reservation ),
-            cut_workspace = Workspace( BatchOfCutWorkspace,
+            cell_workspace = Workspace( BatchOfCellWorkspace,
                 max_of_nb_indices_to_remove = 256,
                 max_of_nb_map_items = 256,
                 max_of_reservation = 256,
@@ -70,3 +71,35 @@ class PowerDiagram:
         """ On a la pos """
         res = driver.call( "newton_dir", "sdot/PowerDiagram/newton_dir.h", res = Return( Tensor, [ ] ), pd = self )
         info( res )
+
+    def adjust_weights( self, dirac_masses, target_distribution ):
+        new_weights = driver.call( "adjust_weights", "sdot/PowerDiagram/adjust_weights.h",
+            new_weights = Return( Tensor( "nb_vertices" ), nb_vertices = self.nb_vertices ),
+            cell_workspace = Workspace( BatchOfCellWorkspace,
+                max_of_nb_indices_to_remove = 256,
+                max_of_nb_map_items = 256,
+                max_of_reservation = 256,
+                max_of_nb_links = 512,
+                batch_size = 1,
+                # dim = self.dim
+            ),
+            cells = Workspace( BatchOfCell,
+                max_of_nb_vertices = 50,
+                max_of_nb_edges = 50,
+                max_of_nb_cuts = 50,
+                batch_size = 1,
+                dim = self.dim
+            ),
+            matrix_terms = Workspace( MatrixTerms,
+                max_of_nb_matrix_terms = 10 * self.nb_vertices,
+                nb_vector_terms = self.nb_vertices
+            ),
+            target_distribution = target_distribution,
+            dirac_masses = dirac_masses,
+            power_diagram = self,
+
+            grad = False
+        )
+
+        infox( new_weights )
+

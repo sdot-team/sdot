@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../support/RecursiveMapOfUniqueSortedIndices.h"
-#include "Cell.h"
+#include <sdot/generated_includes/Cell.h>
 
 namespace sdot {
 
@@ -49,8 +49,8 @@ void for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI simplex_si
 
 /// Call ``func( simplex )`` for every simplex in a fan triangulation of ``cell``.
 ///
-template<class TF, int ct_dim, class Arch>
-void for_each_simplex( const Cell<TF,ct_dim,Arch> &cell, auto &&func ) {
+template<int ct_dim,class Arch,class TF,class TI>
+void for_each_simplex( const Cell<ct_dim,Arch,TF,TI> &cell, auto &&cell_workspace, auto &&func ) {
     constexpr int ct_simplex = ct_dim >= 0 ? ct_dim + 1 : -1;
     const PI nb_vertices = cell.nb_vertices();
     const PI dim = cell.dim();
@@ -59,7 +59,9 @@ void for_each_simplex( const Cell<TF,ct_dim,Arch> &cell, auto &&func ) {
         return;
 
     // make a list
-    RecursiveMapOfUniqueSortedIndices<PI32,ct_dim,Arch> item_map( dim );
+    RecursiveMapOfUniqueSortedIndices<ct_dim,TI,Arch> item_map( cell_workspace.map_items, cell_workspace.nb_map_items, dim, cell.nb_cuts );
+    item_map.reserve( cell.nb_vertices );
+
     DsVec<PI,ct_simplex,Arch> simplex( Size(), dim + 1 );
     for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
         DsVec<PI32,ct_dim,Arch> cut_indices( cell.vertex_indices.row( num_vertex ) );
