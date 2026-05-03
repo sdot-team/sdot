@@ -41,6 +41,16 @@ class Tensor:
         self.shape = [ AxisExpr( s ) for s in axis_exprs ]
         self.dtype = dtype
 
+        # add argument variables in ct_axes
+        for expr in self.shape:
+            for term in expr.terms:
+                if term.variable.arguments:
+                    for argument in term.variable.arguments:
+                        for aterm in argument.terms:
+                            if aterm.variable.name not in self.ct_axes:
+                                self.ct_axes.append( aterm.variable.name )
+
+
     def __call__( self, array = None, dtype = None ):
         if array is None:
             return None

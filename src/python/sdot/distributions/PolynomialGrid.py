@@ -1,6 +1,6 @@
-from ..aggregate import Tensor, aggregate
-from ..driver import driver
+from ..aggregate import Tensor, Return, aggregate
 from .Distribution import Distribution
+from ..driver import driver
 from typing import TYPE_CHECKING
 
 # from itertools import product as iproduct
@@ -46,4 +46,11 @@ class PolynomialGrid( Distribution ):
     @staticmethod
     def nb_coeffs_for( dim, order ):
         return ( order + 1 ) ** dim
+
+    def mass( self ):
+        return driver.call( "mass_of_polynomial_grid", "sdot/Distribution/mass_of_polynomial_grid.h",
+            res = Return( Tensor() ),
+            polynomial_grid = self,
+            grad = False
+        )
 

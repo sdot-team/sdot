@@ -141,17 +141,11 @@ class CallArg_Tensor( CallArg ):
         if is_a_dyn_size and name in self.parent().sub_dict:
             return self.parent().sub_dict[ name ].python_value.item()
 
-        # if use_dyn_size:
-        #     dt = outputs[ num_in_outputs ]
-        #     return dt.item()
-
+        #
+        if enclosing := self.parent().python_value:
+            return getattr( enclosing, name )
 
         raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }'" )
-        # res = getattr( self.parent(), name )
-        # if use_dyn_size:
-        #     res = res.item()
-        # return res
-
 
     def shape_values( self, use_dyn_size = False ):
         res = []
@@ -163,7 +157,7 @@ class CallArg_Tensor( CallArg ):
     def ndim( self ) -> int:
         res = 0
         for s in self.shape:
-            res += s.ndim()
+            res += s.ndim( self.get_axis_variable )
         return res
 
     def signature( self ) -> str:

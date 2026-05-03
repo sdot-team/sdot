@@ -9,7 +9,7 @@ class SplineGrid( Distribution ):
     """
     values      : tensor[ x, y, z, ... ]
     frame       : tensor[ nb_vec, dim ] — canonical frame by default
-    knots       : [ tensor[ num_point ] for axis ] — linspace(0,1) by default
+    knots       : [ tensor[ num_point ] for each axis ] — `range( shape( axis_size ) )` by default
     continuity  : int — minimum continuity order (default 0 = C0)
 
     continuity=0  →  Q_1 bilinear per cell, local Vandermonde solve

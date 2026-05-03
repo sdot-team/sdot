@@ -1,5 +1,6 @@
 #pragma once
 
+#include <iostream> // IWYU pragma: export
 #include <assert.h>
 
 #define ERROR( MSG ) ( [&]() { std::cerr << __FILE__ << ":" << __LINE__ << ": ERROR: " << MSG << "\n"; exit( 1 ); } )()

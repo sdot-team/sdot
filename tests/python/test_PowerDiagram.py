@@ -5,11 +5,8 @@ def test_bsp():
     # n = 16
     # d = 2
 
-    image = sdot.PolynomialGrid( values = [ [ [ 1,0,0,0 ], [ 2,0,0,0 ] ] ], knots = [], frame = [] )
-    info( image.dim )
-    info( image.shape )
-    info( image.nb_coeffs )
-    # info( image.max_of_nb_knots )
+    image = sdot.PolynomialGrid( values = [ [ [ 1 ], [ 2 ] ] ] )
+    info( image.mass() )
 
     # positions = numpy.random.random( [ n, d ] ) * 1.5
     # # positions = [ [ 10, 0 ], [ 11, 0 ] ]

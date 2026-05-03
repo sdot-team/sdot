@@ -37,14 +37,39 @@ class SubDictContainer:
                 return int( ka[ axis_name ] )
 
         # in argument ctor_kwargs ?
-        axes, ct_axes = {}, {}
         for argument in self.sub_dict.values():
             if ka := getattr( argument, "ctor_kwargs", None ):
                 if axis_name in ka:
                     return int( ka[ axis_name ] )
-            argument.get_axes( axes, ct_axes )
+
+        # in argument properties ?
+        axes, ct_axes = {}, {}
+        for argument in self.sub_dict.values():
+            python_value = getattr( argument, "python_value", None )
+            if python_value is not None:
+                value = getattr( python_value, axis_name, None )
+                if value is not None:
+                    return int( value )
+
+        # in self properties ?
+        python_value = getattr( self, "python_value", None )
+        if python_value is not None:
+            value = getattr( python_value, axis_name, None )
+            if value is not None:
+                return int( value )
+
+        # property
+        # if parent := getattr( self, "parent", None ):
+        #     if python_value := getattr( parent(), "python_value", None ):
+        #         v = getattr( python_value, axis_name, None )
+        #         if v is not None:
+        #             return v
 
         # else, make the system using python_value.shape
+        axes, ct_axes = {}, {}
+        for argument in self.sub_dict.values():
+            argument.get_axes( axes, ct_axes )
+
         tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, True )
 
         num_axis = index( list( axes.keys() ), axis_name )
@@ -52,12 +77,13 @@ class SubDictContainer:
             coeff = matrix[ num_case ][ num_axis ]
             if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
                 continue
-            val = self.sub_dict[ tensor_names[ num_case ] ].python_value
-            if val is not None:
-                res = val.shape[ tensor_axes[ num_case ] ]
-                return ( res - int( vector[ num_case ] ) ) // int( coeff )
+            if tensor_names[ num_case ] in self.sub_dict:
+                val = self.sub_dict[ tensor_names[ num_case ] ].python_value
+                if val is not None:
+                    res = val.shape[ tensor_axes[ num_case ] ]
+                    return ( res - int( vector[ num_case ] ) ) // int( coeff )
 
-        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self.python_value }'" )
+        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self }'" )
 
     def axis_variable_equation( self, axes: dict, use_attributes: bool ):
         """
@@ -187,7 +213,7 @@ class SubDictContainer:
         lines = [ struct_name + "{" ]
 
         ct_axes : dict[ str, int ] = {}
-        axes    : dict             = {}
+        axes : dict = {}
         for argument in self.sub_dict.values():
             argument.get_axes( axes, ct_axes )
 
