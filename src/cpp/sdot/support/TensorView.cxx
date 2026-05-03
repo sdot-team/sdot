@@ -34,6 +34,11 @@ UTP DTP &DTP::get_data_from( const TensorView<T,ct_rank,Arch> &that ) {
     TODO;
 }
 
+UTP T_d void DTP::get_data_from( const DsVec<T,d,Arch> &that ) {
+    for( PI i = 0; i < that.size(); ++i )
+        operator[]( i ) = that[ i ];
+}
+
 UTP void DTP::fill_with( T value ) {
     for_each_index( [&]( auto ...indices ) {
         operator()( indices... ) = value;

@@ -212,4 +212,8 @@ UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_i
         }
 }
 
+#undef UTP
+#undef DTP
+
 } // namespace sdot
+

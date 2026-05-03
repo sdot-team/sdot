@@ -35,6 +35,7 @@ public:
     HD auto        partial           ( auto ...indices ) const;
 
     HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
+    HD T_d void    get_data_from     ( const DsVec<T,d,Arch> &that );
     void           fill_with         ( T value );
 
     static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
