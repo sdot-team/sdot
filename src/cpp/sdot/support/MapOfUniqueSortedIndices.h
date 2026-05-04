@@ -6,6 +6,7 @@
 // #include "VecForCapa.h"
 #include "TensorView.h"
 #include "DsVec.h"
+#include "P.h"
 
 namespace sdot {
 
@@ -60,8 +61,9 @@ template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<1,TI,Arch> {
     using TV = TensorView<TI,1,Arch>;
 
-    /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : values( map_items ) {
+    /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
+        P( offset_in_map_items, nb_map_items() );
         next_offset = 1;
         offset = 0;
     }
@@ -69,14 +71,14 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
     void reserve_full_capacity() {
         next_offset = 1;
         offset = 1;
-        for( auto &value : values )
-            value = 0;
+        for( TI i = 0; i < max_inp_value; ++i )
+            values[ offset_in_map_items + i ] = 0;
     }
 
     void reserve( TI reservation ) {
         if ( next_offset == 1 )
-            for( auto &value : values )
-                value = 0;
+            for( TI i = 0; i < max_inp_value; ++i )
+                values[ offset_in_map_items + i ] = 0;
 
         offset = next_offset;
         next_offset += reservation;
@@ -93,6 +95,7 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
     }
 
     TI offset_in_map_items; ///<
+    TI max_inp_value; ///<
     TI next_offset; ///<
     TI offset; ///<
     TV values; ///<
@@ -112,14 +115,14 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
     void reserve_full_capacity() {
         next_offset = 1;
         offset = 1;
-        for( auto &value : values )
-            value = 0;
+        for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
+            values[ offset_in_map_items + i ] = 0;
     }
 
     void reserve( TI reservation ) {
         if ( next_offset == 1 )
-            for( auto &value : values )
-                value = 0;
+            for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
+                values[ offset_in_map_items + i ] = 0;
 
         offset = next_offset;
         next_offset += reservation;

@@ -32,6 +32,12 @@ UTP DTP::DsVec( Size, PI size, auto &&...ctor_args ) : DsVec( Reserved(), size )
         new ( &v ) T( ctor_args... );
 }
 
+UTP DTP::DsVec() {
+    static_assert( ct_size >= 0 );
+    for( auto &v : *this )
+        new ( &v ) T;
+}
+
 UTP DTP::DsVec( Values, auto &&...values ) : DsVec( Reserved(), sizeof...( values ) ) {
     PI i = 0;
     auto append = [&]( auto &&value ) {

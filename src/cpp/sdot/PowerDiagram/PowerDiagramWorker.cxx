@@ -8,6 +8,10 @@ namespace sdot {
 #define UTP template<int ct_dim,class Arch,class TF,class TI>
 #define DTP PowerDiagramWorker<ct_dim,Arch,TF,TI>
 
+UTP DTP::Pt DTP::position( PI n ) const {
+    return power_diagram.positions.row( n );
+}
+
 UTP void DTP::for_each_point_in_bsp( auto &&func ) {
     for( PI i = 0; i < power_diagram.bsp.sorted_vertex_indices.size(); ++i )
         func( power_diagram.bsp.sorted_vertex_indices[ i ] );
@@ -43,7 +47,7 @@ UTP void DTP::for_each_cell( auto &&density, auto &&func ) {
             cell_worker.cut( dir, off, i1 );
         } );
 
-        func( cell_worker, 0 );
+        func( cell_worker, 0, i0 );
     } );
 }
 

@@ -14,7 +14,7 @@ public:
     using TV = TensorView<TI,1,Arch>;
 
     /**/ RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
-        curr( map_items, nb_map_items, dim, max_inp_value ),
+        curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
         next( map_items, nb_map_items, dim, max_inp_value ) {
     }
 
@@ -30,11 +30,10 @@ public:
 
     template<int i>
     IntWithOffset<TI> operator[]( const DsVec<TI,i,Arch> &key ) {
-        return next[ key ];
-    }
-
-    IntWithOffset<TI> operator[]( const DsVec<TI,ct_dim,Arch> &key ) {
-        return curr[ key ];
+        if constexpr( i == ct_dim )
+            return curr[ key ];
+        else
+            return next[ key ];
     }
 
     Curr curr;
@@ -60,7 +59,7 @@ public:
         curr.reserve( reservation );
     }
 
-    IntWithOffset<TI> operator[]( const DsVec<TI,1,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const DsVec<TI,0,Arch> &key ) {
         return curr.operator[]( key );
     }
 

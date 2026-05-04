@@ -7,6 +7,8 @@
 
 #include "CellBoundary.h"
 #include "CellWorker.h"
+#include "integral.h"
+#include "Simplex.h"
 
 #include <numeric>
 
@@ -41,6 +43,10 @@ UTP TF DTP::cut_dot( PI num_cut ) const {
     return cell.cut_planes( num_cut, dim );
 }
 
+UTP TI DTP::cut_id( PI num_cut ) const {
+    return cell.cut_ids( num_cut );
+}
+
 UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_vertex ) {
     for( PI simplex_ind = 0; simplex_ind < simplex_size; ++simplex_ind )
         if ( next_num_vertex == simplex[ simplex_ind ] )
@@ -68,6 +74,7 @@ UTP void DTP::for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI s
             continue;
         }
 
+
         // else, try to make a new simplex
         const PI next_num_vertex = ic;
         if( already_in_simplex( simplex, simplex_size, next_num_vertex ) )
@@ -86,20 +93,48 @@ UTP void DTP::for_each_simplex( auto &&func ) {
     if ( cell.nb_vertices() == 0 )
         return;
 
+    //
+    if ( dim == 2 ) {
+        DsVec<TI,ct_simplex,Arch> simplex( Size(), dim + 1 );
+        simplex[ 0 ] = 0;
+        for( TI num_vertex = 3; num_vertex <= nb_vertices; ++num_vertex ) {
+            simplex[ 1 ] = num_vertex - 2;
+            simplex[ 2 ] = num_vertex - 1;
+            func( simplex );
+        }
+        return;
+    }
+
     // make a list
-    RecursiveMapOfUniqueSortedIndices<ct_dim,TI,Arch> item_map( ws.map_items, ws.nb_map_items, dim, cell.nb_cuts );
+    RecursiveMapOfUniqueSortedIndices<ct_dim - 1,TI,Arch> item_map( ws.map_items, ws.nb_map_items, dim - 1, cell.nb_cuts );
     item_map.reserve( cell.nb_vertices );
 
-    DsVec<PI,ct_simplex,Arch> simplex( Size(), dim + 1 );
-    for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        DsVec<PI32,ct_dim,Arch> cut_indices( cell.vertex_indices.row( num_vertex ) );
+    DsVec<TI,ct_simplex,Arch> simplex( Size(), dim + 1 );
+    for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
+        DsVec<TI,ct_dim,Arch> cut_indices( cell.vertex_indices.row( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
 
+UTP void DTP::for_each_facet( auto &&func ) {
+    const PI nb_vertices = cell.nb_vertices;
+
+    if ( dim == 2 ) {
+        Simplex<ct_dim,ct_dim,TF,Arch> simplex;
+        for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
+            simplex.pts[ 0 ] = vertex_position( num_vertex );
+            simplex.pts[ 1 ] = vertex_position( ( num_vertex + 1 ) % nb_vertices );
+            func( simplex, cut_id( num_vertex ) );
+        }
+        return;
+    }
+
+    TODO;
+}
+
 UTP TF DTP::measure() {
-    const PI nb_vertices = cell.nb_vertices();
-    const PI dim = cell.dim();
+    const TI nb_vertices = cell.nb_vertices();
+    const TI dim = cell.dim();
 
     // infinite cell
     if ( ! cell.is_fully_closed() )
@@ -108,8 +143,8 @@ UTP TF DTP::measure() {
     // 2D: shoelace formula
     if ( dim == 2 ) {
         TF sum = 0;
-        for ( PI i = 0; i < nb_vertices; ++i ) {
-            const PI j = ( i + 1 ) % nb_vertices;
+        for ( TI i = 0; i < nb_vertices; ++i ) {
+            const TI j = ( i + 1 ) % nb_vertices;
             sum += cell.vertex_positions( i, 0 ) * cell.vertex_positions( j, 1 )
                  - cell.vertex_positions( j, 0 ) * cell.vertex_positions( i, 1 );
         }
@@ -121,8 +156,8 @@ UTP TF DTP::measure() {
     TF sum = 0;
 
     for_each_simplex( [&]( const auto &simplex ) {
-        const PI v0 = simplex[ 0 ];
-        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI row, PI col ) {
+        const TI v0 = simplex[ 0 ];
+        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( TI row, TI col ) {
             return cell.vertex_positions( simplex[ col + 1 ], row ) - cell.vertex_positions( v0, row );
         } );
         sum += std::abs( M.determinant() );
@@ -132,14 +167,14 @@ UTP TF DTP::measure() {
 }
 
 UTP void DTP::check_if_fully_closed() {
-    for( PI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
+    for( TI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
         if ( cell.cut_ids[ num_cut ] == CellBoundary::INFINITE )
             return;
     cell.is_fully_closed() = true;
 }
 
 UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
-    const PI nb_vertices = cell.nb_vertices();
+    const TI nb_vertices = cell.nb_vertices();
 
     // if nothing or everything is cut and the cell has infinite boundaries,
     // grow them so the cut has its correct effect, then recompute
@@ -147,7 +182,7 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         grow_infinite_cuts( cut_dir, cut_dot );
 
     //
-    PI nb_out = scalar_products( cut_dir, cut_dot );
+    TI nb_out = scalar_products( cut_dir, cut_dot );
 
     if ( nb_out == 0 )
         return;
@@ -160,7 +195,7 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         cut_2d( cut_dir, cut_dot, cut_id, nb_out );
     } else {
         // store the new cut
-        const PI new_cut_index = register_the_new_cut( cut_dir, cut_dot, cut_id );
+        const TI new_cut_index = register_the_new_cut( cut_dir, cut_dot, cut_id );
 
         // process edges: add new vertices on cut, collect exterior edges into ws.indices_to_remove
         process_edges( new_cut_index );
@@ -500,6 +535,22 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
     }
 }
 
+UTP void DTP::get_data_from( const auto &src_cell ) {
+    cell.vertex_positions.get_data_from( src_cell.vertex_positions, { Values(), src_cell.nb_vertices, dim } );
+    if ( dim != 2 ) {
+        cell.vertex_indices.get_data_from( src_cell.vertex_indices, { Values(), src_cell.nb_vertices, dim } );
+        cell.edge_indices.get_data_from( src_cell.edge_indices, { Values(), src_cell.nb_vertices, dim + 1 } );
+    }
+    cell.cut_planes.get_data_from( src_cell.cut_planes, { Values(), src_cell.nb_vertices, dim + 1 } );
+    cell.cut_ids.get_data_from( src_cell.cut_ids, { Values(), src_cell.nb_vertices } );
+
+    cell.is_fully_closed.get_data_from( src_cell.is_fully_closed );
+
+    cell.nb_vertices = TI( src_cell.nb_vertices );
+    cell.nb_edges = TI( src_cell.nb_edges() );
+    cell.nb_cuts = TI( src_cell.nb_cuts() );
+}
+
 UTP void DTP::clear_cell() {
     cell.is_fully_closed() = 1;
     cell.nb_vertices() = 0;
@@ -629,6 +680,27 @@ UTP void DTP::check_consistency() {
 // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), -1, +1 ), -0.25, 3 );
 // disp_cell( cell );
 // check_consistency( cell );
+
+
+template<class Value,int ct_dim,class Arch,class TF,class TI>
+struct Integral<Value,DTP> {
+    static auto integral( const Value &value, DTP &cw ) {
+        // infinite cell
+        if ( ! cw.cell.is_fully_closed() )
+            return std::numeric_limits<TF>::infinity();
+
+        // simplex
+        TF sum = 0;
+        cw.for_each_simplex( [&]( const auto &simplex_indices ) {
+            Simplex<ct_dim,ct_dim+1,TF,Arch> simplex;
+            for( TI d = 0; d < cw.dim + 1; ++d )
+                simplex.pts[ d ] = cw.cell.vertex_positions.row( simplex_indices[ d ] );
+            sum += sdot::integral( value, simplex );
+        } );
+
+        return sum;
+    }
+};
 
 #undef UTP
 #undef DTP

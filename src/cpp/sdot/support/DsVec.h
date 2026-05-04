@@ -25,6 +25,7 @@ public:
     /**/         DsVec                   ( Reserved, PI size ); ///< `new ( item ) T` has to be done
     /**/         DsVec                   ( Values, auto &&...values );
     /**/         DsVec                   ( Size, PI size, auto &&...ctor_args );
+    /**/         DsVec                   ();
 
     /**/         DsVec                   ( const DsVec &that );
     /**/         DsVec                   ( DsVec &&that ) noexcept;

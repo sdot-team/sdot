@@ -16,17 +16,20 @@ struct CellWorker {
     bool  vertex_inf            ( PI num_vertex ) const; ///< true if at least one cut is inf
     Pt    cut_dir               ( PI num_cut ) const;
     TF    cut_dot               ( PI num_cut ) const;
+    TI    cut_id                ( PI num_cut ) const;
 
     Pt    solve_position        ( PI num_vertex, auto &&add_func ) const;
     Pt    solve_position        ( PI num_vertex ) const;
 
     // info, computations --------------------------------------------------------------------
     void  for_each_simplex      ( auto &&func );
+    void  for_each_facet        ( auto &&func ); ///< func( facet_repr, cut_id )
     void  check_consistency     ();
     void  disp_cell             ();
     TF    measure               ();
 
     // modifications -------------------------------------------------------------------------
+    void  get_data_from         ( const auto &cell );
     void  clear_cell            ();
     void  cut                   ( const auto &cut_dir, auto cut_dot, SI cut_id );
 
@@ -54,6 +57,9 @@ struct CellWorker {
     CellWorkspace<Arch,TF,TI>&  ws;
     const PI                    dim;
 };
+
+// template<int ct_dim,class Arch,class TF,class TI>
+// TF integral( CellWorker<ct_dim,Arch,TF,TI> &cell_worker, auto &&local_function );
 
 } // namespace sdot
 

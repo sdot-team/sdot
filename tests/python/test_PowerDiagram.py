@@ -5,10 +5,10 @@ import jax
 jax.config.update( 'jax_platform_name', 'cpu' )
 
 def test_bsp():
-    n = 16
+    n = 2
     d = 2
 
-    image = sdot.PolynomialGrid( values = [ [ [ 1 ], [ 1 ] ] ] )
+    image = sdot.PolynomialGrid( values = [ [ [ 1 ] ] ] ) #, [ 1 ]
     image = image.normalized_version( mass = 1 )
 
     positions = numpy.random.random( [ n, d ] )

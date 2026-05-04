@@ -10,10 +10,15 @@ import re
 import os
 
 
-def make_dylib_from_source( src: str, dylib_name: str, other_src_paths: list, device_type: str ):
+def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, device_type: str ):
     # write src
     path = compilation_directories.src_dir( dylib_name ) / "binding.cpp"
-    path.write_text( src )
+    try:
+        old_code = path.read_text()
+    except FileNotFoundError:
+        old_code = ""
+    if code != old_code:
+        path.write_text( code )
 
     # make the dylib
     make_dylib_from_files( dylib_name, [ path ] + other_src_paths, device_type )

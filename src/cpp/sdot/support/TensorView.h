@@ -34,6 +34,7 @@ public:
 
     HD auto        partial           ( auto ...indices ) const;
 
+    HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that, const DsVec<PI,ct_rank,Arch> &size_to_take );
     HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
     HD T_d void    get_data_from     ( const DsVec<T,d,Arch> &that );
     void           fill_with         ( T value );
@@ -59,6 +60,7 @@ public:
     HD auto        begin             () const;
     HD auto        end               () const;
 
+    HD void        for_each_index    ( auto &&func, PI sub, const DsVec<PI,ct_rank,Arch> &size_to_take ) const;
     HD void        for_each_index    ( auto &&func, PI sub = 0 ) const;
 
     HD bool        is_contiguous     () const; ///< true iff strides match row-major contiguous layout
@@ -68,6 +70,8 @@ public:
     void           with_cpu_version  ( auto &&func ) const;
     auto           squeeze           ( PI axis, PI index = 0 ) const;
     HD auto        row               ( PI index ) const;
+
+    void           with_same_shape   ( auto &&func ) const;
 
     static std::byte   _sentinel;    ///< address used as invalid marker — never points to real data
 
@@ -89,6 +93,7 @@ private:
     Strides        _strides;         ///< byte strides
     Sizes          _sizes;           ///<
     Ptr            _ptr;             ///<
+    Arch           arch;             ///<
 };
 
 } // namespace sdot

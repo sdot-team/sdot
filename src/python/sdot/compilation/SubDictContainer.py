@@ -216,6 +216,24 @@ class SubDictContainer:
                 lines.append( f"    auto { complete_name }() const {{ { ct_code }return { dv }; }}" )
             lines.append( "" )
 
+        # with_same_shape
+            lines.append( "    void with_same_shape( auto &&func ) const {" )
+            s = "        "
+            for name, _ in self.sub_dict.items():
+                lines.append( s + f"{ name }.with_same_shape( [&]( auto &{ name } ) {{" )
+                s += "  "
+            lines.append( s + f"{ base_cpp_name } new_value{{" )
+            for ct_axis_name in ct_axes:
+                lines.append( s + f"    .ct_{ ct_axis_name } = CtInt<ct_{ ct_axis_name }_value>()," )
+            for name, argument in self.sub_dict.items():
+                lines.append( s + f"    .{ name } = { name }," )
+            lines.append( s + "};" )
+            lines.append( s + "func( new_value );" )
+            for name, _ in self.sub_dict.items():
+                s = s[ :-2 ]
+                lines.append( s + "} );" )
+            lines.append( "    }" )
+
         # compile-time axis members
         for ct_axis_name in ct_axes:
             lines.append( f"    CtInt<ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
@@ -228,7 +246,8 @@ class SubDictContainer:
         lines.extend( end_lines )
 
         beg_lines = [ "#pragma once", "" ]
-        for inc in includes:
+
+        for inc in sorted( includes, key = lambda s: ( -len( s ), s ) ):
             if inc.startswith( "." ):
                 beg_lines.append( f"#include \"{ inc }\"" )
             else:

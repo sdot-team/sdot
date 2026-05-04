@@ -12,6 +12,7 @@ class MatrixTerms:
     matrix_cols : Tensor( "nb_matrix_terms[]", dtype = int )
     matrix_vals : Tensor( "nb_matrix_terms[]" )
     vector_vals : Tensor( "nb_vector_terms" )
+    solution    : Tensor( "nb_vector_terms" )
     residual    : Tensor()
 
     if TYPE_CHECKING:

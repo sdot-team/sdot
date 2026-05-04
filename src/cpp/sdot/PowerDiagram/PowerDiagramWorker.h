@@ -8,15 +8,14 @@ namespace sdot {
 
 template<int ct_dim,class Arch,class TF,class TI>
 struct PowerDiagramWorker {
-    using Pt                   = DsVec<TF,ct_dim,Arch>; ///< point
+    using Pt                                 = DsVec<TF,ct_dim,Arch>; ///< point
 
     // inputs
-
-
+    Pt    position                           ( PI n ) const;
 
     //
-    void  for_each_point_in_bsp( auto &&func );
-    void  for_each_cell        ( auto &&density, auto &&func );
+    void  for_each_point_in_bsp              ( auto &&func );
+    void  for_each_cell                      ( auto &&density, auto &&func );
 
     // attributes ---------------------------------------------------------------------------
     PowerDiagram<ct_dim,ct_dim,ct_dim,Arch,TF,TI> &power_diagram;

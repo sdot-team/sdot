@@ -472,7 +472,7 @@ class JaxDriver:
             lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
         lines.append( "}" )
 
-        include_lines = [ f"#include <{ include }>" for include in includes ]
+        include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
 
         #
         from ..compilation.make_dylib_from_source import make_dylib_from_source

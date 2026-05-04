@@ -26,12 +26,26 @@ UTP DTP::TensorView( T *data, PI size ) : _sizes( Values(), size ), _strides( Va
 UTP DTP::TensorView( Rank, PI rank ) : _strides( Size(), rank, 0 ), _sizes( Size(), rank, 0 ), _ptr( nullptr ) {
 }
 
+UTP DTP &DTP::get_data_from( const TensorView<T,ct_rank,Arch> &that, const DsVec<PI,ct_rank,Arch> &size_to_take ) {
+    for_each_index( [&]( auto indices ) {
+        operator()( indices ) = that( indices );
+    }, 0, size_to_take );
+    return *this;
+}
+
 UTP DTP &DTP::get_data_from( const TensorView<T,ct_rank,Arch> &that ) {
     if ( is_contiguous() ) {
         std::memcpy( data(), that.data(), sizeof( T ) * total_size() );
         return *this;
     }
     TODO;
+}
+
+UTP void DTP::with_same_shape( auto &&func ) const {
+    arch.template with_reservation<T>( total_size(), [&]( T *data ) {
+        TensorView res( data, _sizes, contiguous_strides( _sizes ) );
+        func( res );
+    } );
 }
 
 UTP T_d void DTP::get_data_from( const DsVec<T,d,Arch> &that ) {
@@ -169,7 +183,7 @@ UTP bool DTP::is_contiguous() const {
     return true;
 }
 
-UTP void DTP::for_each_index( auto &&func, PI sub ) const {
+UTP void DTP::for_each_index( auto &&func, PI sub, const DsVec<PI,ct_rank,Arch> &size_to_take ) const {
     DsVecFactory<PI,ct_rank,Arch> pf( rank() );
     if ( rank() == 0 ) {
         func( pf.zeros() );
@@ -180,13 +194,17 @@ UTP void DTP::for_each_index( auto &&func, PI sub ) const {
         func( index );
 
         PI n = rank() - 1;
-        while ( ++index[ n ] == size( n ) - sub ) {
+        while ( ++index[ n ] == size_to_take[ n ] - sub ) {
             if ( n == 0 )
                 return;
             index[ n ] = 0;
             --n;
         }
     }
+}
+
+UTP void DTP::for_each_index( auto &&func, PI sub ) const {
+    for_each_index( func, sub, _sizes );
 }
 
 UTP auto DTP::contiguous_strides( const Sizes &ext ) -> Strides {

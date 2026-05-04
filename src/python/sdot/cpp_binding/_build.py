@@ -340,7 +340,7 @@ def _compile( dylib_name: str, src_paths: list, device_type: str ):
         **os.environ,
         "SDOT_XMAKE_OUTPUT_DIR" : str( dylib_dir ),
         "SDOT_XMAKE_NEEDS_CUDA" : str( int( device_type.startswith( "cuda" ) ) ),
-        "SDOT_XMAKE_REQUIRES"   : str.join( ",", [ "zpp_bits", "eigen" ] ),
+        "SDOT_XMAKE_REQUIRES"   : str.join( ",", [ "zpp_bits", "eigen", "amgcl" ] ),
         "SDOT_XMAKE_INCLUDES"   : str.join( ",", map( str, [
                                       nanobind_ext_include,
                                       nanobind_include_dir,
@@ -349,7 +349,7 @@ def _compile( dylib_name: str, src_paths: list, device_type: str ):
                                   ] + jax_include ) ),
         "SDOT_XMAKE_CXXFLAGS"   : str.join( ",", [ "-fdiagnostics-absolute-paths", "-fno-strict-aliasing" ] ),
         "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, list( src_paths ) + [ nanobind_source ] ) ),
-        "SDOT_XMAKE_DEFINES"    : "",
+        "SDOT_XMAKE_DEFINES"    : "SDOT_USE_AMGCL",
         "SDOT_XMAKE_TARGET"     : dylib_name,
         "PATH"                  : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
     }

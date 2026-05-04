@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common_types.h"
 #include <vector>
 
 #ifdef __CUDACC__
@@ -18,10 +19,11 @@ struct Cuda {
 #endif
 
 struct Cpu {
-    template<class T> struct Vector { using type = std::vector<T>; };
+    T_T struct         Vector          { using type = std::vector<T>; };
 
-    static auto        raw_ptr( auto &&vec ) { return vec.data(); }
-    static const char *name   () { return "cpu"; }
+    T_T void           with_reservation( PI size, auto &&func ) const { T *res = new T[ size ]; func( res ); delete [] res; }
+    static auto        raw_ptr         ( auto &&vec ) { return vec.data(); }
+    static const char* name            () { return "cpu"; }
 
 };
 
