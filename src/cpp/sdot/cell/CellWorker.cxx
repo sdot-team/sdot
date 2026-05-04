@@ -1,13 +1,13 @@
 #pragma once
 
-#include "../support/MapOfUniqueSortedIndices.h"
+#include "../support/RecursiveMapOfUniqueSortedIndices.h"
 #include "../support/SimpleSquareMatrix.h"
 #include "../support/index.h"
-#include "CellBoundary.h"
-
-#include "cut.h"
-
 #include "../support/P.h"
+
+#include "CellBoundary.h"
+#include "CellWorker.h"
+
 #include <numeric>
 
 namespace sdot {
@@ -39,6 +39,96 @@ UTP typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
 
 UTP TF DTP::cut_dot( PI num_cut ) const {
     return cell.cut_planes( num_cut, dim );
+}
+
+UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_vertex ) {
+    for( PI simplex_ind = 0; simplex_ind < simplex_size; ++simplex_ind )
+        if ( next_num_vertex == simplex[ simplex_ind ] )
+            return true;
+    return false;
+}
+
+/// Fan triangulation — recursive core.
+UTP void DTP::for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
+    // register the new vertex
+    simplex[ simplex_size++ ] = num_vertex;
+
+    const PI nb_cut_indices = cut_indices.size();
+    if ( nb_cut_indices == 0 ) {
+        func( simplex );
+        return;
+    }
+
+    for( PI ind_to_remove = 0; ind_to_remove < nb_cut_indices; ++ind_to_remove ) {
+        // first time we see this item -> use vertex `num_vertex`as reference for this item
+        auto new_cut_indices = cut_indices.without_index( ind_to_remove );
+        auto ic = item_map[ new_cut_indices ];
+        if ( ! ic ) {
+            ic = num_vertex;
+            continue;
+        }
+
+        // else, try to make a new simplex
+        const PI next_num_vertex = ic;
+        if( already_in_simplex( simplex, simplex_size, next_num_vertex ) )
+            continue;
+
+        // and continue the recursion
+        for_each_simplex_rec( new_cut_indices, simplex, simplex_size, next_num_vertex, item_map, func );
+    }
+}
+
+UTP void DTP::for_each_simplex( auto &&func ) {
+    constexpr int ct_simplex = ct_dim >= 0 ? ct_dim + 1 : -1;
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
+
+    if ( cell.nb_vertices() == 0 )
+        return;
+
+    // make a list
+    RecursiveMapOfUniqueSortedIndices<ct_dim,TI,Arch> item_map( ws.map_items, ws.nb_map_items, dim, cell.nb_cuts );
+    item_map.reserve( cell.nb_vertices );
+
+    DsVec<PI,ct_simplex,Arch> simplex( Size(), dim + 1 );
+    for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
+        DsVec<PI32,ct_dim,Arch> cut_indices( cell.vertex_indices.row( num_vertex ) );
+        for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
+    }
+}
+
+UTP TF DTP::measure() {
+    const PI nb_vertices = cell.nb_vertices();
+    const PI dim = cell.dim();
+
+    // infinite cell
+    if ( ! cell.is_fully_closed() )
+        return std::numeric_limits<TF>::infinity();
+
+    // 2D: shoelace formula
+    if ( dim == 2 ) {
+        TF sum = 0;
+        for ( PI i = 0; i < nb_vertices; ++i ) {
+            const PI j = ( i + 1 ) % nb_vertices;
+            sum += cell.vertex_positions( i, 0 ) * cell.vertex_positions( j, 1 )
+                 - cell.vertex_positions( j, 0 ) * cell.vertex_positions( i, 1 );
+        }
+        return sum / 2;
+    }
+
+    // nD: fan triangulation
+    SimpleSquareMatrix<TF,ct_dim,Arch> M( Size(), dim );
+    TF sum = 0;
+
+    for_each_simplex( [&]( const auto &simplex ) {
+        const PI v0 = simplex[ 0 ];
+        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI row, PI col ) {
+            return cell.vertex_positions( simplex[ col + 1 ], row ) - cell.vertex_positions( v0, row );
+        } );
+        sum += std::abs( M.determinant() );
+    } );
+
+    return sum / factorial( dim );
 }
 
 UTP void DTP::check_if_fully_closed() {
