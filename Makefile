@@ -13,6 +13,12 @@ reqs:
 docs:
 	npm run docs:build
 
+docs_dev:
+	npm run docs:dev
+
+publish:
+	npm run docs:deploy
+
 test:
 	SDOT_FORCE_BUILD=1 PYTHONPATH=$(CURDIR)/src/python $(PYTHON) -m pytest -v tests/python/
 
@@ -20,4 +26,5 @@ help:
 	@echo "  make all    : Alias for 'make test'"
 	@echo "  make reqs   : Get all the requirements"
 	@echo "  make docs   : Build the doc site"
+	@echo "  make publish: Build and publish the doc site to GitHub Pages"
 	@echo "  make test   : Build and run all tests (pytest)"

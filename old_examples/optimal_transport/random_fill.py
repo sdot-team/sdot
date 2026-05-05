@@ -1,0 +1,22 @@
+from pysdot.domain_types import ConvexPolyhedraAssembly
+from pysdot import OptimalTransport
+import numpy as np
+
+positions = np.random.rand(2000,2)
+
+# diracs
+ot = OptimalTransport()
+ot.set_positions(np.array(positions))
+ot.set_weights(np.ones(ot.get_positions().shape[0]))
+ot.verbosity = 2
+
+ot.set_stopping_criterion(1e-8, "max delta masses")
+
+# solve
+ot.adjust_weights()
+
+# display
+ot.display_vtk( "results/pd.vtk" )
+
+# print( ot.pd.display_html() )
+
