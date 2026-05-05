@@ -20,21 +20,21 @@ class PowerDiagram:
 
     positions : Tensor( "nb_vertices", "dim", ct_axes = [ "dim" ] ) # vertex index ->
     weights : Tensor( "nb_vertices" ) # vertex index ->
-    norm : Norm2
+    ground_metric : Norm2
     bsp : Bsp
 
     if TYPE_CHECKING:
-        max_of_nb_vertices : int
         nb_vertices : int
         dim : int
 
-    def __init__( self, positions, weights = None, norm = None ):
+    def __init__( self, positions, weights = None, ground_metric = None ):
         self.positions = positions
         self.weights = weights
 
-        if norm is None:
-            norm = Norm2( driver.empty( [ 0, self.dim + 1, self.dim + 1 ] ) )
-        self.norm = norm
+        if ground_metric is None:
+            ground_metric = Norm2( driver.empty( [ 0, self.dim + 1, self.dim + 1 ] ) )
+        self.ground_metric = ground_metric
+        info( self.ground_metric )
 
         self.bsp = Bsp.make_from( self.positions, self.weights )
 
@@ -68,14 +68,11 @@ class PowerDiagram:
             grad = False
         )
 
-    def newton_dir( self, g: Distribution ):
-        """ On a la pos """
-        res = driver.call( "newton_dir", "sdot/PowerDiagram/newton_dir.h", res = Return( Tensor, [ ] ), pd = self )
-        info( res )
-
     def adjust_weights( self, dirac_masses, target_distribution ):
-        new_weights = driver.call( "adjust_weights", "sdot/PowerDiagram/adjust_weights.h",
+        new_weights, barycenter, distance = driver.call( "adjust_weights", "sdot/PowerDiagram/adjust_weights.h",
             new_weights = Return( Tensor( "nb_vertices" ), nb_vertices = self.nb_vertices ),
+            barycenter = Return( Tensor( "nb_vertices", "dim" ), nb_vertices = self.nb_vertices, dim = self.dim ),
+            distance = Return( Tensor() ),
             cell_workspace = Workspace( BatchOfCellWorkspace,
                 max_of_nb_indices_to_remove = 256,
                 max_of_nb_map_items = 256,
@@ -106,3 +103,5 @@ class PowerDiagram:
         )
 
         self.weights = new_weights
+
+        return distance, barycenter

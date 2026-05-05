@@ -155,8 +155,8 @@ def _setup_distribution_class( cls ):
             annotation = fields.get( name )
             if coerce := getattr( annotation, "coerce", None ):
                 value = coerce( value )
-            else:
-                assert isinstance( value, annotation )
+            elif not isinstance( value, annotation ):
+                value = annotation( value )
             object.__setattr__( self, name, value )
         cls.__setattr__ = __setattr__
 

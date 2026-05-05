@@ -1,7 +1,7 @@
 # distributions (1d and batch version are generated after)
-# from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 # from .distributions.PiecewiseConstantGrid import PiecewiseConstantGrid as PiecewiseConstantGrid
 # from .distributions.PiecewiseAffineGrid import PiecewiseAffineGrid as PiecewiseAffineGrid
+from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs as SumOfWeightedDiracs
 from .distributions.PolynomialGrid import PolynomialGrid as PolynomialGrid
 from .distributions.SplineGrid import SplineGrid as SplineGrid
 
@@ -23,7 +23,7 @@ from .aggregate.Tensor import Tensor as Tensor
 # from .BatchOf1dOtPlans import BatchOf1dOtPlans as BatchOf1dOtPlans
 # from .BatchOfOtPlans import BatchOfOtPlans as BatchOfOtPlans
 # from .OtPlan1d import OtPlan1d as OtPlan1d
-# from .OtPlan import OtPlan as OtPlan
+from .OtPlan import OtPlan as OtPlan, optimal_transport_plan as optimal_transport_plan
 
 # from .Polynomial import Polynomial as Polynomial
 from .PowerDiagram import PowerDiagram as PowerDiagram

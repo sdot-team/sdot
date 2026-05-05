@@ -1,24 +1,20 @@
-# from sdot.aggregate._methods import TensorField, aggregate
+from ..aggregate import Tensor, aggregate
 from .Distribution import Distribution
-from ..driver import driver
+from typing import TYPE_CHECKING
 
-
-# @aggregate
+@aggregate
 class SumOfWeightedDiracs( Distribution ):
     """
     positions : tensor[ nb_diracs, dim ]
     weights   : tensor[ nb_diracs ] (ones by default)
     """
 
-    # positions = TensorField( "nb_diracs", "dim" )
-    # weights   = TensorField( "nb_diracs" )
+    positions : Tensor( "nb_diracs", "dim" )
+    weights   : Tensor( "nb_diracs" )
 
-    # nb_diracs : int
+    if TYPE_CHECKING:
+        nb_diracs : int
 
-    # def __init__(self, positions = None, weights = None):
-    #     self.positions = positions
-    #     self.weights = weights
-
-    # def default_weights( self ):
-    #     return driver.ones( ( self.nb_diracs, ) ) if self.nb_diracs is not None else None
+    def normalized_version( self ):
+        return self
 
