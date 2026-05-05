@@ -6,7 +6,7 @@ hero:
   text: Semi-Discrete Optimal Transport
   tagline: Fast · Differentiable · N-dimensional — works natively with JAX and PyTorch.
   image:
-    src: examples/img/patate.png
+    src: /examples/img/patate.png
     alt: VitePress
   actions:
     - theme: brand
@@ -77,7 +77,7 @@ Of courses, sdot allows to access quantities of the transport plan.
 from sdot import SplineGrid, SumOfDiracs, optimal_transport_plan
 import numpy as np
 
-f = np.random.random( [ 30, 2 ] ) * 2 - 1 # seen as dirac position
+f = np.random.random( [ 30, 2 ] ) * 2 - 1 # dirac positions
 g = Box( frame = [ [ 0, 0 ], [ 2, 0 ], [ 2, 0 ] ] )
 
 plan = optimal_transport_plan( f, g )
@@ -89,7 +89,7 @@ print( plan.second_order_moments ) # ...
 plan.backward_map.brenier_potential.plot()  # the dual potential ψ
 ```
 
-![Computed Tomography Reconstruction](examples/img/brenier.png){ width="200" style="display: block; margin: 0 auto"  }
+![Computed Tomography Reconstruction](/examples/img/brenier.png){ width="200" style="display: block; margin: 0 auto"  }
 
 ### Use inside JAX/Torch
 
