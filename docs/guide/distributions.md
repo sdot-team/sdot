@@ -1,52 +1,97 @@
 # Distributions
 
-SDOT works with two kinds of distributions: **sources** (discrete, sum of Dirac masses) and **targets** (continuous densities). Any source can be transported to any target — the library generates the appropriate C++ kernel at compile time.
+SDOT handles a wide variety of distributions. To handle the large number of combination, the library generates and compiles the appropriate C++ kernels at runtime.
 
 ---
 
-## Sources
+**Source** and **target** can be either a discrete measure (a sum of Dirac masses) or a a continuous density.
 
-Sources represent the discrete side of the semi-discrete OT problem.
+All the axes are named. The axes sizes can be dynamic and depend of other axis variables.
 
-### `SumOfDiracs`
-
-Equal-weight Dirac masses. The simplest source — masses are set to `1/n` automatically.
+For instance,
 
 ```python
-from sdot import SumOfDiracs
-import numpy as np
+@aggregate
+class Image( Distribution ):
+    values      : Tensor( "shape( dim )" )
+    frame       : Tensor( "dim + 1", "dim" )
+    knots       : Tensor( "nb_knots[ dim ]" )
 
-f = SumOfDiracs( np.random.rand( 500, 2 ) )   # 500 points, 2D
+img = Image( values = [ [ 1, 2 ] ], knots = [ [ 1, 5 ], [ 6 ] ] )
+print( img.dim )   # -> 2
+print( img.shape ) # -> [ 1, 2 ]
+print( img.nb_knots ) # -> [ 2, 1 ]
 ```
 
-| Argument | Type | Description |
-|---|---|---|
-| `positions` | array `(n, d)` | Dirac locations |
+## Variants and aggregate
 
-### `SumOfWeightedDiracs`
+All the distributions (as well as all the classes with intermediate quantities like `Cell`, `PowerDiagram`, ...) have variants
+- `BatchOf` prepends a `batch_size` axis on each Tensor and DynamicSize.
+- `1d` specifically sets `dim` axes variables and remove the axes that reduce to value 1.
 
-Dirac masses with explicit weights. Useful for partial transport (masses don't have to sum to 1).
+Typically, `BatchOf` is useful for GPU-parallel workloads. Besides, it can be used to get a list of objects in a compact way. For instance `PowerDiagram.cells` actually return a `BatchOfCell`.
+
+Here is an example of `BatchOf` usage:
 
 ```python
-from sdot import SumOfWeightedDiracs
-import numpy as np
+# Compute 64 distances in parallel
+f = sdot.BatchOfSumOfDiracs( positions ) # shape (64, n, d)
+g = sdot.BatchOfSplineGrid( values )     # shape (64, ...)
 
+d = sdot.distances( f, g )               # shape (64,)
+```
+
+`1d` is useful to simplify the codes, because of the lower ranks tensors. Here is an example :
+
+```python
+from sdot import BatchOfSumOfDiracs, BatchOfSplineGrid, distance
+
+# Compute 64 distances in parallel
+f = sdot.PiecewiseAffine1d( [ 0, 1 ], knots = [ 2, 3 ] ) # knots is a single tensor
+g = sdot.SumOfDiracs1d( [ 1, 2, 3 ] ) # position : rank 1 tensor. Equivalent to SumOfDiracs( [[1],[2],[3]] )
+f = SumOfDiracs1d( [ 0.1, 0.5, 0.9 ] ) # equivalent SumOfDiracs( [ [0.1], [0.5], [0.9] ] )
+
+d = sdot.barycenters( f, g ) # shape (3,) (and not (3,1))
+```
+
+## Masses
+
+By default, all the distributions are normalized so that the mass is 1 (excepted when integrals are not finite)
+- if the user specifies `mass = None`, nothing is done, the distribution is used as-is
+- it is possible to fix a specific value, like `mass = 0.5`
+
+If the source and target have different total masses, SDOT automatically performs **partial transport** — only the overlapping mass fraction is transported (see the `partial` tag in the [Examples gallery →](/examples/))
+
+
+### Discrete distributions
+
+| Class | Description |
+|---|---|
+| `SumOfDiracs( positions )` | Equal-weight Dirac masses at given positions |
+| `SumOfWeightedDiracs( positions, weights )` | Dirac masses with explicit weights |
+
+```python
+# 500 uniform diracs in 2D
+f = sdot.SumOfDiracs( np.random.rand( 500, 2 ) )
+
+# 50 diracs with explicit masses (must sum to 1 for full transport)
 positions = np.random.rand( 50, 2 )
-weights   = np.ones( 50 ) / 50
-
-f = SumOfWeightedDiracs( positions, weights )
+weights = np.ones( 50 ) / 50
+f2 = sdot.SumOfWeightedDiracs( positions, weights )
 ```
 
-| Argument | Type | Description |
-|---|---|---|
-| `positions` | array `(n, d)` | Dirac locations |
-| `weights` | array `(n,)` | Masses (positive, typically summing to 1) |
+### Continuous distributions
 
----
+| Class | Description |
+|---|---|
+| `SplineGrid( values, continuity=1 )` | C0, C1 or C2 spline density on a regular grid |
+| `PolynomialGrid( values )` | Piecewise polynomial density on a regular grid |
+| `Grid( values )` | Shortcut for PolynomialGrid with 1 coefficient |
+| `SumOfGaussians( centers, covariances, weights )` | Mixture of Gaussians _(coming soon)_ |
+| `PolynomialCells( ... )` | Sum of polynomials defined on a batch of cells _(coming soon)_ |
+| `Cells( ... )` | Shortcut for `PolynomialCells` with 1 coefficient per polynomial _(coming soon)_ |
+| `Mesh( vertices, values, elements )` | Density on a mesh, following the vtk conventions  _(coming soon)_ |
 
-## Targets
-
-Target distributions are **continuous densities** on some domain. They are **normalized to mass 1 by default** — pass `mass=` to trigger partial transport.
 
 ### `PolynomialGrid`
 
@@ -72,7 +117,7 @@ g   = PolynomialGrid( values = img )
 
 ### `SplineGrid`
 
-C¹ or higher continuity spline density on a regular grid. More regular than `PolynomialGrid`, supports gradients of the density with respect to its values.
+C¹ or higher continuity spline density on a grid. Can be seen as a specialization of `PolynomialGrid`.
 
 ```python
 from sdot import SplineGrid
@@ -120,41 +165,3 @@ Density defined on a surface or volume mesh (triangles, tetrahedra, …). Suppor
 Piecewise polynomial density on a polyhedral cell decomposition — the most general target type.
 :::
 
----
-
-## Batch Variants
-
-Every distribution class has a `BatchOf` prefix variant for running multiple independent problems in parallel (GPU-friendly).
-
-```python
-from sdot import BatchOfSumOfDiracs, BatchOfSplineGrid, distance
-
-B, n, d = 64, 500, 2
-
-positions = np.random.rand( B, n, d )
-values    = np.random.rand( B, 10, 10 )
-
-f = BatchOfSumOfDiracs( positions )   # batch of 64 source distributions
-g = BatchOfSplineGrid( values )       # batch of 64 targets
-
-d = distance( f, g )                  # shape (64,) — 64 distances in one call
-```
-
-And a `1d` suffix for simplified 1D construction (no need to add an extra axis):
-
-```python
-from sdot import SumOfDiracs1d
-
-f = SumOfDiracs1d( [ 0.1, 0.5, 0.9 ] )   # equivalent to SumOfDiracs( [[0.1],[0.5],[0.9]] )
-```
-
----
-
-## Normalization and Partial Transport
-
-By default, all targets are normalized so their total mass equals 1. If the source and target have different total masses, SDOT automatically performs **partial transport** — only the overlapping mass fraction is transported.
-
-```python
-# Partial transport: target has mass 0.5, source has mass 1
-g = SplineGrid( np.random.rand( 8, 8 ), mass = 0.5 )
-```

@@ -28,10 +28,12 @@ export default defineConfig({
         {
           text: 'Guide',
           items: [
-            { text: 'Getting Started',    link: '/guide/getting-started' },
-            { text: 'Distributions',      link: '/guide/distributions' },
-            { text: 'Ground Metrics',     link: '/guide/ground-metrics' },
+            { text: 'Getting Started',          link: '/guide/getting-started' },
+            { text: 'Distributions',            link: '/guide/distributions' },
+            { text: 'Ground Metrics',           link: '/guide/ground-metrics' },
             { text: 'Backends (JAX / PyTorch)', link: '/guide/backends' },
+            { text: 'Differentiability',        link: '/guide/differentiability' },
+            { text: 'Ot Plans',                 link: '/guide/ot-plan' },
           ]
         }
       ],
