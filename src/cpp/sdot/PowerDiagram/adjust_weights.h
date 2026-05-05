@@ -3,6 +3,7 @@
 #include "../support/LinearSolver.h"
 #include "PowerDiagramWorker.h"
 #include "../support/P.h"
+#include <iomanip>
 
 namespace sdot {
 
@@ -97,13 +98,11 @@ int get_matrix_terms( auto &p, auto &&distribution_worker, MatrixTermsWorker<Arc
     return error;
 }
 
-int adjust_weights( auto &&p ) {
-    p.power_diagram.weights.spill_to( p.new_weights );
-
+int newton_with_backtracking( auto &p ) {
     int error = 0;
     with_worker_for( p.target_distribution, [&]( auto &&distribution ) {
         MatrixTermsWorker mw( p.matrix_terms );
-        for( PI i = 0; i < p.max_iteration_count; ++i ) {
+        for( PI num_iter = 0; ; ) {
             int system_error = get_matrix_terms( p, distribution, mw );
             if ( system_error ) {
                 using TF = DECAYED_TYPE_OF( p.matrix_terms.solution[ 0 ] );
@@ -112,13 +111,17 @@ int adjust_weights( auto &&p ) {
                     p.matrix_terms.solution[ n ] *= coeff_backtracking;
                     p.power_diagram.weights[ n ] -= p.matrix_terms.solution[ n ];
                 }
-                // P( p.power_diagram.weights );
                 continue;
             }
 
-            P( mw.mt.max_measure_error_ratio() );
+            if ( p.verbosity )
+                std::cout << "niter: " << std::setw( 10 ) << num_iter << " merr: " << std::setw( 10 ) << std::scientific << mw.mt.max_measure_error_ratio() << std::endl;
+
             if ( mw.mt.max_measure_error_ratio() < 1e-3 )
                 return;
+
+            if( ++num_iter == p.max_iteration_count )
+                error = 1;
 
             mw.solve();
 
@@ -127,6 +130,14 @@ int adjust_weights( auto &&p ) {
 
         }
     } );
+
+    return error;
+}
+
+int adjust_weights( auto &&p ) {
+    p.power_diagram.weights.spill_to( p.new_weights );
+
+    int error = newton_with_backtracking( p );
 
     return error;
 }

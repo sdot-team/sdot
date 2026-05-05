@@ -99,7 +99,8 @@ class PowerDiagram:
             dirac_masses = dirac_masses,
             power_diagram = self,
 
-            max_iteration_count = 200,
+            max_iteration_count = 2000,
+            verbosity = 2,
 
             grad = False
         )

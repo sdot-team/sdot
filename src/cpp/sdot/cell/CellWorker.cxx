@@ -761,7 +761,7 @@ struct Integral<Value,DTP> {
     static auto integral( const Value &value, DTP &cw ) {
         // infinite cell
         if ( ! cw.cell.is_fully_closed() )
-            return std::numeric_limits<TF>::infinity();
+            return std::numeric_limits<TF>::max();
 
         // simplex
         TF sum = 0;

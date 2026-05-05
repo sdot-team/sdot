@@ -8,7 +8,7 @@ def test_bsp():
     n = 200
     d = 2
 
-    image = sdot.PolynomialGrid( values = [ [ [ 1 ], [ 2 ] ] ] )
+    image = sdot.PolynomialGrid( values = [ [ [ 1e-3, 0, 1, 0 ], [ 1, 0, 1, 0 ] ] ] )
     image = image.normalized_version( mass = 1 )
 
     positions = numpy.random.random( [ n, d ] )
