@@ -240,6 +240,32 @@ UTP TF DTP::measure() {
     return sum / factorial( dim );
 }
 
+UTP T_d auto DTP::simplex_from_indices( const DsVec<TI,d,Arch> &indices ) const {
+    Simplex<ct_dim,d,TF,Arch> res;
+    for( PI i = 0; i < d; ++i )
+        res.pts[ i ] = vertex_position( indices[ i ] );
+    return res;
+}
+
+UTP bool DTP::contains( const Pt &p ) const {
+    for( PI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
+        if ( dot( cut_dir( num_cut ), p ) - cut_dot( num_cut ) > 0 )
+            return false;
+    return true;
+}
+
+UTP DTP::Pt DTP::centroid() {
+    Pt res( Size(), dim, 0 );
+    TF mea = 0;
+    for_each_simplex( [&]( const auto &indices ) {
+        auto simplex = simplex_from_indices( indices );
+        TF m = simplex.measure();
+        res += m * simplex.centroid();
+        mea += m;
+    } );
+    return res / mea;
+}
+
 UTP void DTP::check_if_fully_closed() {
     for( TI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
         if ( cell.cut_ids[ num_cut ] == CellBoundary::INFINITE )

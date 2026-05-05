@@ -1,9 +1,12 @@
 #include "../Distribution/PolynomialGridWorker.h"
 #include <sdot/generated_includes/MatrixTerms.h>
 #include "../support/LinearSolver.h"
+#include "../support/dichotomy.h"
 #include "PowerDiagramWorker.h"
 #include "../support/P.h"
 #include <iomanip>
+
+#include <cstdlib>
 
 namespace sdot {
 
@@ -98,6 +101,12 @@ int get_matrix_terms( auto &p, auto &&distribution_worker, MatrixTermsWorker<Arc
     return error;
 }
 
+enum {
+    NO_ERROR = 0,
+    ERROR_ON_FIRST_SYSTEM,
+    ERROR_MAX_ITER,
+};
+
 int newton_with_backtracking( auto &p ) {
     int error = 0;
     with_worker_for( p.target_distribution, [&]( auto &&distribution ) {
@@ -105,6 +114,11 @@ int newton_with_backtracking( auto &p ) {
         for( PI num_iter = 0; ; ) {
             int system_error = get_matrix_terms( p, distribution, mw );
             if ( system_error ) {
+                if ( num_iter == 0 ) {
+                    error = ERROR_ON_FIRST_SYSTEM;
+                    return;
+                }
+
                 using TF = DECAYED_TYPE_OF( p.matrix_terms.solution[ 0 ] );
                 const TF coeff_backtracking = 0.5;
                 for( PI n = 0; n < p.matrix_terms.solution.size(); ++n ) {
@@ -120,8 +134,10 @@ int newton_with_backtracking( auto &p ) {
             if ( mw.mt.max_measure_error_ratio() < 1e-3 )
                 return;
 
-            if( ++num_iter == p.max_iteration_count )
-                error = 1;
+            if( ++num_iter == p.max_iteration_count ) {
+                error = ERROR_MAX_ITER;
+                break;
+            }
 
             mw.solve();
 
@@ -134,12 +150,88 @@ int newton_with_backtracking( auto &p ) {
     return error;
 }
 
+void center_weights( auto &p ) {
+    using namespace std;
+
+    constexpr PI dim = DECAYED_TYPE_OF( p.power_diagram.ct_dim )::value;
+    using TF = DECAYED_TYPE_OF( p.new_weights[ 0 ] );
+    using Pt = DsVec<TF,dim,Cpu>;
+
+    with_worker_for( p.target_distribution, [&]( auto &&distribution_worker ) {
+        distribution_worker.with_preparation_for_cell_traversal( p.cell_workspace, p.cells, [&]( auto &distribution_worker ) {
+            auto cell_workspace = p.cell_workspace.row( 0 );
+            auto cell = p.cells.row( 0 );
+            CellWorker cw( cell, cell_workspace, cell.dim() );
+            distribution_worker.init_cell( cell );
+
+            // find a (hyper) cube that fits inside the cell
+            auto cube_center = cw.centroid();
+            auto has_outside = [&]( TF sca ) {
+                for( PI d = 0; d < cw.dim; ++d ) {
+                    for( TF v : { -sca, +sca } ) {
+                        auto p = cube_center;
+                        p[ d ] += v;
+
+                        if ( ! cw.contains( p ) )
+                            return true;
+                    }
+                }
+                return false;
+            };
+
+            TF cube_width = dichotomy_find_largest_zero( TF( 0 ), has_outside ) * 0.9;
+
+            // min max diracs
+            Pt mi_di = p.power_diagram.positions.row( 0 );
+            Pt ma_di = mi_di;
+            for( PI n = 1; n < p.power_diagram.positions.size( 0 ); ++n ) {
+                for( PI d = 0; d < dim; ++d ) {
+                    mi_di[ d ] = min( mi_di[ d ], p.power_diagram.positions( n, d ) );
+                    ma_di[ d ] = max( ma_di[ d ], p.power_diagram.positions( n, d ) );
+                }
+            }
+            Pt diracs_center = ( ma_di + mi_di ) / 2;
+            Pt diracs_width = ( ma_di - mi_di ) / 2;
+
+            // adjust the weights
+            Pt scal = Pt::with_func( dim, [&]( PI d ) { return cube_width / diracs_width[ d ] - 1; } );
+            Pt grad = Pt::with_func( dim, [&]( PI d ) { return 2 * ( diracs_center[ d ] - cube_center[ d ] ); } );
+            for( PI n = 0; n < p.power_diagram.positions.size( 0 ); ++n ) {
+                TF w = dot( grad, Pt( p.power_diagram.positions.row( n ) ) );
+                for( PI d = 0; d < dim; ++d )
+                    w -= scal[ d ] * pow( p.power_diagram.positions( n, d ) - diracs_center[ d ], 2 ) / 2;
+                p.power_diagram.weights[ n ] = w;
+            }
+        } );
+    } );
+}
+
 int adjust_weights( auto &&p ) {
     p.power_diagram.weights.spill_to( p.new_weights );
 
-    int error = newton_with_backtracking( p );
+    center_weights( p );
 
-    return error;
+    bool weights_has_been_adjusted_to_fit_density_boundaries = false;
+    while ( true ) {
+        int error = newton_with_backtracking( p );
+        if ( error == 0 )
+            return 0;
+
+        if ( error == ERROR_ON_FIRST_SYSTEM ) {
+            if ( weights_has_been_adjusted_to_fit_density_boundaries )
+                TODO;
+            weights_has_been_adjusted_to_fit_density_boundaries = true;
+
+            center_weights( p );
+            continue;
+        }
+
+        if ( error == ERROR_MAX_ITER ) {
+            return ERROR_MAX_ITER;
+        }
+
+        TODO;
+    }
 }
 
 void adjust_weights_backward( auto &&p ) {

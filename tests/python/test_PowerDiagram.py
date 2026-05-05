@@ -4,14 +4,16 @@ import sdot
 import jax
 jax.config.update( 'jax_platform_name', 'cpu' )
 
+numpy.random.seed( 0 )
+
 def test_bsp():
-    n = 200
+    n = 100
     d = 2
 
-    image = sdot.PolynomialGrid( values = [ [ [ 1e-3, 0, 1, 0 ], [ 1, 0, 1, 0 ] ] ] )
+    image = sdot.PolynomialGrid( values = [ [ [ 1 ] ] ] )
     image = image.normalized_version( mass = 1 )
 
-    positions = numpy.random.random( [ n, d ] )
+    positions = numpy.random.random( [ n, d ] ) * 0.01 + 10 # + numpy.array( [ 0.5, 0 ] )
     # # positions = [ [ 10, 0 ], [ 11, 0 ] ]
     # # positions = [ [ 0, 0 ], [ 1, 0 ] ]
     weights = numpy.full( [ n ], 0 )
