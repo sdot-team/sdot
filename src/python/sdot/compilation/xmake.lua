@@ -3,8 +3,8 @@
 -- ==================================================================
 
 add_rules("mode.release", "mode.debug")
--- set_defaultmode("release")
-set_defaultmode("debug")
+set_defaultmode("release")
+-- set_defaultmode("debug")
 
 -- ──────────────────────────── helpers ─────────────────────────────────────────
 
@@ -33,6 +33,7 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     -- debug / release changes
     if is_mode("release") then
         add_defines("NB_COMPACT_ASSERTIONS")
+        add_cxxflags("-O3")
     else
         set_symbols("debug")
         add_cxxflags("-g3")

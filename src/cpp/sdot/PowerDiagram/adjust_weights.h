@@ -6,8 +6,10 @@
 
 namespace sdot {
 
-template<typename Arch, typename TF, typename TI>
+template<typename Arch, typename _TF, typename TI>
 struct MatrixTermsWorker {
+    using TF = _TF;
+
     void clear() {
         mt.nb_matrix_terms = 0;
     }
@@ -35,17 +37,22 @@ struct MatrixTermsWorker {
 };
 
 template<typename Arch, typename TF, typename TI>
-void get_matrix_terms( auto &p, auto &&distribution_worker, MatrixTermsWorker<Arch,TF,TI> &mw ) {
+int get_matrix_terms( auto &p, auto &&distribution_worker, MatrixTermsWorker<Arch,TF,TI> &mw ) {
+    using namespace std;
+
     PowerDiagramWorker pw( p.power_diagram, p.cell_workspace, p.cells );
     mw.clear();
 
+    mw.mt.max_measure_error_ratio() = 0;
+
+    int error = 0;
     distribution_worker.with_preparation_for_cell_traversal( p.cell_workspace, p.cells, [&]( auto &distribution_worker ) {
-        pw.for_each_cell( distribution_worker, [&]( auto &cell_worker, PI batch_index, SI num_dirac_0 ) {
+        error = pw.for_each_cell( distribution_worker, [&]( auto &cell_worker, PI batch_index, SI num_dirac_0 ) {
             auto d0_center = pw.position( num_dirac_0 );
-            auto V = p.dirac_masses[ num_dirac_0 ];
-            auto der_0 = V * 0;
+            TF der_0 = 0;
+            TF mass = 0;
             distribution_worker.for_each_sub_cell( cell_worker.cell, batch_index, [&]( auto &cell_worker, const auto &local_function ) {
-                V -= integral( local_function, cell_worker );
+                mass += integral( local_function, cell_worker );
 
                 cell_worker.for_each_facet( [&]( auto &&facet, SI num_dirac_1 ) {
                     if ( num_dirac_1 < 0 )
@@ -70,28 +77,58 @@ void get_matrix_terms( auto &p, auto &&distribution_worker, MatrixTermsWorker<Ar
 
                 // der_0 += cp.integration_der_wrt_weight( space_func, radial_func.func_for_final_cp_integration(), d0_weight );
             } );
+
+            if ( mass == 0 )
+                return 1;
+
+            mw.mt.vector_vals[ num_dirac_0 ] = p.dirac_masses[ num_dirac_0 ] - mass;
             mw.add_term( num_dirac_0, num_dirac_0, der_0 );
-            mw.mt.vector_vals[ num_dirac_0 ] = V;
+
+            mw.mt.max_measure_error_ratio() = max( mw.mt.max_measure_error_ratio(), abs( p.dirac_masses[ num_dirac_0 ] - mass ) / mass );
+
+            return 0;
         } );
     } );
 
     if ( p.matrix_terms.nb_matrix_terms ) {
         mw.add_term( 0, 0, 1 );
     }
+
+    return error;
 }
 
-void adjust_weights( auto &&p ) {
+int adjust_weights( auto &&p ) {
+    p.power_diagram.weights.spill_to( p.new_weights );
+
+    int error = 0;
     with_worker_for( p.target_distribution, [&]( auto &&distribution ) {
         MatrixTermsWorker mw( p.matrix_terms );
-        for( PI i = 0; i < 3; ++i ) {
-            get_matrix_terms( p, distribution, mw );
+        for( PI i = 0; i < p.max_iteration_count; ++i ) {
+            int system_error = get_matrix_terms( p, distribution, mw );
+            if ( system_error ) {
+                using TF = DECAYED_TYPE_OF( p.matrix_terms.solution[ 0 ] );
+                const TF coeff_backtracking = 0.5;
+                for( PI n = 0; n < p.matrix_terms.solution.size(); ++n ) {
+                    p.matrix_terms.solution[ n ] *= coeff_backtracking;
+                    p.power_diagram.weights[ n ] -= p.matrix_terms.solution[ n ];
+                }
+                // P( p.power_diagram.weights );
+                continue;
+            }
+
+            P( mw.mt.max_measure_error_ratio() );
+            if ( mw.mt.max_measure_error_ratio() < 1e-3 )
+                return;
+
             mw.solve();
 
-            P( p.matrix_terms.vector_vals );
             for( PI n = 0; n < p.matrix_terms.solution.size(); ++n )
                 p.power_diagram.weights[ n ] += p.matrix_terms.solution[ n ];
+
         }
     } );
+
+    return error;
 }
 
 void adjust_weights_backward( auto &&p ) {

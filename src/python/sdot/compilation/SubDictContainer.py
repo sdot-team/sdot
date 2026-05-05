@@ -219,9 +219,8 @@ class SubDictContainer:
         # with_same_shape
             lines.append( "    void with_same_shape( auto &&func ) const {" )
             s = "        "
-            for name, _ in self.sub_dict.items():
-                lines.append( s + f"{ name }.with_same_shape( [&]( auto &{ name } ) {{" )
-                s += "  "
+            for name, argument in self.sub_dict.items():
+                s = argument.beg_with_same_shape( name, s, lines )
             lines.append( s + f"{ base_cpp_name } new_value{{" )
             for ct_axis_name in ct_axes:
                 lines.append( s + f"    .ct_{ ct_axis_name } = CtInt<ct_{ ct_axis_name }_value>()," )
@@ -229,9 +228,8 @@ class SubDictContainer:
                 lines.append( s + f"    .{ name } = { name }," )
             lines.append( s + "};" )
             lines.append( s + "func( new_value );" )
-            for name, _ in self.sub_dict.items():
-                s = s[ :-2 ]
-                lines.append( s + "} );" )
+            for name, argument in self.sub_dict.items():
+                s = argument.end_with_same_shape( name, s, lines )
             lines.append( "    }" )
 
         # compile-time axis members

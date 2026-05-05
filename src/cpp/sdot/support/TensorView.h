@@ -39,6 +39,8 @@ public:
     HD T_d void    get_data_from     ( const DsVec<T,d,Arch> &that );
     void           fill_with         ( T value );
 
+    void           spill_to          ( TensorView &that ); ///< copie data of this to that, and use data from that
+
     static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
     HD Strides     strides           () const;
     HD SI          stride            ( PI d ) const;
@@ -60,7 +62,7 @@ public:
     HD auto        begin             () const;
     HD auto        end               () const;
 
-    HD void        for_each_index    ( auto &&func, PI sub, const DsVec<PI,ct_rank,Arch> &size_to_take ) const;
+    HD void        for_each_index    ( auto &&func, PI sub, DsVec<PI,ct_rank,Arch> size_to_take ) const;
     HD void        for_each_index    ( auto &&func, PI sub = 0 ) const;
 
     HD bool        is_contiguous     () const; ///< true iff strides match row-major contiguous layout
@@ -93,7 +95,8 @@ private:
     Strides        _strides;         ///< byte strides
     Sizes          _sizes;           ///<
     Ptr            _ptr;             ///<
-    Arch           arch;             ///<
+
+    Arch           _arch;            ///<
 };
 
 } // namespace sdot

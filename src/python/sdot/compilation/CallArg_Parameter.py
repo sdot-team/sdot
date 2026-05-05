@@ -45,3 +45,12 @@ class CallArg_Parameter( CallArg ):
 
     def assembled_code( self, beg_line ):
         return self.ffi_name()
+
+    def get_all_the_ways_to_get( self, *arg, **kwargs ):
+        pass
+
+    def beg_with_same_shape( self, name, s, lines ):
+        return s
+
+    def end_with_same_shape( self, name, s, lines ):
+        return s

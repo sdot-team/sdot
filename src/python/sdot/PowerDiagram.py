@@ -38,11 +38,11 @@ class PowerDiagram:
 
         self.bsp = Bsp.make_from( self.positions, self.weights )
 
-    def plot( self, plotter = None ):
+    def plot( self, target_distribution, plotter = None ):
         with Plotter( plotter ) as p:
-            p.plot_mesh( *self.vtk_cell_faces() )
+            p.plot_mesh( *self.vtk_cell_faces( target_distribution ) )
 
-    def vtk_cell_faces( self ):
+    def vtk_cell_faces( self, target_distribution ):
         reservation = 64 * self.nb_vertices # TODO better approx
 
         return driver.call( "vtk_cell_faces", "sdot/PowerDiagram/vtk_cell_faces.h",
@@ -62,6 +62,7 @@ class PowerDiagram:
                 batch_size = 1,
                 dim = self.dim
             ),
+            target_distribution = target_distribution,
             power_diagram = self,
 
             grad = False
@@ -98,8 +99,9 @@ class PowerDiagram:
             dirac_masses = dirac_masses,
             power_diagram = self,
 
+            max_iteration_count = 200,
+
             grad = False
         )
 
-        infox( new_weights )
-
+        self.weights = new_weights

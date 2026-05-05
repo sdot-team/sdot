@@ -56,3 +56,12 @@ class CallArg:
     def get_includes( self, includes: set ):
         pass
 
+    def beg_with_same_shape( self, name, s, lines ):
+        lines.append( s + f"{ name }.with_same_shape( [&]( auto &{ name } ) {{" )
+        return s + "  "
+
+    def end_with_same_shape( self, name, s, lines ):
+        s = s[ :-2 ]
+        lines.append( s + "} );" )
+        return s
+

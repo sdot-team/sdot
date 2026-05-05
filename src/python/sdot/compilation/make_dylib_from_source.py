@@ -80,6 +80,8 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
         if out.returncode:
             sys.exit( out.returncode )
 
+    xmake_mode = os.environ.get( "SDOT_XMAKE_MODE", "release" )
+
     run( [ "pwd" ] )
-    run( [ xmake, "f", "-P", str( sdot_dir ), "-y", "--require=yes" ] )
+    run( [ xmake, "f", "-P", str( sdot_dir ), "-y", "--require=yes", "-m", xmake_mode ] )
     run( [ xmake, "-P", str( sdot_dir ) ] )

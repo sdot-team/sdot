@@ -24,6 +24,8 @@ struct CellWorker {
     // info, computations --------------------------------------------------------------------
     void  for_each_simplex      ( auto &&func );
     void  for_each_facet        ( auto &&func ); ///< func( facet_repr, cut_id )
+    void  for_each_face         ( auto &&func ); ///< func( num_vertices, cut_indices_for_this_face )
+
     void  check_consistency     ();
     void  disp_cell             ();
     TF    measure               ();

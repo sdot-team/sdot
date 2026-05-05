@@ -14,8 +14,8 @@ struct PowerDiagramWorker {
     Pt    position                           ( PI n ) const;
 
     //
-    void  for_each_point_in_bsp              ( auto &&func );
-    void  for_each_cell                      ( auto &&density, auto &&func );
+    int   for_each_point_in_bsp              ( auto &&func );
+    int   for_each_cell                      ( auto &&density, auto &&func ); ///< func( cell_worker, batch_index, point_index ) -> bool to continue;
 
     // attributes ---------------------------------------------------------------------------
     PowerDiagram<ct_dim,ct_dim,ct_dim,Arch,TF,TI> &power_diagram;

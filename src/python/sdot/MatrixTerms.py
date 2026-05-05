@@ -8,12 +8,13 @@ class MatrixTerms:
 
     """
 
-    matrix_rows : Tensor( "nb_matrix_terms[]", dtype = int )
-    matrix_cols : Tensor( "nb_matrix_terms[]", dtype = int )
-    matrix_vals : Tensor( "nb_matrix_terms[]" )
-    vector_vals : Tensor( "nb_vector_terms" )
-    solution    : Tensor( "nb_vector_terms" )
-    residual    : Tensor()
+    matrix_rows             : Tensor( "nb_matrix_terms[]", dtype = int )
+    matrix_cols             : Tensor( "nb_matrix_terms[]", dtype = int )
+    matrix_vals             : Tensor( "nb_matrix_terms[]" )
+    vector_vals             : Tensor( "nb_vector_terms" )
+    solution                : Tensor( "nb_vector_terms" )
+
+    max_measure_error_ratio : Tensor()
 
     if TYPE_CHECKING:
         max_of_nb_matrix_terms : int
