@@ -1,0 +1,34 @@
+{
+  "languages": {
+    "C++": {
+      "language_servers": ["clangd"],
+      "format_on_save": "off",
+      "tab_size": 4
+    },
+    "Python": {
+      "language_servers": ["pyright"],
+      "format_on_save": "off",
+      "tab_size": 4
+    }
+  },
+  "lsp": {
+    "clangd": {
+      "binary": {
+        "path": "/opt/homebrew/opt/llvm/bin/clangd",
+        "arguments": [
+          "--compile-commands-dir=.",
+          "--header-insertion=never",
+          "--background-index",
+          "--clang-tidy",
+          "--completion-style=detailed",
+          "--pch-storage=memory",
+          "--log=error"
+        ]
+      }
+    },
+  },
+  "tab_size": 4,
+  "format_on_save": "off",
+  "ensure_final_newline_on_save": true,
+  "remove_trailing_whitespace_on_save": true,
+}

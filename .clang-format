@@ -1,0 +1,79 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+# Indentation
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+# Spaces inside parentheses: f( a, b + 2 ), if ( cond )
+# clang-format >= 17
+SpacesInParens: Custom
+SpacesInParensOptions:
+  InConditionalStatements: true
+  InEmptyParentheses: false
+  Other: true
+# clang-format < 17 (décommenter si besoin)
+# SpacesInParentheses: true
+
+# Spaces inside square brackets: arr[ i ]
+SpacesInSquareBrackets: true
+
+# Spaces inside angle brackets: vector< int >
+SpacesInAngles: Always
+
+# Pointer/reference attachés au type: int* x, const T& y
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# Accolades sur la même ligne: if (...) {
+BreakBeforeBraces: Attach
+
+# Fonctions/lambdas courtes sur une seule ligne
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+
+# Pas d'espace entre le nom de fonction et la parenthèse
+SpaceBeforeParens: ControlStatements
+
+# Espaces autour des opérateurs binaires (comportement par défaut LLVM, ok)
+SpaceBeforeAssignmentOperators: true
+
+# Alignement des arguments sur plusieurs lignes
+AlignAfterOpenBracket: Align
+ContinuationIndentWidth: 4
+
+# Alignement des noms de variables/attributs sur les lignes consécutives
+# Résultat : FaceMap  face_map;  /  PI       curr_op_id;  /  Vertices vertices;
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: false
+
+# Alignement des = consécutifs (utile pour les blocs using/typedef)
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: false
+
+# Constructeurs/initialiseurs
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: Never
+
+# Template
+AlwaysBreakTemplateDeclarations: Yes
+SpaceAfterTemplateKeyword: false
+
+# Namespaces
+NamespaceIndentation: None
+CompactNamespaces: false
+
+# Include sorting
+SortIncludes: Never
+
+# Trailing commas/semicolons
+RemoveSemicolon: false

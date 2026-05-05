@@ -1,0 +1,79 @@
+[
+  {
+    "label": "Build",
+    "command": "make -f .test.mk",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🔥 Clean + Rebuild",
+    "command": "make clean && make build",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "✅ Run All Tests",
+    "command": "make test",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🧪 C++ Tests Only",
+    "command": ".venv/bin/meson test -C build --print-errorlogs",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🐍 Python Tests Only",
+    "command": "PYTHONPATH=python/pytorch:python/jax .venv/bin/pytest tests/ -v",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🔬 PyTorch Tests",
+    "command": "PYTHONPATH=python/pytorch:python/jax .venv/bin/pytest tests/test_pytorch.py tests/test_w2_pytorch.py -v",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🎯 JAX Tests",
+    "command": "PYTHONPATH=python/pytorch:python/jax .venv/bin/pytest tests/test_jax.py tests/test_w2_jax.py -v",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🏥 CT Reconstruction Example",
+    "command": "make ct_reco",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🧹 Clean Build",
+    "command": "make clean",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "📊 Meson Configure",
+    "command": ".venv/bin/meson configure build",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🔍 Check Compile Commands",
+    "command": "ls -lh build/compile_commands.json && wc -l build/compile_commands.json",
+    "use_new_terminal": false,
+    "allow_concurrent_runs": true,
+    "reveal": "always"
+  }
+]
