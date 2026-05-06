@@ -137,11 +137,16 @@ def _setup_distribution_class( cls ):
 
             # set values
             for name, field in fields.items():
+                value = None
                 if name in values:
-                    cted = field( values[ name ] )
-                else:
-                    cted = field()
-                setattr( self, name, cted )
+                    value = values[ name ]
+
+                if coerce := getattr( field, "coerce", None ):
+                    value = coerce( value )
+                elif value is not None and not isinstance( value, field ):
+                    value = field( value )
+
+                setattr( self, name, value )
 
         cls.__aggregate_init__ = __aggregate_init__
 
@@ -153,10 +158,11 @@ def _setup_distribution_class( cls ):
     if '__setattr__' not in vars( cls ):
         def __setattr__( self, name, value ):
             annotation = fields.get( name )
-            if coerce := getattr( annotation, "coerce", None ):
-                value = coerce( value )
-            elif not isinstance( value, annotation ):
-                value = annotation( value )
+            if annotation is not None:
+                if coerce := getattr( annotation, "coerce", None ):
+                    value = coerce( value )
+                elif value is not None and not isinstance( value, annotation ):
+                    value = annotation( value )
             object.__setattr__( self, name, value )
         cls.__setattr__ = __setattr__
 

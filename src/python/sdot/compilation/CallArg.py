@@ -46,6 +46,9 @@ class CallArg:
         if isinstance( python_value, ( list, tuple ) ):
             raise NotImplementedError
 
+        if python_class.__name__ == "NoneType":
+            raise RuntimeError( f"for { name_in_parent }" )
+
         # else, get attributes
         from .CallArg_Aggregate import CallArg_Aggregate
         return CallArg_Aggregate.factory( call_args, parent, name_in_parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )

@@ -68,6 +68,8 @@ class CallArgs( SubDictContainer ):
         res.dynamix_axes = []
 
         for name, arg in nargs.items():
+            if arg is None:
+                raise RuntimeError( f"None arg in CallArgs for arg `{ name }`" )
             io_category = IoCategory( want_return = False, want_output = False, has_input = True )
             res.sub_dict[ name ] = CallArg.factory( res, res, name, type( arg ), arg, io_category, [], {} )
 

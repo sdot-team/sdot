@@ -20,9 +20,6 @@ class CallArg_Aggregate( SubDictContainer, CallArg ):
     def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
         res = CallArg_Aggregate()
 
-        if python_class.__name__ == "NoneType":
-            raise RuntimeError( f"for { name_in_parent }" )
-
         res.python_class = python_class
         res.python_value = python_value
         res.io_category = io_category

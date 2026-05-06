@@ -34,7 +34,6 @@ class PowerDiagram:
         if ground_metric is None:
             ground_metric = Norm2( driver.empty( [ 0, self.dim + 1, self.dim + 1 ] ) )
         self.ground_metric = ground_metric
-        info( self.ground_metric )
 
         self.bsp = Bsp.make_from( self.positions, self.weights )
 

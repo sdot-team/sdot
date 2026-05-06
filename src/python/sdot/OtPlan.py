@@ -22,29 +22,10 @@ class OtPlan:
     f: Distribution # SumOfWeightedDiracs
     g: Distribution
 
-    # def __init__( self, f: Distribution, g: Distribution, call_solve = True ):
-    #     self.f = f
-    #     self.g = g
 
-    #     if call_solve:
-    #         self.solve()
+    def plot( self ):
+        self.power_diagram.plot( self.g )
 
-    # def unidimensional_version( self ):
-    #     assert self.barycenters.shape[ 1 ] == 1
-    #     return OtPlan1d( self.distances, self.barycenters[ :, 0 ], self.potentials, self.cuts )
-
-    def solve( self ):
-        f, g, update_cb = self._ordered_f_and_g()
-
-        self.power_diagram = PowerDiagram( f.positions, f.weights )
-
-    # def _ordered_f_and_g( self ) -> tuple[ SumOfWeightedDiracs, Distribution, callable ]:
-    #     if isinstance( self.f, SumOfWeightedDiracs ):
-    #         def nothing_to_do():
-    #             pass
-    #         return self.f, self.g, nothing_to_do
-
-    #     raise NotImplementedError
 
 def optimal_transport_plan( f: Distribution, g: Distribution, ground_metric = None ):
     # normalize f
@@ -72,19 +53,19 @@ def optimal_transport_plan( f: Distribution, g: Distribution, ground_metric = No
     power_diagram = PowerDiagram( positions = f.positions, weights = weights, ground_metric = ground_metric )
     distance, barycenters = power_diagram.adjust_weights( dirac_masses = f.weights, target_distribution = g )
 
-    # res = OtPlan(
-    #     power_diagram = power_diagram,
-    #     barycenters = barycenters,
-    #     potentials = power_diagram.weights,
-    #     distance = distance,
-    #     f = f,
-    #     g = g,
-    # )
+    res = OtPlan(
+        power_diagram = power_diagram,
+        barycenters = barycenters,
+        potentials = power_diagram.weights,
+        distance = distance,
+        f = f,
+        g = g,
+    )
 
-    # if inverted:
-    #     pass
+    if inverted:
+        pass
 
-    # return res
+    return res
 
 
 

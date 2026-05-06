@@ -207,7 +207,10 @@ void center_weights( auto &p ) {
 }
 
 int adjust_weights( auto &&p ) {
-    p.power_diagram.weights.spill_to( p.new_weights );
+    if ( p.power_diagram.weights.is_valid() )
+        p.power_diagram.weights.spill_to( p.new_weights );
+    else
+        TODO;
 
     center_weights( p );
 

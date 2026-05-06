@@ -12,12 +12,12 @@ def for_each_driver_comb( cb ):
 
 
 def test_basic():
-    # plan = sdot.opt(
-    # )
-    # info( plan.distance )
-    g = sdot.SumOfWeightedDiracs( numpy.random.random( [ 5, 2 ] ), numpy.ones( 5 ) / 5 )
+    g = sdot.SumOfWeightedDiracs( numpy.random.random( [ 5, 2 ] ) )
     f = sdot.PolynomialGrid( [ [ [ 1 ] ] ] )
     p = sdot.optimal_transport_plan( f, g )
+
+    info( p.distance )
+    p.plot()
 
 
 if __name__ == "__main__":
