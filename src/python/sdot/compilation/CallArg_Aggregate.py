@@ -11,7 +11,7 @@ class CallArg_Aggregate( SubDictContainer, CallArg ):
     python_class: any #
     python_value: any #
     io_category : IoCategory #
-    sub_dict    : dict[ CallArg ] #
+    sub_dict    : dict[ str, CallArg ] #
 
     ctor_args   : list
     ctor_kwargs : dict
@@ -75,16 +75,12 @@ class CallArg_Aggregate( SubDictContainer, CallArg ):
         return self.python_class( **ctor_args )
 
     def get_includes( self, includes: set ):
-        includes.add( f"sdot/generated_includes/{ self.base_cpp_name() }.h" )
+        includes.add( f"sdot/{ self.base_cpp_name() }.h" )
 
     def generate_structure( self, already_visited ):
         if self.python_class in already_visited:
             return
         already_visited.add( self.python_class )
-
-        includes = set( [ "sdot/support/DynamicAxis.h" ] )
-        beg_lines = [ "", "namespace sdot {", "" ]
-        end_lines = [ "", "} // namespace sdot", "" ]
 
         # unbatch
         bv = getattr( self.python_class, "BaseVersion", None )
@@ -96,8 +92,34 @@ class CallArg_Aggregate( SubDictContainer, CallArg ):
             unbatch_call_arg = CallArg_Aggregate.factory( call_args = None, parent = None, name_in_parent = "", python_class = bv, python_value = None, io_category = io, ctor_args = [], ctor_kwargs = {} )
             unbatch_call_arg.generate_structures( already_visited )
 
-        # current version
-        code = self.struct_decl( self.base_cpp_name(), includes, beg_lines, end_lines, unbatch_version = bv )
+        body_lines, includes, template_args = self.struct_body( self.base_cpp_name(), unbatch_version = bv )
+        includes.add( "sdot/support/DynamicAxis.h" )
+
+        cpp_name = self.base_cpp_name()
+
+        inc_lines = []
+        for inc in sorted( includes, key = lambda s: ( -len( s ), s ) ):
+            if inc.startswith( "." ):
+                inc_lines.append( f"#include \"{ inc }\"" )
+            else:
+                inc_lines.append( f"#include <{ inc }>" )
+
+        # PARAMETERS_OF_<Name>: template signature for the outer hand-written struct
+        if template_args:
+            params           = ', '.join( f'{ ta.cpp_type } { n }' for n, ta in template_args )
+            parameters_macro = f"#define PARAMETERS_OF_{ cpp_name } template<{ params }>"
+        else:
+            parameters_macro = f"#define PARAMETERS_OF_{ cpp_name }"
+
+        # ATTRIBUTES_OF_<Name>: struct body as a multi-line macro (backslash continuations)
+        if body_lines:
+            macro_body       = "\n".join( ( line or "    " ) + " \\" for line in body_lines[ :-1 ] ) + "\n" + ( body_lines[ -1 ] or "    " )
+            attributes_macro = f"#define ATTRIBUTES_OF_{ cpp_name } \\\n{ macro_body }"
+        else:
+            attributes_macro = f"#define ATTRIBUTES_OF_{ cpp_name }"
+
+        all_lines = [ "#pragma once", "" ] + inc_lines + [ "", parameters_macro, "", attributes_macro ]
+        code = "\n".join( all_lines )
 
         from ..generated_files.compilation_directories import generated_includes_dir
         path = generated_includes_dir() / f"{ self.base_cpp_name() }.h"

@@ -1,3 +1,4 @@
+from typing_extensions import Optional
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
@@ -235,7 +236,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, func_name: str, includes: str | list[ str ], grad = True, parameters_struct = None, **args ):
+    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -244,15 +245,16 @@ class JaxDriver:
           - plain JAX array            — read-only input
           - int / float / str / ...    — scalar XLA attribute
         """
-        if isinstance( includes, str ):
-            includes = [ includes ]
 
-        # get a jax compatible set of arg lists
+        if includes is None:
+            includes = []
+
+        # argument analysis (get a jax compatible set of arg lists, ...)
         fai = CallArgs.factory( args = args )
 
         # check ffi function is registered
-        module_name = self._module_name_for( func_name, includes, fai )
-        self._register_ffi_target( module_name, func_name, includes, fai, make_backward_binding = grad )
+        module_name = self._module_name_for( code, grad_code, includes, fai )
+        self._register_ffi_target( module_name, code, grad_code, includes, fai )
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
@@ -397,21 +399,23 @@ class JaxDriver:
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
 
-    def _module_name_for( self, func_name: str, includes: list[ str ], main_list: CallArgs ):
+    def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgs ):
         # get signature
-        base_signature = [ func_name ] + [ name + "_" + arg.signature() for name, arg in main_list.sub_dict.items() ] + includes
+        base_signature = [ code, grad_code ] + [ str( name ) + "_" + arg.signature() for name, arg in main_list.sub_dict.items() ] + includes
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
-        res = re.sub( r'[^\w]', '_', str.join( "__", base_signature ) )
-        if len( res ) > 40:
-            res = res[ : 40 - 11 ] + encode_base_62( res[ 40 - 11: ] )
+        res = re.sub( r'[^\w]', '_', str.join( "_", base_signature ) )
+        while "__" in res:
+            res = res.replace( "__", "_" )
+        if len( res ) > 50:
+            res = res[ : 50 - 11 ] + encode_base_62( res[ 50 - 11: ] )
 
         return res
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, func_name: str, includes: list[ str ], args: CallArgs, make_backward_binding = True ):
+    def _register_ffi_target( self, module_name: str, code: str, grad_code: str, includes: list[ str ], args: CallArgs ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -421,17 +425,17 @@ class JaxDriver:
         from ..compilation.force_build import force_build
         if not force_build():
             try:
-                self._try_to_import_and_register_ffi_target( module_name, func_name, make_backward_binding )
+                self._try_to_import_and_register_ffi_target( module_name, code, bool( grad_code ) )
                 return
             except ( ImportError, SystemError ):
                 pass
 
         # else, make the dylib
         includes_set = set( includes )
-        self._make_dylib( func_name, includes_set, args, module_name, make_backward_binding )
+        self._make_dylib( code, grad_code, includes_set, args, module_name )
 
         # and try again to import it
-        self._try_to_import_and_register_ffi_target( module_name, func_name, make_backward_binding )
+        self._try_to_import_and_register_ffi_target( module_name, code, bool( grad_code ) )
 
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
@@ -441,7 +445,7 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, func_name: str, includes: set, fai: CallArgs, module_name: str, make_backward_binding: bool ):
+    def _make_dylib( self, code: str, grad_code: str, includes: set, fai: CallArgs, module_name: str ):
         # generate structs
         already_visited = set()
         fai.generate_structures( already_visited )
@@ -457,16 +461,15 @@ class JaxDriver:
         lines.append( "using namespace sdot;" )
         lines.append( "" )
         lines.append( "using Arch = Cpu;" )
-        lines.append( f"using TF = { self.normalized_dtype };" )
         lines.append( "" )
 
         # --- forward handler ---
-        self._handler_source( includes, lines, func_name, fai )
+        self._handler_source( includes, lines, code, fai, module_name )
         lines.append( "" )
 
         # --- backward handler ---
-        if make_backward_binding:
-            self._handler_source( includes, lines, func_name + "_backward", fai.backward_version( self ) )
+        if grad_code:
+            self._handler_source( includes, lines, code + "_backward", fai.backward_version( self ), module_name )
             lines.append( "" )
 
         lines.append( "" )
@@ -477,9 +480,9 @@ class JaxDriver:
         lines.append( "}" )
         lines.append( "" )
         lines.append( f"NB_MODULE( { module_name }, m ) {{" )
-        lines.append( f"  m.def( \"{ func_name }\", []() {{ return EncapsulateFfiCall( binding_{ func_name } ); }} );" )
-        if make_backward_binding:
-            lines.append( f"  m.def( \"{ func_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ func_name }_backward ); }} );" )
+        lines.append( f"  m.def( \"{ module_name }\", []() {{ return EncapsulateFfiCall( binding_{ module_name } ); }} );" )
+        if grad_code:
+            lines.append( f"  m.def( \"{ module_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ module_name }_backward ); }} );" )
         lines.append( "}" )
 
         include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
@@ -488,17 +491,14 @@ class JaxDriver:
         from ..compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
 
-    def _handler_source( self, includes, lines, func_name: str, fai: CallArgs ) -> list[ str ]:
+    def _handler_source( self, includes, lines, code: str, fai: CallArgs, module_name: str ):
         # make a structure with the names
-        if fai.parameters_struct is None:
-            parameters_struct = f"Parameters_{ func_name }"
-            fai.make_parameters_struct( includes, lines, parameters_struct )
-        else:
-            parameters_struct = fai.parameters_struct
+        parameters_struct = f"Parameters_{ module_name }"
+        fai.make_parameters_struct( includes, lines, parameters_struct )
         lines.append( "" )
 
         # start impl: declaration
-        lines.append( f"xla::ffi::Error impl_{ func_name }( { fai.arg_decl() } ) {{" )
+        lines.append( f"xla::ffi::Error impl_{ module_name }( { fai.arg_decl() } ) {{" )
 
         # u8_...
         if len( fai.u8_input_values ):
@@ -515,7 +515,8 @@ class JaxDriver:
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"        { func_name }( { fai.assembled_code( parameters_struct, '        ' )  } );" )
+        lines.append( f"        auto p = { fai.assembled_code( parameters_struct, '        ' ) };" )
+        lines.append( f"        { code };" )
 
         # end try block
 
@@ -530,7 +531,7 @@ class JaxDriver:
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain()
-        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( '.', bind_chain ) } );" )
+        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ module_name }, impl_{ module_name }, { str.join( '.', bind_chain ) } );" )
 
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):
@@ -586,4 +587,3 @@ class JaxDriver:
 
         final = unpack( result.x )
         return final if is_list else final[ 0 ]
-

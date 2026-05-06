@@ -1,8 +1,6 @@
 {
   "include": [
     "src/python",
-    "tests",
-    "examples"
   ],
   "exclude": [
     "**/__pycache__",
@@ -12,11 +10,9 @@
   ],
   "extraPaths": [
     "src/python",
-    "build/src/python"
   ],
-  "venvPath": ".",
-  "venv": ".venv",
-  "pythonVersion": "3.14",
+  "pythonVersion": "3.13",
+  "pythonPath": "/Users/hugo.leclerc/.mamba/envs/vfs/bin/python",
   "pythonPlatform": "Darwin",
   "typeCheckingMode": "basic",
   "reportMissingImports": true,
@@ -29,6 +25,7 @@
   "reportOptionalMemberAccess": "none",
   "reportGeneralTypeIssues": "none",
   "reportPrivateUsage": "none",
+  "reportInvalidTypeForm": false,
   "stubPath": "stubs",
-  "extraBuiltins": ["ic", "info"]
+  // "extraBuiltins": ["ic", "info"]
 }

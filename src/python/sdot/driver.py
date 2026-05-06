@@ -6,7 +6,7 @@
 # from .CtInt import CtInt as CtInt
 # from .Dyn import Dyn as Dyn
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast, Any
 import numpy
 import sys
 import os
@@ -300,3 +300,8 @@ class DriverProxy:
 
 # start with an unknown driver instance
 driver = DriverProxy()
+
+# git a concrete instance to typing
+if TYPE_CHECKING:
+    from .drivers.JaxDriver import JaxDriver
+    driver = cast( JaxDriver, driver )

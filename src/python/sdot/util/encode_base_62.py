@@ -9,4 +9,3 @@ def encode_base_62( s: str, length: int = 11 ) -> str:
         res.append( chars[ h % 62 ] )
         h //= 62
     return ''.join( reversed( res ) )
-

@@ -1,8 +1,7 @@
-from .aggregate import aggregate, Tensor, Return
+from .aggregate import aggregate, Workspace, Tensor, Return
+from typing import TYPE_CHECKING, cast
 from .driver import driver
 
-from typing import TYPE_CHECKING
-import numpy
 
 # constant
 INFINITE = -2
@@ -15,41 +14,82 @@ class Cell:
 
     """
 
-    vertex_positions : Tensor( "nb_vertices[]", "dim", ct_axes = [ "dim" ] )
-    vertex_indices   : Tensor( "nb_vertices[]", "dim", dtype = int ) # vertex index -> sorted cut indices
-    edge_indices     : Tensor( "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
-    cut_planes       : Tensor( "nb_cuts[]", "dim + 1" )
-    cut_ids          : Tensor( "nb_cuts[]", dtype = int )
+    # workspaces
+    indices_to_remove : Workspace( Tensor( "nb_vertices[]", dtype = int ) ) # actually used for vertices, edges and cuts
+    used_flags        : Workspace( Tensor( "nb_vertices[]", dtype = int ) )
+    map_items         : Workspace( Tensor( "nb_map_items[]", dtype = int ) )
+    links             : Workspace( Tensor( "nb_links[]", dtype = int ) )
+    corr              : Workspace( Tensor( "nb_vertices[]", dtype = int ) )
+    sps               : Workspace( Tensor( "nb_vertices[]" ) )
 
-    is_fully_closed  : Tensor( dtype = int )
+    # data
+    vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_axes = [ "dim" ] )
+    vertex_indices    : Tensor( "nb_vertices[]", "dim", dtype = int ) # vertex index -> sorted cut indices
+    edge_indices      : Tensor( "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
+    cut_planes        : Tensor( "nb_cuts[]", "dim + 1" )
+    cut_ids           : Tensor( "nb_cuts[]", dtype = int )
+
+    is_fully_closed   : Tensor( dtype = int )
+
 
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
+
+        max_of_nb_indices_to_remove: int
+        max_of_nb_map_items: int
         max_of_nb_vertices: int
+        max_of_nb_links: int
         max_of_nb_edges: int
         max_of_nb_cuts: int
         dim: int
 
 
-    def __init__( self, dim, nb_vertices_capacity = 50, nb_edges_capacity = 50, nb_cuts_capacity = 50 ):
-        self.vertex_positions = driver.empty( [ nb_vertices_capacity, dim ] )
-        self.cut_planes = driver.empty( [ nb_cuts_capacity, dim + 1 ] )
-        self.cut_ids = driver.empty( [ nb_cuts_capacity ], dtype = driver.itype )
+    @staticmethod
+    def full( dim ):
+        return cast( Cell, driver.call( "p.cell.init_full()", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
 
-        self.is_fully_closed = 0
-        self.nb_vertices = 0
-        self.nb_edges = 0
-        self.nb_cuts = 0
+    @staticmethod
+    def _return_parameters( dim ):
+        return dict(
+            max_of_nb_indices_to_remove = 64,
+            max_of_nb_map_items = 64,
+            max_of_nb_vertices = 64,
+            max_of_nb_links = 64 * 8,
+            max_of_nb_edges = 64,
+            max_of_nb_cuts = 64,
+            dim = dim,
+        )
 
-        if dim != 2:
-            self.large_vertex_indices = driver.empty( [ nb_vertices_capacity, dim ], dtype = driver.int_type )
-            self.large_edge_indices = driver.empty( [ nb_edges_capacity, dim + 1 ], dtype = driver.int_type )
+    # @staticmethod
+    # def hypercube( frame, bnd = BOUNDARY ):
+    #     frame = driver.array( frame )
+    #     assert frame is not None
+    #     return Cell( frame.shape[ 1 ], lambda cell: cpp_binding( "make_hypercube", "sdot/cell/Cell.h" )( Output( cell ), frame, bnd ) )
 
-        #     driver.call( "make_empty_cell", "sdot/cell/Cell.h", cell = Mutable( self ) )
-        #     return
+    # @staticmethod
+    # def aligned_simplex( dim, bnd = BOUNDARY ):
+    #     return Cell( dim, lambda cell: cpp_binding( "make_aligned_simplex", "sdot/cell/Cell.h" )( Output( cell ), bnd ) )
 
-        # # assuming tensors
-        # self.__default_init__( *args, **kwargs )
+
+    # def __init__( self, dim, nb_vertices_capacity = 50, nb_edges_capacity = 50, nb_cuts_capacity = 50 ):
+    #     self.vertex_positions = driver.empty( [ nb_vertices_capacity, dim ] )
+    #     self.cut_planes = driver.empty( [ nb_cuts_capacity, dim + 1 ] )
+    #     self.cut_ids = driver.empty( [ nb_cuts_capacity ], dtype = driver.itype )
+
+    #     self.is_fully_closed = 0
+    #     self.nb_vertices = 0
+    #     self.nb_edges = 0
+    #     self.nb_cuts = 0
+
+    #     if dim != 2:
+    #         self.large_vertex_indices = driver.empty( [ nb_vertices_capacity, dim ], dtype = driver.int_type )
+    #         self.large_edge_indices = driver.empty( [ nb_edges_capacity, dim + 1 ], dtype = driver.int_type )
+
+    #     #     driver.call( "make_empty_cell", "sdot/cell/Cell.h", cell = Mutable( self ) )
+    #     #     return
+
+    #     # # assuming tensors
+    #     # self.__default_init__( *args, **kwargs )
 
 
     @staticmethod
@@ -76,16 +116,6 @@ class Cell:
         frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
 
         return Cell.hypercube( frame, bnd = bnd )
-
-    @staticmethod
-    def hypercube( frame, bnd = BOUNDARY ):
-        frame = driver.array( frame )
-        assert frame is not None
-        return Cell( frame.shape[ 1 ], lambda cell: cpp_binding( "make_hypercube", "sdot/cell/Cell.h" )( Output( cell ), frame, bnd ) )
-
-    @staticmethod
-    def aligned_simplex( dim, bnd = BOUNDARY ):
-        return Cell( dim, lambda cell: cpp_binding( "make_aligned_simplex", "sdot/cell/Cell.h" )( Output( cell ), bnd ) )
 
     # @property
     # def vertex_positions( self ):

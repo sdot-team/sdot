@@ -67,4 +67,3 @@ class CallArg:
         s = s[ :-2 ]
         lines.append( s + "} );" )
         return s
-

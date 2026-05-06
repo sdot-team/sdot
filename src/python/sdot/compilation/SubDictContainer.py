@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing_extensions import Optional
 from .CallArg import CallArg
 
 
@@ -10,7 +11,7 @@ class SubDictContainer:
       - hold `sub_dict` and define what it means
       - resolve axis variable values from tensor shapes (get_variable_value)
       - build the linear system that relates tensor shapes to axis variables (axis_variable_equation)
-      - generate C++ struct declarations and initializers (struct_decl, assembled_code)
+      - generate C++ struct body and declarations (struct_body, struct_decl, assembled_code)
 
     Subclasses are responsible for:
       - populating `sub_dict` during construction
@@ -58,13 +59,6 @@ class SubDictContainer:
             if value is not None:
                 return int( value )
 
-        # property
-        # if parent := getattr( self, "parent", None ):
-        #     if python_value := getattr( parent(), "python_value", None ):
-        #         v = getattr( python_value, axis_name, None )
-        #         if v is not None:
-        #             return v
-
         # else, make the system using python_value.shape
         axes, ct_axes = {}, {}
         for argument in self.sub_dict.values():
@@ -83,9 +77,6 @@ class SubDictContainer:
                     res = val.shape[ tensor_axes[ num_case ] ]
                     return ( res - int( vector[ num_case ] ) ) // int( coeff )
 
-        # name = "CallArgs"
-        # if v := getattr( self,  )
-        # infox( axis_name, self )
         raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self }'" )
 
     def axis_variable_equation( self, axes: dict, use_attributes: bool ):
@@ -126,27 +117,6 @@ class SubDictContainer:
                 if axis_name in ct_axes:
                     cases.append( f"ct_{ axis_name }_value" )
 
-        # all_the_arguments = [] # e.g. dim in shape( dim )
-        # for term in expr.terms:
-        #     for argument in term.variable.arguments:
-        #         all_the_arguments.append( argument )
-        # if len( all_the_arguments ) == 1:
-        #     argument = all_the_arguments[ 0 ]
-        #     arg_name, arg_offset, arg_coeff = argument.as_single_name()
-        #     if arg_name == axis_name:
-        #         nb_without_argument = 0
-        #         nb_with_argument = 0
-        #         for rpxe in tensor_field.shape:
-        #             has_argument = rpxe.has_argument()
-        #             if has_argument:
-        #                 nb_with_argument += 1
-        #             else:
-        #                 nb_without_argument += 1
-
-        #         if nb_with_argument == 1:
-        #             return ( array.ndim - nb_without_argument - arg_offset ) // arg_coeff
-
-
         # using shapes
         num_axis = index( list( axes.keys() ), axis_name )
         for num_case in range( len( tensor_names ) ):
@@ -165,21 +135,21 @@ class SubDictContainer:
 
         return f"first_positive( \"{ axis_name }\", { ', '.join( cases ) } )"
 
-    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], end_lines: list[ str ] = None, unbatch_version = None ) -> str:
+    def struct_body( self, base_cpp_name: str, unbatch_version = None ):
         """
-        Generate the C++ struct declaration for this container's sub_dict.
+        Generate the content of a C++ struct: methods and data members, without the
+        `template<...> struct Name {` / `};` wrapper.
 
-        Appends to `lines` and `includes` in place; also returns the full source as a string
-        (includes + lines + end_lines joined by newlines).
+        Returns ( body_lines, includes, template_args ) so the caller can either wrap
+        them into a full struct declaration (struct_decl) or write them to an include
+        file for embedding inside a hand-written struct.
         """
         from .TemplateArgs import TemplateArgs
 
-        if end_lines is None:
-            end_lines = []
-
+        includes      = set()
         template_args = TemplateArgs()
         ct_axes       : dict[ str, int ] = {}
-        axes          : dict             = {}
+        axes          : dict = {}
 
         for name, argument in self.sub_dict.items():
             argument.get_template_args( template_args, [ name ] )
@@ -189,22 +159,19 @@ class SubDictContainer:
         for ct_axis_name in ct_axes:
             template_args.add( f"ct_{ ct_axis_name }_value", "int", 0 )
 
-        lines.append( f"template<{ ', '.join( f'{ ta.cpp_type } { n }' for n, ta in template_args ) }>" )
-        lines.append( f"struct { base_cpp_name } {{" )
+        lines = []
 
-        # row
+        # row accessor (batch → single-row)
         if unbatch_version is not None:
             includes.add( f"./{ unbatch_version.__name__ }.h" )
-
             lines.append(  "    auto row( PI index ) const {" )
             lines.append( f"        return { unbatch_version.__name__ }{{" )
             for ct_axis_name in ct_axes:
-                lines.append( f"            .ct_{ ct_axis_name } = CtInt<ct_{ ct_axis_name }_value>()," )
+                lines.append( f"            .ct_{ ct_axis_name }_inst = CtInt<ct_{ ct_axis_name }>()," )
             for name, argument in self.sub_dict.items():
                 lines.append( f"            .{ name } = { name }.row( index )," )
             lines.append(  "        };" )
             lines.append(  "    }" )
-
 
         # axis accessor methods
         if axes:
@@ -217,41 +184,43 @@ class SubDictContainer:
             lines.append( "" )
 
         # with_same_shape
-            lines.append( "    void with_same_shape( auto &&func ) const {" )
-            s = "        "
-            for name, argument in self.sub_dict.items():
-                s = argument.beg_with_same_shape( name, s, lines )
-            lines.append( s + f"{ base_cpp_name } new_value{{" )
-            for ct_axis_name in ct_axes:
-                lines.append( s + f"    .ct_{ ct_axis_name } = CtInt<ct_{ ct_axis_name }_value>()," )
-            for name, argument in self.sub_dict.items():
-                lines.append( s + f"    .{ name } = { name }," )
-            lines.append( s + "};" )
-            lines.append( s + "func( new_value );" )
-            for name, argument in self.sub_dict.items():
-                s = argument.end_with_same_shape( name, s, lines )
-            lines.append( "    }" )
+        lines.append( "    void with_same_shape( auto &&func ) const {" )
+        s = "        "
+        for name, argument in self.sub_dict.items():
+            s = argument.beg_with_same_shape( name, s, lines )
+        lines.append( s + f"{ base_cpp_name } new_value{{" )
+        for ct_axis_name in ct_axes:
+            lines.append( s + f"    .ct_{ ct_axis_name }_inst = CtInt<ct_{ ct_axis_name }>()," )
+        for name, argument in self.sub_dict.items():
+            lines.append( s + f"    .{ name } = { name }," )
+        lines.append( s + "};" )
+        lines.append( s + "func( new_value );" )
+        for name, argument in self.sub_dict.items():
+            s = argument.end_with_same_shape( name, s, lines )
+        lines.append( "    }" )
 
         # compile-time axis members
         for ct_axis_name in ct_axes:
-            lines.append( f"    CtInt<ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
+            lines.append( f"    CtInt<ct_{ ct_axis_name }> ct_{ ct_axis_name }_inst;" )
 
         # data members
         for name, argument in self.sub_dict.items():
             lines.append( f"    { argument.cpp_type_name( [ name ] ) } { name };" )
 
+        return lines, includes, template_args
+
+    def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], unbatch_version = None ) -> None:
+        """
+        Append a full C++ template struct declaration to `lines` and update `includes`.
+        Used when embedding a struct inside a larger generated source file (e.g. FFI handler).
+        """
+        body_lines, body_includes, template_args = self.struct_body( base_cpp_name, unbatch_version )
+        includes.update( body_includes )
+
+        lines.append( f"template<{ ', '.join( f'{ ta.cpp_type } { n }' for n, ta in template_args ) }>" )
+        lines.append( f"struct { base_cpp_name } {{" )
+        lines.extend( body_lines )
         lines.append( "};" )
-        lines.extend( end_lines )
-
-        beg_lines = [ "#pragma once", "" ]
-
-        for inc in sorted( includes, key = lambda s: ( -len( s ), s ) ):
-            if inc.startswith( "." ):
-                beg_lines.append( f"#include \"{ inc }\"" )
-            else:
-                beg_lines.append( f"#include <{ inc }>" )
-
-        return "\n".join( beg_lines + lines )
 
     def assembled_code( self, struct_name: str, beg_line: str ) -> str:
         """
@@ -268,12 +237,8 @@ class SubDictContainer:
         for name, argument in self.sub_dict.items():
             argument.get_axes( axes, ct_axes )
 
-        # for argument in self.sub_dict.values():
-        #     info( self.sub_dict.keys(), self.sub_dict.values(), ct_axes )
-        # info( self.sub_dict.keys(), self.sub_dict.values(), ct_axes )
-
         for ct_axis_name in ct_axes:
-            lines.append( f"{ beg_line }    .ct_{ ct_axis_name } = CtInt<{ self.get_variable_value( ct_axis_name ) }>()," )
+            lines.append( f"{ beg_line }    .ct_{ ct_axis_name }_inst = CtInt<{ self.get_variable_value( ct_axis_name ) }>()," )
 
         for name, argument in self.sub_dict.items():
             lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + '    ' ) }," )

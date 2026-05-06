@@ -1,17 +1,4 @@
-from sdot.Cell import Cell
 import sdot
-
-def test_cell_2D_basic():
-    c = Cell.aligned_hypercube( 2 )
-
-    c.cut( [ 1, 0 ], 0.3 )
-    ic( c.vertex_positions )
-    ic( c.vertex_indices )
-    ic( c.cut_planes )
-    ic( c.measure )
-    # ic( c.faces )
-
-    c.plot()
 
 def test_cell_2D_diff():
     # c = Cell.aligned_hypercube( [ 0, 0 ], [ 1, 1 ] )
@@ -53,12 +40,24 @@ def test_cell_2D_diff():
     # ic( scale )
 
 
-def test_cell_3D():
-    c = Cell.aligned_simplex( 3 )
-    # c.cut( [ 1, 0, 0 ], 0.5 )
+# def test_cell_3D():
+#     c = Cell.aligned_simplex( 3 )
+#     # c.cut( [ 1, 0, 0 ], 0.5 )
+#     info( c.vertex_indices )
+#     info( c.edge_indices )
+#     info( c.measure )
+
+def test_cell_2D_basic():
+    c = sdot.Cell.full( 2 )
+
+    # c.cut( [ 1, 0 ], 0.3 )
+    info( c.vertex_positions )
     info( c.vertex_indices )
-    info( c.edge_indices )
+    info( c.cut_planes )
     info( c.measure )
+    # ic( c.faces )
+
+    # c.plot()
 
 if __name__ == "__main__":
     test_cell_2D_basic()

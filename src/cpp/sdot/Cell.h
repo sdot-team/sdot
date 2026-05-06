@@ -1,12 +1,14 @@
 #pragma once
 
-#include <sdot/generated_includes/CellWorkspace.h>
 #include <sdot/generated_includes/Cell.h>
 
 namespace sdot {
 
-template<int ct_dim,class Arch,class TF,class TI>
-struct CellWorker {
+PARAMETERS_OF_Cell // template<int ct_dim,class Arch,class TF,class TI>
+struct Cell {
+    // static constexpr int ct_dim = ct_dim_value;
+    ATTRIBUTES_OF_Cell
+
     using    Pt                    = DsVec<TF,ct_dim,Arch>; ///< point
     using    Ci                    = DsVec<TI,ct_dim,Arch>; ///< cut indices
 
@@ -58,10 +60,6 @@ struct CellWorker {
     void     for_each_simplex_rec  ( const auto &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
     bool     already_in_simplex    ( auto &simplex, PI simplex_size, PI next_num_vertex );
 
-    // attributes ---------------------------------------------------------------------------
-    Cell<ct_dim,Arch,TF,TI>&    cell;
-    CellWorkspace<Arch,TF,TI>&  ws;
-    const PI                    dim;
 };
 
 // template<int ct_dim,class Arch,class TF,class TI>
