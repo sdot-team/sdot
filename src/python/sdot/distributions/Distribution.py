@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 class Distribution:
     """
@@ -18,9 +18,9 @@ class Distribution:
         batch_size                 : int
         dim                        : int
 
-        def multidimensional_version( self, *_ ) -> Self: ...
-        def unidimensional_version( self, *_ ) -> Self: ...
-        def batch_version( self, *_ ) -> Self: ...
+        def multidimensional_version( self, *_ ): ... #  -> Self
+        def unidimensional_version( self, *_ ): ... #  -> Self
+        def batch_version( self, *_ ): ... #  -> Self
 
 
     @property

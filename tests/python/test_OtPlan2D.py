@@ -2,10 +2,11 @@ import numpy
 import sdot
 
 def for_each_driver_comb( cb ):
-    for framework in [ "torch", "jax" ]: #
+    for framework in [ "jax" ]: # "torch",
+        sdot.driver.framework = framework
+        print( sdot.driver )
         for dtype in [ "FP64", "FP32" ]: #
             for device in [ "cpu" ]: #, "cuda"
-                sdot.driver.framework = framework
                 sdot.driver.device = device
                 sdot.driver.dtype = dtype
                 cb()

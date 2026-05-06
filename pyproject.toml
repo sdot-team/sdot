@@ -1,29 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "sdot"
-version = "0.1.0"
+version = "2026.05.06.1"
 description = "Semi-discrete optimal transport"
+requires-python = ">=3.10"
 dependencies = [
     "nanobind",
     "numpy",
-    "meson",    # build system — nécessaire aussi en runtime (compilation des extensions)
-    "ninja",    # backend meson
+    # xmake est un outil système — installer via https://xmake.io (pas pip)
 ]
 
-# [project.optional-dependencies]
-# torch = ["torch"]
-# jax   = ["jax", "jaxlib"]
-# dask  = ["dask[array]"]
-# plot  = ["matplotlib"]
-# docs  = [
-#     "mkdocs-material",
-#     "mkdocstrings[python]",
-#     "pyyaml",
-# ]
-# dev = [
-#     "pytest",
-#     "timing",
-#     "sdot[torch,jax,dask,plot,ot,docs]",
-# ]
+[project.optional-dependencies]
+jax   = ["jax", "jaxlib"]
+torch = ["torch"]
+dask  = ["dask[array]"]
+plot  = ["matplotlib"]
+dev = [
+    "pytest",
+    "timing",
+    "sdot[jax,plot]",
+]
+
+# ---------------------------------------------------------------------------
+# Hatchling — layout
+# ---------------------------------------------------------------------------
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/python/sdot"]
+# fichiers générés non trackés par git — inclus explicitement
+artifacts = [
+    "src/python/sdot/generated_files/*.so",
+    "src/python/sdot/generated_files/*.dll",
+    "src/python/sdot/generated_files/*.pyd",
+    "src/python/sdot/generated_files/*.dylib",
+]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/python/sdot/",
+    "scripts/",
+    "pyproject.toml",
+    "hatch_build.py",
+    "requirements.txt",
+]
+
+# ---------------------------------------------------------------------------
+# cibuildwheel
+# ---------------------------------------------------------------------------
+
+[tool.cibuildwheel]
+build = "cp310-* cp311-* cp312-* cp313-*"
+# pas de 32-bit, pas de musl (Alpine), pas de Windows (jax non supporté)
+skip = "*-manylinux_i686 *-musllinux* *-win*"
+
+environment = { SDOT_XMAKE_MODE = "release", SDOT_FORCE_BUILD = "1" }
+
+# macOS : xmake installé via before-all (une fois), before-build fait les dylibs
+before-build = "pip install jax jaxlib numpy nanobind devtools torch && PYTHONPATH={project}/src/python python {project}/scripts/make_common_dylibs.py"
+
+[tool.cibuildwheel.macos]
+before-all = "brew install xmake"
+
+[tool.cibuildwheel.linux]
+# manylinux_2_28 = GLIBC 2.28+, compatible Ubuntu 20.04+ / RHEL 8+
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+# before-all n'est pas fiable dans Docker local → xmake dans before-build avec garde
+# "which xmake || ..." évite de réinstaller pour chaque version Python
+before-build = """which xmake || \
+  (curl -fsSL https://xmake.io/shget.text | bash && \
+   ln -sf $HOME/.local/bin/xmake /usr/bin/xmake) && \
+  pip install jax jaxlib numpy nanobind devtools torch && \
+  PYTHONPATH={project}/src/python python {project}/scripts/make_common_dylibs.py"""
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

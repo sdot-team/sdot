@@ -18,10 +18,12 @@ class JaxDriver:
     """
     def __init__( self, normalized_dtype : str, normalized_device: str ):
         self.device = JaxDriver.find_device( normalized_device )
-        self.dtype = JaxDriver.find_dtype( normalized_dtype )
+        self.dtype = JaxDriver.find_dtype( None, normalized_dtype )
         self.itype = jnp.int64
-        if normalized_dtype == "FP64":
-            jax.config.update( "jax_enable_x64", True )
+
+        # if normalized_dtype == "FP64":
+        # 64 bits for ints
+        jax.config.update( "jax_enable_x64", True )
 
         self.map_of_plan_methods = map_of_plan_methods
 
@@ -51,8 +53,16 @@ class JaxDriver:
             return jax.devices( "METAL" )[ 0 ]
         raise RuntimeError( f"Unknown device { normalized_device }" )
 
-    @staticmethod
-    def find_dtype( dtype ):
+    def find_dtype( self, dtype ):
+        if self is not None and dtype is None:
+            return self.dtype
+
+        if dtype is float:
+            return self.dtype
+
+        if dtype is int:
+            return self.itype
+
         if dtype == "FP32":
             return jnp.float32
         if dtype == "FP64":
@@ -64,7 +74,7 @@ class JaxDriver:
         if dtype == "PI64":
             return jnp.uint64
 
-        return numpy.dtype( dtype )
+        return jnp.dtype( dtype )
 
     @property
     def array_type( self ):
@@ -414,7 +424,7 @@ class JaxDriver:
                 self._try_to_import_and_register_ffi_target( module_name, func_name, make_backward_binding )
                 return
             except ( ImportError, SystemError ):
-                return None
+                pass
 
         # else, make the dylib
         includes_set = set( includes )
@@ -505,7 +515,7 @@ class JaxDriver:
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"        { func_name }( { fai.assembled_code( parameters_struct, "        " )  } );" )
+        lines.append( f"        { func_name }( { fai.assembled_code( parameters_struct, '        ' )  } );" )
 
         # end try block
 
@@ -520,7 +530,7 @@ class JaxDriver:
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain()
-        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( ".", bind_chain ) } );" )
+        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ func_name }, impl_{ func_name }, { str.join( '.', bind_chain ) } );" )
 
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):

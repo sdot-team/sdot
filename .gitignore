@@ -24,7 +24,8 @@ __pycache__/
 .tox/
 *.egg-info/
 dist/
-wheels/
+wheelhouse/
+*.whl
 
 # system
 .DS_Store

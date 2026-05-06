@@ -1,6 +1,14 @@
 # Core — nécessaire pour build et runtime
+# xmake doit être installé séparément via https://xmake.io (pas le package pip du même nom)
 nanobind
 numpy
+meson
+ninja
+
+# Packaging
+hatchling
+build
+cibuildwheel
 
 # Backends
 jaxlib
@@ -8,9 +16,10 @@ torch
 jax
 
 # Intégrations
-dask[array]
+# dask[array]
 matplotlib
 
 # Tests
 pytest
 timing
+

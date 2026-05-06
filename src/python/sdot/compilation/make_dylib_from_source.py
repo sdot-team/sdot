@@ -42,20 +42,35 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
         except ImportError:
             pass
 
-    xmake = shutil.which( "xmake" )
-    if xmake is None:
-        raise RuntimeError( "xmake not found in PATH — please install it (https://xmake.io)" )
+    extended_path = os.pathsep.join( p for p in [
+        str( Path( sys.executable ).parent ),
+        sysconfig.get_path( "scripts" ),
+        str( Path.home() / ".local" / "bin" ),  # install par défaut du script xmake.io
+        "/opt/homebrew/bin",                     # homebrew Apple Silicon
+        "/usr/local/bin",                        # homebrew Intel / install --prefix=/usr/local
+        os.environ.get( "PATH", "" ),
+    ] if p )
 
-    result = subprocess.run( [ xmake, "--version" ], capture_output = True, env = { "NO_COLOR": "1" } )
-    xmake_number = re.search( r"(\d+\.\d+\.\d+)", result.stdout.decode() ).group( 1 )
-    if tuple( map( int, xmake_number.split( "." ) ) ) < ( 3, 0, 8 ):
+    _xmake_bin = shutil.which( "xmake", path = extended_path )
+    if _xmake_bin is None:
+        searched = "\n  ".join( p for p in extended_path.split( os.pathsep ) if p )
         raise RuntimeError(
-            f"xmake >= 3.0.8 required (found { xmake_number }). "
-            "Run: xmake update"
+            f"xmake introuvable. Chemins cherchés :\n  { searched }\n\n"
+            "Pour localiser xmake : lancez 'which xmake' dans votre terminal.\n"
+            "Installation : brew install xmake  ou  https://xmake.io"
         )
+    xmake_cmd = [ _xmake_bin ]
+
+    # result = subprocess.run( [ *xmake_cmd, "--version" ], capture_output = True, env = { "NO_COLOR": "1" } )
+    # xmake_number = re.search( r"(\d+\.\d+\.\d+)", result.stdout.decode() ).group( 1 )
+    # if tuple( map( int, xmake_number.split( "." ) ) ) < ( 3, 0, 8 ):
+    #     raise RuntimeError(
+    #         f"xmake >= 3.0.8 requis (trouvé { xmake_number }). Lancez : xmake update"
+    #     )
 
     env = {
         **os.environ,
+        **( { "XMAKE_ROOT": "y" } if hasattr( os, "getuid" ) and os.getuid() == 0 else {} ),
         "SDOT_XMAKE_OUTPUT_DIR" : str( compilation_directories.dylib_dir() ),
         "SDOT_XMAKE_NEEDS_CUDA" : str( int( device_type.startswith( "cuda" ) ) ),
         "SDOT_XMAKE_REQUIRES"   : str.join( ",", [ "zpp_bits", "eigen" ] ),
@@ -70,7 +85,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
         "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, list( src_paths ) + [ nanobind_source ] ) ),
         "SDOT_XMAKE_DEFINES"    : "",
         "SDOT_XMAKE_TARGET"     : dylib_name,
-        "PATH"                  : str( Path( sys.executable ).parent ) + os.pathsep + os.environ.get( "PATH", "" ),
+        "PATH"                  : extended_path,
     }
 
     sdot_dir = Path( __file__ ).parent  # cpp_binding/ (contains xmake.lua)
@@ -83,5 +98,5 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
     xmake_mode = os.environ.get( "SDOT_XMAKE_MODE", "release" )
 
     run( [ "pwd" ] )
-    run( [ xmake, "f", "-P", str( sdot_dir ), "-y", "--require=yes", "-m", xmake_mode ] )
-    run( [ xmake, "-P", str( sdot_dir ) ] )
+    run( [ *xmake_cmd, "f", "-P", str( sdot_dir ), "-y", "--require=yes", "-m", xmake_mode ] )
+    run( [ *xmake_cmd, "-P", str( sdot_dir ) ] )

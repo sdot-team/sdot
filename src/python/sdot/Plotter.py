@@ -1,8 +1,8 @@
 import numpy
-import pyvista
 
 class Plotter:
     def __init__( self, plotter = None ):
+        import pyvista
         self._owned = plotter is None
         if self._owned:
             self._plotter = pyvista.Plotter( theme = pyvista.themes.DarkTheme() )
@@ -21,6 +21,7 @@ class Plotter:
             self._plotter.show()
 
     def plot_mesh( self, points, faces ):
+        import pyvista
         pts = numpy.asarray( points )
 
         self._dim = pts.shape[ 1 ]
