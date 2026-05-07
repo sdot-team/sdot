@@ -48,13 +48,17 @@ def test_cell_2D_diff():
 #     info( c.measure )
 
 def test_cell_2D_basic():
-    c = sdot.Cell.full( 2 )
+    c = sdot.Cell.unbounded( 2 )
 
     # c.cut( [ 1, 0 ], 0.3 )
     info( c.vertex_positions )
-    info( c.vertex_indices )
+    # info( c.vertex_indices )
     info( c.cut_planes )
-    info( c.measure )
+    info( c.cut_ids )
+
+    info( c.index_corrections )
+    # info( c.measure )
+    # info( c.measure )
     # ic( c.faces )
 
     # c.plot()

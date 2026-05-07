@@ -15,11 +15,10 @@ class Cell:
     """
 
     # workspaces
-    indices_to_remove : Workspace( Tensor( "nb_vertices[]", dtype = int ) ) # actually used for vertices, edges and cuts
-    used_flags        : Workspace( Tensor( "nb_vertices[]", dtype = int ) )
+    index_corrections : Workspace( Tensor( "nb_index_corrections[]", dtype = int ) )
+    used_flags        : Workspace( Tensor( "nb_used_flags[]", dtype = int ) )
     map_items         : Workspace( Tensor( "nb_map_items[]", dtype = int ) )
     links             : Workspace( Tensor( "nb_links[]", dtype = int ) )
-    corr              : Workspace( Tensor( "nb_vertices[]", dtype = int ) )
     sps               : Workspace( Tensor( "nb_vertices[]" ) )
 
     # data
@@ -35,26 +34,30 @@ class Cell:
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
 
-        max_of_nb_indices_to_remove: int
+        max_of_nb_index_corrections: int
+        max_of_nb_used_flags: int
         max_of_nb_map_items: int
-        max_of_nb_vertices: int
         max_of_nb_links: int
+
+        max_of_nb_vertices: int
         max_of_nb_edges: int
         max_of_nb_cuts: int
         dim: int
 
 
     @staticmethod
-    def full( dim ):
-        return cast( Cell, driver.call( "p.cell.init_full()", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
+    def unbounded( dim ):
+        return cast( Cell, driver.call( "p.cell.init_as_unbounded()", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
 
     @staticmethod
     def _return_parameters( dim ):
         return dict(
-            max_of_nb_indices_to_remove = 64,
+            max_of_nb_index_corrections = 64,
+            max_of_nb_used_flags = 64,
             max_of_nb_map_items = 64,
-            max_of_nb_vertices = 64,
             max_of_nb_links = 64 * 8,
+
+            max_of_nb_vertices = 64,
             max_of_nb_edges = 64,
             max_of_nb_cuts = 64,
             dim = dim,

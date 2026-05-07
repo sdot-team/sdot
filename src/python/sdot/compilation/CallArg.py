@@ -1,9 +1,8 @@
 from .IoCategory import IoCategory
 from ..driver import driver
 
-
-from typing import TYPE_CHECKING
-
+from typing import TYPE_CHECKING, Optional
+from weakref import ref
 
 class CallArg:
     """
@@ -20,6 +19,18 @@ class CallArg:
     if TYPE_CHECKING:
         def cpp_type_name( self, main_list ) -> str: ...
         def signature( self ) -> str: ...
+
+        io_category    : IoCategory
+
+        python_value   : Optional[ any ]
+        python_class   : any #
+
+        name_in_parent : Optional[ str ]
+        parent         : Optional[ ref[ 'CallArg' ] ]
+
+        ctor_kwargs    : Optional[ dict ]
+        ctor_args      : Optional[ list ]
+
 
     @staticmethod
     def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
@@ -59,6 +70,9 @@ class CallArg:
     def get_includes( self, includes: set ):
         pass
 
+    def get_axes( self, axes, ct_axes ):
+        pass
+
     def beg_with_same_shape( self, name, s, lines ):
         lines.append( s + f"{ name }.with_same_shape( [&]( auto &{ name } ) {{" )
         return s + "  "
@@ -67,3 +81,9 @@ class CallArg:
         s = s[ :-2 ]
         lines.append( s + "} );" )
         return s
+
+    def assembled_code( self, beg_line: str ):
+        raise NotImplementedError
+
+    def assemble_return( self ):
+        raise NotImplementedError

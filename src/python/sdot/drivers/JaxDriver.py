@@ -4,7 +4,7 @@ from jax._src import ad_util
 import jax.core as jax_core
 import jax.numpy as jnp
 
-from sdot.compilation.CallArgs import CallArgs
+from ..compilation.CallArgsAnalysis import CallArgsAnalysis
 
 import importlib
 import numpy
@@ -250,7 +250,7 @@ class JaxDriver:
             includes = []
 
         # argument analysis (get a jax compatible set of arg lists, ...)
-        fai = CallArgs.factory( args = args )
+        fai = CallArgsAnalysis( args, "Parameters" )
 
         # check ffi function is registered
         module_name = self._module_name_for( code, grad_code, includes, fai )
@@ -399,9 +399,9 @@ class JaxDriver:
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
 
-    def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgs ):
+    def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
         # get signature
-        base_signature = [ code, grad_code ] + [ str( name ) + "_" + arg.signature() for name, arg in main_list.sub_dict.items() ] + includes
+        base_signature = [ code, grad_code, main_list.arguments.signature() ] + includes
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
@@ -415,7 +415,7 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, code: str, grad_code: str, includes: list[ str ], args: CallArgs ):
+    def _register_ffi_target( self, module_name: str, code: str, grad_code: str, includes: list[ str ], args: CallArgsAnalysis ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -440,15 +440,15 @@ class JaxDriver:
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
         module = importlib.import_module( "sdot.generated_files." + module_name )
-        jax.ffi.register_ffi_target( module_name, getattr( module, func_name )(), platform = "cpu" )
+        jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = "cpu" )
         if make_backward_binding:
-            jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, func_name + "_backward" )(), platform = "cpu" )
+            jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, module_name + "_backward" )(), platform = "cpu" )
 
 
-    def _make_dylib( self, code: str, grad_code: str, includes: set, fai: CallArgs, module_name: str ):
+    def _make_dylib( self, code: str, grad_code: str, includes: set, fai: CallArgsAnalysis, module_name: str ):
         # generate structs
         already_visited = set()
-        fai.generate_structures( already_visited )
+        fai.arguments.generate_structures( already_visited )
 
         # include list
         includes.add( "sdot/jax_ffi_wrappers.h" )
@@ -491,10 +491,10 @@ class JaxDriver:
         from ..compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
 
-    def _handler_source( self, includes, lines, code: str, fai: CallArgs, module_name: str ):
+    def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str ):
         # make a structure with the names
-        parameters_struct = f"Parameters_{ module_name }"
-        fai.make_parameters_struct( includes, lines, parameters_struct )
+        # parameters_struct = f"Parameters_{ module_name }"
+        fai.make_parameters_struct( includes, lines, "Parameters" )
         lines.append( "" )
 
         # start impl: declaration
@@ -515,7 +515,7 @@ class JaxDriver:
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"        auto p = { fai.assembled_code( parameters_struct, '        ' ) };" )
+        lines.append( f"        auto p = { fai.arguments.assembled_code( '        ' ) };" ) # , struct_name = parameters_struct
         lines.append( f"        { code };" )
 
         # end try block

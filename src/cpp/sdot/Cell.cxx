@@ -1,50 +1,107 @@
 #pragma once
 
-#include "../support/RecursiveMapOfUniqueSortedIndices.h"
-#include "../support/SimpleSquareMatrix.h"
-#include "../support/index.h"
-#include "../support/P.h"
+#include "support/RecursiveMapOfUniqueSortedIndices.h"
+#include "support/SimpleSquareMatrix.h"
+#include "support/index.h"
+#include "support/P.h"
 
-#include "CellBoundary.h"
-#include "CellWorker.h"
-#include "integral.h"
-#include "Simplex.h"
+#include "Cell/CellBoundary.h"
+#include "Cell/integral.h"
+#include "Cell/Simplex.h"
+#include "Cell.h"
 
 #include <numeric>
 
 namespace sdot {
 
-#define UTP template<int ct_dim,class Arch,class TF,class TI>
-#define DTP CellWorker<ct_dim,Arch,TF,TI>
+#define UTP PARAMETERS_DECLARATION_OF_Cell
+#define DTP Cell<PARAMETER_NAMES_OF_Cell>
 
-UTP typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
-    return cell.vertex_positions.row( num_vertex );
+UTP void DTP::init_as_aligned_simplex( TI cut_id ) {
+    is_fully_closed = cut_id != CellBoundary::INFINITE;
+    nb_vertices = dim + 1;
+    nb_edges = ( dim + 1 ) * dim / 2;
+    nb_cuts = dim + 1;
+
+    // vertex_positions
+    for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex )
+        for( PI d = 0; d < dim; ++d )
+            vertex_positions( num_vertex, d ) = ( d + 1 == num_vertex );
+
+    // vertex_inds
+    if ( dim != 2 )
+        for( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex )
+            for( PI d = 0; d < dim; ++d )
+                vertex_indices( num_vertex, d ) = d + ( d >= num_vertex );
+
+    // edge_indices
+    if ( dim != 2 ) {
+        for ( PI a = 0, o = 0; a < nb_vertices; ++a ) {
+            for ( PI b = a + 1; b < nb_vertices; ++b ) {
+                if ( a != b ) {
+                    edge_indices( o, 0 ) = a;
+                    edge_indices( o, 1 ) = b;
+                    for( PI d = 0; d < dim - 1; ++d )
+                        edge_indices( o, 2 + d ) = d + ( d >= a ) + ( d >= b - 1 );
+                    ++o;
+                }
+            }
+        }
+    }
+
+    // cut_planes
+    if ( dim != 2 ) {
+        for( PI num_cut = 0; num_cut < dim; ++num_cut ) {
+            for( PI d = 0; d < dim; ++d )
+                cut_planes( num_cut, d ) = - ( d == num_cut );
+            cut_planes( num_cut, dim ) = 0;
+        }
+        for( PI d = 0; d < dim + 1; ++d )
+            cut_planes( dim, d ) = 1;
+    } else {
+        cut_planes( 0, 0 ) =  0; cut_planes( 0, 1 ) = -1; cut_planes( 0, 2 ) = 0;
+        cut_planes( 1, 0 ) = +1; cut_planes( 1, 1 ) = +1; cut_planes( 1, 2 ) = 1;
+        cut_planes( 2, 0 ) = -1; cut_planes( 2, 1 ) =  0; cut_planes( 2, 2 ) = 0;
+    }
+
+    // cut_ids
+    for( PI num_cut = 0; num_cut < nb_cuts; ++num_cut )
+        cut_ids( num_cut ) = cut_id;
 }
 
-UTP typename DTP::Ci DTP::vertex_indices( PI num_vertex ) const {
+UTP void DTP::init_as_unbounded() {
+    init_as_aligned_simplex( CellBoundary::INFINITE );
+    nb_index_corrections = 2;
+}
+
+UTP typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
+    return vertex_positions.row( num_vertex );
+}
+
+UTP typename DTP::Ci DTP::vertex_cuts( PI num_vertex ) const {
     if constexpr ( ct_dim == 2 )
-        return { Values(), ( num_vertex + cell.nb_vertices - 1 ) % cell.nb_vertices, num_vertex };
-    return cell.vertex_indices.row( num_vertex );
+        return { Values(), ( num_vertex + nb_vertices - 1 ) % nb_vertices, num_vertex };
+    return vertex_indices.row( num_vertex );
 }
 
 UTP bool DTP::vertex_inf( PI num_vertex ) const {
     Ci ci = vertex_indices( num_vertex );
     for ( PI d = 0; d < dim; ++d )
-        if ( cell.cut_ids( ci[ d ] ) == CellBoundary::INFINITE )
+        if ( cut_ids( ci[ d ] ) == CellBoundary::INFINITE )
             return true;
     return false;
 }
 
 UTP typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
-    return std::span( &cell.cut_planes( num_cut, 0 ), dim );
+    return std::span( &cut_planes( num_cut, 0 ), dim );
 }
 
 UTP TF DTP::cut_dot( PI num_cut ) const {
-    return cell.cut_planes( num_cut, dim );
+    return cut_planes( num_cut, dim );
 }
 
 UTP TI DTP::cut_id( PI num_cut ) const {
-    return cell.cut_ids( num_cut );
+    return cut_ids( num_cut );
 }
 
 UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_vertex ) {
@@ -87,10 +144,7 @@ UTP void DTP::for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI s
 
 UTP void DTP::for_each_simplex( auto &&func ) {
     constexpr int ct_simplex = ct_dim >= 0 ? ct_dim + 1 : -1;
-    const PI nb_vertices = cell.nb_vertices();
-    const PI dim = cell.dim();
-
-    if ( cell.nb_vertices() == 0 )
+    if ( nb_vertices == 0 )
         return;
 
     //
@@ -106,18 +160,18 @@ UTP void DTP::for_each_simplex( auto &&func ) {
     }
 
     // make a list
-    RecursiveMapOfUniqueSortedIndices<ct_dim - 1,TI,Arch> item_map( ws.map_items, ws.nb_map_items, dim - 1, cell.nb_cuts );
-    item_map.reserve( cell.nb_vertices );
+    RecursiveMapOfUniqueSortedIndices<ct_dim - 1,TI,Arch> item_map( map_items, nb_map_items, dim - 1, nb_cuts );
+    item_map.reserve( nb_vertices );
 
     DsVec<TI,ct_simplex,Arch> simplex( Size(), dim + 1 );
     for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        DsVec<TI,ct_dim,Arch> cut_indices( cell.vertex_indices.row( num_vertex ) );
+        DsVec<TI,ct_dim,Arch> cut_indices( vertex_indices.row( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
 
 UTP void DTP::for_each_facet( auto &&func ) {
-    const PI nb_vertices = cell.nb_vertices;
+    const PI nb_vertices = nb_vertices;
 
     if ( dim == 2 ) {
         Simplex<ct_dim,ct_dim,TF,Arch> simplex;
@@ -134,7 +188,7 @@ UTP void DTP::for_each_facet( auto &&func ) {
 
 UTP void DTP::for_each_face( auto &&func ) {
     if ( dim == 2 ) {
-        std::vector<PI> indices( cell.nb_vertices() );
+        std::vector<PI> indices( nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
         func( indices, DsVec<TI,0,Arch>( Values() ) );
         return;
@@ -145,9 +199,9 @@ UTP void DTP::for_each_face( auto &&func ) {
 
     // // on remplit une liste chainée d'edges
     // // pour chaque face, on récupère l'index dans la liste chainée
-    // MapOfUniqueSortedIndices<( ct_dim > 0 ? ct_dim - 2 : -1 ),TI,Arch> face_map( workspace.map_items, workspace.nb_map_items, dim - 2, cell.nb_cuts );
+    // MapOfUniqueSortedIndices<( ct_dim > 0 ? ct_dim - 2 : -1 ),TI,Arch> face_map( workspace.map_items, workspace.nb_map_items, dim - 2, nb_cuts );
     // face_map.reserve_full_capacity();
-    // for( PI edge = 0; edge < cell.nb_edges; ++edge ) {
+    // for( PI edge = 0; edge < nb_edges; ++edge ) {
     //     DsVec<TI,( ct_dim >= 0 ? ct_dim - 1 : -1 ),Arch> edge_cut_indices = std::span( &cell.edge_indices( edge, 2 ), dim - 1 );
     //     for( PI ind_to_remove = 0; ind_to_remove < dim - 1; ++ind_to_remove ) {
     //         auto face_cut_indices = edge_cut_indices.without_index( ind_to_remove );
@@ -207,11 +261,10 @@ UTP void DTP::for_each_face( auto &&func ) {
 }
 
 UTP TF DTP::measure() {
-    const TI nb_vertices = cell.nb_vertices();
-    const TI dim = cell.dim();
+    const TI nb_vertices = nb_vertices();
 
     // infinite cell
-    if ( ! cell.is_fully_closed() )
+    if ( ! is_fully_closed() )
         return std::numeric_limits<TF>::infinity();
 
     // 2D: shoelace formula
@@ -219,8 +272,8 @@ UTP TF DTP::measure() {
         TF sum = 0;
         for ( TI i = 0; i < nb_vertices; ++i ) {
             const TI j = ( i + 1 ) % nb_vertices;
-            sum += cell.vertex_positions( i, 0 ) * cell.vertex_positions( j, 1 )
-                 - cell.vertex_positions( j, 0 ) * cell.vertex_positions( i, 1 );
+            sum += vertex_positions( i, 0 ) * vertex_positions( j, 1 )
+                 - vertex_positions( j, 0 ) * vertex_positions( i, 1 );
         }
         return sum / 2;
     }
@@ -232,7 +285,7 @@ UTP TF DTP::measure() {
     for_each_simplex( [&]( const auto &simplex ) {
         const TI v0 = simplex[ 0 ];
         auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( TI row, TI col ) {
-            return cell.vertex_positions( simplex[ col + 1 ], row ) - cell.vertex_positions( v0, row );
+            return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
         } );
         sum += std::abs( M.determinant() );
     } );
@@ -248,7 +301,7 @@ UTP T_d auto DTP::simplex_from_indices( const DsVec<TI,d,Arch> &indices ) const 
 }
 
 UTP bool DTP::contains( const Pt &p ) const {
-    for( PI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
+    for( PI num_cut = 0; num_cut < nb_cuts; ++num_cut )
         if ( dot( cut_dir( num_cut ), p ) - cut_dot( num_cut ) > 0 )
             return false;
     return true;
@@ -267,18 +320,15 @@ UTP DTP::Pt DTP::centroid() {
 }
 
 UTP void DTP::check_if_fully_closed() {
-    for( TI num_cut = 0; num_cut < cell.nb_cuts; ++num_cut )
-        if ( cell.cut_ids[ num_cut ] == CellBoundary::INFINITE )
+    for( TI num_cut = 0; num_cut < nb_cuts; ++num_cut )
+        if ( cut_ids[ num_cut ] == CellBoundary::INFINITE )
             return;
-    cell.is_fully_closed() = true;
+    is_fully_closed() = true;
 }
 
 UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
-    const TI nb_vertices = cell.nb_vertices();
-
-    // if nothing or everything is cut and the cell has infinite boundaries,
-    // grow them so the cut has its correct effect, then recompute
-    if ( ! cell.is_fully_closed() )
+    // check to grow enough so that all the vertices stay on the same side even if we grow more
+    if ( ! is_fully_closed() )
         grow_infinite_cuts( cut_dir, cut_dot );
 
     //
@@ -297,11 +347,8 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         // store the new cut
         const TI new_cut_index = register_the_new_cut( cut_dir, cut_dot, cut_id );
 
-        // process edges: add new vertices on cut, collect exterior edges into ws.indices_to_remove
+        // process edges: add new vertices on cut, collect exterior edges into `index_corrections`
         process_edges( new_cut_index );
-
-        // remove exterior edges (ws.corr unused here)
-        remove_unused_edges();
 
         // remove exterior vertices, ws.corr = vertex old->new (also updates edge vertex refs)
         remove_unused_vertices( nb_vertices );
@@ -313,20 +360,18 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
     }
 
     // check if closed
-    if ( ! cell.is_fully_closed() )
+    if ( ! is_fully_closed() )
         check_if_fully_closed();
 }
 
 UTP PI DTP::scalar_products( const auto &cut_dir, auto cut_dot ) {
-    const PI nb_vertices = cell.nb_vertices();
-    ws.reservation = nb_vertices;
     PI nb_out = 0;
     for ( PI v = 0; v < nb_vertices; ++v ) {
-        TF sp = cell.vertex_positions( v, 0 ) * cut_dir[ 0 ];
+        TF sp = vertex_positions( v, 0 ) * cut_dir[ 0 ];
         for ( PI d = 1; d < dim; ++d )
-            sp += cell.vertex_positions( v, d ) * cut_dir[ d ];
+            sp += vertex_positions( v, d ) * cut_dir[ d ];
         sp -= cut_dot;
-        ws.sps[ v ] = sp;
+        sps[ v ] = sp;
         nb_out += ( sp > 0 );
     }
     return nb_out;
@@ -334,162 +379,164 @@ UTP PI DTP::scalar_products( const auto &cut_dir, auto cut_dot ) {
 
 // generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
 UTP void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
-    const PI nb_initial = PI( nb );
-    ws.reservation = nb_initial;
-    std::iota( ws.corr.data(), ws.corr.data() + nb_initial, 0 );
-    while ( ws.nb_indices_to_remove() ) {
-        const PI dst = ws.indices_to_remove[ --ws.nb_indices_to_remove ];
-        const PI src = --nb;
-        ws.corr[ src ] = dst;
-        if ( dst != src )
-            move_row( dst, src );
-    }
-    // When a src was itself placed there by a prior step, corr[src]=dst only records
-    // the intermediate hop. Follow each chain to its fixed point (corr[j]==j).
-    // Chains are strictly decreasing (dst<src in every non-trivial step) so no cycles.
-    for ( PI i = 0; i < nb_initial; ++i ) {
-        PI j = ws.corr[ i ];
-        while ( ws.corr[ j ] != j )
-            j = ws.corr[ j ];
-        ws.corr[ i ] = j;
-    }
+    TODO;
+    // const PI nb_initial = PI( nb );
+    // ws.reservation = nb_initial;
+    // std::iota( ws.corr.data(), ws.corr.data() + nb_initial, 0 );
+    // while ( nb_indices_to_remove ) {
+    //     const PI dst = indices_to_remove[ --nb_indices_to_remove ];
+    //     const PI src = --nb;
+    //     ws.corr[ src ] = dst;
+    //     if ( dst != src )
+    //         move_row( dst, src );
+    // }
+    // // When a src was itself placed there by a prior step, corr[src]=dst only records
+    // // the intermediate hop. Follow each chain to its fixed point (corr[j]==j).
+    // // Chains are strictly decreasing (dst<src in every non-trivial step) so no cycles.
+    // for ( PI i = 0; i < nb_initial; ++i ) {
+    //     PI j = corr[ i ];
+    //     while ( corr[ j ] != j )
+    //         j = corr[ j ];
+    //     corr[ i ] = j;
+    // }
 }
 
 UTP void DTP::process_edges( PI nc ) {
-    const PI nb_edges = cell.nb_edges();
+    MapOfUniqueSortedIndices<ctd_sub(ct_dim,2),TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
+    face_map.reserve( nb_vertices() + nb_edges );
 
-    MapOfUniqueSortedIndices<ct_dim-2,TI,Arch> face_map( ws.map_items, ws.nb_map_items, dim - 2, nc );
-    face_map.reserve( cell.nb_vertices() + nb_edges );
-
-    ws.nb_indices_to_remove = 0;
+    // store exterior edge indices in index_corrections,
+    // create the new vertices,
+    // create the new edges
+    nb_index_corrections = 0;
     for ( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
-        const PI n0 = cell.edge_indices( num_edge, 0 );
-        const PI n1 = cell.edge_indices( num_edge, 1 );
-        const TF s0 = ws.sps[ n0 ];
-        const TF s1 = ws.sps[ n1 ];
+        const PI n0 = edge_indices( num_edge, 0 );
+        const PI n1 = edge_indices( num_edge, 1 );
+        const TF s0 = sps[ n0 ];
+        const TF s1 = sps[ n1 ];
         const bool e0 = s0 > 0;
         const bool e1 = s1 > 0;
         if ( e0 == e1 ) {
             if ( e0 )
-                ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = num_edge;
+                index_corrections[ nb_index_corrections++ ] = num_edge;
             continue;
         }
 
         // add the new vertex
-        const PI nn = cell.nb_vertices()++;
+        const TF sc = s0 / ( s1 - s0 );
+        const PI nn = nb_vertices++;
         for ( PI d = 0; d < dim; ++d ) {
-            const TF p0 = cell.vertex_positions( n0, d );
-            const TF p1 = cell.vertex_positions( n1, d );
-            cell.vertex_positions( nn, d ) = p0 - s0 / ( s1 - s0 ) * ( p1 - p0 );
+            const TF p0 = vertex_positions( n0, d );
+            const TF p1 = vertex_positions( n1, d );
+            vertex_positions( nn, d ) = p0 - sc * ( p1 - p0 );
         }
         for ( PI d = 0; d < dim - 1; ++d )
-            cell.vertex_indices( nn, d ) = cell.edge_indices( num_edge, 2 + d );
-        cell.vertex_indices( nn, dim - 1 ) = nc;
+            vertex_indices( nn, d ) = edge_indices( num_edge, 2 + d );
+        vertex_indices( nn, dim - 1 ) = nc;
 
         // update the edge
-        cell.edge_indices( num_edge, ! e0 ) = nn;
+        edge_indices( num_edge, ! e0 ) = nn;
 
-        // register the node / add new edge for each connected face
+        // register the face => vertex correspondance, or create the new edge if already done
         for ( PI ind_to_remove = 0; ind_to_remove < dim - 1; ++ind_to_remove ) {
-            constexpr PI ct_face_dim = ct_dim > 0 ? ct_dim - 2 : -1;
-            auto face_inds = DsVec<PI,ct_face_dim,Arch>::with_func( dim - 2, [&]( PI i ) {
-                return cell.edge_indices( num_edge, 2 + i + ( i >= ind_to_remove ) );
+            auto face_inds = DsVec<PI,ctd_sub(ct_dim,2),Arch>::with_func( dim - 2, [&]( PI i ) {
+                return edge_indices( num_edge, 2 + i + ( i >= ind_to_remove ) );
             } );
 
+            // first time we see the face -> store vertex index
             auto face_corr = face_map[ face_inds ];
             if ( ! face_corr ) {
                 face_corr = nn;
                 continue;
             }
 
-            const PI ne = cell.nb_edges()++;
-            cell.edge_indices( ne, 0 ) = face_corr;
-            cell.edge_indices( ne, 1 ) = nn;
+            // else, create the new edge
+            const PI ne = nb_index_corrections ? nb_index_corrections-- : nb_edges++;
+            edge_indices( ne, 0 ) = face_corr;
+            edge_indices( ne, 1 ) = nn;
             for ( PI d = 0; d < dim - 2; ++d )
-                cell.edge_indices( ne, 2 + d ) = face_inds[ d ];
-            cell.edge_indices( ne, 2 + dim - 2 ) = nc;
+                edge_indices( ne, 2 + d ) = face_inds[ d ];
+            edge_indices( ne, 2 + dim - 2 ) = nc;
         }
     }
-}
 
-UTP void DTP::remove_unused_edges() {
-    swap_and_pop( cell.nb_edges, [&]( PI dst, PI src ) {
-        for ( PI d = 0; d < cell.edge_indices.size( 1 ); ++d )
-            cell.edge_indices( dst, d ) = std::move( cell.edge_indices( src, d ) );
-    } );
+    // in `index_corrections`, we have the edges that have to be removed (sorted indices)
+    P( index_corrections );
+    exit( 0 );
+    //
 }
 
 UTP void DTP::remove_unused_vertices( PI nb_vertices_orig ) {
-    const PI dim = cell.dim();
-    ws.nb_indices_to_remove = 0;
-    for ( PI n = 0; n < nb_vertices_orig; ++n )
-        if ( ws.sps[ n ] > 0 )
-            ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = n;
+    TODO;
+    // nb_indices_to_remove = 0;
+    // for ( PI n = 0; n < nb_vertices_orig; ++n )
+    //     if ( sps[ n ] > 0 )
+    //         indices_to_remove[ ws.nb_indices_to_remove++ ] = n;
 
-    // -> update ws.corr
-    swap_and_pop( cell.nb_vertices, [&]( PI dst, PI src ) {
-        for ( PI d = 0; d < dim; ++d )
-            cell.vertex_positions( dst, d ) = std::move( cell.vertex_positions( src, d ) );
-        for ( PI d = 0; d < dim; ++d )
-            cell.vertex_indices( dst, d ) = std::move( cell.vertex_indices( src, d ) );
-    } );
-
+    // // -> update ws.corr
+    // swap_and_pop( nb_vertices, [&]( PI dst, PI src ) {
+    //     for ( PI d = 0; d < dim; ++d )
+    //         vertex_positions( dst, d ) = std::move( vertex_positions( src, d ) );
+    //     for ( PI d = 0; d < dim; ++d )
+    //         vertex_indices( dst, d ) = std::move( vertex_indices( src, d ) );
+    // } );
 }
 
 UTP void DTP::apply_vertex_corr() {
-    // update edge vertex references
-    for ( PI e = 0; e < cell.nb_edges; ++e ) {
-        cell.edge_indices( e, 0 ) = ws.corr[ cell.edge_indices( e, 0 ) ];
-        cell.edge_indices( e, 1 ) = ws.corr[ cell.edge_indices( e, 1 ) ];
-    }
+    TODO;
+    // // update edge vertex references
+    // for ( PI e = 0; e < nb_edges; ++e ) {
+    //     edge_indices( e, 0 ) = ws.corr[ edge_indices( e, 0 ) ];
+    //     edge_indices( e, 1 ) = ws.corr[ edge_indices( e, 1 ) ];
+    // }
 }
 
 UTP void DTP::remove_unused_cuts() {
-    const PI dim = cell.dim();
+    TODO;
+    // const PI dim = cell.dim;
 
-    for( PI i = 0; i < cell.nb_cuts(); ++i )
-    ws.used_flags[ i ] = false;
+    // for( PI i = 0; i < nb_cuts(); ++i )
+    // ws.used_flags[ i ] = false;
 
-    for ( PI v = 0; v < cell.nb_vertices(); ++v )
-        for ( PI d = 0; d < dim; ++d )
-            ws.used_flags[ cell.vertex_indices( v, d ) ] = true;
+    // for ( PI v = 0; v < nb_vertices(); ++v )
+    //     for ( PI d = 0; d < dim; ++d )
+    //         ws.used_flags[ vertex_indices( v, d ) ] = true;
 
-    ws.nb_indices_to_remove = 0;
-    for ( PI c = 0; c < cell.nb_cuts(); ++c )
-        if ( ! ws.used_flags[ c ] )
-            ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = c;
+    // ws.nb_indices_to_remove = 0;
+    // for ( PI c = 0; c < nb_cuts(); ++c )
+    //     if ( ! ws.used_flags[ c ] )
+    //         ws.indices_to_remove[ ws.nb_indices_to_remove++ ] = c;
 
-    swap_and_pop( cell.nb_cuts, [&]( PI dst, PI src ) {
-        for ( PI d = 0; d <= dim; ++d )
-            cell.cut_planes( dst, d ) = std::move( cell.cut_planes( src, d ) );
-        cell.cut_ids( dst ) = std::move( cell.cut_ids( src ) );
-    } );
+    // swap_and_pop( nb_cuts, [&]( PI dst, PI src ) {
+    //     for ( PI d = 0; d <= dim; ++d )
+    //         cut_planes( dst, d ) = std::move( cut_planes( src, d ) );
+    //     cut_ids( dst ) = std::move( cut_ids( src ) );
+    // } );
 }
 
 UTP void DTP::apply_cut_corr() {
-    const PI dim = cell.dim();
+    TODO;
+    // for ( PI v = 0; v < nb_vertices(); ++v )
+    //     for ( PI d = 0; d < dim; ++d )
+    //         vertex_indices( v, d ) = ws.corr[ vertex_indices( v, d ) ];
 
-    for ( PI v = 0; v < cell.nb_vertices(); ++v )
-        for ( PI d = 0; d < dim; ++d )
-            cell.vertex_indices( v, d ) = ws.corr[ cell.vertex_indices( v, d ) ];
-
-    for ( PI e = 0; e < cell.nb_edges(); ++e )
-        for ( PI d = 0; d < dim - 1; ++d )
-            cell.edge_indices( e, 2 + d ) = ws.corr[ cell.edge_indices( e, 2 + d ) ];
+    // for ( PI e = 0; e < nb_edges(); ++e )
+    //     for ( PI d = 0; d < dim - 1; ++d )
+    //         cell.edge_indices( e, 2 + d ) = ws.corr[ cell.edge_indices( e, 2 + d ) ];
 }
 
 UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) {
-    const SI old_nb_vertices = cell.nb_vertices;
+    const SI old_nb_vertices = nb_vertices;
 
     // helper to copy vertex_positions and cut_planes/cut_ids together
     auto copy_vertex_data = [&]( PI dst, PI src ) {
         for ( PI d = 0; d < 2; ++d )
-            cell.vertex_positions( dst, d ) = cell.vertex_positions( src, d );
+            vertex_positions( dst, d ) = vertex_positions( src, d );
     };
     auto copy_cut_data = [&]( PI dst, PI src ) {
         for ( PI d = 0; d < 3; ++d )
-            cell.cut_planes( dst, d ) = cell.cut_planes( src, d );
-        cell.cut_ids( dst ) = cell.cut_ids( src );
+            cut_planes( dst, d ) = cut_planes( src, d );
+        cut_ids( dst ) = cut_ids( src );
     };
     auto copy_vertex_and_cut_data = [&]( PI dst, PI src ) {
         copy_vertex_data( dst, src );
@@ -497,44 +544,44 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
     };
 
     auto ext = [&]( PI num_vertex ) {
-        return ws.sps[ num_vertex ] > 0;
+        return sps[ num_vertex ] > 0;
     };
 
     // need to add a vertex
     if ( nb_out == 1 ) {
-        const SI n1 = index( ws.sps, []( TF sp ) { return sp > 0; } );
+        const SI n1 = index( sps, []( TF sp ) { return sp > 0; } );
         const SI n0 = ( n1 + old_nb_vertices - 1 ) % old_nb_vertices;
         const SI n2 = ( n1 + 1 ) % old_nb_vertices;
 
         // compute new vertex positions
-        const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ];
+        const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ];
         const TF d01 = sp0 / ( sp1 - sp0 );
         const TF d12 = sp1 / ( sp2 - sp1 );
         TF p01[ 2 ], p12[ 2 ];
         for ( PI d = 0; d < 2; ++d ) {
-            const TF p0 = cell.vertex_positions( n0, d );
-            const TF p1 = cell.vertex_positions( n1, d );
-            const TF p2 = cell.vertex_positions( n2, d );
+            const TF p0 = vertex_positions( n0, d );
+            const TF p1 = vertex_positions( n1, d );
+            const TF p2 = vertex_positions( n2, d );
             p01[ d ] = p0 - d01 * ( p1 - p0 );
             p12[ d ] = p1 - d12 * ( p2 - p1 );
         }
 
         // get room for the new point and the new cut
-        cell.nb_vertices = old_nb_vertices + 1;
-        cell.nb_edges = old_nb_vertices + 1;
-        cell.nb_cuts = old_nb_vertices + 1;
+        nb_vertices = old_nb_vertices + 1;
+        nb_edges = old_nb_vertices + 1;
+        nb_cuts = old_nb_vertices + 1;
         for( SI nn = old_nb_vertices; --nn > n1; )
             copy_vertex_and_cut_data( nn + 1, nn );
         copy_cut_data( n1 + 1, n1 );
 
         // set data for the new point and the new cut
         for ( PI d = 0; d < 2; ++d ) {
-            cell.vertex_positions( n1 + 0, d ) = p01[ d ];
-            cell.vertex_positions( n1 + 1, d ) = p12[ d ];
-            cell.cut_planes( n1, d ) = cut_dir[ d ];
+            vertex_positions( n1 + 0, d ) = p01[ d ];
+            vertex_positions( n1 + 1, d ) = p12[ d ];
+            cut_planes( n1, d ) = cut_dir[ d ];
         }
-        cell.cut_planes( n1, 2 ) = cut_dot;
-        cell.cut_ids[ n1 ] = cut_id;
+        cut_planes( n1, 2 ) = cut_dot;
+        cut_ids[ n1 ] = cut_id;
         return;
     }
 
@@ -546,27 +593,27 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
         const SI n3 = ( n0 + 3 ) % old_nb_vertices;
 
         // compute new vertex positions
-        const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ], sp3 = ws.sps[ n3 ];
+        const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
         const TF d01 = sp0 / ( sp1 - sp0 );
         const TF d23 = sp2 / ( sp3 - sp2 );
         TF p01[ 2 ], p23[ 2 ];
         for ( PI d = 0; d < 2; ++d ) {
-            const TF p0 = cell.vertex_positions( n0, d );
-            const TF p1 = cell.vertex_positions( n1, d );
-            const TF p2 = cell.vertex_positions( n2, d );
-            const TF p3 = cell.vertex_positions( n3, d );
+            const TF p0 = vertex_positions( n0, d );
+            const TF p1 = vertex_positions( n1, d );
+            const TF p2 = vertex_positions( n2, d );
+            const TF p3 = vertex_positions( n3, d );
             p01[ d ] = p0 - d01 * ( p1 - p0 );
             p23[ d ] = p2 - d23 * ( p3 - p2 );
         }
 
         // set data for the new point and the new cut
         for ( PI d = 0; d < 2; ++d ) {
-            cell.vertex_positions( n1, d ) = p01[ d ];
-            cell.vertex_positions( n2, d ) = p23[ d ];
-            cell.cut_planes( n1, d ) = cut_dir[ d ];
+            vertex_positions( n1, d ) = p01[ d ];
+            vertex_positions( n2, d ) = p23[ d ];
+            cut_planes( n1, d ) = cut_dir[ d ];
         }
-        cell.cut_planes( n1, 2 ) = cut_dot;
-        cell.cut_ids[ n1 ] = cut_id;
+        cut_planes( n1, 2 ) = cut_dot;
+        cut_ids[ n1 ] = cut_id;
         return;
     }
 
@@ -576,15 +623,15 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
     SI n3 = ( n2 + 1 ) % old_nb_vertices;
 
     // compute new vertex positions
-    const TF sp0 = ws.sps[ n0 ], sp1 = ws.sps[ n1 ], sp2 = ws.sps[ n2 ], sp3 = ws.sps[ n3 ];
+    const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
     const TF d01 = sp0 / ( sp1 - sp0 );
     const TF d23 = sp2 / ( sp3 - sp2 );
     TF p01[ 2 ], p23[ 2 ];
     for ( PI d = 0; d < 2; ++d ) {
-        const TF p0 = cell.vertex_positions( n0, d );
-        const TF p1 = cell.vertex_positions( n1, d );
-        const TF p2 = cell.vertex_positions( n2, d );
-        const TF p3 = cell.vertex_positions( n3, d );
+        const TF p0 = vertex_positions( n0, d );
+        const TF p1 = vertex_positions( n1, d );
+        const TF p2 = vertex_positions( n2, d );
+        const TF p3 = vertex_positions( n3, d );
         p01[ d ] = p0 - d01 * ( p1 - p0 );
         p23[ d ] = p2 - d23 * ( p3 - p2 );
     }
@@ -592,9 +639,9 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
     // remove intermediate points
     if ( n1 < n2 ) {
         const PI nb_to_remove = n2 - ( n1 + 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
-        cell.nb_vertices = nb_new_vertices;
-        cell.nb_edges = nb_new_vertices;
-        cell.nb_cuts = nb_new_vertices;
+        nb_vertices = nb_new_vertices;
+        nb_edges = nb_new_vertices;
+        nb_cuts = nb_new_vertices;
 
         copy_cut_data( n2 - nb_to_remove, n2 );
         for( SI nn = n2 + 1; nn < old_nb_vertices; ++nn )
@@ -603,17 +650,17 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
         // set data for the new point and the new cut
         n2 = n1 + 1;
         for ( PI d = 0; d < 2; ++d ) {
-            cell.vertex_positions( n1, d ) = p01[ d ];
-            cell.vertex_positions( n2, d ) = p23[ d ];
-            cell.cut_planes( n1, d ) = cut_dir[ d ];
+            vertex_positions( n1, d ) = p01[ d ];
+            vertex_positions( n2, d ) = p23[ d ];
+            cut_planes( n1, d ) = cut_dir[ d ];
         }
-        cell.cut_planes( n1, 2 ) = cut_dot;
-        cell.cut_ids[ n1 ] = cut_id;
+        cut_planes( n1, 2 ) = cut_dot;
+        cut_ids[ n1 ] = cut_id;
     } else {
         const PI nb_to_remove = n2 + ( old_nb_vertices - n1 - 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
-        cell.nb_vertices = nb_new_vertices;
-        cell.nb_edges = nb_new_vertices;
-        cell.nb_cuts = nb_new_vertices;
+        nb_vertices = nb_new_vertices;
+        nb_edges = nb_new_vertices;
+        nb_cuts = nb_new_vertices;
 
         if ( n2 ) {
             for( SI nn = n2; nn <= n1; ++nn )
@@ -626,56 +673,57 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
 
         // set data for the new point and the new cut
         for ( PI d = 0; d < 2; ++d ) {
-            cell.vertex_positions( n1, d ) = p01[ d ];
-            cell.vertex_positions( n2, d ) = p23[ d ];
-            cell.cut_planes( n1, d ) = cut_dir[ d ];
+            vertex_positions( n1, d ) = p01[ d ];
+            vertex_positions( n2, d ) = p23[ d ];
+            cut_planes( n1, d ) = cut_dir[ d ];
         }
-        cell.cut_planes( n1, 2 ) = cut_dot;
-        cell.cut_ids[ n1 ] = cut_id;
+        cut_planes( n1, 2 ) = cut_dot;
+        cut_ids[ n1 ] = cut_id;
     }
 }
 
 UTP void DTP::get_data_from( const auto &src_cell ) {
-    cell.vertex_positions.get_data_from( src_cell.vertex_positions, { Values(), src_cell.nb_vertices, dim } );
-    if ( dim != 2 ) {
-        cell.vertex_indices.get_data_from( src_cell.vertex_indices, { Values(), src_cell.nb_vertices, dim } );
-        cell.edge_indices.get_data_from( src_cell.edge_indices, { Values(), src_cell.nb_vertices, dim + 1 } );
-    }
-    cell.cut_planes.get_data_from( src_cell.cut_planes, { Values(), src_cell.nb_vertices, dim + 1 } );
-    cell.cut_ids.get_data_from( src_cell.cut_ids, { Values(), src_cell.nb_vertices } );
+    TODO;
+    // vertex_positions.get_data_from( src_vertex_positions, { Values(), src_nb_vertices, dim } );
+    // if ( dim != 2 ) {
+    //     vertex_indices.get_data_from( src_vertex_indices, { Values(), src_nb_vertices, dim } );
+    //     cell.edge_indices.get_data_from( src_cell.edge_indices, { Values(), src_nb_vertices, dim + 1 } );
+    // }
+    // cut_planes.get_data_from( src_cut_planes, { Values(), src_nb_vertices, dim + 1 } );
+    // cut_ids.get_data_from( src_cut_ids, { Values(), src_nb_vertices } );
 
-    cell.is_fully_closed.get_data_from( src_cell.is_fully_closed );
+    // cell.is_fully_closed.get_data_from( src_cell.is_fully_closed );
 
-    cell.nb_vertices = TI( src_cell.nb_vertices );
-    cell.nb_edges = TI( src_cell.nb_edges() );
-    cell.nb_cuts = TI( src_cell.nb_cuts() );
+    // nb_vertices = TI( src_nb_vertices );
+    // nb_edges = TI( src_nb_edges() );
+    // nb_cuts = TI( src_nb_cuts() );
 }
 
 UTP void DTP::clear_cell() {
-    cell.is_fully_closed() = 1;
-    cell.nb_vertices() = 0;
-    cell.nb_edges() = 0;
-    cell.nb_cuts() = 0;
+    is_fully_closed() = 1;
+    nb_vertices = 0;
+    nb_edges = 0;
+    nb_cuts = 0;
 }
 
 UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
-    PI res = cell.nb_cuts()++;
+    PI res = nb_cuts++;
     for ( PI d = 0; d < dim; ++d )
-        cell.cut_planes( res, d ) = cut_dir[ d ];
-    cell.cut_planes( res, dim ) = cut_dot;
-    cell.cut_ids( res ) = cut_id;
+        cut_planes( res, d ) = cut_dir[ d ];
+    cut_planes( res, dim ) = cut_dot;
+    cut_ids( res ) = cut_id;
     return res;
 }
 
 UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
-    Ci ci = vertex_indices( num_vertex );
+    Ci ci = vertex_cuts( num_vertex );
 
     auto M  = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
-        return cell.cut_planes( ci[ r ], c );
+        return cut_planes( ci[ r ], c );
     } );
 
     auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) {
-        return cell.cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
+        return cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
     } );
 
     return M.solve_ge( V );
@@ -690,8 +738,6 @@ UTP DTP::Pt DTP::solve_position( PI num_vertex ) const {
 // evaluate at s=0 and s=1 via SimpleSquareMatrix::solve_ge. For each vertex with sp(0)<0 and
 // sp(1)>0 the crossing is at s* = -sp(0)/(sp(1)-sp(0)). Apply s_grow = max(s*) to all INFINITE cuts.
 UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
-    const PI nb_vertices = cell.nb_vertices();
-
     // check to grow enough so that all the vertices stay on the same side
     TF s_grow = 0; // std::numeric_limits<TF>::max();
     bool need_to_grow = false;
@@ -699,7 +745,7 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
         if ( ! vertex_inf( num_vertex ) )
             continue;
 
-        const Pt p1 = solve_position( num_vertex, [&]( PI num_cut ) { return cell.cut_ids( num_cut ) == CellBoundary::INFINITE ? norm_2( cut_dir( num_cut ) ) : 0; } );
+        const Pt p1 = solve_position( num_vertex, [&]( PI num_cut ) { return cut_ids( num_cut ) == CellBoundary::INFINITE ? norm_2( cut_dir( num_cut ) ) : 0; } );
         const TF s0 = dot( vertex_position( num_vertex ), new_cut_dir ) - new_cut_dot;
         const TF s1 = dot( p1, new_cut_dir ) - new_cut_dot;
 
@@ -719,68 +765,49 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
         s_grow += 1;
 
         // add s_grow * norm_2( n_c ) to each INFINITE cut's offset
-        for ( PI num_cut = 0; num_cut < cell.nb_cuts(); ++num_cut )
-            if ( cell.cut_ids( num_cut ) == CellBoundary::INFINITE )
-                cell.cut_planes( num_cut, dim ) += s_grow * norm_2( cut_dir( num_cut ) );
+        for ( PI num_cut = 0; num_cut < nb_cuts(); ++num_cut )
+            if ( cut_ids( num_cut ) == CellBoundary::INFINITE )
+                cut_planes( num_cut, dim ) += s_grow * norm_2( cut_dir( num_cut ) );
 
         // recompute vertex positions for all vertices with any INFINITE adjacent cut
         for ( PI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex )
             if ( vertex_inf( num_vertex ) )
-                cell.vertex_positions.row( num_vertex ).get_data_from( solve_position( num_vertex ) );
+                vertex_positions.row( num_vertex ).get_data_from( solve_position( num_vertex ) );
     }
 }
 
 UTP void DTP::disp_cell() {
-    P( cell.nb_vertices() );
-    for( PI i = 0; i < cell.nb_vertices(); ++i ) {
-        auto pos = DsVec<TF,ct_dim,Arch>::with_func( 2, [&]( PI d ) { return cell.vertex_positions( i, d ); } );
-        auto cut = DsVec<TF,ct_dim+1,Arch>::with_func( 3, [&]( PI d ) { return cell.cut_planes( i, d ); } );
+    P( nb_vertices() );
+    for( PI i = 0; i < nb_vertices(); ++i ) {
+        auto pos = DsVec<TF,ct_dim,Arch>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
+        auto cut = DsVec<TF,ct_dim+1,Arch>::with_func( 3, [&]( PI d ) { return cut_planes( i, d ); } );
         P( pos, cut );
     }
 }
 
 UTP void DTP::check_consistency() {
-    const PI nb_vertices = cell.nb_vertices();
-
     auto get_cut_inds = [&]( PI v, PI *out ) {
         if ( dim == 2 ) {
             out[ 0 ] = ( v + nb_vertices - 1 ) % nb_vertices;
             out[ 1 ] = v;
         } else {
             for ( PI d = 0; d < dim; ++d )
-                out[ d ] = cell.vertex_indices( v, d );
+                out[ d ] = vertex_indices( v, d );
         }
     };
 
-    for( PI v = 0; v < cell.nb_vertices(); ++v ) {
+    for( PI v = 0; v < nb_vertices(); ++v ) {
         PI ci[ ct_dim ];
         get_cut_inds( v, ci );
 
-        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) { return cell.cut_planes( ci[ r ], c ); } );
-        auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cell.cut_planes( ci[ i ], dim ); } );
+        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
+        auto V = DsVec<TF,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
         const auto pos = M.solve_ge( V );
 
         for ( PI d = 0; d < dim; ++d )
-            P( cell.vertex_positions( v, d ), pos[ d ] );
+            P( vertex_positions( v, d ), pos[ d ] );
     }
 }
-
-// disp_cell( cell );
-// check_consistency( cell );
-
-// _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 0 ), 0.5, 1 );
-// disp_cell( cell );
-// check_consistency( cell );
-
-// _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 0 ), 0.3, 2 );
-// disp_cell( cell );
-// check_consistency( cell );
-
-// // _cut( cell, ws, DsVec<TF,2,Arch>( Values(), 1, 1 ), 0.1, 3 );
-// _cut( cell, ws, DsVec<TF,2,Arch>( Values(), -1, +1 ), -0.25, 3 );
-// disp_cell( cell );
-// check_consistency( cell );
-
 
 template<class Value,int ct_dim,class Arch,class TF,class TI>
 struct Integral<Value,DTP> {
@@ -794,7 +821,7 @@ struct Integral<Value,DTP> {
         cw.for_each_simplex( [&]( const auto &simplex_indices ) {
             Simplex<ct_dim,ct_dim+1,TF,Arch> simplex;
             for( TI d = 0; d < cw.dim + 1; ++d )
-                simplex.pts[ d ] = cw.cell.vertex_positions.row( simplex_indices[ d ] );
+                simplex.pts[ d ] = cw.vertex_positions.row( simplex_indices[ d ] );
             sum += sdot::integral( value, simplex );
         } );
 

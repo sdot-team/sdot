@@ -1,3 +1,4 @@
+from sdot.aggregate.Workspace import Workspace
 from ..util.get_all_annotations import get_all_annotations
 from ..driver import driver
 from .Tensor import Tensor
@@ -38,6 +39,8 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     # add tensors for dynamic shapes
     dynamic_shapes = {}
     for field in fields.values():
+        if isinstance( field, Workspace ):
+            field = field.return_type
         if isinstance( field, Tensor ):
             for expr in field.shape:
                 for term in expr.terms:
@@ -323,5 +326,3 @@ def _axis_count( distribution, axis_name, fields_to_avoid = None ):
                 n += expr.ndim( lambda n, _: getattr( distribution, n ) )
 
     return None
-
-

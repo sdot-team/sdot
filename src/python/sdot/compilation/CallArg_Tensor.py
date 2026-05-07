@@ -7,29 +7,18 @@ from .IoCategory import IoCategory
 from .CallArg import CallArg
 
 from typing import Optional
-import weakref
+from weakref import ref
 
 class CallArg_Tensor( CallArg ):
     """ input or mutable
     """
 
-    python_class              : any #
-    python_value              : any # optional tensor
-    io_category               : IoCategory
-
     ct_axes                   : dict
 
-    name_in_parent            : str
-    parent                    : CallArg #
-
-    ctor_kwargs               : dict
-    ctor_args                 : list
-
+    represents_a_dynamic_axis : str
     is_differentiable         : bool
     shape                     : list[ AxisExpr ]
     dtype                     : any
-
-    represents_a_dynamic_axis : str
 
     validity_output_index     : int
     validity_input_index      : int
@@ -56,20 +45,23 @@ class CallArg_Tensor( CallArg ):
 
         res = CallArg_Tensor()
 
+        # CallArg attributes
         res.name_in_parent = name_in_parent
+        res.parent = ref( parent ) if parent is not None else None
+
         res.python_class = python_class
         res.python_value = python_value
+
         res.io_category = io_category
-        res.parent = weakref.ref( parent )
 
         res.ctor_kwargs = ctor_kwargs
         res.ctor_args = ctor_args
 
+        # Tensor attributes
+        res.represents_a_dynamic_axis = represents_a_dynamic_axis
         res.is_differentiable = not driver.is_int_dtype( dtype )
         res.shape = shape
         res.dtype = dtype
-
-        res.represents_a_dynamic_axis = represents_a_dynamic_axis
 
         res.validity_output_index = -1
         res.validity_input_index = -1
@@ -122,6 +114,10 @@ class CallArg_Tensor( CallArg ):
         if res is None:
             return res
 
+        # if in Worspace, return None
+        if self.io_category.want_return == False:
+            return None
+
         # if we have a dynamic size, make a slice
         slices = []
         for expr in self.shape:
@@ -139,8 +135,14 @@ class CallArg_Tensor( CallArg ):
 
     def get_axis_variable( self, name, is_a_dyn_size ):
         # Return( ..., dim = 2 )
-        if name in self.ctor_kwargs:
-            return int( self.ctor_kwargs[ name ] )
+        call_arg = self
+        while True:
+            if ck := getattr( call_arg, "ctor_kwargs", None ):
+                if name in ck:
+                    return int( ck[ name ] )
+            if call_arg.parent is None:
+                break
+            call_arg = call_arg.parent()
 
         # tensor
         if is_a_dyn_size and name in self.parent().sub_dict:
@@ -150,7 +152,7 @@ class CallArg_Tensor( CallArg ):
         if enclosing := self.parent().python_value:
             return getattr( enclosing, name )
 
-        raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }'" )
+        raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }', or in ctor args" )
 
     def shape_values( self, use_dyn_size = False ):
         res = []

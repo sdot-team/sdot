@@ -8,18 +8,29 @@ class CallArg_Parameter( CallArg ):
     """
 
     num_in_parameters : int
-    python_value : any
-    io_category : IoCategory
     name : str
 
     @staticmethod
     def factory( call_args, name, python_value ):
         """  """
         res = CallArg_Parameter()
-        res.num_in_parameters = call_args.add_parameter( res )
+
+        # CallArg attributes
+        res.name_in_parent = None
+        res.parent = None
+
+        res.python_class = None
         res.python_value = python_value
+
         res.io_category = IoCategory( want_return = False, want_output = False, has_input = True )
+
+        res.ctor_kwargs = None
+        res.ctor_args = None
+
+        # Parameter attributes
+        res.num_in_parameters = call_args.add_parameter( res )
         res.name = name
+
         return res
 
     def signature( self ) -> str:

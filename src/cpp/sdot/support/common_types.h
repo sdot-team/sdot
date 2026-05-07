@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common_macros.h"
+#include "CtdInt.h" // IWYU pragma: export
 #include <iostream>
 #include <cstddef>
 #include <cstdint>

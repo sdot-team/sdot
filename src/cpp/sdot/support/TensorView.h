@@ -25,7 +25,11 @@ public:
     HD             TensorView        ( T *data, PI size );
     HD             TensorView        ( Rank, PI rank );
 
+    // scalar operations
+    HD             operator T        () const requires ( ct_rank == 0 ) { return *data(); }
+    HD TensorView& operator=         ( T value ) requires ( ct_rank == 0 ) { *data() = value; return *this; }
 
+    // selection
     HD T&          operator()        ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
     HD T&          operator()        ( PI index, auto ...rem ) const;
     HD T&          operator()        () const;
@@ -34,6 +38,7 @@ public:
 
     HD auto        partial           ( auto ...indices ) const;
 
+    // data copy / transfer
     HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that, const DsVec<PI,ct_rank,Arch> &size_to_take );
     HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
     HD T_d void    get_data_from     ( const DsVec<T,d,Arch> &that );
@@ -41,6 +46,7 @@ public:
 
     void           spill_to          ( TensorView &that ); ///< copie data of this to that, and use data from that
 
+    //
     static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
     HD Strides     strides           () const;
     HD SI          stride            ( PI d ) const;
