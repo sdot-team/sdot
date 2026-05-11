@@ -40,6 +40,12 @@ from .Bsp import Bsp as Bsp
 # hardware/framework interfaces
 from .driver import driver as driver
 
+# inject info/infox as builtins so tests can use them without explicit import
+import builtins as _builtins
+from .util.info import info as _info, infox as _infox
+_builtins.info  = _info
+_builtins.infox = _infox
+
 # variants
 # from sdot.aggregate._methods import variants_of
 # SumOfWeightedDiracs1d, BatchOfSumOfWeightedDiracs, BatchOfSumOfWeightedDiracs1d = variants_of( SumOfWeightedDiracs )

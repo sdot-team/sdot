@@ -17,7 +17,7 @@ namespace sdot {
 UTP std::byte DTP::_sentinel{};
 
 UTP DTP DTP::make_invalid( Shape shape, Strides strides ) {
-    return TensorView( reinterpret_cast<RawPtr>( &_sentinel ), shape, strides );
+    return TensorView( reinterpret_cast<TF *>( &_sentinel ), shape, strides );
 }
 
 UTP DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawPtr>( data ) ), _strides( strides ), _shape( shape ) {
@@ -107,7 +107,7 @@ UTP PI DTP::total_size() const {
 
 UTP auto DTP::size() const {
     ASSERT( rank() == 1 );
-    return size( Ct<int,0>() );
+    return shape( Ct<int,0>() );
 }
 
 UTP bool DTP::is_invalid() const {

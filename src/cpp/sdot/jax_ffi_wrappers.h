@@ -4,11 +4,15 @@
 ///
 /// Usage (in a generated XLA FFI handler):
 ///
-///   auto tv = ffi_tv<TF,2>( arg_0 );   // ffi::Buffer<ffi::DataType::F64> → TensorView<TF,2,Cpu>
-///   auto tv = ffi_tv<TF,1>( *res_0 );  // dereference Result<Buffer> first
+///   auto tv = tensor_view_input ( CtType<AxisTuple<PI,Cpu,2>>(), buf     );
+///   auto tv = tensor_view_output( CtType<AxisTuple<PI,Cpu,0>>(), res_buf );
+///
+/// Axes with a compile-time known size use KnownAxisSize in the AxisTuple:
+///   auto tv = tensor_view_input( CtType<AxisTuple<PI,Cpu,2,KnownAxisSize<PI,1,3>>>(), buf );
 
 #include "support/DynamicAxis.h"
 #include <xla/ffi/api/ffi.h>
+#include <utility>
 
 namespace sdot {
 
@@ -23,94 +27,111 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S32> { using type = SI32; };
 template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 
-// ------------------- tensor_view -------------------
+// ------------------- contiguous strides -------------------
+// C-contiguous (row-major) byte strides for a given shape AxisTuple.
 
-template<class Shape,xla::ffi::DataType dtype>
+template<class TF, class Shape, std::size_t... Is>
+auto _contiguous_strides_impl( const Shape &shape, std::index_sequence<Is...> ) {
+    using Strides = AxisTuple<SI,typename Shape::Arch,Shape::ct_rank>;
+    if constexpr ( Shape::ct_rank == 0 ) {
+        return Strides( Values() );
+    } else {
+        SI s[ Shape::ct_rank ];
+        s[ Shape::ct_rank - 1 ] = sizeof( TF );
+        for ( int i = Shape::ct_rank - 2; i >= 0; --i )
+            s[ i ] = s[ i + 1 ] * SI( shape[ i + 1 ] );
+        return Strides( Values(), SI( s[ Is ] )... );
+    }
+}
+
+template<class TF, class Shape>
+auto contiguous_strides( const Shape &shape ) {
+    return _contiguous_strides_impl<TF>( shape, std::make_index_sequence<Shape::ct_rank>{} );
+}
+
+
+// ------------------- tensor_view_input -------------------
+
+template<class Shape, xla::ffi::DataType dtype>
 auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
-    using Ar = Shape::Arch;
-    using TI = Shape::TI;
 
-    // get shape
-    Shape shape( Function(), [&]( auto i ) { return buf.dimensions()[ i ]; } );
+    auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
+        return Shape( Values(), PI( buf.dimensions()[ Is ] )... );
+    }( std::make_index_sequence<Shape::ct_rank>{} );
 
-    // by design, Jax tensors are C oriented and compact...
-
-    //
-    using Strides = AxisTuple<TI,Ar,AT::ct_rank>;
-    Strides strides( Values(), buf.dimensions() );
-
+    auto strides = contiguous_strides<TF>( shape );
+    using Strides = DECAYED_TYPE_OF( strides );
 
     if ( ! valid )
-        return TensorView<TF,AT,Cpu>::make_invalid( ndim );
+        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
 
-    ASSERT_EQ( ndim, buf.dimensions().size() );
-    Vector<PI,ndim,Cpu> sizes( Size(), ndim );
-    for( int i = 0; i < ndim; ++i )
-        sizes[ i ] = buf.dimensions()[ i ];
-
-    // XLA FFI guarantees C-contiguous (row-major) layout
-    return TensorView<TF,ndim,Cpu>( const_cast<TF *>( buf.typed_data() ), sizes );
+    return TensorView<TF,Shape,Strides>( const_cast<TF *>( buf.typed_data() ), shape, strides );
 }
 
 
-// xla::ffi::ResultBuffer
-template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view_output( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
+// ------------------- tensor_view_output -------------------
+
+template<class Shape, xla::ffi::DataType dtype>
+auto tensor_view_output( CtType<Shape>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
 
+    auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
+        return Shape( Values(), PI( buf->dimensions()[ Is ] )... );
+    }( std::make_index_sequence<Shape::ct_rank>{} );
+
+    auto strides = contiguous_strides<TF>( shape );
+    using Strides = DECAYED_TYPE_OF( strides );
+
     if ( ! valid )
-        return TensorView<TF,ndim,Cpu>::make_invalid( ndim );
+        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
 
-    ASSERT_EQ( ndim, buf->dimensions().size() );
-    Vector<PI,ndim,Cpu> sizes( Size(), ndim );
-    for( int i = 0; i < ndim; ++i )
-        sizes[ i ] = buf->dimensions()[ i ];
-
-    // XLA FFI guarantees C-contiguous (row-major) layout
-    return TensorView<TF,ndim,Cpu>( buf->typed_data(), sizes );
+    return TensorView<TF,Shape,Strides>( buf->typed_data(), shape, strides );
 }
 
-// mutable
-template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view_mutable( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
-    if ( ! valid )
-        return tensor_view( CtInt<ndim>(), buf_out, false );
 
-    auto out = tensor_view( CtInt<ndim>(), buf_out, true );
-    auto inp = tensor_view( CtInt<ndim>(), buf_inp, true );
+// ------------------- tensor_view_mutable -------------------
+
+template<class Shape, xla::ffi::DataType dtype>
+auto tensor_view_mutable( CtType<Shape> cd, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
+    if ( ! valid )
+        return tensor_view_output( cd, buf_out, false );
+
+    auto out = tensor_view_output( cd, buf_out, true );
+    auto inp = tensor_view_input ( cd, buf_inp, true );
     out.get_data_from( inp );
     return out;
 }
 
+
 // ------------------- dynamic_axis -------------------
-template<int ndim,xla::ffi::DataType dtype>
-auto dynamic_axis_input( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf, bool valid ) {
+
+template<class Shape, xla::ffi::DataType dtype>
+auto dynamic_axis_input( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf, bool valid ) {
     return DynamicAxis( num_dynamic_axis, capacity, tensor_view_input( cd, buf, valid ) );
 }
 
-
-// xla::ffi::ResultBuffer
-template<int ndim,xla::ffi::DataType dtype>
-auto dynamic_axis_output( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid ) {
+template<class Shape, xla::ffi::DataType dtype>
+auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid ) {
     auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
     res.sizes.fill_with( 0 );
     return res;
 }
 
-// mutable
-template<int ndim,xla::ffi::DataType dtype>
-auto dynamic_axis_mutable( CtInt<ndim> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {
+template<class Shape, xla::ffi::DataType dtype>
+auto dynamic_axis_mutable( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {
     auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf_out ) );
     if ( valid_inp ) {
-        auto inp = tensor_view_output( cd, buf_inp );
+        auto inp = tensor_view_input( cd, buf_inp );
         res.sizes.get_data_from( inp );
     }
     return res;
 }
 
+
 // ------------------- first_positive -------------------
-SI first_positive( const std::string &name ) { return 0; } // throw std::runtime_error( "no positive value for " + name );
+
+SI first_positive( const std::string &name ) { return 0; }
 SI first_positive( const std::string &name, SI head, auto...tail ) { return head >= 0 ? head : first_positive( name, tail... ); }
 
 } // namespace sdot

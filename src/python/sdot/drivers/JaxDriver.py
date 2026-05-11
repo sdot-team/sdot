@@ -236,7 +236,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, **args ):
+    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, mlir = False, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -306,7 +306,9 @@ class JaxDriver:
                 return ret
             return tuple( ret )
 
-        if not grad:
+        if mlir:
+            outputs = self._call_via_primitive( fai, module_name )
+        elif not grad:
             outputs = _call_ffi( tuple( fai.differentiable_ffi_inputs ) )
         else:
             @jax.custom_vjp
@@ -337,7 +339,7 @@ class JaxDriver:
             my_ffi_op.defvjp( my_ffi_op_fwd, my_ffi_op_bwd, symbolic_zeros = True )
 
             # --- appel ---
-            outputs = my_ffi_op( tuple( input.python_value for input in fai.differentiable_ffi_inputs ) )
+            outputs = my_ffi_op( tuple( fai.differentiable_ffi_inputs ) )
 
         # ret assembly
         fai.update_objects( outputs )
@@ -398,6 +400,20 @@ class JaxDriver:
 
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
+
+    def _call_via_primitive( self, fai: CallArgsAnalysis, module_name: str ):
+        from .JaxMlirPrimitive import get_or_create
+
+        fai.update_differentiable_input_values_with(
+            tuple( fai.differentiable_ffi_inputs )
+        )
+
+        prim = get_or_create( module_name, fai.ffi_outputs )
+        ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+
+        if isinstance( ret, jax.Array ):
+            return ( ret, )
+        return tuple( ret )
 
     def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
         # get signature

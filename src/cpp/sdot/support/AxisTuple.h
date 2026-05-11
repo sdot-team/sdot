@@ -138,6 +138,7 @@ public:
     /**/      AxisTuple   ( Values ) {}
 
     auto      apply_values( auto &&cb ) const { return cb(); }
+    auto      operator[]  ( TI /*u*/ ) const -> TI { ASSERT( false ); return 0; }
     void      display     ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) os << "[]"; else os << " ]"; }
     int       size        () const { return 0; }
 };

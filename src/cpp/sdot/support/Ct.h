@@ -13,7 +13,7 @@ struct Ct {
     }
 
     void display( auto &os ) const {
-        os << i;
+        os << "Ct(" << i  << ")";
     }
 };
 

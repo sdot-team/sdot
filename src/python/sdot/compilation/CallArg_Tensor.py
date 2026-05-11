@@ -168,7 +168,10 @@ class CallArg_Tensor( CallArg ):
         return res
 
     def signature( self ) -> str:
-        return f"T{ self.ndim }{ driver.normalized_type_for( self.dtype ) }"
+        ct_values = []
+        for ct_variable in self.ct_axes.keys():
+            ct_values.append( f"{ ct_variable }_{ self.get_axis_variable( ct_variable, False ) }" )
+        return f"T{ self.ndim }{ driver.normalized_type_for( self.dtype ) }{ '-'.join( ct_values ) }"
 
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
@@ -184,16 +187,55 @@ class CallArg_Tensor( CallArg ):
         template_args.add( "Arch", "typename", 1 )
 
 
+    def _get_kwarg_only( self, name, is_dyn ):
+        """Raise if `name` is not statically available from ctor_kwargs."""
+        if is_dyn:
+            raise KeyError( name )
+        call_arg = self
+        while True:
+            if ck := getattr( call_arg, "ctor_kwargs", None ):
+                if name in ck:
+                    return int( ck[ name ] )
+            if call_arg.parent is None:
+                break
+            call_arg = call_arg.parent()
+        raise KeyError( name )
+
+    def _ct_axis_value( self, n ):
+        """Return the compile-time value for axis n, or None if runtime-only."""
+        expr = self.shape[ n ]
+        if not expr.terms:
+            return expr.offset
+        for term in expr.terms:
+            if term.variable.selection is not None or term.variable.arguments is not None:
+                return None
+        try:
+            return int( expr.value( self._get_kwarg_only, False ) )
+        except ( KeyError, RuntimeError ):
+            return None
+
+    def shape_type( self ):
+        """Build AxisTuple C++ type string with KnownAxisSize where axes are CT-known."""
+        known = []
+        for n in range( self.ndim ):
+            val = self._ct_axis_value( n )
+            if val is not None:
+                known.append( f"KnownAxisSize<PI,{ n },{ val }>" )
+        suffix = ( "," + ",".join( known ) ) if known else ""
+        return f"AxisTuple<PI,Arch,{ self.ndim }{ suffix }>"
+
     def cpp_type_name( self, main_list ):
+        shape_t   = self.shape_type()
+        strides_t = f"AxisTuple<SI,Arch,{ self.ndim }>"
         if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<{ self.dtype_name() },{ self.ndim },Arch>"
-        return f"TensorView<{ self.dtype_name() },{ self.ndim },Arch>"
+            return f"DynamicAxis<PI,{ shape_t },{ strides_t }>"
+        return f"TensorView<{ self.dtype_name() },{ shape_t },{ strides_t }>"
 
     def dtype_name( self ):
         if self.dtype is float or self.dtype is None:
             return "TF"
         if self.dtype is int:
-            return "TI"
+            return "PI"
         return driver.normalized_type_for( self.dtype )
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
@@ -236,8 +278,10 @@ class CallArg_Tensor( CallArg ):
         return self.ffi_input_name()
 
     def ffi_conversion_code( self ):
-        base = "tensor_view"
-        extr = ""
+        base      = "tensor_view"
+        extr      = ""
+        ct_shape  = f"CtType<{ self.shape_type() }>()"
+
         if self.represents_a_dynamic_axis:
             p = self.parent()
 
@@ -255,15 +299,15 @@ class CallArg_Tensor( CallArg ):
 
         # mutable
         if self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_mutable( CtInt<{ self.ndim }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+            return f"{ base }_mutable( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_output( CtInt<{ self.ndim }>(){ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+            return f"{ base }_output( { ct_shape }{ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
 
         # pure input
         if self.io_category.has_input and not self.io_category.want_output:
-            return f"{ base }_input( CtInt<{ self.ndim }>(){ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
+            return f"{ base }_input( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
 
         raise NotImplementedError
 

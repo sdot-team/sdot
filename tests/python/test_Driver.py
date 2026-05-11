@@ -77,7 +77,14 @@ import sdot
 #     info( res )
 
 def test_ffi_basic():
-    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    input = sdot.driver.array( [ 3. ] )
+    info( sdot.driver.call( "info( p.input.size() ); info( p.output.size() ); for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
+
+    input = sdot.driver.array( [ 3., 4. ] )
+    info( sdot.driver.call( "info( p.input.size() ); info( p.output.size() ); for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
+
+def test_mlir_basic():
+    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", mlir = True, output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
 
 
 # import jax
@@ -95,6 +102,7 @@ def test_ffi_basic():
 if __name__ == "__main__":
     # test_alac_grad()
     test_ffi_basic()
+    test_mlir_basic()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

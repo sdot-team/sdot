@@ -250,7 +250,7 @@ class CallArg_Aggregate( CallArg ):
             coeff = matrix[ num_case ][ num_axis ]
             if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
                 continue
-            op = f"{ tensor_names[ num_case ] }.size( { tensor_axes[ num_case ] } )"
+            op = f"{ tensor_names[ num_case ] }.shape( { tensor_axes[ num_case ] } )"
             if vector[ num_case ]:
                 if coeff != 1:
                     op = f"( { op } - { vector[ num_case ] } ) / { coeff }"
@@ -307,9 +307,9 @@ class CallArg_Aggregate( CallArg ):
                 complete_axis_name = f"max_of_{ axis_name }" if axis_selection is not None else axis_name
 
                 if axis_name in ct_axes and ct_axes[ axis_name ] is None: # always a ct_axis -> make a constexpr
-                    lines.append( f"    static constexpr TI { complete_axis_name } = ct_{ axis_name };" )
+                    lines.append( f"    static constexpr SI { complete_axis_name } = ct_{ axis_name };" )
                 else: # else, attribute to be filled during construction
-                    lines.append( f"    TI { complete_axis_name };" )
+                    lines.append( f"    SI { complete_axis_name };" )
 
             lines.append( "" )
 
