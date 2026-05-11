@@ -1,6 +1,6 @@
 #pragma once
 
-#include "DsVec.h"
+#include "Vector.h"
 
 namespace sdot {
 

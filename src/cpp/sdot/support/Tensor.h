@@ -50,7 +50,7 @@ public:
     T&          operator() ( PI i0 );
     T&          operator() ();
 
-    /// DsVec-based access (forwards to TensorView)
+    /// Vector-based access (forwards to TensorView)
     const T&    operator() ( const auto &indices ) const;
     T&          operator() ( const auto &indices );
 

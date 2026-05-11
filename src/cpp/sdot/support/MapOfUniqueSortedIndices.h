@@ -5,7 +5,7 @@
 // #include <tl/support/compare.h>
 // #include "VecForCapa.h"
 #include "TensorView.h"
-#include "DsVec.h"
+#include "Vector.h"
 #include "P.h"
 
 namespace sdot {
@@ -43,13 +43,13 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
         value = 0;
     }
 
-    IntWithOffset<TI> operator[]( const DsVec<TI,0,Arch> &/* key */ ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,0,Arch> &/* key */ ) {
         return { offset, value };
     }
 
     void for_each_item( auto &&func ) const {
         if ( value >= offset )
-            func( DsVec<TI,0,Arch>( Values() ), value - offset );
+            func( Vector<TI,0,Arch>( Values() ), value - offset );
     }
 
     TI offset; ///<
@@ -84,14 +84,14 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const DsVec<TI,1,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,1,Arch> &key ) {
         return { offset, values[ key[ 0 ] - offset_in_map_items ] };
     }
 
     void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
             if ( values[ offset_in_map_items + i ] >= offset )
-                func( DsVec<TI,1,Arch>( Values(), i ), values[ offset_in_map_items + i ] - offset );
+                func( Vector<TI,1,Arch>( Values(), i ), values[ offset_in_map_items + i ] - offset );
     }
 
     TI offset_in_map_items; ///<
@@ -128,7 +128,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const DsVec<TI,2,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,2,Arch> &key ) {
         return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
     }
 
@@ -137,7 +137,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
             for( PI j = 0; j < values.size(); ++j ) {
                 PI k = offset_in_map_items + i * max_inp_value + j;
                 if ( values[ k ] >= offset )
-                    func( DsVec<TI,1,Arch>( Values(), i, j ), values[ k ] - offset );
+                    func( Vector<TI,1,Arch>( Values(), i, j ), values[ k ] - offset );
             }
         }
     }
@@ -162,7 +162,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
 
 //     void  prepare_for             ( InputInt /*max_input_value*/, PI64 /* max_output_value */ ) { values.clear(); }
 
-//     IntWithOffset operator[] ( const DsVec<InputInt,-1,Arch> &key ) {
+//     IntWithOffset operator[] ( const Vector<InputInt,-1,Arch> &key ) {
 //         auto iter = values.find( key );
 //         if ( iter == values.end() )
 //             iter = values.insert( iter, { key, 0 } );
@@ -170,7 +170,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
 //     }
 
 // private:
-//     using Map        = std::map<DsVec<InputInt,-1,Arch>,PI64>;
+//     using Map        = std::map<Vector<InputInt,-1,Arch>,PI64>;
 
 //     Map   values;    ///<
 // };

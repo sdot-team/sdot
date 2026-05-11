@@ -12,14 +12,13 @@ struct DynamicSizeException {
 
 
 //
-template<class TI,int rank,class Arch>
+template<class TI,class Shape,class Strides>
 class DynamicAxis {
 public:
-    using        Sizes          = TensorView<TI,rank,Arch>;
+    using        Sizes          = TensorView<TI,Shape,Strides>;
 
     // slicing/subparts
-    auto         operator()     ( auto...indices ) const { constexpr int new_rank = rank - int( sizeof...( indices ) ); return DynamicAxis<TI,new_rank,Arch>( num_dynamic_axis, capacity, sizes.partial( indices... ) ); }
-    auto         row            ( auto index ) const { return operator()( index ); }
+    auto         operator()     ( auto...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,typename TT::Shape,typename TT::Strides>( num_dynamic_axis, capacity, new_sizes ); }
 
     // info
     bool         is_invalid     () const { return sizes.is_invalid(); }
@@ -27,13 +26,13 @@ public:
     PI           size           ( PI ind ) const { return sizes.size( ind ); }
 
     // assuming rank == 0
-    PI           post_increment ( PI value ) { PI res = sizes(); operator=( res + value ); return res; }
-    PI           operator++     () { PI res = sizes() + 1; operator=( res ); return res; }
-    PI           operator++     ( int ) { PI res = sizes(); operator=( res + 1 ); return res; }
-    PI           operator--     () { PI res = sizes() - 1; operator=( res ); return res; }
-    PI           operator--     ( int ) { PI res = sizes(); operator=( res - 1 ); return res; }
-    DynamicAxis& operator=      ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes() = new_size; return *this; }
-    operator     PI             () const { return sizes(); }
+    PI           post_increment ( PI value ) { PI res = sizes.item(); operator=( res + value ); return res; }
+    PI           operator++     () { PI res = sizes.item() + 1; operator=( res ); return res; }
+    PI           operator++     ( int ) { PI res = sizes.item(); operator=( res + 1 ); return res; }
+    PI           operator--     () { PI res = sizes.item() - 1; operator=( res ); return res; }
+    PI           operator--     ( int ) { PI res = sizes.item(); operator=( res - 1 ); return res; }
+    DynamicAxis& operator=      ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes.item() = new_size; return *this; }
+    operator     PI             () const { return sizes.item(); }
 
     // exception
     void         overflow       ( PI needed_size ) { throw DynamicSizeException( num_dynamic_axis, needed_size ); }

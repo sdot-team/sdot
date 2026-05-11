@@ -29,7 +29,7 @@ public:
     }
 
     template<int i>
-    IntWithOffset<TI> operator[]( const DsVec<TI,i,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,i,Arch> &key ) {
         if constexpr( i == ct_dim )
             return curr[ key ];
         else
@@ -59,7 +59,7 @@ public:
         curr.reserve( reservation );
     }
 
-    IntWithOffset<TI> operator[]( const DsVec<TI,0,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,0,Arch> &key ) {
         return curr.operator[]( key );
     }
 

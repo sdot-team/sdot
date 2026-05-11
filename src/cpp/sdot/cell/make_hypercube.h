@@ -62,7 +62,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = DsVec<TF,ct_dim,Arch>::with_func( dim, [d]( PI i ) {
+        auto e_d = Vector<TF,Arch,ct_dim,Arch>::with_func( dim, [d]( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -151,4 +151,3 @@ UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_i
 #undef DTP
 
 } // namespace sdot
-

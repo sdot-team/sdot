@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../support/DsVec.h"
+#include "../support/Vector.h"
 
 namespace sdot {
 
@@ -8,10 +8,10 @@ namespace sdot {
 template<class T,int ct_size,class Arch>
 class SimpleSquareMatrix {
 public:
-    struct               EigenSystem             { DsVec<T,ct_size,Arch> values;   /* ascending order */ SimpleSquareMatrix<T,ct_size,Arch> vectors;  /* row i = eigenvector i */ };
+    struct               EigenSystem             { Vector<T,ct_size,Arch> values;   /* ascending order */ SimpleSquareMatrix<T,ct_size,Arch> vectors;  /* row i = eigenvector i */ };
     using                value_type              = T;
-    using                Content                 = DsVec<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
-    using                Vec                     = DsVec<T,ct_size,Arch>;
+    using                Content                 = Vector<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
+    using                Vec                     = Vector<T,ct_size,Arch>;
 
     /**/                 SimpleSquareMatrix      ( Size, PI size, T value ) : _content( Size(), size * size, value ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
     /**/                 SimpleSquareMatrix      ( Size, PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }

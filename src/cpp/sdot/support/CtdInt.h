@@ -8,8 +8,8 @@ struct CtdInt {
     constexpr operator int() const { return i; }
 };
 
-consteval auto ctd_add( int i, int j ) { if ( i < 0 ) return i;  if ( j < 0 ) return j; return i;  }
-consteval auto ctd_sub( int i, int j ) { if ( i < 0 ) return i;  if ( j < 0 ) return j; return i;  }
+consteval auto ctd_add( int i, int j ) { if ( i < 0 ) return i;  if ( j < 0 ) return j; return i + j;  }
+consteval auto ctd_sub( int i, int j ) { if ( i < 0 ) return i;  if ( j < 0 ) return j; return i - j;  }
 
 template<int i, int j> constexpr auto operator+( CtdInt<i>, CtdInt<j> ) { return CtdInt<ctd_add( i, j )>{}; }
 template<int i, int j> constexpr auto operator-( CtdInt<i>, CtdInt<j> ) { return CtdInt<ctd_sub( i, j )>{}; }

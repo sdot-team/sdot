@@ -16,14 +16,14 @@ struct BspMaker {
 
     enum { degree_w_approx       = 1 };
     enum { ct_nb_coeffs_w_approx = 1 + ct_dim * ( degree_w_approx >= 1 ) + ct_dim * ( ct_dim + 1 ) / 2 * ( degree_w_approx >= 2 ) };
-    using                 Pt = DsVec<TF,ct_dim>;
+    using                 Pt = Vector<TF,Arch,ct_dim>;
 
-    std::pair<DsVec<TF,ct_dim>,DsVec<TF,ct_dim>> min_max( SI beg_in_sorted_vertex_indices, SI end_in_sorted_vertex_indices ) {
+    std::pair<Vector<TF,Arch,ct_dim>,Vector<TF,Arch,ct_dim>> min_max( SI beg_in_sorted_vertex_indices, SI end_in_sorted_vertex_indices ) {
         using namespace std;
 
         const PI ind = bsp.sorted_vertex_indices( beg_in_sorted_vertex_indices );
-        DsVec<TF,ct_dim> mi( positions.row( ind ) );
-        DsVec<TF,ct_dim> ma = mi;
+        Vector<TF,Arch,ct_dim> mi( positions.row( ind ) );
+        Vector<TF,Arch,ct_dim> ma = mi;
 
         const PI dim = ct_dim >= 0 ? ct_dim : positions.size( 0 );
         for( SI i = beg_in_sorted_vertex_indices + 1; i < end_in_sorted_vertex_indices; ++i ) {
@@ -132,13 +132,13 @@ struct BspMaker {
 
         // M, V
         SimpleSquareMatrix<TF,ct_nb_coeffs_w_approx,Arch> M( Size(), nb_coeffs_w_approx, 0 );
-        DsVec<TF,ct_nb_coeffs_w_approx,Arch> V( Size(), nb_coeffs_w_approx, 0 );
+        Vector<TF,Arch,ct_nb_coeffs_w_approx,Arch> V( Size(), nb_coeffs_w_approx, 0 );
         for( SI num_si = beg_si; num_si < end_si; ++num_si ) {
             const PI index = bsp.sorted_vertex_indices[ num_si ];
             const TF w = weights.is_invalid() ? 0 : weights[ index ];
             const Pt p = positions.row( index );
 
-            DsVec<TF,ct_nb_coeffs_w_approx,Arch> coeffs( Size(), nb_coeffs_w_approx );
+            Vector<TF,Arch,ct_nb_coeffs_w_approx,Arch> coeffs( Size(), nb_coeffs_w_approx );
             coeffs[ 0 ] = 1;
             if ( degree_w_approx >= 1 )
                 for( std::size_t d = 0; d < dim; ++d )

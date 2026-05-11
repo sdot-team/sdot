@@ -1,108 +1,88 @@
 #pragma once
 
-#include "common_macros.h"
-#include "DsVec.h"
-
-#include <ostream>
+#include "AxisTuple.h"
+#include "Vector.h"
 
 namespace sdot {
-template<class T,int ct_rank,class Arch> class Tensor;
-template<class T,int ct_size,class Arch> class DsVec;
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
-template<class T,int ct_rank,class Arch>
+template<class TF,class _Shape,class _Strides>
 class TensorView {
 public:
-    using          value_type        = T;
-    using          Strides           = DsVec<SI,ct_rank,Arch>; ///< byte strides
-    using          Sizes             = DsVec<PI,ct_rank,Arch>;
-    using          Ptr               = std::conditional_t<std::is_const_v<T>,const std::byte*,std::byte*>;
+    using            value_type         = TF;
+    using            Strides            = _Strides;
+    using            Shape              = _Shape;
 
-    static HD auto make_invalid      ( PI rank = ct_rank ); ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
+    SCInt            ct_rank            = Shape::ct_rank;
+    using            RawPtr             = std::conditional_t<std::is_const_v<TF>,const std::byte*,std::byte*>;
+    using            Arch               = Shape::Arch;
+    using            TI                 = Shape::TI;
 
-    HD             TensorView        ( T *data, Sizes sizes, Strides strides );
-    HD             TensorView        ( T *data, Sizes sizes );
-    HD             TensorView        ( T *data, PI size );
-    HD             TensorView        ( Rank, PI rank );
+    static HD auto   make_invalid       ( Shape shape, Strides strides ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
-    // scalar operations
-    HD             operator T        () const requires ( ct_rank == 0 ) { return *data(); }
-    HD TensorView& operator=         ( T value ) requires ( ct_rank == 0 ) { *data() = value; return *this; }
+    HD               TensorView         ( TF *data, Shape shape, Strides strides );
 
-    // selection
-    HD T&          operator()        ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
-    HD T&          operator()        ( PI index, auto ...rem ) const;
-    HD T&          operator()        () const;
+    // operator() produces a new tensor
+    HD auto          operator()         ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
+    HD auto          operator()         ( const auto &index, auto ...rem ) const;
+    HD auto          operator()         () const { return *this; }
 
-    HD T&          operator[]        ( const auto &index ) const;
+    // operator[] allows to get a scalar value/reference for a rank 1 tensor
+    HD TF&           operator[]         ( const auto &index ) const;
 
-    HD auto        partial           ( auto ...indices ) const;
+    // scalar value/reference for a rank 0 tensor
+    HD               operator TF        () const requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); return *data(); }
+    HD TensorView&   operator=          ( TF value ) requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); *data() = value; return *this; }
+    HD TF&           item               () const;
 
     // data copy / transfer
-    HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that, const DsVec<PI,ct_rank,Arch> &size_to_take );
-    HD TensorView& get_data_from     ( const TensorView<T,ct_rank,Arch> &that );
-    HD T_d void    get_data_from     ( const DsVec<T,d,Arch> &that );
-    void           fill_with         ( T value );
+    HD void          get_data_from      ( const auto &that, const auto &size_to_take );
+    HD void          get_data_from      ( const auto &that );
+    void             fill_with          ( TF value );
 
-    void           spill_to          ( TensorView &that ); ///< copie data of this to that, and use data from that
+    void             spill_to           ( TensorView &that ); ///< copie data of this to that, and use data from that
 
-    //
-    static HD auto contiguous_strides( const Sizes &ext ) -> Strides;
-    HD Strides     strides           () const;
-    HD SI          stride            ( PI d ) const;
+    // strides
+    HD Strides       strides            () const;
+    HD SI            stride             ( auto d ) const;
 
-    HD PI          total_size        () const;
-    HD bool        is_invalid        () const; ///<
-    HD bool        is_valid          () const; ///< false iff constructed from None/nullopt (_ptr == nullptr)
-    HD bool        empty             () const;
-    Sizes          sizes             () const;
-    HD PI          shape             ( PI d ) const { return size( d ); }
-    Sizes          shape             () const { return sizes(); }
-    HD PI          size              ( PI d ) const;
-    HD PI          size              () const;
+    // shape
+    HD PI            total_size         () const;
+    HD auto          shape              ( auto d ) const { return _shape[ d ]; }
+    Shape            shape              () const { return _shape; }
+    HD bool          empty              () const;
+    HD auto          size               () const;
 
-    HD PI          rank              () const;
+    HD bool          is_invalid         () const; ///<
+    HD bool          is_valid           () const; ///<
 
-    HD T*          data              () const;
+    HD auto          rank               () const;
 
-    HD auto        begin             () const;
-    HD auto        end               () const;
+    HD TF*           data               () const;
 
-    HD void        for_each_index    ( auto &&func, PI sub, DsVec<PI,ct_rank,Arch> size_to_take ) const;
-    HD void        for_each_index    ( auto &&func, PI sub = 0 ) const;
+    HD auto          begin              () const;
+    HD auto          end                () const;
 
-    HD bool        is_contiguous     () const; ///< true iff strides match row-major contiguous layout
-    HD auto        unsqueeze         () const; ///< append a trailing dimension of size 1 (preserves strides)
+    //    HD vo@id   for_each_index     ( auto &&func, PI sub, Vector<PI,ct_rank,Arch> size_to_take ) const;
+    HD void          for_each_index     ( auto &&func, PI sub = 0 ) const;
 
-    T_U auto       sum_along_axis_1  () const -> Tensor<U,1,Arch>;
-    void           with_cpu_version  ( auto &&func ) const;
-    auto           squeeze           ( PI axis, PI index = 0 ) const;
-    HD auto        row               ( PI index ) const;
+    HD bool          is_contiguous      () const; ///< true iff strides match row-major contiguous layout
 
-    void           with_same_shape   ( auto &&func ) const;
+    // T_U auto      sum_along_axis_1() const -> Tensor<U,1,Arch>;
+    void             apply_cpu_version  ( auto &&func ) const;
+    HD auto          unsqueeze          ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
+    auto             squeeze            ( auto axis, PI index = 0 ) const;
+    HD auto          row                ( PI index ) const;
 
-    static std::byte   _sentinel;    ///< address used as invalid marker — never points to real data
-
-    friend std::ostream &operator<<( std::ostream &os, const TensorView &p ) {
-        if constexpr( ct_rank == 0 )
-            return os << p();
-        else if constexpr ( ct_rank == 1 ) {
-            for( sdot::PI i = 0; i < p.size(); ++i )
-                os << ( i ? ", " : "" ) << p[ i ];
-            return os;
-        } else {
-            for( sdot::PI i = 0; i < p.size( 0 ); ++i )
-                os << "\n" << p.row( i );
-            return os;
-        }
-    }
+    void             with_same_shape    ( auto &&func ) const;
 
 private:
-    Strides        _strides;         ///< byte strides
-    Sizes          _sizes;           ///<
-    Ptr            _ptr;             ///<
+    static std::byte _sentinel;        ///< address used as invalid marker — never points to real data
 
-    Arch           _arch;            ///<
+    RawPtr           _raw_ptr;          ///<
+    Strides          _strides;          ///< byte strides
+    Shape            _shape;            ///<
+    Arch             _arch;             ///<
 };
 
 } // namespace sdot

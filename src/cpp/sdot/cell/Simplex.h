@@ -1,14 +1,14 @@
 #pragma once
 
 #include "../support/SimpleSquareMatrix.h"
-#include "../support/DsVec.h"
+#include "../support/Vector.h"
 #include "../support/TODO.h"
 
 namespace sdot {
 
 template<int dim,int npt,class TF,class Arch>
 struct Simplex {
-    using Pt = DsVec<TF,dim,Arch>;
+    using Pt = Vector<TF,Arch,dim,Arch>;
 
     TF measure() const {
         using namespace std;

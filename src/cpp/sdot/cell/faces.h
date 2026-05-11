@@ -29,7 +29,7 @@ std::vector<std::vector<PI>> faces( const Cell<TF,ct_dim,Arch> &cell ) {
     // for each edge, find the connected faces
     std::vector<std::vector<PI>> faces_to_edges;
     for( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
-        auto face_inds = DsVec<PI32,ct_nb_face_inds,Arch>::with_func( dim - 2, [&]( PI i ) {
+        auto face_inds = Vector<PI32,ct_nb_face_inds,Arch>::with_func( dim - 2, [&]( PI i ) {
             return cell.edge_indices( num_edge, i + ( i >= num_edge ) );
         } );
 

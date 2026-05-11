@@ -155,7 +155,7 @@ void center_weights( auto &p ) {
 
     constexpr PI dim = DECAYED_TYPE_OF( p.power_diagram.ct_dim )::value;
     using TF = DECAYED_TYPE_OF( p.new_weights[ 0 ] );
-    using Pt = DsVec<TF,dim,Cpu>;
+    using Pt = Vector<TF,Arch,dim,Cpu>;
 
     with_worker_for( p.target_distribution, [&]( auto &&distribution_worker ) {
         distribution_worker.with_preparation_for_cell_traversal( p.cell_workspace, p.cells, [&]( auto &distribution_worker ) {

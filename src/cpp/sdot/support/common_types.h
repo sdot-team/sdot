@@ -1,8 +1,10 @@
 #pragma once
 
 #include "common_macros.h"
-#include "CtdInt.h" // IWYU pragma: export
-#include <iostream>
+#include "ASSERT.h" // IWYU pragma: export
+#include "TODO.h" // IWYU pragma: export
+#include "info.h" // IWYU pragma: export
+
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -26,13 +28,13 @@ using SI = long long;
 using PI = std::size_t;
 
 template<class T> struct CtType {};
-template<int i> struct CtInt { static constexpr int value = i; constexpr operator int() const { return i; } };
 
 inline static const char *type_name( CtType<FP64> ) { return "FP64"; }
 inline static const char *type_name( CtType<FP32> ) { return "FP32"; }
 
 // ctor args
 struct SizeAndCtorArgs {};
+struct Function {};
 struct Reserved {};
 struct Values {};
 struct Shape {};

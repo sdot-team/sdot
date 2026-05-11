@@ -16,7 +16,7 @@
 // struct JAX_FFI_Buffer_To_TensorView<T, Rank, Cpu> {
 //     static auto get(const ffi::AnyBuffer& buffer) {
 //         PI r = buffer.dimensions().size();
-//         DsVec<PI, Rank, Cpu> sizes(Size(), r);
+//         Vector<PI, Rank, Cpu> sizes(Size(), r);
 //         for (int i = 0; i < (int)r; ++i) {
 //             sizes[i] = buffer.dimensions()[i];
 //         }

@@ -63,6 +63,22 @@ def test_cell_2D_basic():
 
     # c.plot()
 
+def test_cell_3D_basic():
+    c = sdot.Cell.unbounded( 2 )
+
+    # c.cut( [ 1, 0 ], 0.3 )
+    info( c.vertex_positions )
+    # info( c.vertex_indices )
+    info( c.cut_planes )
+    info( c.cut_ids )
+
+    info( c.index_corrections )
+    # info( c.measure )
+    # info( c.measure )
+    # ic( c.faces )
+
+    # c.plot()
+
 if __name__ == "__main__":
     test_cell_2D_basic()
     # test_cell_2D_diff()

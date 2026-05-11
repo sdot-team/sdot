@@ -19,8 +19,8 @@ struct PolynomialGridWorker {
     using                 BatchOfCell                        = sdot::BatchOfCell<dim,Arch,TF,TI>;
     using                 Polynomial                         = sdot::Polynomial<order,dim,Arch,TF>;
     using                 Cell                               = sdot::Cell<dim,Arch,TF,TI>;
-    using                 Pt                                 = DsVec<TF,dim,Arch>;
-    using                 Pi                                 = DsVec<TI,dim,Arch>;
+    using                 Pt                                 = Vector<TF,Arch,dim,Arch>;
+    using                 Pi                                 = Vector<TI,dim,Arch>;
 
     void                  with_preparation_for_cell_traversal( auto &cell_workspace, auto &cells, auto &&func );
     void                  for_each_sub_cell                  ( const auto &cell, TI batch_index, auto &&func ); // ( auto &cell_worker, const auto &local_function )

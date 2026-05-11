@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../support/common_types.h"
-#include "../support/DsVec.h"
+#include "../support/Vector.h"
 #include "../Cell/Simplex.h"
 
 namespace sdot {
@@ -14,7 +14,7 @@ struct Polynomial {
 
     Polynomial() : coeffs( Size(), nb_coeffs ) {}
 
-    DsVec<TF,nb_coeffs,Arch> coeffs;
+    Vector<TF,Arch,nb_coeffs,Arch> coeffs;
 };
 
 /** ∫_{simplex} P(x) dx, simplex = array of dim+1 points */

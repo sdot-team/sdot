@@ -1,15 +1,8 @@
 #pragma once
 
 #include "read_arg_name.h"
-#include <iostream>
-#include <vector>
+#include "display.h"
 #include <mutex>
-
-template<class T,class A> std::ostream &operator<<( std::ostream &os, const std::vector<T,A> &v ) {
-    for( std::size_t i = 0; i < v.size(); ++i )
-        os << ( i ? ", " : " " ) << v[ i ];
-    return os;
-}
 
 namespace sdot {
 
@@ -22,7 +15,7 @@ void __print_with_mutex( std::ostream &os, std::string_view arg_names, const aut
     auto get_item = [&]( const auto &arg_value ) {
         if ( cpt++ )
             os << "\t";
-        os << "\033[90m" << read_arg_name( arg_names ) << ":\033[0m " << arg_value;
+        display( os << "\033[90m" << read_arg_name( arg_names ) << ":\033[0m ", arg_value );
     };
     ( get_item( arg_values ), ... );
     os << std::endl;
@@ -32,7 +25,7 @@ void __print_with_mutex( std::ostream &os, std::string_view arg_names, const aut
 }
 
 // PRINT in cout
-#define P( ... ) \
+#define info( ... ) \
     sdot::__print_with_mutex( std::cout, #__VA_ARGS__, __VA_ARGS__ )
 
 } // namespace sdot

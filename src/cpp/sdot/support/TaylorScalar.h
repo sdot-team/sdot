@@ -95,7 +95,7 @@ struct TaylorScalar<TF,3> {
      */
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
         using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
-        using Vec = DsVec<TF, -1, Cpu>;
+        using Vec = Vector<TF,Arch, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
         const PI nd = n();
@@ -108,10 +108,10 @@ struct TaylorScalar<TF,3> {
                 H( i, j ) = d2( i, j ) + d2( j, i );
 
         // ── quadratic minimiser x* = H^{-1}(-c1) ────────────────────────────
-        Vec neg_c1( Size(), nd );
+        Vector neg_c1( Size(), nd );
         for ( PI i = 0; i < nd; ++i )
             neg_c1[ i ] = -c1[ i ];
-        Vec x_star = H.solve( neg_c1 );
+        Vector x_star = H.solve( neg_c1 );
 
         // ── f(x*) = c0 + ½ c1·x*  (since H x* = -c1) ───────────────────────
         TF f_star = c0;
@@ -128,7 +128,7 @@ struct TaylorScalar<TF,3> {
         // normal of ellipsoid at boundary point parameterised by unit u:
         //   x(u) = x* + r L^{-T} u   =>   ∇f = H(x-x*) = r L u
         auto compute_Lu = [&]( const Vec &u ) {
-            Vec Lu( Size(), nd );
+            Vector Lu( Size(), nd );
             for ( PI i = 0; i < nd; ++i ) {
                 TF s = TF(0);
                 for ( PI k = 0; k <= i; ++k )
@@ -141,7 +141,7 @@ struct TaylorScalar<TF,3> {
         // ── candidate unit directions on S^{n-1} ────────────────────────────
         std::vector<Vec> candidates;
         if ( nd == 1 ) {
-            Vec u1( Size(), 1 ), u2( Size(), 1 );
+            Vector u1( Size(), 1 ), u2( Size(), 1 );
             u1[ 0 ] = TF( +1 );
             u2[ 0 ] = TF( -1 );
             candidates = { u1, u2 };
@@ -149,7 +149,7 @@ struct TaylorScalar<TF,3> {
             constexpr TF pi2 = TF( 6.283185307179586 );
             for ( PI k = 0; k < n_cuts; ++k ) {
                 TF theta = pi2 * k / n_cuts;
-                Vec u( Size(), 2 );
+                Vector u( Size(), 2 );
                 u[ 0 ] = std::cos( theta );
                 u[ 1 ] = std::sin( theta );
                 candidates.push_back( u );
@@ -158,7 +158,7 @@ struct TaylorScalar<TF,3> {
             std::mt19937_64 rng( 0 );
             std::normal_distribution<double> nd_dist;
             for ( PI k = 0; k < n_cuts; ++k ) {
-                Vec u( Size(), nd );
+                Vector u( Size(), nd );
                 double norm = 0;
                 for ( PI d = 0; d < nd; ++d ) {
                     double v = nd_dist( rng );
@@ -454,7 +454,7 @@ struct TaylorScalar<TF,4> {
     /// uses only c0, c1, d2 (order-2 quadratic approximation).
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
         using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
-        using Vec = DsVec<TF, -1, Cpu>;
+        using Vec = Vector<TF,Arch, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
         const PI nd = n();
@@ -465,9 +465,9 @@ struct TaylorScalar<TF,4> {
             for ( PI j = 0; j < nd; ++j )
                 H( i, j ) = d2( i, j ) + d2( j, i );
 
-        Vec neg_c1( nd );
+        Vector neg_c1( nd );
         for ( PI i = 0; i < nd; ++i ) neg_c1[ i ] = -c1[ i ];
-        Vec x_star = H.solve( neg_c1 );
+        Vector x_star = H.solve( neg_c1 );
 
         TF f_star = c0;
         for ( PI i = 0; i < nd; ++i ) f_star += TF(0.5) * c1[ i ] * x_star[ i ];
@@ -477,7 +477,7 @@ struct TaylorScalar<TF,4> {
         Mat L = H.cholesky();
 
         auto compute_Lu = [&]( const Vec &u ) {
-            Vec Lu( nd );
+            Vector Lu( nd );
             for ( PI i = 0; i < nd; ++i ) {
                 TF s = TF(0);
                 for ( PI k = 0; k <= i; ++k ) s += L( i, k ) * u[ k ];
@@ -488,7 +488,7 @@ struct TaylorScalar<TF,4> {
 
         std::vector<Vec> candidates;
         if ( nd == 1 ) {
-            Vec u1( 1 ), u2( 1 );
+            Vector u1( 1 ), u2( 1 );
             u1[ 0 ] = TF(  1 );
             u2[ 0 ] = TF( -1 );
             candidates = { u1, u2 };
@@ -496,7 +496,7 @@ struct TaylorScalar<TF,4> {
             constexpr TF pi2 = TF( 6.283185307179586 );
             for ( PI k = 0; k < n_cuts; ++k ) {
                 TF theta = pi2 * k / n_cuts;
-                Vec u( 2 );
+                Vector u( 2 );
                 u[ 0 ] = std::cos( theta );
                 u[ 1 ] = std::sin( theta );
                 candidates.push_back( u );
@@ -505,7 +505,7 @@ struct TaylorScalar<TF,4> {
             std::mt19937_64 rng( 0 );
             std::normal_distribution<double> nd_dist;
             for ( PI k = 0; k < n_cuts; ++k ) {
-                Vec u( nd );
+                Vector u( nd );
                 double norm = 0;
                 for ( PI d = 0; d < nd; ++d ) {
                     double v = nd_dist( rng );

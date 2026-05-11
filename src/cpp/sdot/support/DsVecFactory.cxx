@@ -1,13 +1,13 @@
 #pragma once
 
-#include "DsVecFactory.h"
+#include "VectorFactory.h"
 
 namespace sdot {
 
 #define UTP template<class T,int ct_dim,class Arch>
-#define DTP DsVecFactory<T,ct_dim,Arch>
+#define DTP VectorFactory<T,ct_dim,Arch>
 
-UTP DTP::DsVecFactory( PI dim ) : _dim( dim ) {
+UTP DTP::VectorFactory( PI dim ) : _dim( dim ) {
     if constexpr ( ct_dim >= 0 )
         ASSERT( dim == ct_dim );
 }

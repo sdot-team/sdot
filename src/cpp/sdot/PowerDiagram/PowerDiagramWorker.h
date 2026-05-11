@@ -8,7 +8,7 @@ namespace sdot {
 
 template<int ct_dim,class Arch,class TF,class TI>
 struct PowerDiagramWorker {
-    using Pt                                 = DsVec<TF,ct_dim,Arch>; ///< point
+    using Pt                                 = Vector<TF,Arch,ct_dim,Arch>; ///< point
 
     // inputs
     Pt    position                           ( PI n ) const;

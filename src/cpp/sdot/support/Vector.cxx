@@ -2,23 +2,24 @@
 
 #include <algorithm>
 #include <utility>
+#include "Ct.h"
 
-#include "ASSERT.h"
-#include "DsVec.h"
+#include "Vector.h"
+#include "CtdInt.h"
 
 namespace sdot {
 
-#define UTP template<class T,int ct_size,class Arch>
-#define DTP DsVec<T,ct_size,Arch>
+#define UTP template<class T,class Arch,int ct_size>
+#define DTP Vector<T,Arch,ct_size>
 
-UTP DTP::DsVec( const auto &values ) requires( requires { values.size(); } ) : DsVec( Reserved(), values.size() ) {
+UTP DTP::Vector( const auto &values ) requires( requires { values.size(); } ) : Vector( Reserved(), values.size() ) {
     ASSERT( values.size() == size() );
     auto iter = values.begin();
     for( PI i = 0; i < size(); ++i )
         new ( data() + i ) T( *( iter++ ) );
 }
 
-UTP DTP::DsVec( Reserved, PI size ) {
+UTP DTP::Vector( Reserved, PI size ) {
     if constexpr ( ct_size < 0 ) {
         content.values = reinterpret_cast<T * >( malloc( size * sizeof( T ) ) );
         content.size = size;
@@ -27,18 +28,18 @@ UTP DTP::DsVec( Reserved, PI size ) {
     }
 }
 
-UTP DTP::DsVec( Size, PI size, auto &&...ctor_args ) : DsVec( Reserved(), size ) {
+UTP DTP::Vector( Size, PI size, auto &&...ctor_args ) : Vector( Reserved(), size ) {
     for( auto &v : *this )
         new ( &v ) T( ctor_args... );
 }
 
-UTP DTP::DsVec() {
+UTP DTP::Vector() {
     static_assert( ct_size >= 0 );
     for( auto &v : *this )
         new ( &v ) T;
 }
 
-UTP DTP::DsVec( Values, auto &&...values ) : DsVec( Reserved(), sizeof...( values ) ) {
+UTP DTP::Vector( Values, auto &&...values ) : Vector( Reserved(), sizeof...( values ) ) {
     PI i = 0;
     auto append = [&]( auto &&value ) {
         new ( data() + i++ ) T( FORWARD( value ) );
@@ -46,12 +47,12 @@ UTP DTP::DsVec( Values, auto &&...values ) : DsVec( Reserved(), sizeof...( value
     ( append( FORWARD( values ) ), ... );
 }
 
-UTP DTP::DsVec( const DsVec &that ) : DsVec( Reserved(), that.size() ) {
+UTP DTP::Vector( const Vector &that ) : Vector( Reserved(), that.size() ) {
     for ( PI i = 0; i < that.size(); ++i )
         new ( data() + i ) T( that[ i ] );
 }
 
-UTP DTP::DsVec( DsVec &&that ) noexcept {
+UTP DTP::Vector( Vector &&that ) noexcept {
     if constexpr ( ct_size < 0 ) {
         content.values = std::exchange( that.content.values, nullptr );
         content.size = std::exchange( that.content.size, 0 );
@@ -61,7 +62,7 @@ UTP DTP::DsVec( DsVec &&that ) noexcept {
     }
 }
 
-UTP DsVec<T,ct_size,Arch>& DTP::operator=( const DsVec &that ) {
+UTP Vector<T,Arch,ct_size>& DTP::operator=( const Vector &that ) {
     if ( this == &that )
         return *this;
 
@@ -88,7 +89,7 @@ UTP DsVec<T,ct_size,Arch>& DTP::operator=( const DsVec &that ) {
     return *this;
 }
 
-UTP DsVec<T,ct_size,Arch>& DTP::operator=( DsVec &&that ) noexcept {
+UTP DTP& DTP::operator=( Vector &&that ) noexcept {
     if ( this == &that )
         return *this;
 
@@ -107,7 +108,7 @@ UTP DsVec<T,ct_size,Arch>& DTP::operator=( DsVec &&that ) noexcept {
     return *this;
 }
 
-UTP DTP::~DsVec() {
+UTP DTP::~Vector() {
     for ( PI i = 0; i < size(); ++i )
         data()[ i ].~T();
     if constexpr ( ct_size < 0 )
@@ -147,12 +148,12 @@ UTP bool DTP::operator<( const std::span<T> &that ) const {
     return std::ranges::lexicographical_compare( operator std::span<T>(), that );
 }
 
-UTP bool DTP::operator<( const DsVec &that ) const {
+UTP bool DTP::operator<( const Vector &that ) const {
     return std::ranges::lexicographical_compare( operator std::span<T>(), that.operator std::span<T>() );
 }
 
 UTP DTP DTP::with_func( PI size, auto &&func ) {
-    DsVec res( Reserved(), size );
+    Vector res( Reserved(), size );
     for ( PI i = 0; i < size; ++i )
         new ( res.data() + i ) T( func( i ) );
     return res;
@@ -171,8 +172,7 @@ UTP DTP DTP::value_at( PI size, PI index, T value ) {
 }
 
 UTP auto DTP::with_pushed_value( T value ) const {
-    constexpr int new_ct_size = ct_size >= 0 ? ct_size + 1 : -1;
-    DsVec<T,new_ct_size,Arch> res( Reserved(), size() + 1 );
+    Vector<T,Arch,ctd_add( ct_size, 1 )> res( Reserved(), size() + 1 );
     for( PI i = 0; i < size(); ++i )
         new ( res.data() + i ) T( operator[]( i ) );
     new ( res.data() + size() ) T( value );
@@ -180,8 +180,7 @@ UTP auto DTP::with_pushed_value( T value ) const {
 }
 
 UTP auto DTP::without_index( PI ind_to_remove ) const {
-    constexpr int new_ct_size = ct_size >= 0 ? ct_size - 1 : -1;
-    DsVec<T,new_ct_size,Arch> res( Reserved(), size() - 1 );
+    Vector<T,Arch,ctd_sub( ct_size, 1 )> res( Reserved(), size() - 1 );
     for( PI i = 0; i < ind_to_remove; ++i )
         new ( res.data() + i ) T( operator[]( i ) );
     for( PI i = ind_to_remove + 1; i < size(); ++i )
@@ -189,11 +188,11 @@ UTP auto DTP::without_index( PI ind_to_remove ) const {
     return res;
 }
 
-UTP PI DTP::size() const {
+UTP auto DTP::size() const {
     if constexpr ( ct_size < 0 )
         return content.size;
     else
-        return ct_size;
+        return Ct<PI,ct_size>();
 }
 
 UTP const T* DTP::data() const {
@@ -240,4 +239,3 @@ UTP T DTP::max() const {
 #undef DTP
 
 } // namespace sdot
-

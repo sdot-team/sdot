@@ -8,7 +8,6 @@
 ///   auto tv = ffi_tv<TF,1>( *res_0 );  // dereference Result<Buffer> first
 
 #include "support/DynamicAxis.h"
-#include "support/P.h"
 #include <xla/ffi/api/ffi.h>
 
 namespace sdot {
@@ -26,15 +25,27 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 // ------------------- tensor_view -------------------
 
-template<int ndim,xla::ffi::DataType dtype>
-auto tensor_view_input( CtInt<ndim>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
+template<class Shape,xla::ffi::DataType dtype>
+auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
     using TF = SdotTypeFor<dtype>::type;
+    using Ar = Shape::Arch;
+    using TI = Shape::TI;
+
+    // get shape
+    Shape shape( Function(), [&]( auto i ) { return buf.dimensions()[ i ]; } );
+
+    // by design, Jax tensors are C oriented and compact...
+
+    //
+    using Strides = AxisTuple<TI,Ar,AT::ct_rank>;
+    Strides strides( Values(), buf.dimensions() );
+
 
     if ( ! valid )
-        return TensorView<TF,ndim,Cpu>::make_invalid( ndim );
+        return TensorView<TF,AT,Cpu>::make_invalid( ndim );
 
     ASSERT_EQ( ndim, buf.dimensions().size() );
-    DsVec<PI,ndim,Cpu> sizes( Size(), ndim );
+    Vector<PI,ndim,Cpu> sizes( Size(), ndim );
     for( int i = 0; i < ndim; ++i )
         sizes[ i ] = buf.dimensions()[ i ];
 
@@ -52,7 +63,7 @@ auto tensor_view_output( CtInt<ndim>, xla::ffi::ResultBuffer<dtype> buf, bool va
         return TensorView<TF,ndim,Cpu>::make_invalid( ndim );
 
     ASSERT_EQ( ndim, buf->dimensions().size() );
-    DsVec<PI,ndim,Cpu> sizes( Size(), ndim );
+    Vector<PI,ndim,Cpu> sizes( Size(), ndim );
     for( int i = 0; i < ndim; ++i )
         sizes[ i ] = buf->dimensions()[ i ];
 

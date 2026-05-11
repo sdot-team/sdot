@@ -24,12 +24,12 @@ UTP void DTP::for_each_sub_cell( const auto &cell, TI batch_index, auto &&func )
     CellWorker<dim,Arch,TF,TI> new_cw( new_cell, new_cell_workspace, dim );
 
     // ( auto &cell_worker, const auto &local_function )
-    for_each_index( [&]( const DsVec<PI,dim,Arch> &index ) {
+    for_each_index( [&]( const Vector<PI,dim,Arch> &index ) {
         new_cw.get_data_from( cell );
 
         for( TI d = 0; d < dim; ++d ) {
             auto cp = cut_plane( d );
-            new_cw.cut( cp, cut_offset( d, index + DsVec<PI,dim,Arch>::value_at( dim, d, 1 ) ), CellBoundary::BOUNDARY );
+            new_cw.cut( cp, cut_offset( d, index + Vector<PI,dim,Arch>::value_at( dim, d, 1 ) ), CellBoundary::BOUNDARY );
             new_cw.cut( - cp, - cut_offset( d, index ), CellBoundary::BOUNDARY );
         }
 
@@ -48,13 +48,13 @@ UTP TF DTP::cut_offset( TI d, Pi index ) {
 
 
 UTP void DTP::for_each_index( auto &&func ) const {
-    DsVecFactory<PI,dim,Arch> pf( dim );
+    VectorFactory<PI,dim,Arch> pf( dim );
     if ( dim == 0 ) {
         func( pf.zeros() );
         return;
     }
 
-    DsVec<PI,dim,Arch> index = pf.zeros();
+    Vector<PI,dim,Arch> index = pf.zeros();
     while ( true ) {
         func( index );
 
@@ -85,7 +85,7 @@ UTP TF DTP::piece_integral( auto index, const Polynomial &pol ) const {
     // where m_k[d] = (b_d^{k+1} - a_d^{k+1}) / (k+1)
 
     // Per-axis moments m[d][k] = ∫_{a_d}^{b_d} x^k dx,  k = 0..order
-    DsVec<TF,dim * ( order + 1 ),Arch> m( Size(), dim * ( order + 1 ) );
+    Vector<TF,Arch,dim * ( order + 1 ),Arch> m( Size(), dim * ( order + 1 ) );
     for( TI d = 0; d < dim; ++d ) {
         const TF a = knots( d, index[ d ] + 0 );
         const TF b = knots( d, index[ d ] + 1 );
