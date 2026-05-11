@@ -50,9 +50,10 @@ public:
     HD PI            total_size         () const;
     HD auto          shape              ( auto d ) const { return _shape[ d ]; }
     Shape            shape              () const { return _shape; }
-    HD bool          empty              () const;
+    HD auto          empty              () const;
     HD auto          size               () const;
 
+    HD bool          surely_null        () const; ///< is_invalid() || Zero tensor
     HD bool          is_invalid         () const; ///<
     HD bool          is_valid           () const; ///<
 
@@ -63,8 +64,7 @@ public:
     HD auto          begin              () const;
     HD auto          end                () const;
 
-    //    HD vo@id   for_each_index     ( auto &&func, PI sub, Vector<PI,ct_rank,Arch> size_to_take ) const;
-    HD void          for_each_index     ( auto &&func, PI sub = 0 ) const;
+    HD void          for_each_index     ( auto &&func ) const;
 
     HD bool          is_contiguous      () const; ///< true iff strides match row-major contiguous layout
 

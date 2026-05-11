@@ -59,9 +59,9 @@ class CallArgsAnalysis:
         self.parent = None
 
         # we make an object that behaves like an aggregate
-        klass = type( parameter_class, (), { "__annotations__": dict( ( name, None ) for name in args.keys() ) } )
+        klass = type( parameter_class, (), { "__annotations__": dict( ( name, None ) for name in nargs.keys() ) } )
         ainst = klass()
-        for name, argument in args.items():
+        for name, argument in nargs.items():
             setattr( ainst, name, argument )
 
         # make a CallArg_Aggregate

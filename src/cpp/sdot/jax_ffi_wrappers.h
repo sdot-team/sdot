@@ -32,7 +32,7 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 template<class TF, class Shape, std::size_t... Is>
 auto _contiguous_strides_impl( const Shape &shape, std::index_sequence<Is...> ) {
-    using Strides = AxisTuple<SI,typename Shape::Arch,Shape::ct_rank>;
+    using Strides = AxisTuple<typename Shape::TI,typename Shape::Arch,Shape::ct_rank>;
     if constexpr ( Shape::ct_rank == 0 ) {
         return Strides( Values() );
     } else {

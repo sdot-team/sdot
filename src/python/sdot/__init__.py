@@ -39,6 +39,8 @@ from .Bsp import Bsp as Bsp
 
 # hardware/framework interfaces
 from .driver import driver as driver
+from .drivers.JaxDriver import CapacityOverflow as CapacityOverflow
+from .drivers.JaxDriver import is_capacity_overflow as is_capacity_overflow
 
 # inject info/infox as builtins so tests can use them without explicit import
 import builtins as _builtins

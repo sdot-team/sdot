@@ -78,13 +78,60 @@ import sdot
 
 def test_ffi_basic():
     input = sdot.driver.array( [ 3. ] )
-    info( sdot.driver.call( "info( p.input.size() ); info( p.output.size() ); for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
-
-    input = sdot.driver.array( [ 3., 4. ] )
-    info( sdot.driver.call( "info( p.input.size() ); info( p.output.size() ); for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
+    info( sdot.driver.call( "for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
 
 def test_mlir_basic():
-    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", mlir = True, output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+
+def test_growing_capacity():
+    import jax
+
+    # Eager mode: capacity auto-grows (2 → 4 → 8), returns exact-sized result
+    res = sdot.driver.call(
+        "for( PI i = 0; i < 8; ++i ) p.output[ p.n++ ] = i;",
+        mlir = True,
+        output = sdot.Return( sdot.Tensor( "n[]" ), max_of_n = 2 )
+    )
+    info( res )
+    assert list( res ) == list( range( 8 ) )
+
+    # JIT mode with sufficient capacity: no overflow, returns full pre-allocated buffer
+    @jax.jit
+    def f( input ):
+        return sdot.driver.call(
+            "for( PI i = 0; i < p.input.size(); ++i ) p.output[ p.n++ ] = i;",
+            mlir = True,
+            output = sdot.Return( sdot.Tensor( "n[]" ), max_of_n = 8 ),
+            input = input
+        )
+
+    info( f( sdot.driver.ones( 8 ) ) )
+
+    # JIT mode with overflow: raises CapacityOverflow (possibly wrapped in JaxRuntimeError)
+    @jax.jit
+    def f_small( input ):
+        return sdot.driver.call(
+            "for( PI i = 0; i < p.input.size(); ++i ) p.output[ p.n++ ] = i;",
+            mlir = True,
+            output = sdot.Return( sdot.Tensor( "n[]" ), max_of_n = 2 ),
+            input = input
+        )
+
+    try:
+        f_small( sdot.driver.ones( 16 ) )
+        raise AssertionError( "expected CapacityOverflow" )
+    except AssertionError:
+        raise
+    except Exception as e:
+        assert sdot.is_capacity_overflow( e ), f"unexpected exception type: { type( e ) }: { e }"
+
+
+def test_grad():
+    def f( input ):
+        return sdot.driver.call( "if ( p.o_0.is_non_null() ) p.o_0 = 2 * p.i_0; p.o_0 = 2 * p.i_0;", output = sdot.Return( sdot.Tensor() ), input = input )
+    import jax
+    input = sdot.driver.array( [ 3., 4. ] )
+    info( jax.grad( f )(  ) )
 
 
 # import jax
@@ -101,8 +148,9 @@ def test_mlir_basic():
 # ic( r )
 if __name__ == "__main__":
     # test_alac_grad()
-    test_ffi_basic()
-    test_mlir_basic()
+    # test_ffi_basic()
+    # test_mlir_basic()
+    test_growing_capacity()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

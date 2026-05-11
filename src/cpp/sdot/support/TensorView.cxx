@@ -110,6 +110,19 @@ UTP auto DTP::size() const {
     return shape( Ct<int,0>() );
 }
 
+UTP bool DTP::surely_null() const {
+    if ( is_invalid() )
+        return true;
+    // several values -> we do not make the test
+    if ( _shape.has_value( []( auto size ) { return size > Ct<int,1>(); } ) )
+        return false;
+    // empty
+    if ( _shape.has_value( []( auto size ) { return size < Ct<int,1>(); } ) )
+        return true;
+    // -> single value
+    return *data() == 0;
+}
+
 UTP bool DTP::is_invalid() const {
     return _raw_ptr == reinterpret_cast<const RawPtr>( &_sentinel );
 }
@@ -118,13 +131,8 @@ UTP bool DTP::is_valid() const {
     return _raw_ptr != reinterpret_cast<const RawPtr>( &_sentinel );
 }
 
-UTP bool DTP::empty() const {
-    if ( rank() == 0 )
-        return _raw_ptr == nullptr;
-    for ( PI i = 0; i < rank(); ++i )
-        if ( _shape[ i ] == 0 )
-            return true;
-    return false;
+UTP auto DTP::empty() const {
+    return _shape.has_value( []( auto size ) { return size == Ct<int,0>(); } );
 }
 
 UTP auto DTP::rank() const {
@@ -207,8 +215,8 @@ UTP bool DTP::is_contiguous() const {
 //     }
 // }
 
-UTP void DTP::for_each_index( auto &&func, PI sub ) const {
-    for_each_index( func, sub, _shape );
+UTP void DTP::for_each_index( auto &&func ) const {
+    _shape.for_each_index( func );
 }
 
 // UTP auto DTP::contiguous_strides( const Sizes &ext ) -> Strides {

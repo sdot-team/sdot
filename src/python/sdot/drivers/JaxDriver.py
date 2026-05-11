@@ -11,6 +11,26 @@ import numpy
 import jax
 import re
 
+
+class CapacityOverflow( RuntimeError ):
+    """Raised when a dynamic-capacity tensor overflows inside jax.jit.
+
+    Increase max_of_<axis> or call outside jax.jit to enable the automatic retry loop.
+    """
+    pass
+
+
+def is_capacity_overflow( e: BaseException ) -> bool:
+    """True if e is, or wraps (via __context__), a CapacityOverflow.
+
+    Needed because jax.debug.callback exceptions are wrapped in jax.errors.JaxRuntimeError.
+    """
+    while e is not None:
+        if isinstance( e, CapacityOverflow ):
+            return True
+        e = getattr( e, '__context__', None )
+    return False
+
 map_of_plan_methods = {}
 
 class JaxDriver:
@@ -236,7 +256,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, mlir = False, **args ):
+    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, mlir = True, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -408,12 +428,100 @@ class JaxDriver:
             tuple( fai.differentiable_ffi_inputs )
         )
 
-        prim = get_or_create( module_name, fai.ffi_outputs )
-        ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+        # Detect if we're inside an outer jax.jit trace.
+        # Inside a trace, any JAX op produces a Tracer instead of a concrete array.
+        inside_jit = isinstance( jax.numpy.zeros( () ), jax_core.Tracer )
 
-        if isinstance( ret, jax.Array ):
-            return ( ret, )
-        return tuple( ret )
+        if inside_jit and fai.dynamix_axes:
+            # Try to run the retry loop concretely at trace time using
+            # ensure_compile_time_eval. This works when all FFI inputs are concrete
+            # (e.g. captured constants). If an input is abstract (JAX traced arg),
+            # we fall back to a runtime callback that raises CapacityOverflow.
+            # Note: JaxRuntimeError wraps the callback exception — use
+            # sdot.is_capacity_overflow(e) or catch jax.errors.JaxRuntimeError.
+            concrete_retry_done = False
+            with jax.ensure_compile_time_eval():
+                try:
+                    while True:
+                        func = jax.ffi.ffi_call( module_name, fai.ffi_outputs )
+                        eager_ret = func( *fai.ffi_inputs )
+                        if isinstance( eager_ret, jax.Array ):
+                            eager_ret = ( eager_ret, )
+                        else:
+                            eager_ret = tuple( eager_ret )
+                        u64 = eager_ret[ fai.index_u64_output ]
+                        if int( u64[ fai.index_dynamic_size_exception ] ) == 0:
+                            break
+                        da   = fai.dynamix_axes[ int( u64[ fai.index_dynamic_size_exception ] ) - 1 ]
+                        need = int( u64[ fai.index_dynamic_size_exception + 1 ] )
+                        name = "max_of_" + da.name_in_parent
+                        for t in fai.tensor_outputs:
+                            if t.parent() == da.parent() and name in t.ctor_kwargs:
+                                t.ctor_kwargs[ name ] = max( need, 2 * int( t.ctor_kwargs[ name ] ) )
+                    concrete_retry_done = True
+                except Exception:
+                    pass  # abstract inputs — will use runtime callback below
+
+            prim = get_or_create( module_name, fai.ffi_outputs )
+            ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+            if isinstance( ret, jax.Array ):
+                ret = ( ret, )
+            else:
+                ret = tuple( ret )
+
+            if not concrete_retry_done:
+                def _raise_if_overflow( u64 ):
+                    if u64[ fai.index_dynamic_size_exception ] != 0:
+                        idx = int( u64[ fai.index_dynamic_size_exception ] ) - 1
+                        da  = fai.dynamix_axes[ idx ]
+                        raise CapacityOverflow(
+                            f"Overflow on dynamic axis '{ da.name_in_parent }' inside jax.jit. "
+                            f"Increase max_of_{ da.name_in_parent } or call outside jax.jit. "
+                            f"Note: JAX wraps this in JaxRuntimeError — use sdot.is_capacity_overflow(e)."
+                        )
+                jax.debug.callback( _raise_if_overflow, ret[ fai.index_u64_output ], ordered = True )
+
+        elif inside_jit:
+            # No dynamic axes: plain JIT call.
+            prim = get_or_create( module_name, fai.ffi_outputs )
+            ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+            if isinstance( ret, jax.Array ):
+                ret = ( ret, )
+            else:
+                ret = tuple( ret )
+
+        else:
+            # Eager mode: retry loop until capacity is sufficient.
+            while True:
+                prim = get_or_create( module_name, fai.ffi_outputs )
+                ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+
+                if isinstance( ret, jax.Array ):
+                    ret = ( ret, )
+                else:
+                    ret = tuple( ret )
+
+                u64_output = ret[ fai.index_u64_output ]
+                if u64_output[ fai.index_dynamic_size_exception ] == 0:
+                    break
+
+                da = fai.dynamix_axes[ int( u64_output[ fai.index_dynamic_size_exception + 0 ] ) - 1 ]
+                needed_size = int( u64_output[ fai.index_dynamic_size_exception + 1 ] )
+                faulty_axis_name = "max_of_" + da.name_in_parent
+
+                made_a_change = False
+                for tensor_output in fai.tensor_outputs:
+                    if tensor_output.parent() != da.parent():
+                        continue
+                    if faulty_axis_name in tensor_output.ctor_kwargs:
+                        old_value = int( tensor_output.ctor_kwargs[ faulty_axis_name ] )
+                        new_value = max( needed_size, 2 * old_value )
+                        tensor_output.ctor_kwargs[ faulty_axis_name ] = new_value
+                        made_a_change = True
+
+                assert made_a_change
+
+        return ret
 
     def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
         # get signature
@@ -515,6 +623,8 @@ class JaxDriver:
 
         # start impl: declaration
         lines.append( f"xla::ffi::Error impl_{ module_name }( { fai.arg_decl() } ) {{" )
+
+        lines.append( f"    using TI = SI64;" ) # TODO: 32 bit systems
 
         # u8_...
         if len( fai.u8_input_values ):

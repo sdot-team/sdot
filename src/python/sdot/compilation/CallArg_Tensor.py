@@ -119,13 +119,18 @@ class CallArg_Tensor( CallArg ):
             return None
 
         # if we have a dynamic size, make a slice
+        # When inside a JAX JIT trace the size is a traced value (not concrete),
+        # so we fall back to returning the full buffer without slicing.
         slices = []
         for expr in self.shape:
             axes = {}
             expr.get_axes( axes )
             da = find( axes.values(), lambda x: x is not None )
             if da is not None and len( da ) == 0:
-                slices.append( slice( 0, expr.value( self.get_axis_variable, True ) ) )
+                try:
+                    slices.append( slice( 0, int( expr.value( self.get_axis_variable, True ) ) ) )
+                except Exception:
+                    slices.append( slice( None ) )
             else:
                 slices.append( slice( None ) )
 
@@ -181,8 +186,7 @@ class CallArg_Tensor( CallArg ):
         if ( self.dtype is float ) or ( self.dtype is None ):
             template_args.add( self.dtype_name(), "typename", 2 )
 
-        if self.dtype is int:
-            template_args.add( self.dtype_name(), "typename", 3 )
+        template_args.add( "TI", "typename", 2 ) # always needed
 
         template_args.add( "Arch", "typename", 1 )
 
@@ -220,15 +224,15 @@ class CallArg_Tensor( CallArg ):
         for n in range( self.ndim ):
             val = self._ct_axis_value( n )
             if val is not None:
-                known.append( f"KnownAxisSize<PI,{ n },{ val }>" )
+                known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         suffix = ( "," + ",".join( known ) ) if known else ""
-        return f"AxisTuple<PI,Arch,{ self.ndim }{ suffix }>"
+        return f"AxisTuple<TI,Arch,{ self.ndim }{ suffix }>"
 
     def cpp_type_name( self, main_list ):
         shape_t   = self.shape_type()
-        strides_t = f"AxisTuple<SI,Arch,{ self.ndim }>"
+        strides_t = f"AxisTuple<TI,Arch,{ self.ndim }>"
         if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<PI,{ shape_t },{ strides_t }>"
+            return f"DynamicAxis<TI,{ shape_t },{ strides_t }>"
         return f"TensorView<{ self.dtype_name() },{ shape_t },{ strides_t }>"
 
     def dtype_name( self ):
