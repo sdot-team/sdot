@@ -47,7 +47,7 @@ def test_cell_2D_diff():
 #     info( c.edge_indices )
 #     info( c.measure )
 
-def test_cell_2D_basic():
+def test_cell_3D_basic():
     c = sdot.Cell.unbounded( 2 )
 
     # c.cut( [ 1, 0 ], 0.3 )
@@ -63,7 +63,7 @@ def test_cell_2D_basic():
 
     # c.plot()
 
-def test_cell_3D_basic():
+def test_cell_2D_basic():
     c = sdot.Cell.unbounded( 2 )
 
     # c.cut( [ 1, 0 ], 0.3 )

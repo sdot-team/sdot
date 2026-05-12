@@ -10,9 +10,9 @@
 
 namespace sdot {
 
-/// dynamic or static vector, with the same interfaces in all the cases (that's why there's no resize for instance)
+/// dynamic or static vector, with the same interfaces in all the cases (that's why there's no resize for instance, and size is required in ctors even if ct known)
 ///
-template<class T,class Arch,int ct_size>
+template<class T,class Arch,int ct_size=-1>
 class Vector {
 public:
     struct       CtContent                   { std::byte values[ sizeof( T ) * ct_size ]; };

@@ -47,7 +47,7 @@ class Cell:
 
     @staticmethod
     def unbounded( dim ):
-        return cast( Cell, driver.call( "p.cell.init_as_unbounded()", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
+        return cast( Cell, driver.call( "p.cell.init_as_unbounded();", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
 
     @staticmethod
     def _return_parameters( dim ):

@@ -133,7 +133,7 @@ UTP TF DTP::mass() {
 }
 
 UTP void DTP::init_cell( Cell &cell ) {
-    SimpleSquareMatrix<TF,dim+1,Arch> frame( Size(), dim + 1 );
+    Matrix<TF,dim+1,Arch> frame( Size(), dim + 1 );
     for( TI c = 0; c < dim; ++c )
         frame( 0, c ) = 0;
     for( TI r = 0; r < dim; ++r )

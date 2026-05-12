@@ -1,15 +1,15 @@
 #pragma once
 
-#include "SimpleSquareMatrix.h"
+#include "Matrix.h"
 #include <cmath>
 
 namespace sdot {
 
-#define UTP template<class T,int ct_size,class Arch>
-#define DTP SimpleSquareMatrix<T,ct_size,Arch>
+#define UTP template<class T,class Arch,int ct_size>
+#define DTP Matrix<T,Arch,ct_size>
 
-UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> DTP::without_row_and_col( PI wr, PI wc ) const {
-    SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> res( Size(), size() - 1 );
+UTP Matrix<T,Arch,(ct_size>0?ct_size-1:-1)> DTP::without_row_and_col( PI wr, PI wc ) const {
+    Matrix<T,Arch,(ct_size>0?ct_size-1:-1)> res( Size(), size() - 1 );
     for( PI r = 0; r < res.size(); ++r )
         for( PI c = 0; c < res.size(); ++c )
             res( r, c ) = operator()( r + ( r >= wr ), c + ( c >= wc ) );
@@ -17,7 +17,7 @@ UTP SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch> DTP::without_row_and_col
 }
 
 UTP auto DTP::with_func( PI size, auto &&func ) {
-    SimpleSquareMatrix<T,ct_size,Arch> res( Size(), size );
+    Matrix<T,Arch,ct_size> res( Size(), size );
     for( PI r = 0; r < size; ++r )
         for( PI c = 0; c < size; ++c )
             res( r, c ) = func( r, c );
@@ -25,7 +25,7 @@ UTP auto DTP::with_func( PI size, auto &&func ) {
 }
 
 UTP DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
-    SimpleSquareMatrix res = *this;
+    Matrix res = *this;
     for( PI r = 0; r < size(); ++r )
         res( r, c ) = col[ r ];
     return res;
@@ -50,7 +50,7 @@ UTP T DTP::determinant() const {
 
 UTP DTP DTP::cholesky() const {
     const PI nd = size();
-    SimpleSquareMatrix L( nd );
+    Matrix L( nd );
     for ( PI i = 0; i < nd; ++i )
         for ( PI j = 0; j < nd; ++j )
             L( i, j ) = T( 0 );
@@ -83,7 +83,7 @@ UTP DTP::Vec DTP::solve( const Vec &vec ) const {
 
 UTP DTP::Vec DTP::solve_ge( Vec b ) const {
     const PI n = size();
-    SimpleSquareMatrix A = *this;
+    Matrix A = *this;
 
     // forward elimination with partial pivoting
     for ( PI p = 0; p < n; ++p ) {
@@ -122,8 +122,8 @@ UTP DTP::Vec DTP::solve_ge( Vec b ) const {
 
 UTP DTP DTP::inverse() const {
     const PI n = size();
-    SimpleSquareMatrix A = *this;
-    SimpleSquareMatrix inv = with_func( n, []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
+    Matrix A = *this;
+    Matrix inv = with_func( n, []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
 
     for ( PI p = 0; p < n; ++p ) {
         // partial pivot
@@ -153,5 +153,3 @@ UTP DTP DTP::inverse() const {
 #undef DTP
 
 } // namespace sdot
-
-

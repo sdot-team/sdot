@@ -5,16 +5,16 @@
 namespace sdot {
 
 // _size
-template<class T,int ct_size,class Arch>
-class SimpleSquareMatrix {
+template<class T,class Arch,int ct_size>
+class Matrix {
 public:
-    struct               EigenSystem             { Vector<T,ct_size,Arch> values;   /* ascending order */ SimpleSquareMatrix<T,ct_size,Arch> vectors;  /* row i = eigenvector i */ };
+    struct               EigenSystem             { Vector<T,Arch,ct_size> values; /* ascending order */ Matrix<T,Arch,ct_size> vectors; /* row i = eigenvector i */ };
     using                value_type              = T;
-    using                Content                 = Vector<T,(ct_size>=0?ct_size*ct_size:-1),Arch>;
-    using                Vec                     = Vector<T,ct_size,Arch>;
+    using                Content                 = Vector<T,Arch,(ct_size>=0?ct_size*ct_size:-1)>;
+    using                Vec                     = Vector<T,Arch,ct_size>;
 
-    /**/                 SimpleSquareMatrix      ( Size, PI size, T value ) : _content( Size(), size * size, value ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
-    /**/                 SimpleSquareMatrix      ( Size, PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/                 Matrix                  ( Size, PI size, T value ) : _content( Size(), size * size, value ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
+    /**/                 Matrix                  ( Size, PI size ) : _content( Size(), size * size ), _size( size ) { if ( ct_size >= 0 ) ASSERT( size == ct_size ); }
 
     static auto          with_func               ( PI size, auto &&func );
 
@@ -22,14 +22,14 @@ public:
     T&                   operator()              ( PI r, PI c ) { return _content[ r * size() + c ]; }
 
 
-    auto                 without_row_and_col     ( PI r, PI c ) const -> SimpleSquareMatrix<T,(ct_size>0?ct_size-1:-1),Arch>;
-    auto                 with_replaced_col       ( PI c, const Vec &col ) const -> SimpleSquareMatrix;
+    auto                 without_row_and_col     ( PI r, PI c ) const -> Matrix<T,Arch,(ct_size>0?ct_size-1:-1)>;
+    auto                 with_replaced_col       ( PI c, const Vec &col ) const -> Matrix;
     EigenSystem          eigen_system            () const;
     T                    determinant             () const;
     Vec                  diagonal                () const;
-    SimpleSquareMatrix   cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
+    Matrix               cholesky                () const;  ///< returns L s.t. *this = L * L^T (H must be SPD)
     Vec                  solve_ge                ( Vec b ) const;   ///< Gaussian elimination with partial pivoting; zero pivot → x[p]=0 (handles degenerate cells)
-    SimpleSquareMatrix   inverse                 () const;  ///< Gauss-Jordan on [A | I]; zero pivot row → identity row in result
+    Matrix               inverse                 () const;  ///< Gauss-Jordan on [A | I]; zero pivot row → identity row in result
     Vec                  solve                   ( const Vec &vec ) const;
     PI                   size                    ( PI ) const { return size(); }
     PI                   size                    () const { return ct_size >= 0 ? ct_size : _size; }
@@ -41,15 +41,6 @@ public:
     auto                 begin                   () { return _content.begin(); }
     auto                 end                     () const { return _content.end(); }
     auto                 end                     () { return _content.end(); }
-
-    friend std::ostream &operator<<( std::ostream &os, const SimpleSquareMatrix &p ) {
-        for ( PI r = 0; r < p.size(); ++r ) {
-            os << "\n  ";
-            for ( PI c = 0; c < p.size(); ++c )
-                os << ( c ? ", " : "" ) << p( r, c );
-        }
-        return os;
-    }
 
     Content              _content;
     PI                   _size;
@@ -69,4 +60,4 @@ T_Td SimpleSquareMatrix<T,d> operator-( const SimpleSquareMatrix<T,d> &a ) { Sim
 } // namespace sdot
 
 
-#include "SimpleSquareMatrix.cxx"
+#include "Matrix.cxx"

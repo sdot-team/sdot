@@ -9,8 +9,8 @@ struct Cell {
     // static constexpr int ct_dim = ct_dim_value;
     ATTRIBUTES_OF_Cell
 
-    using    Pt                     = Vector<TF,Arch,ct_dim,Arch>; ///< point
-    using    Ci                     = Vector<TI,ct_dim,Arch>; ///< cut indices
+    using    Pt                     = Vector<TF,Arch,ct_dim>; ///< point
+    using    Ci                     = Vector<TI,Arch,ct_dim>; ///< cut indices
 
     //
     void     init_as_aligned_simplex( TI cut_id );
@@ -38,7 +38,7 @@ struct Cell {
     Pt       centroid               ();
     TF       measure                ();
 
-    T_d auto simplex_from_indices   ( const Vector<TI,d,Arch> &indices ) const;
+    T_d auto simplex_from_indices   ( const Vector<TI,Arch,d> &indices ) const;
 
     // modifications -------------------------------------------------------------------------
     void     get_data_from          ( const auto &cell );

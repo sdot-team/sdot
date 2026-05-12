@@ -1,9 +1,8 @@
 #pragma once
 
 #include "support/RecursiveMapOfUniqueSortedIndices.h"
-#include "support/SimpleSquareMatrix.h"
+#include "support/Matrix.h"
 #include "support/index.h"
-#include "support/P.h"
 
 #include "Cell/CellBoundary.h"
 #include "Cell/integral.h"
@@ -149,7 +148,7 @@ UTP void DTP::for_each_simplex( auto &&func ) {
 
     //
     if ( dim == 2 ) {
-        Vector<TI,ct_simplex,Arch> simplex( Size(), dim + 1 );
+        Vector<TI,Arch,ct_simplex> simplex( Size(), dim + 1 );
         simplex[ 0 ] = 0;
         for( TI num_vertex = 3; num_vertex <= nb_vertices; ++num_vertex ) {
             simplex[ 1 ] = num_vertex - 2;
@@ -163,9 +162,9 @@ UTP void DTP::for_each_simplex( auto &&func ) {
     RecursiveMapOfUniqueSortedIndices<ct_dim - 1,TI,Arch> item_map( map_items, nb_map_items, dim - 1, nb_cuts );
     item_map.reserve( nb_vertices );
 
-    Vector<TI,ct_simplex,Arch> simplex( Size(), dim + 1 );
+    Vector<TI,Arch,ct_simplex> simplex( Size(), dim + 1 );
     for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        Vector<TI,ct_dim,Arch> cut_indices( vertex_indices.row( num_vertex ) );
+        Vector<TI,Arch,ct_dim> cut_indices( vertex_indices.row( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
@@ -190,7 +189,7 @@ UTP void DTP::for_each_face( auto &&func ) {
     if ( dim == 2 ) {
         std::vector<PI> indices( nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
-        func( indices, Vector<TI,0,Arch>( Values() ) );
+        func( indices, Vector<TI,Arch,0>( Values() ) );
         return;
     }
 
@@ -279,12 +278,12 @@ UTP TF DTP::measure() {
     }
 
     // nD: fan triangulation
-    SimpleSquareMatrix<TF,ct_dim,Arch> M( Size(), dim );
+    Matrix<TF,Arch,ct_dim> M( Size(), dim );
     TF sum = 0;
 
     for_each_simplex( [&]( const auto &simplex ) {
         const TI v0 = simplex[ 0 ];
-        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( TI row, TI col ) {
+        auto M = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( TI row, TI col ) {
             return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
         } );
         sum += std::abs( M.determinant() );
@@ -293,7 +292,7 @@ UTP TF DTP::measure() {
     return sum / factorial( dim );
 }
 
-UTP T_d auto DTP::simplex_from_indices( const Vector<TI,d,Arch> &indices ) const {
+UTP T_d auto DTP::simplex_from_indices( const Vector<TI,Arch,d> &indices ) const {
     Simplex<ct_dim,d,TF,Arch> res;
     for( PI i = 0; i < d; ++i )
         res.pts[ i ] = vertex_position( indices[ i ] );
@@ -439,7 +438,7 @@ UTP void DTP::process_edges( PI nc ) {
 
         // register the face => vertex correspondance, or create the new edge if already done
         for ( PI ind_to_remove = 0; ind_to_remove < dim - 1; ++ind_to_remove ) {
-            auto face_inds = Vector<PI,ctd_sub(ct_dim,2),Arch>::with_func( dim - 2, [&]( PI i ) {
+            auto face_inds = Vector<PI,Arch,ctd_sub(ct_dim,2)>::with_func( dim - 2, [&]( PI i ) {
                 return edge_indices( num_edge, 2 + i + ( i >= ind_to_remove ) );
             } );
 
@@ -718,11 +717,11 @@ UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id )
 UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
-    auto M  = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
+    auto M  = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) {
         return cut_planes( ci[ r ], c );
     } );
 
-    auto V = Vector<TF,Arch,ct_dim,Arch>::with_func( dim, [&]( PI i ) {
+    auto V = Vector<TF,Arch,ct_dim>::with_func( dim, [&]( PI i ) {
         return cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
     } );
 
@@ -777,11 +776,11 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
 }
 
 UTP void DTP::disp_cell() {
-    P( nb_vertices() );
+    info( nb_vertices() );
     for( PI i = 0; i < nb_vertices(); ++i ) {
-        auto pos = Vector<TF,Arch,ct_dim,Arch>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
-        auto cut = Vector<TF,Arch,ct_dim+1,Arch>::with_func( 3, [&]( PI d ) { return cut_planes( i, d ); } );
-        P( pos, cut );
+        auto pos = Vector<TF,Arch,ct_dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
+        auto cut = Vector<TF,Arch,ctd_add(ct_dim,1)>::with_func( dim + 1, [&]( PI d ) { return cut_planes( i, d ); } );
+        info( pos, cut );
     }
 }
 
@@ -800,8 +799,8 @@ UTP void DTP::check_consistency() {
         PI ci[ ct_dim ];
         get_cut_inds( v, ci );
 
-        auto M = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
-        auto V = Vector<TF,Arch,ct_dim,Arch>::with_func( dim, [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
+        auto M = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
+        auto V = Vector<TF,Arch,ct_dim>::with_func( dim, [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
         const auto pos = M.solve_ge( V );
 
         for ( PI d = 0; d < dim; ++d )

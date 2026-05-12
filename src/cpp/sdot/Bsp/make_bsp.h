@@ -131,7 +131,7 @@ struct BspMaker {
         const int nb_coeffs_w_approx = 1 + dim * ( degree_w_approx >= 1 ) + dim * ( dim + 1 ) / 2 * ( degree_w_approx >= 2 );
 
         // M, V
-        SimpleSquareMatrix<TF,ct_nb_coeffs_w_approx,Arch> M( Size(), nb_coeffs_w_approx, 0 );
+        Matrix<TF,ct_nb_coeffs_w_approx,Arch> M( Size(), nb_coeffs_w_approx, 0 );
         Vector<TF,Arch,ct_nb_coeffs_w_approx,Arch> V( Size(), nb_coeffs_w_approx, 0 );
         for( SI num_si = beg_si; num_si < end_si; ++num_si ) {
             const PI index = bsp.sorted_vertex_indices[ num_si ];

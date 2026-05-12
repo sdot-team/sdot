@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MapOfUniqueSortedIndices.h"
+#include "TensorView.h"
 
 namespace sdot {
 
@@ -11,7 +12,7 @@ class RecursiveMapOfUniqueSortedIndices {
 public:
     using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch>;
     using Curr = MapOfUniqueSortedIndices<ct_dim,TI,Arch>;
-    using TV = TensorView<TI,1,Arch>;
+    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
     /**/ RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
         curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
@@ -29,7 +30,7 @@ public:
     }
 
     template<int i>
-    IntWithOffset<TI> operator[]( const Vector<TI,i,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,Arch,i> &key ) {
         if constexpr( i == ct_dim )
             return curr[ key ];
         else
@@ -46,7 +47,7 @@ template<class TI,class Arch>
 class RecursiveMapOfUniqueSortedIndices<0,TI,Arch> {
 public:
     using Curr = MapOfUniqueSortedIndices<0,TI,Arch>;
-    using TV = TensorView<TI,1,Arch>;
+    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
     /**/ RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
     }
@@ -59,7 +60,7 @@ public:
         curr.reserve( reservation );
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,0,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &key ) {
         return curr.operator[]( key );
     }
 

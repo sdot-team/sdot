@@ -19,7 +19,7 @@ class Workspace:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def call_arg_factory( self, call_args, parent, name_in_parent, io_category: IoCategory, ctor_args, ctor_kwargs ):
+    def call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
         new_io_category = IoCategory(
             want_return = False,
             want_output = True,

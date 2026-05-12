@@ -5,8 +5,6 @@
 // #include <tl/support/compare.h>
 // #include "VecForCapa.h"
 #include "TensorView.h"
-#include "Vector.h"
-#include "P.h"
 
 namespace sdot {
 
@@ -43,13 +41,13 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
         value = 0;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,0,Arch> &/* key */ ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &/* key */ ) {
         return { offset, value };
     }
 
     void for_each_item( auto &&func ) const {
         if ( value >= offset )
-            func( Vector<TI,0,Arch>( Values() ), value - offset );
+            func( Vector<TI,Arch,0>( Values() ), value - offset );
     }
 
     TI offset; ///<
@@ -59,7 +57,7 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
 // 1d
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<1,TI,Arch> {
-    using TV = TensorView<TI,1,Arch>;
+    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
     /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
@@ -84,14 +82,14 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,1,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,Arch,1> &key ) {
         return { offset, values[ key[ 0 ] - offset_in_map_items ] };
     }
 
     void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
             if ( values[ offset_in_map_items + i ] >= offset )
-                func( Vector<TI,1,Arch>( Values(), i ), values[ offset_in_map_items + i ] - offset );
+                func( Vector<TI,Arch,1>( Values(), i ), values[ offset_in_map_items + i ] - offset );
     }
 
     TI offset_in_map_items; ///<
@@ -104,7 +102,7 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
 // 2d. TODO: hash table ?
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<2,TI,Arch> {
-    using TV = TensorView<TI,1,Arch>;
+    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
     /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
@@ -128,7 +126,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,2,Arch> &key ) {
+    IntWithOffset<TI> operator[]( const Vector<TI,Arch,2> &key ) {
         return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
     }
 
@@ -137,7 +135,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
             for( PI j = 0; j < values.size(); ++j ) {
                 PI k = offset_in_map_items + i * max_inp_value + j;
                 if ( values[ k ] >= offset )
-                    func( Vector<TI,1,Arch>( Values(), i, j ), values[ k ] - offset );
+                    func( Vector<TI,Arch,2>( Values(), i, j ), values[ k ] - offset );
             }
         }
     }

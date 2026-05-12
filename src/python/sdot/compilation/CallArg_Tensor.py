@@ -244,7 +244,7 @@ class CallArg_Tensor( CallArg ):
         if self.dtype is float or self.dtype is None:
             return "TF"
         if self.dtype is int:
-            return "PI"
+            return "TI"
         return driver.normalized_type_for( self.dtype )
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):

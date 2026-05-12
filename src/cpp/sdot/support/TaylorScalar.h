@@ -94,7 +94,7 @@ struct TaylorScalar<TF,3> {
      * n_cuts: number of tangent planes (or sphere samples for n > 2).
      */
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
-        using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
+        using Mat = Matrix<TF, -1, Cpu>;
         using Vec = Vector<TF,Arch, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
@@ -453,7 +453,7 @@ struct TaylorScalar<TF,4> {
     /// Same algorithm as TaylorScalar<TF,3>::update_bounds_to_stay_positive —
     /// uses only c0, c1, d2 (order-2 quadratic approximation).
     void update_bounds_to_stay_positive( auto &cell, PI n_cuts = 24 ) const {
-        using Mat = SimpleSquareMatrix<TF, -1, Cpu>;
+        using Mat = Matrix<TF, -1, Cpu>;
         using Vec = Vector<TF,Arch, -1, Cpu>;
         using Pt  = std::remove_reference_t<decltype(cell)>::Pt;
 
