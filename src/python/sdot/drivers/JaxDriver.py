@@ -1,4 +1,5 @@
 from typing_extensions import Optional
+from typing import cast
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
@@ -10,26 +11,6 @@ import importlib
 import numpy
 import jax
 import re
-
-
-class CapacityOverflow( RuntimeError ):
-    """Raised when a dynamic-capacity tensor overflows inside jax.jit.
-
-    Increase max_of_<axis> or call outside jax.jit to enable the automatic retry loop.
-    """
-    pass
-
-
-def is_capacity_overflow( e: BaseException ) -> bool:
-    """True if e is, or wraps (via __context__), a CapacityOverflow.
-
-    Needed because jax.debug.callback exceptions are wrapped in jax.errors.JaxRuntimeError.
-    """
-    while e is not None:
-        if isinstance( e, CapacityOverflow ):
-            return True
-        e = getattr( e, '__context__', None )
-    return False
 
 map_of_plan_methods = {}
 
@@ -47,6 +28,28 @@ class JaxDriver:
         jax.config.update( "jax_enable_x64", True )
 
         self.map_of_plan_methods = map_of_plan_methods
+
+    class CapacityOverflow( RuntimeError ):
+        """Raised when a dynamic-capacity tensor overflows inside jax.jit.
+
+        Increase max_of_<axis> or call outside jax.jit to enable the automatic retry loop.
+        """
+        pass
+
+
+    @staticmethod
+    def is_capacity_overflow( e: BaseException ) -> str:
+        """True if e is, or wraps (via __context__), a CapacityOverflow.
+
+        Needed because jax.debug.callback exceptions are wrapped in jax.errors.JaxRuntimeError.
+        """
+        if isinstance( e, jax.errors.JaxRuntimeError ) and len( e.args ):
+            for arg in e.args:
+                txt = cast( str, arg )
+                pos = txt.find( "CapacityOverflow" )
+                if pos >= 0:
+                    return txt[ pos: ]
+        return ""
 
     @property
     def name( self ) -> str:
@@ -306,9 +309,10 @@ class JaxDriver:
                 # update output shape
                 made_a_change = False
                 for tensor_output in fai.tensor_outputs:
+                    assert tensor_output.parent is not None
                     if tensor_output.parent() != da.parent():
                         continue
-                    if faulty_axis_name in tensor_output.ctor_kwargs:
+                    if tensor_output.ctor_kwargs is not None and faulty_axis_name in tensor_output.ctor_kwargs:
                         old_value = int( tensor_output.ctor_kwargs[ faulty_axis_name ] )
                         new_value = max( needed_size, 2 * old_value )
 
@@ -326,8 +330,44 @@ class JaxDriver:
                 return ret
             return tuple( ret )
 
-        if mlir:
+        if mlir and grad_code:
+            from .JaxMlirPrimitive import get_or_create
+
+            def _call_prim( differentiable_inputs ):
+                fai.update_differentiable_input_values_with( differentiable_inputs )
+                prim = get_or_create( module_name, fai.ffi_outputs )
+                ret = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+                if isinstance( ret, jax.Array ):
+                    return ( ret, )
+                return tuple( ret )
+
+            @jax.custom_vjp
+            def my_mlir_op( differentiable_inputs ):
+                return _call_prim( differentiable_inputs )
+
+            def my_mlir_op_fwd( _differentiable_inputs ):
+                perturbed_flags = tuple( v.perturbed if isinstance( v, CustomVJPPrimal ) else True for v in _differentiable_inputs )
+                differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_inputs )
+                outputs = _call_prim( differentiable_inputs )
+                return outputs, ( differentiable_inputs, outputs, perturbed_flags )
+
+            def my_mlir_op_bwd( residuals, grads_of_the_outputs ):
+                differentiable_inputs, outputs, perturbed_flags = residuals
+                if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
+                    grads_of_the_outputs = ( grads_of_the_outputs, )
+                bfai = fai.backward_version( self, outputs, grads_of_the_outputs, "GradParameters", differentiable_inputs, perturbed_flags )
+                func = jax.ffi.ffi_call( module_name + "_backward", bfai.ffi_outputs )
+                ret = func( *bfai.ffi_inputs, **bfai.ffi_attributes )
+                if isinstance( ret, jax.Array ):
+                    ret = ( ret, )
+                return ( tuple( ret[ ct.num_in_outputs ] for ct in bfai.tensor_outputs ), )
+
+            my_mlir_op.defvjp( my_mlir_op_fwd, my_mlir_op_bwd, symbolic_zeros = True )
+            outputs = my_mlir_op( tuple( fai.differentiable_ffi_inputs ) )
+
+        elif mlir:
             outputs = self._call_via_primitive( fai, module_name )
+
         elif not grad:
             outputs = _call_ffi( tuple( fai.differentiable_ffi_inputs ) )
         else:
@@ -337,24 +377,24 @@ class JaxDriver:
 
             def my_ffi_op_fwd( _differentiable_inputs ):
                 # With symbolic_zeros = True, JAX wraps each input in CustomVJPPrimal( value, perturbed )
+                perturbed_flags = tuple( v.perturbed if isinstance( v, CustomVJPPrimal ) else True for v in _differentiable_inputs )
                 differentiable_inputs = tuple( v.value if isinstance( v, CustomVJPPrimal ) else v for v in _differentiable_inputs )
                 outputs = _call_ffi( differentiable_inputs )
 
-                return outputs, ( differentiable_inputs, outputs )
+                return outputs, ( differentiable_inputs, outputs, perturbed_flags )
 
             def my_ffi_op_bwd( residuals, grads_of_the_outputs ):
-                differentiable_inputs, outputs = residuals
+                differentiable_inputs, outputs, perturbed_flags = residuals
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
-                bfai = fai.backward_version( self, outputs, grads_of_the_outputs )
-                func = jax.ffi.ffi_call( module_name + "_backward", bfai.output_specs )
-                ret = func( *bfai.input_values, **bfai.attributes )
+                bfai = fai.backward_version( self, outputs, grads_of_the_outputs, "GradParameters", differentiable_inputs, perturbed_flags )
+                func = jax.ffi.ffi_call( module_name + "_backward", bfai.ffi_outputs )
+                ret = func( *bfai.ffi_inputs, **bfai.ffi_attributes )
                 if isinstance( ret, jax.Array ):
                     ret = ( ret, )
 
-                return ( tuple( ret ), )
-
+                return ( tuple( ret[ ct.num_in_outputs ] for ct in bfai.tensor_outputs ), )
 
             my_ffi_op.defvjp( my_ffi_op_fwd, my_ffi_op_bwd, symbolic_zeros = True )
 
@@ -452,18 +492,19 @@ class JaxDriver:
                         u64 = eager_ret[ fai.index_u64_output ]
                         if int( u64[ fai.index_dynamic_size_exception ] ) == 0:
                             break
-                        da   = fai.dynamix_axes[ int( u64[ fai.index_dynamic_size_exception ] ) - 1 ]
+                        da = fai.dynamix_axes[ int( u64[ fai.index_dynamic_size_exception ] ) - 1 ]
                         need = int( u64[ fai.index_dynamic_size_exception + 1 ] )
                         name = "max_of_" + da.name_in_parent
                         for t in fai.tensor_outputs:
-                            if t.parent() == da.parent() and name in t.ctor_kwargs:
+                            assert t.parent is not None
+                            if t.parent() == da.parent() and t.ctor_kwargs is not None and name in t.ctor_kwargs:
                                 t.ctor_kwargs[ name ] = max( need, 2 * int( t.ctor_kwargs[ name ] ) )
                     concrete_retry_done = True
                 except Exception:
                     pass  # abstract inputs — will use runtime callback below
 
             prim = get_or_create( module_name, fai.ffi_outputs )
-            ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+            ret = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
             if isinstance( ret, jax.Array ):
                 ret = ( ret, )
             else:
@@ -473,8 +514,8 @@ class JaxDriver:
                 def _raise_if_overflow( u64 ):
                     if u64[ fai.index_dynamic_size_exception ] != 0:
                         idx = int( u64[ fai.index_dynamic_size_exception ] ) - 1
-                        da  = fai.dynamix_axes[ idx ]
-                        raise CapacityOverflow(
+                        da = fai.dynamix_axes[ idx ]
+                        raise JaxDriver.CapacityOverflow(
                             f"Overflow on dynamic axis '{ da.name_in_parent }' inside jax.jit. "
                             f"Increase max_of_{ da.name_in_parent } or call outside jax.jit. "
                             f"Note: JAX wraps this in JaxRuntimeError — use sdot.is_capacity_overflow(e)."
@@ -511,9 +552,10 @@ class JaxDriver:
 
                 made_a_change = False
                 for tensor_output in fai.tensor_outputs:
+                    assert tensor_output.parent is not None
                     if tensor_output.parent() != da.parent():
                         continue
-                    if faulty_axis_name in tensor_output.ctor_kwargs:
+                    if tensor_output.ctor_kwargs is not None and faulty_axis_name in tensor_output.ctor_kwargs:
                         old_value = int( tensor_output.ctor_kwargs[ faulty_axis_name ] )
                         new_value = max( needed_size, 2 * old_value )
                         tensor_output.ctor_kwargs[ faulty_axis_name ] = new_value
@@ -588,12 +630,13 @@ class JaxDriver:
         lines.append( "" )
 
         # --- forward handler ---
-        self._handler_source( includes, lines, code, fai, module_name )
+        self._handler_source( includes, lines, code, fai, module_name, "Parameters" )
         lines.append( "" )
 
         # --- backward handler ---
         if grad_code:
-            self._handler_source( includes, lines, code + "_backward", fai.backward_version( self ), module_name )
+            gfai = fai.backward_version( self, [], [], "GradParameters" )
+            self._handler_source( includes, lines, grad_code, gfai, module_name, "GradParameters", "_backward" )
             lines.append( "" )
 
         lines.append( "" )
@@ -615,14 +658,14 @@ class JaxDriver:
         from ..compilation.make_dylib_from_source import make_dylib_from_source
         return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
 
-    def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str ):
+    def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
         # make a structure with the names
         # parameters_struct = f"Parameters_{ module_name }"
-        fai.make_parameters_struct( includes, lines, "Parameters" )
+        fai.make_parameters_struct( includes, lines, struct_name )
         lines.append( "" )
 
         # start impl: declaration
-        lines.append( f"xla::ffi::Error impl_{ module_name }( { fai.arg_decl() } ) {{" )
+        lines.append( f"xla::ffi::Error impl_{ module_name }{ suffix }( { fai.arg_decl() } ) {{" )
 
         lines.append( f"    using TI = SI64;" ) # TODO: 32 bit systems
 
@@ -642,7 +685,8 @@ class JaxDriver:
 
         # call the function
         lines.append( f"        auto p = { fai.arguments.assembled_code( '        ' ) };" ) # , struct_name = parameters_struct
-        lines.append( f"        { code };" )
+        lines.append( "" )
+        lines.append( f"        { code }" )
 
         # end try block
 
@@ -657,7 +701,7 @@ class JaxDriver:
 
         # XLA_FFI_DEFINE_HANDLER_SYMBOL
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain()
-        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ module_name }, impl_{ module_name }, { str.join( '.', bind_chain ) } );" )
+        lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ module_name }{ suffix }, impl_{ module_name }{ suffix }, { str.join( '.', bind_chain ) } );" )
 
 
     def optimize_using_lbfgs( self, loss, params, max_iter=50, tol_grad=1e-7, on_iter=None ):

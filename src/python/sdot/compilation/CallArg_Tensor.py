@@ -16,19 +16,20 @@ class CallArg_Tensor( CallArg ):
     ct_axes                   : dict
 
     represents_a_dynamic_axis : str
+    comes_from_basic_array    : bool
     is_differentiable         : bool
     shape                     : list[ AxisExpr ]
     dtype                     : any
 
     validity_output_index     : int
-    validity_input_index      : int
+    tensor_type_input_index      : int
 
     num_in_input_sub_list     : int
     num_in_dynamic_axes       : int
     num_in_outputs            : int
 
     @staticmethod
-    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = None, represents_a_dynamic_axis = "" ):
+    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_axes = None, represents_a_dynamic_axis = "", comes_from_basic_array = False ):
         """  """
         if ct_axes is None:
             ct_axes = []
@@ -59,12 +60,13 @@ class CallArg_Tensor( CallArg ):
 
         # Tensor attributes
         res.represents_a_dynamic_axis = represents_a_dynamic_axis
+        res.comes_from_basic_array = comes_from_basic_array
         res.is_differentiable = not driver.is_int_dtype( dtype )
         res.shape = shape
         res.dtype = dtype
 
         res.validity_output_index = -1
-        res.validity_input_index = -1
+        res.tensor_type_input_index = -1
 
         res.num_in_input_sub_list = -1
         res.num_in_outputs = -1
@@ -76,7 +78,7 @@ class CallArg_Tensor( CallArg ):
 
         # input or mutable -> need an input tensor
         if io_category.has_input:
-            res.validity_input_index = call_args.get_u8_input( [ CallArg_Tensor.is_valid( python_value ) ] )
+            res.tensor_type_input_index = call_args.get_u8_input( [ CallArg_Tensor.tensor_type_index( python_value ) ] )
             res.num_in_input_sub_list = call_args.add_tensor_input( res )
 
         # mutable, return or workspace -> need an output tensor
@@ -94,14 +96,16 @@ class CallArg_Tensor( CallArg ):
         return res
 
     @staticmethod
-    def is_valid( python_value ):
+    def tensor_type_index( python_value ):
         if python_value is None:
             return 0
+        if driver.is_zero_tensor( python_value ):
+            return 2
         return 1
 
     @property
     def ffi_value( self ):
-        if self.python_value is None:
+        if self.python_value is None or driver.is_zero_tensor( self.python_value ):
             return driver.empty( [ 0 ] * self.ndim, dtype = self.dtype )
         return self.python_value
 
@@ -221,10 +225,11 @@ class CallArg_Tensor( CallArg ):
     def shape_type( self ):
         """Build AxisTuple C++ type string with KnownAxisSize where axes are CT-known."""
         known = []
-        for n in range( self.ndim ):
-            val = self._ct_axis_value( n )
-            if val is not None:
-                known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
+        if not self.comes_from_basic_array:
+            for n in range( self.ndim ):
+                val = self._ct_axis_value( n )
+                if val is not None:
+                    known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         suffix = ( "," + ",".join( known ) ) if known else ""
         return f"AxisTuple<TI,Arch,{ self.ndim }{ suffix }>"
 
@@ -303,7 +308,7 @@ class CallArg_Tensor( CallArg ):
 
         # mutable
         if self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_mutable( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+            return f"{ base }_mutable( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
@@ -311,7 +316,7 @@ class CallArg_Tensor( CallArg ):
 
         # pure input
         if self.io_category.has_input and not self.io_category.want_output:
-            return f"{ base }_input( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.validity_input_index } ] )"
+            return f"{ base }_input( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ] )"
 
         raise NotImplementedError
 
@@ -330,3 +335,39 @@ class CallArg_Tensor( CallArg ):
 
     def assembled_code( self, beg_line ):
         return f"t_{ self.ffi_name() }"
+
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
+        res = CallArg_Tensor()
+        self.init_CallArgs_backward_version( res, parent )
+
+        res.ct_axes = self.ct_axes
+
+        res.represents_a_dynamic_axis = self.represents_a_dynamic_axis
+        res.comes_from_basic_array = self.comes_from_basic_array
+        res.is_differentiable = self.is_differentiable
+        res.shape = self.shape
+        res.dtype = self.dtype
+
+        res.validity_output_index = -1
+        res.tensor_type_input_index = -1
+
+        res.num_in_input_sub_list = -1
+        res.num_in_outputs = -1
+
+        res.num_in_dynamic_axes = -1
+        if call_args and res.represents_a_dynamic_axis:
+            res.num_in_dynamic_axes = len( call_args.dynamix_axes )
+            call_args.dynamix_axes.append( res )
+
+        # something that was an output -> make an input
+        python_value = self.python_value
+        if self.io_category.want_output and self.num_in_outputs < len( outputs ):
+            python_value = outputs[ self.num_in_outputs ]
+        elif self.is_differentiable and differentiable_inputs is not None and 0 <= self.num_in_input_sub_list < len( differentiable_inputs ):
+            python_value = differentiable_inputs[ self.num_in_input_sub_list ]
+
+        res.python_value = python_value
+        res.tensor_type_input_index = call_args.get_u8_input( [ CallArg_Tensor.tensor_type_index( python_value ) ] )
+        res.num_in_input_sub_list = call_args.add_tensor_input( res )
+
+        return res

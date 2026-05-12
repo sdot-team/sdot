@@ -1,3 +1,4 @@
+# from sdot.compilation.CallArgsAnalysis import CallArgsAnalysis
 from ..util.get_all_annotations import get_all_annotations
 
 from .IoCategory import IoCategory
@@ -391,3 +392,13 @@ class CallArg_Aggregate( CallArg ):
 
         lines.append( beg_line + "}" )
         return "\n".join( lines )
+
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
+        res = CallArg_Aggregate()
+        self.init_CallArgs_backward_version( res, parent )
+
+        res.sub_dict = {}
+        for name, attr in self.sub_dict.items():
+            res.sub_dict[ name ] = attr.backward_version( call_args, driver, outputs, grads_of_the_outputs, res, differentiable_inputs )
+
+        return res

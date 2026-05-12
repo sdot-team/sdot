@@ -1,5 +1,4 @@
 from __future__ import annotations
-from types import NoneType
 
 from ..aggregate.Workspace import Workspace
 from ..aggregate.Return import Return
@@ -212,5 +211,60 @@ class CallArgsAnalysis:
             from ..driver import driver
             items.append( driver.ffi_tensor_output_bind_code( 1, "PI64" ) )
 
-
         return items
+
+
+    def backward_version( self, driver, outputs: list, grads_of_the_outputs, parameter_class: str, differentiable_inputs=None, perturbed_flags=None ):
+        #
+        res = CallArgsAnalysis( {}, parameter_class )
+        res.arguments = self.arguments.backward_version( res, driver, outputs, grads_of_the_outputs, None, differentiable_inputs )
+
+        # update python_class to get a correct base_cpp_name
+        res.arguments.python_class = type( parameter_class, (), {} )
+
+        # for each differentiable_tensor_inputs, add a grad output
+        for i, ct in enumerate( self.differentiable_tensor_inputs ):
+            name = "output_grad_for_" + ct.fully_qualified_name()
+            needed = perturbed_flags is None or ( i < len( perturbed_flags ) and perturbed_flags[ i ] )
+            grad_tensor = CallArg_Tensor.factory(
+                call_args = res,
+                parent = res.arguments,
+                name_in_parent = name,
+                python_class = ct.python_class,
+                python_value = None,
+                io_category = IoCategory.for_return(),
+                ctor_args = [],
+                ctor_kwargs = {},
+                shape = ct.shape,
+                dtype = ct.dtype,
+                ct_axes = ct.ct_axes,
+                represents_a_dynamic_axis = ct.represents_a_dynamic_axis,
+                comes_from_basic_array = ct.comes_from_basic_array
+            )
+            if not needed:
+                res.u8_input_values[ grad_tensor.validity_output_index ] = 0
+            res.arguments.sub_dict[ name ] = grad_tensor
+
+        # for each output, add a grad input
+        for ct in self.tensor_outputs:
+            name = "input_grad_for_" + ct.fully_qualified_name()
+            python_value = None
+            if ct.num_in_outputs < len( grads_of_the_outputs ):
+                python_value = grads_of_the_outputs[ ct.num_in_outputs ]
+            res.arguments.sub_dict[ name ] = CallArg_Tensor.factory(
+                call_args = res,
+                parent = res.arguments,
+                name_in_parent = name,
+                python_class = ct.python_class,
+                python_value = python_value,
+                io_category = IoCategory.pure_input(),
+                ctor_args = [],
+                ctor_kwargs = {},
+                shape = ct.shape,
+                dtype = ct.dtype,
+                ct_axes = ct.ct_axes,
+                represents_a_dynamic_axis = ct.represents_a_dynamic_axis,
+                comes_from_basic_array = ct.comes_from_basic_array
+            )
+
+        return res

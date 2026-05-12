@@ -1,7 +1,7 @@
 from .IoCategory import IoCategory
 from ..driver import driver
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Self
 from weakref import ref
 
 class CallArg:
@@ -17,6 +17,8 @@ class CallArg:
     """
 
     if TYPE_CHECKING:
+        def get_template_args( self, template_args, names ): ...
+        def backward_version( self, fai, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ) -> Self: ...
         def cpp_type_name( self, main_list ) -> str: ...
         def signature( self ) -> str: ...
 
@@ -45,7 +47,7 @@ class CallArg:
         # arrays
         if driver.is_a_tensor( python_value ):
             from .CallArg_Tensor import CallArg_Tensor
-            return CallArg_Tensor.factory( call_args, parent, name_in_parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
+            return CallArg_Tensor.factory( call_args, parent, name_in_parent, python_class, python_value, io_category, ctor_args, ctor_kwargs, comes_from_basic_array = True )
 
         # std objects
         if isinstance( python_value, ( int, float ) ):
@@ -87,3 +89,24 @@ class CallArg:
 
     def assemble_return( self ):
         raise NotImplementedError
+
+    def fully_qualified_name( self ) -> str:
+        l = [ self.name_in_parent or "" ]
+        p = self.parent
+        while p is not None:
+            if name := p().name_in_parent:
+                l.append( name )
+            p = p().parent
+        return str.join( "_", l[ :-1 ] )
+
+    def init_CallArgs_backward_version( self, res, parent ):
+        res.io_category = IoCategory.pure_input()
+
+        res.python_value = self.python_value
+        res.python_class = self.python_class
+
+        res.name_in_parent = self.name_in_parent
+        res.parent = parent
+
+        res.ctor_kwargs = None
+        res.ctor_args = None

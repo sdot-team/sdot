@@ -39,14 +39,12 @@ from .Bsp import Bsp as Bsp
 
 # hardware/framework interfaces
 from .driver import driver as driver
-from .drivers.JaxDriver import CapacityOverflow as CapacityOverflow
-from .drivers.JaxDriver import is_capacity_overflow as is_capacity_overflow
 
 # inject info/infox as builtins so tests can use them without explicit import
-import builtins as _builtins
-from .util.info import info as _info, infox as _infox
-_builtins.info  = _info
-_builtins.infox = _infox
+# import builtins as _builtins
+from .util.info import info as info, infox as infox
+# _builtins.info  = _info
+# _builtins.infox = _infox
 
 # variants
 # from sdot.aggregate._methods import variants_of

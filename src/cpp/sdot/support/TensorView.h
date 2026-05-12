@@ -53,6 +53,7 @@ public:
     HD auto          empty              () const;
     HD auto          size               () const;
 
+    HD bool          not_surely_null    () const { return ! surely_null(); }
     HD bool          surely_null        () const; ///< is_invalid() || Zero tensor
     HD bool          is_invalid         () const; ///<
     HD bool          is_valid           () const; ///<

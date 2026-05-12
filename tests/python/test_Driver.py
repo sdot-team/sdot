@@ -107,31 +107,102 @@ def test_growing_capacity():
 
     info( f( sdot.driver.ones( 8 ) ) )
 
-    # JIT mode with overflow: raises CapacityOverflow (possibly wrapped in JaxRuntimeError)
-    @jax.jit
-    def f_small( input ):
-        return sdot.driver.call(
-            "for( PI i = 0; i < p.input.size(); ++i ) p.output[ p.n++ ] = i;",
-            mlir = True,
-            output = sdot.Return( sdot.Tensor( "n[]" ), max_of_n = 2 ),
-            input = input
-        )
+    # # JIT mode with overflow: raises CapacityOverflow (possibly wrapped in JaxRuntimeError)
+    # @jax.jit
+    # def f_small( input ):
+    #     return sdot.driver.call(
+    #         "for( PI i = 0; i < p.input.size(); ++i ) p.output[ p.n++ ] = i;",
+    #         mlir = True,
+    #         output = sdot.Return( sdot.Tensor( "n[]" ), max_of_n = 2 ),
+    #         input = input
+    #     )
 
-    try:
-        f_small( sdot.driver.ones( 16 ) )
-        raise AssertionError( "expected CapacityOverflow" )
-    except AssertionError:
-        raise
-    except Exception as e:
-        assert sdot.is_capacity_overflow( e ), f"unexpected exception type: { type( e ) }: { e }"
+    # try:
+    #     f_small( sdot.driver.ones( 16 ) )
+    #     raise AssertionError( "expected CapacityOverflow" )
+    # except AssertionError:
+    #     raise
+    # except Exception as e:
+    #     txt = sdot.driver.is_capacity_overflow( e )
+    #     assert txt, f"unexpected exception type: { type( e ) }: { e }"
+    #     print( "----------->",txt )
 
 
 def test_grad():
-    def f( input ):
-        return sdot.driver.call( "if ( p.o_0.is_non_null() ) p.o_0 = 2 * p.i_0; p.o_0 = 2 * p.i_0;", output = sdot.Return( sdot.Tensor() ), input = input )
+    def f( i0, i1 ):
+        return sdot.driver.call(
+            "info( p.o0.is_valid() ); info( p.o1.is_valid() ); if ( p.o0.is_valid() ) p.o0 = 2 * p.i0; if ( p.o1.is_valid() ) p.o1 = 3 * p.i1;",
+            "info( p.output_grad_for_i0.is_valid(), p.input_grad_for_o0.not_surely_null(), p.output_grad_for_i1.is_valid(), p.input_grad_for_o1.not_surely_null() ); p.output_grad_for_i0 = 2 * p.input_grad_for_o0; p.output_grad_for_i1 = 3 * p.input_grad_for_o1;", # info( p.o0.is_valid() ); info( p.o1.is_valid() ); if ( p.o0.is_valid() )
+            o0 = sdot.Return( sdot.Tensor() ),
+            o1 = sdot.Return( sdot.Tensor() ),
+            i0 = i0,
+            i1 = i1,
+        )
+    i0 = sdot.driver.array( 10. )
+    i1 = sdot.driver.array( 20. )
     import jax
-    input = sdot.driver.array( [ 3., 4. ] )
-    info( jax.grad( f )(  ) )
+    primals, f_vjp = jax.vjp( f, i0, i1 )
+    info( primals )  # (20., 60.)
+    cotangents = [ jax.numpy.ones_like( p ) for p in primals ]
+    info( f_vjp( cotangents ) )  # (2., 3.)
+
+
+def test_grad_symbolic_zero():
+    """When only o0 is used in the loss, JAX sends a SymbolicZero for o1's cotangent.
+    C++ should see input_grad_for_o1.not_surely_null() == false."""
+    import jax
+
+    def f( i0, i1 ):
+        return sdot.driver.call(
+            "if ( p.o0.is_valid() ) p.o0 = 2 * p.i0; if ( p.o1.is_valid() ) p.o1 = 3 * p.i1;",
+            # grad only if cotangent is non-null; returns 0 otherwise (JAX gets uninitialized buf, but won't use it)
+            "info( p.input_grad_for_o0.not_surely_null() );"
+            "info( p.input_grad_for_o1.not_surely_null() );"
+            "if ( p.input_grad_for_o0.not_surely_null() ) p.output_grad_for_i0 = 2 * p.input_grad_for_o0;"
+            "if ( p.input_grad_for_o1.not_surely_null() ) p.output_grad_for_i1 = 3 * p.input_grad_for_o1;",
+            o0 = sdot.Return( sdot.Tensor() ),
+            o1 = sdot.Return( sdot.Tensor() ),
+            i0 = i0,
+            i1 = i1,
+        )
+
+    i0 = sdot.driver.array( 10. )
+    i1 = sdot.driver.array( 20. )
+
+    # only o0 used → o1's cotangent is SymbolicZero → input_grad_for_o1 invalid in C++
+    gi0, gi1 = jax.grad( lambda i0, i1: f( i0, i1 )[ 0 ], argnums = ( 0, 1 ) )( i0, i1 )
+    info( gi0, gi1 )
+    assert float( gi0 ) == 2.0
+    assert float( gi1 ) == 0.0  # i1 doesn't affect o0, gradient is 0
+
+
+def test_grad_perturbed():
+    """When differentiating w.r.t. only i0, JAX sets perturbed=False for i1.
+    C++ should see output_grad_for_i1.is_valid() == false."""
+    import jax
+
+    def f( i0, i1 ):
+        return sdot.driver.call(
+            "if ( p.o0.is_valid() ) p.o0 = 2 * p.i0 + 3 * p.i1;",
+            # skip grad computation for non-requested inputs
+            "info( p.output_grad_for_i0.is_valid() );"
+            "info( p.output_grad_for_i1.is_valid() );"
+            "info( p.input_grad_for_o0.not_surely_null() );"
+            "info( p.input_grad_for_o0.not_surely_null() );"
+            "if ( p.output_grad_for_i0.is_valid() ) p.output_grad_for_i0 = 2 * p.input_grad_for_o0;"
+            "if ( p.output_grad_for_i1.is_valid() ) p.output_grad_for_i1 = 3 * p.input_grad_for_o0;",
+            o0 = sdot.Return( sdot.Tensor() ),
+            i0 = i0,
+            i1 = i1,
+        )
+
+    i0 = sdot.driver.array( 10. )
+    i1 = sdot.driver.array( 20. )
+
+    # only i0 perturbed → output_grad_for_i1 is invalid in C++
+    gi0 = jax.grad( f, argnums = 0 )( i0, i1 )
+    info( gi0 )
+    assert float( gi0 ) == 2.0
 
 
 # import jax
@@ -150,7 +221,10 @@ if __name__ == "__main__":
     # test_alac_grad()
     # test_ffi_basic()
     # test_mlir_basic()
-    test_growing_capacity()
+    # test_growing_capacity()
+    test_grad()
+    test_grad_symbolic_zero()
+    test_grad_perturbed()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

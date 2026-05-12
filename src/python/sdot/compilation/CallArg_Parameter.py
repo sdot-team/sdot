@@ -65,3 +65,13 @@ class CallArg_Parameter( CallArg ):
 
     def end_with_same_shape( self, name, s, lines ):
         return s
+
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
+        res = CallArg_Parameter()
+
+        self.init_CallArgs_backward_version( res, parent )
+
+        res.num_in_parameters = call_args.add_parameter( res )
+        res.name = self.name
+
+        return res

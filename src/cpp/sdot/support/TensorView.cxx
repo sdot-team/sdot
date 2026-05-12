@@ -113,14 +113,16 @@ UTP auto DTP::size() const {
 UTP bool DTP::surely_null() const {
     if ( is_invalid() )
         return true;
-    // several values -> we do not make the test
-    if ( _shape.has_value( []( auto size ) { return size > Ct<int,1>(); } ) )
-        return false;
-    // empty
+    // empty tensor (any dimension == 0)
     if ( _shape.has_value( []( auto size ) { return size < Ct<int,1>(); } ) )
         return true;
-    // -> single value
-    return *data() == 0;
+    // all strides zero (rank > 0) → surely-null by construction: all elements alias data()[0] == 0
+    if ( rank() > 0 && ! _strides.has_value( []( auto s ) { return s != SI(0); } ) )
+        return true;
+    // single scalar: check value
+    if ( ! _shape.has_value( []( auto size ) { return size > Ct<int,1>(); } ) )
+        return *data() == 0;
+    return false;
 }
 
 UTP bool DTP::is_invalid() const {

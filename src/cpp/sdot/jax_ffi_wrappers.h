@@ -27,6 +27,22 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S32> { using type = SI32; };
 template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 
+// ------------------- zero strides -------------------
+// All-zero byte strides: every element aliases data()[0].
+// Used for surely-null tensors (SymbolicZero from JAX): not_surely_null() == false.
+
+template<class Shape, std::size_t... Is>
+auto _zero_strides_impl( std::index_sequence<Is...> ) {
+    using Strides = AxisTuple<typename Shape::TI, typename Shape::Arch, Shape::ct_rank>;
+    return Strides( Values(), ( (void)Is, SI(0) )... );
+}
+
+template<class Shape>
+auto zero_strides() {
+    return _zero_strides_impl<Shape>( std::make_index_sequence<Shape::ct_rank>{} );
+}
+
+
 // ------------------- contiguous strides -------------------
 // C-contiguous (row-major) byte strides for a given shape AxisTuple.
 
@@ -53,8 +69,19 @@ auto contiguous_strides( const Shape &shape ) {
 // ------------------- tensor_view_input -------------------
 
 template<class Shape, xla::ffi::DataType dtype>
-auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, bool valid = true ) {
+auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, PI8 tensor_type_index = 1 ) {
     using TF = SdotTypeFor<dtype>::type;
+
+    if ( tensor_type_index == 2 ) {
+        // surely-null: shape in buf.dimensions()[1:], zero strides, data points to a static TF(0)
+        auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
+            return Shape( Values(), PI( buf.dimensions()[ Is + 1 ] )... );
+        }( std::make_index_sequence<Shape::ct_rank>{} );
+        auto strides = zero_strides<Shape>();
+        using Strides = DECAYED_TYPE_OF( strides );
+        static const TF _zero{};
+        return TensorView<TF, Shape, Strides>( const_cast<TF *>( &_zero ), shape, strides );
+    }
 
     auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
         return Shape( Values(), PI( buf.dimensions()[ Is ] )... );
@@ -63,7 +90,7 @@ auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, bool valid =
     auto strides = contiguous_strides<TF>( shape );
     using Strides = DECAYED_TYPE_OF( strides );
 
-    if ( ! valid )
+    if ( ! tensor_type_index )
         return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
 
     return TensorView<TF,Shape,Strides>( const_cast<TF *>( buf.typed_data() ), shape, strides );
