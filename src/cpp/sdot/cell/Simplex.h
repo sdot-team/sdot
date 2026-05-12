@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../support/SimpleSquareMatrix.h"
+#include "../support/Matrix.h"
 #include "../support/Vector.h"
 #include "../support/TODO.h"
 
@@ -8,12 +8,12 @@ namespace sdot {
 
 template<int dim,int npt,class TF,class Arch>
 struct Simplex {
-    using Pt = Vector<TF,Arch,dim,Arch>;
+    using Pt = Vector<TF,Arch,dim>;
 
     TF measure() const {
         using namespace std;
         if constexpr ( npt == dim + 1 ) {
-            auto M = SimpleSquareMatrix<TF,dim,Arch>::with_func( dim, [&]( auto row, auto col ) { return pts[ row + 1 ][ col ] - pts[ 0 ][ col ]; } );
+            auto M = Matrix<TF,Arch,dim>::with_func( dim, [&]( auto row, auto col ) { return pts[ row + 1 ][ col ] - pts[ 0 ][ col ]; } );
             return abs( M.determinant() );
         } else {
             TODO;

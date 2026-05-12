@@ -185,14 +185,14 @@ class CallArg_Tensor( CallArg ):
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
             lst = names[ : -1 ] + [ name ]
-            template_args.add( f"ct_{ '_'.join( lst ) }", "int", 0 )
+            template_args.add( f"ct_{ '_'.join( lst ) }", "TI", 4 )
 
         if ( self.dtype is float ) or ( self.dtype is None ):
-            template_args.add( self.dtype_name(), "typename", 2 )
+            template_args.add( self.dtype_name(), "typename", 0 )
 
-        template_args.add( "TI", "typename", 2 ) # always needed
+        template_args.add( "TI", "typename", 1 ) # always needed
 
-        template_args.add( "Arch", "typename", 1 )
+        template_args.add( "Arch", "typename", 2 )
 
 
     def _get_kwarg_only( self, name, is_dyn ):
@@ -222,19 +222,33 @@ class CallArg_Tensor( CallArg ):
         except ( KeyError, RuntimeError ):
             return None
 
-    def shape_type( self ):
+    def shape_type( self, for_a_particular_binding ):
         """Build AxisTuple C++ type string with KnownAxisSize where axes are CT-known."""
         known = []
         if not self.comes_from_basic_array:
             for n in range( self.ndim ):
                 val = self._ct_axis_value( n )
                 if val is not None:
+                    if not for_a_particular_binding:
+                        expr = self.shape[ n ]
+                        ops = []
+                        if expr.offset:
+                           ops.append( str( expr.offset ) )
+                        for term in expr.terms:
+                            if term.coeff == 1:
+                                ops.append( f'ct_{ term.variable.name }' )
+                            else:
+                                ops.append( f'{ term.coeff } * ct_{ term.variable.name }' )
+                        if ops:
+                            val = ' + '.join( ops )
+                        else:
+                            val = '0'
                     known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         suffix = ( "," + ",".join( known ) ) if known else ""
         return f"AxisTuple<TI,Arch,{ self.ndim }{ suffix }>"
 
     def cpp_type_name( self, main_list ):
-        shape_t   = self.shape_type()
+        shape_t   = self.shape_type( False )
         strides_t = f"AxisTuple<TI,Arch,{ self.ndim }>"
         if self.represents_a_dynamic_axis:
             return f"DynamicAxis<TI,{ shape_t },{ strides_t }>"
@@ -289,7 +303,7 @@ class CallArg_Tensor( CallArg ):
     def ffi_conversion_code( self ):
         base      = "tensor_view"
         extr      = ""
-        ct_shape  = f"CtType<{ self.shape_type() }>()"
+        ct_shape  = f"CtType<{ self.shape_type( True ) }>()"
 
         if self.represents_a_dynamic_axis:
             p = self.parent()

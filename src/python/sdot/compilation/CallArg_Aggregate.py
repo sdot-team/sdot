@@ -295,7 +295,7 @@ class CallArg_Aggregate( CallArg ):
             lines.append(  "    auto row( PI index ) const {" )
             lines.append( f"        return { unbatch_version.__name__ }{{" )
             for ct_axis_name in ct_axes:
-                lines.append( f"            .ct_{ ct_axis_name }_inst = CtdInt<ct_{ ct_axis_name }>()," )
+                lines.append( f"            .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
             for name, argument in self.sub_dict.items():
                 lines.append( f"            .{ name } = { name }.row( index )," )
             lines.append(  "        };" )
@@ -321,7 +321,7 @@ class CallArg_Aggregate( CallArg ):
             s = argument.beg_with_same_shape( name, s, lines )
         lines.append( s + f"{ base_cpp_name } new_value{{" )
         for ct_axis_name in ct_axes:
-            lines.append( s + f"    .ct_{ ct_axis_name }_inst = CtdInt<ct_{ ct_axis_name }>()," )
+            lines.append( s + f"    .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
         for name, argument in self.sub_dict.items():
             lines.append( s + f"    .{ name } = { name }," )
         lines.append( s + "};" )
@@ -332,7 +332,7 @@ class CallArg_Aggregate( CallArg ):
 
         # compile-time axis members
         for ct_axis_name in ct_axes:
-            lines.append( f"    CtdInt<ct_{ ct_axis_name }> ct_{ ct_axis_name }_inst;" )
+            lines.append( f"    CtdInt<TI,ct_{ ct_axis_name }> ct_{ ct_axis_name }_inst;" )
 
         # data members
         for name, argument in self.sub_dict.items():
@@ -385,7 +385,7 @@ class CallArg_Aggregate( CallArg ):
 
         # ct axes
         for ct_axis_name in ct_axes:
-            lines.append( f"{ beg_line }    .ct_{ ct_axis_name }_inst = CtdInt<{ self.get_variable_value( ct_axis_name ) }>()," )
+            lines.append( f"{ beg_line }    .ct_{ ct_axis_name }_inst = CtdInt<TI,{ self.get_variable_value( ct_axis_name ) }>()," )
 
         for name, argument in self.sub_dict.items():
             lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + '    ' ) }," )
