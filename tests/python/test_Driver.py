@@ -205,6 +205,11 @@ def test_grad_perturbed():
     assert float( gi0 ) == 2.0
 
 
+def test_gpu_basic():
+    sdot.driver.device = "gpu"
+    infox( sdot.driver.device )
+    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+
 # import jax
 
 # def loss( x ):
@@ -222,9 +227,10 @@ if __name__ == "__main__":
     # test_ffi_basic()
     # test_mlir_basic()
     # test_growing_capacity()
-    test_grad()
-    test_grad_symbolic_zero()
-    test_grad_perturbed()
+    # test_grad()
+    # test_grad_symbolic_zero()
+    # test_grad_perturbed()
+    test_gpu_basic()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )
