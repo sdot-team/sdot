@@ -207,8 +207,10 @@ def test_grad_perturbed():
 
 def test_gpu_basic():
     sdot.driver.device = "gpu"
-    infox( sdot.driver.device )
-    info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.device )
+    #info( sdot.driver.call( "arch.run_single( [p] HD () { p.output.item() = double( p.input[ 0 ] + p.input[ 1 ] ); } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    # info( sdot.driver.call( "cudaMemcpyAsync( p.output.data(), p.input.data(), sizeof( FP64 ), cudaMemcpyDeviceToDevice, stream );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.call( "arch.run_single( [p] HD () mutable { p.output = p.input[ 1 ]; } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
 
 # import jax
 

@@ -566,8 +566,8 @@ class JaxDriver:
         return ret
 
     def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
-        # get signature
-        base_signature = [ code, grad_code, main_list.arguments.signature() ] + includes
+        # get signature — include device type to avoid CPU/GPU cache collision
+        base_signature = [ code, grad_code, main_list.arguments.signature(), self.normalized_device_type ] + includes
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
@@ -605,10 +605,11 @@ class JaxDriver:
 
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
+        platform = "gpu" if self.device.platform == "gpu" else "cpu"
         module = importlib.import_module( "sdot.generated_files." + module_name )
-        jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = "cpu" )
+        jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = platform )
         if make_backward_binding:
-            jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, module_name + "_backward" )(), platform = "cpu" )
+            jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, module_name + "_backward" )(), platform = platform )
 
 
     def _make_dylib( self, code: str, grad_code: str, includes: set, fai: CallArgsAnalysis, module_name: str ):
@@ -626,7 +627,10 @@ class JaxDriver:
         lines.append( "namespace nb = nanobind;" )
         lines.append( "using namespace sdot;" )
         lines.append( "" )
-        lines.append( "using Arch = Cpu;" )
+        if self.normalized_device_type == "cuda":
+            lines.append( "using Arch = Gpu;" )
+        else:
+            lines.append( "using Arch = Cpu;" )
         lines.append( "" )
 
         # --- forward handler ---
@@ -656,26 +660,44 @@ class JaxDriver:
 
         #
         from ..compilation.make_dylib_from_source import make_dylib_from_source
-        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], "yo" )
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.normalized_device_type )
 
     def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
-        # make a structure with the names
-        # parameters_struct = f"Parameters_{ module_name }"
+        is_gpu = self.normalized_device_type == "cuda"
+
         fai.make_parameters_struct( includes, lines, struct_name )
         lines.append( "" )
 
-        # start impl: declaration
-        lines.append( f"xla::ffi::Error impl_{ module_name }{ suffix }( { fai.arg_decl() } ) {{" )
+        # handler signature — append stream for GPU (PlatformStream<T> decodes to T directly)
+        arg_decl = fai.arg_decl()
+        if is_gpu:
+            stream_arg = "cudaStream_t stream"
+            arg_decl = f"{ arg_decl }, { stream_arg }" if arg_decl else stream_arg
+        lines.append( f"xla::ffi::Error impl_{ module_name }{ suffix }( { arg_decl } ) {{" )
 
         lines.append( f"    using TI = SI64;" ) # TODO: 32 bit systems
 
+        # arch instance
+        if is_gpu:
+            lines.append( "    Arch arch( stream );" )
+        else:
+            lines.append( "    Arch arch;" )
+
         # u8_...
         if len( fai.u8_input_values ):
-            lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )
+            if is_gpu:
+                lines.append( f"    std::vector<PI8> _u8_host( { len( fai.u8_input_values ) } );" )
+                lines.append( "    cudaMemcpy( _u8_host.data(), u8_input_buffer.typed_data(), _u8_host.size() * sizeof( PI8 ), cudaMemcpyDeviceToHost );" )
+                lines.append( "    const PI8 *u8_input = _u8_host.data();" )
+            else:
+                lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )
 
         if fai.u64_output_size:
             lines.append( "    PI64 *u64_output = u64_output_buffer->typed_data();" )
-            lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
+            if is_gpu:
+                lines.append( "    cudaMemsetAsync( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ), stream );" )
+            else:
+                lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
 
         # conversions
         fai.tensor_conversions( lines )
@@ -684,23 +706,29 @@ class JaxDriver:
         lines.append( "    try {" )
 
         # call the function
-        lines.append( f"        auto p = { fai.arguments.assembled_code( '        ' ) };" ) # , struct_name = parameters_struct
+        lines.append( f"        auto p = { fai.arguments.assembled_code( '        ' ) };" )
         lines.append( "" )
         lines.append( f"        { code }" )
 
         # end try block
-
         lines.append( '    } catch ( DynamicSizeException de ) {' )
-        lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 0 } ] = 1 + de.num_dynamic_axis;' )
-        lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 1 } ] = de.needed_size;' )
+        if is_gpu:
+            # DynamicSizeException from device code is not supported yet; signal via cudaMemcpy
+            lines.append( f'        PI64 _de_vals[2] = {{ 1 + de.num_dynamic_axis, de.needed_size }};' )
+            lines.append( f'        cudaMemcpyAsync( u64_output + { fai.index_dynamic_size_exception }, _de_vals, 2 * sizeof( PI64 ), cudaMemcpyHostToDevice, stream );' )
+        else:
+            lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 0 } ] = 1 + de.num_dynamic_axis;' )
+            lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 1 } ] = de.needed_size;' )
         lines.append( '    }' )
 
         # end impl
         lines.append( "    return xla::ffi::Error::Success();" )
         lines.append( "}" )
 
-        # XLA_FFI_DEFINE_HANDLER_SYMBOL
+        # XLA_FFI_DEFINE_HANDLER_SYMBOL — append PlatformStream bind for GPU
         bind_chain = [ "xla::ffi::Ffi::Bind()" ] + fai.bind_chain()
+        if is_gpu:
+            bind_chain.append( "Ctx<xla::ffi::PlatformStream<cudaStream_t>>()" )
         lines.append( f"XLA_FFI_DEFINE_HANDLER_SYMBOL( binding_{ module_name }{ suffix }, impl_{ module_name }{ suffix }, { str.join( '.', bind_chain ) } );" )
 
 

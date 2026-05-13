@@ -45,115 +45,115 @@ public:
 template<class _TI,class _Arch,int _ct_rank,class... ct_tail>
 class AxisTuple {
 public:
-    SCInt     ct_rank       = _ct_rank;
-    using     Arch          = _Arch;
-    using     TI            = _TI;
+    SCInt        ct_rank       = _ct_rank;
+    using        Arch          = _Arch;
+    using        TI            = _TI;
 
-    using     Next          = AxisTuple<TI,Arch,ct_rank-1,typename WithOffset<int,-1,ct_tail>::type...>;
+    using        Next          = AxisTuple<TI,Arch,ct_rank-1,typename WithOffset<int,-1,ct_tail>::type...>;
 
-    /**/      AxisTuple     ( Function, auto &&func, auto index ) : front_value( func( index ) ), next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) {}
-    /**/      AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
-    /**/      AxisTuple     ( Values, TI front_value, auto... next_values ) : front_value( front_value ), next_values( Values(), next_values... ) {}
+    HD           AxisTuple     ( Function, auto &&func, auto index ) : front_value( func( index ) ), next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) {}
+    HD           AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
+    HD           AxisTuple     ( Values, TI front_value, auto... next_values ) : front_value( front_value ), next_values( Values(), next_values... ) {}
 
-    void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
-    auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
-    T_Uu auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
-    auto      operator[]    ( TI u ) const { if ( u == 0 ) return front_value; return next_values[ u - 1 ]; }
-    auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
-    auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
-    void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
-    int       size          () const { return ct_rank; }
+    HD void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
+    HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
+    T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
+    HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return front_value; return next_values[ u - 1 ]; }
+    HD auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
+    HD auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
+    HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
+    HD int       size          () const { return ct_rank; }
 
-    auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
+    HD auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
 
-    T_Uu auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
+    HD auto      without_axis  ( TI u ) const;
 
-    TI        front_value;
-    Next      next_values;
+    TI           front_value;
+    Next         next_values;
 };
 
 /// known ct_rank, next num known axis is 0
 template<class _TI,class _Arch,int _ct_rank,_TI ct_front_value,class... ct_tail>
 class AxisTuple<_TI,_Arch,_ct_rank,KnownAxisSize<_TI,0,ct_front_value>,ct_tail...> {
 public:
-    SCInt     ct_rank       = _ct_rank;
-    using     Arch          = _Arch;
-    using     TI            = _TI;
+    SCInt        ct_rank       = _ct_rank;
+    using        Arch          = _Arch;
+    using        TI            = _TI;
 
-    using     Next          = AxisTuple<TI,Arch,ct_rank-1,typename WithOffset<int,-1,ct_tail>::type...>;
+    using        Next          = AxisTuple<TI,Arch,ct_rank-1,typename WithOffset<int,-1,ct_tail>::type...>;
 
-    /**/      AxisTuple     ( Function, auto &&func, auto index ) : next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) { ASSERT_EQ( func( index ), ct_front_value ); }
-    /**/      AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
-    /**/      AxisTuple     ( Values, TI front_value, auto... next_values ) : next_values( Values(), next_values... ) { ASSERT_EQ( front_value, ct_front_value ); }
+    HD           AxisTuple     ( Function, auto &&func, auto index ) : next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) { ASSERT_EQ( func( index ), ct_front_value ); }
+    HD           AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
+    HD           AxisTuple     ( Values, TI front_value, auto... next_values ) : next_values( Values(), next_values... ) { ASSERT_EQ( front_value, ct_front_value ); }
 
-    void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < ct_front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
-    auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( ct_front_value, nxt... ); } ); }
-    T_Uu auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return Ct<TI,ct_front_value>(); else return next_values[ Ct<U,u-1>() ]; }
-    auto      operator[]    ( TI u ) const { if ( u == 0 ) return ct_front_value; return next_values[ u - 1 ]; }
-    auto      all_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( ! res ) return res; return next_values.all_value( func ); }
-    auto      has_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( res ) return res; return next_values.has_value( func ); }
-    void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << ct_front_value, ", " ); }
-    int       size          () const { return ct_rank; }
+    HD void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < ct_front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
+    HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( ct_front_value, nxt... ); } ); }
+    T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return Ct<TI,ct_front_value>(); else return next_values[ Ct<U,u-1>() ]; }
+    HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return ct_front_value; return next_values[ u - 1 ]; }
+    HD auto      all_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( ! res ) return res; return next_values.all_value( func ); }
+    HD auto      has_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( res ) return res; return next_values.has_value( func ); }
+    HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << ct_front_value, ", " ); }
+    HD int       size          () const { return ct_rank; }
 
-    auto      front_shape   () const { return AxisTuple<TI,Arch,1,KnownAxisSize<TI,0,ct_front_value>>( Values(), ct_front_value ); }
+    HD auto      front_shape   () const { return AxisTuple<TI,Arch,1,KnownAxisSize<TI,0,ct_front_value>>( Values(), ct_front_value ); }
 
-    T_Uu auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
+    HD auto      without_axis  ( TI u ) const;
 
-    Next      next_values;
+    Next         next_values;
 };
 
 /// known ct_rank > 0, no next known axis
 template<class _TI,class _Arch,int _ct_rank>
 class AxisTuple<_TI,_Arch,_ct_rank> {
 public:
-    SCInt     ct_rank       = _ct_rank;
-    using     Arch          = _Arch;
-    using     TI            = _TI;
+    SCInt        ct_rank       = _ct_rank;
+    using        Arch          = _Arch;
+    using        TI            = _TI;
 
-    using     Next          = AxisTuple<TI,Arch,ct_rank-1>;
+    using        Next          = AxisTuple<TI,Arch,ct_rank-1>;
 
-    /**/      AxisTuple     ( Function, auto &&func, auto index ) : front_value( func( index ) ), next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) {}
-    /**/      AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
-    /**/      AxisTuple     ( Values, TI front_value, auto... next_values ) : front_value( front_value ), next_values( Values(), next_values... ) {}
+    HD           AxisTuple     ( Function, auto &&func, auto index ) : front_value( func( index ) ), next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) {}
+    HD           AxisTuple     ( Function, auto &&func ) : AxisTuple( Function(), func, Ct<int,0>() ) {}
+    HD           AxisTuple     ( Values, TI front_value, auto... next_values ) : front_value( front_value ), next_values( Values(), next_values... ) {}
 
-    void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
-    auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
-    T_Uu auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
-    auto      operator[]    ( TI u ) const { return ( &front_value )[ u ]; }
-    auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
-    auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
-    void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
-    int       size          () const { return ct_rank; }
+    HD void      for_each_index( auto &&func, auto ...indices_so_far ) const { for( TI i = 0; i < front_value; ++i ) next_values.for_each_index( func, indices_so_far..., i ); }
+    HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
+    T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
+    HD auto      operator[]    ( TI u ) const { return ( &front_value )[ u ]; }
+    HD auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
+    HD auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
+    HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
+    HD int       size          () const { return ct_rank; }
 
-    auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
+    HD auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
 
-    T_Uu auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
+    HD auto      without_axis  ( TI u ) const;
 
-    TI        front_value;
-    Next      next_values;
+    TI           front_value;
+    Next         next_values;
 };
 
 /// known ct_rank == 0
 template<class _TI,class _Arch>
 class AxisTuple<_TI,_Arch,0> {
 public:
-    SCInt     ct_rank       = 0;
-    using     Arch          = _Arch;
-    using     TI            = _TI;
+    SCInt        ct_rank       = 0;
+    using        Arch          = _Arch;
+    using        TI            = _TI;
 
-    /**/      AxisTuple     ( Function, auto &&/*func*/, auto /*index*/ ) {}
-    /**/      AxisTuple     ( Values ) {}
+    HD           AxisTuple     ( Function, auto &&/*func*/, auto /*index*/ ) {}
+    HD           AxisTuple     ( Values ) {}
 
-    void      for_each_index( auto &&func, auto ...indices_so_far ) const { func( indices_so_far... ); }
-    auto      apply_values  ( auto &&cb ) const { return cb(); }
-    auto      all_value     ( auto &&/*func*/ ) const { return Ct<bool,true>(); }
-    auto      has_value     ( auto &&/*func*/ ) const { return Ct<bool,false>(); }
-    auto      operator[]    ( TI /*u*/ ) const -> TI { ASSERT( false ); return 0; }
-    void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) os << "[]"; else os << " ]"; }
-    int       size          () const { return 0; }
+    HD void      for_each_index( auto &&func, auto ...indices_so_far ) const { func( indices_so_far... ); }
+    HD auto      apply_values  ( auto &&cb ) const { return cb(); }
+    HD auto      all_value     ( auto &&/*func*/ ) const { return Ct<bool,true>(); }
+    HD auto      has_value     ( auto &&/*func*/ ) const { return Ct<bool,false>(); }
+    HD auto      operator[]    ( TI /*u*/ ) const -> TI { ASSERT( false ); return 0; }
+    HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) os << "[]"; else os << " ]"; }
+    HD int       size          () const { return 0; }
 };
 
 } // namespace sdot

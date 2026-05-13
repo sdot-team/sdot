@@ -11,8 +11,9 @@ import os
 
 
 def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, device_type: str ):
-    # write src
-    path = compilation_directories.src_dir( dylib_name ) / "binding.cpp"
+    # .cu extension lets xmake route the file through nvcc (defines __CUDACC__)
+    ext = ".cu" if device_type.startswith( "cuda" ) else ".cpp"
+    path = compilation_directories.src_dir( dylib_name ) / f"binding{ ext }"
     try:
         old_code = path.read_text()
     except FileNotFoundError:
@@ -81,7 +82,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
                                       project_root / "src" / "cpp",
                                       compilation_directories.additional_includes_dir()
                                   ] + jax_include ) ),
-        "SDOT_XMAKE_CXXFLAGS"   : str.join( ",", [ "-fdiagnostics-absolute-paths", "-fno-strict-aliasing" ] ),
+        "SDOT_XMAKE_CXXFLAGS"   : str.join( ",", [ "-fno-strict-aliasing" ] ),
         "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, list( src_paths ) + [ nanobind_source ] ) ),
         "SDOT_XMAKE_DEFINES"    : "",
         "SDOT_XMAKE_TARGET"     : dylib_name,

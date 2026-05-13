@@ -31,16 +31,18 @@ public:
     HD TF&           operator[]         ( const auto &index ) const;
 
     // scalar value/reference for a rank 0 tensor
-    HD               operator TF        () const requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); return *data(); }
-    HD TensorView&   operator=          ( TF value ) requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); *data() = value; return *this; }
+    HD               operator TF        () const { ASSERT( rank() == 0 ); return *data(); }
+
+    HD void          operator=          ( TF value ) { ASSERT( rank() == 0 ); *data() = value; }
+
     HD TF&           item               () const;
 
     // data copy / transfer
     HD void          get_data_from      ( const auto &that, const auto &size_to_take );
     HD void          get_data_from      ( const auto &that );
-    void             fill_with          ( TF value );
+    HD void          fill_with          ( TF value );
 
-    void             spill_to           ( TensorView &that ); ///< copie data of this to that, and use data from that
+    HD void          spill_to           ( TensorView &that ); ///< copie data of this to that, and use data from that
 
     // strides
     HD Strides       strides            () const;
@@ -49,7 +51,7 @@ public:
     // shape
     HD PI            total_size         () const;
     HD auto          shape              ( auto d ) const { return _shape[ d ]; }
-    Shape            shape              () const { return _shape; }
+    HD Shape         shape              () const { return _shape; }
     HD auto          empty              () const;
     HD auto          size               () const;
 
@@ -72,25 +74,19 @@ public:
     // T_U auto      sum_along_axis_1() const -> Tensor<U,1,Arch>;
     void             apply_cpu_version  ( auto &&func ) const;
     HD auto          unsqueeze          ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
-    auto             squeeze            ( auto axis, PI index = 0 ) const;
+    HD auto          squeeze            ( auto axis, PI index = 0 ) const;
     HD auto          row                ( PI index ) const;
 
-    void             with_same_shape    ( auto &&func ) const;
+    void             with_same_shape    ( const auto &arch, auto &&func ) const;
 
 private:
-    static std::byte _sentinel;        ///< address used as invalid marker — never points to real data
+    static HD RawPtr sentinel           () { return RawPtr( nullptr ) + 1; }
 
     RawPtr           _raw_ptr;          ///<
     Strides          _strides;          ///< byte strides
     Shape            _shape;            ///<
-    Arch             _arch;             ///<
 };
 
 } // namespace sdot
-
-#ifdef __CUDACC__
-template<class T,int ct_rank>
-std::ostream &operator<<( std::ostream &os, const sdot::TensorView<T,ct_rank,sdot::Cuda> &p );
-#endif
 
 #include "TensorView.cxx" // IWYU pragma: export

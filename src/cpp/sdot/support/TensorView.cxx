@@ -14,30 +14,28 @@ namespace sdot {
 #define UTP template<class TF,class Shape,class Strides>
 #define DTP TensorView<TF,Shape,Strides>
 
-UTP std::byte DTP::_sentinel{};
-
-UTP DTP DTP::make_invalid( Shape shape, Strides strides ) {
-    return TensorView( reinterpret_cast<TF *>( &_sentinel ), shape, strides );
+UTP HD DTP DTP::make_invalid( Shape shape, Strides strides ) {
+    return TensorView( reinterpret_cast<TF *>( sentinel() ), shape, strides );
 }
 
-UTP DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawPtr>( data ) ), _strides( strides ), _shape( shape ) {
+UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawPtr>( data ) ), _strides( strides ), _shape( shape ) {
 }
 
-UTP void DTP::get_data_from( const auto &that, const auto &size_to_take ) {
+UTP HD void DTP::get_data_from( const auto &that, const auto &size_to_take ) {
     for_each_index( [&]( auto indices ) {
         operator()( indices ) = that( indices );
     }, 0, size_to_take );
 }
 
-UTP void DTP::get_data_from( const auto &that ) {
+UTP HD void DTP::get_data_from( const auto &that ) {
     if ( is_contiguous() )
         std::memcpy( data(), that.data(), sizeof( TF ) * total_size() );
     else
         get_data_from( that, shape() );
 }
 
-UTP void DTP::with_same_shape( auto &&func ) const {
-    _arch.template with_reservation<TF>( total_size(), [&]( TF *data ) {
+UTP HD void DTP::with_same_shape( const auto &arch, auto &&func ) const {
+    arch.template with_reservation<TF>( total_size(), [&]( TF *data ) {
         auto new_strides = contiguous_strides( _shape );
         using NewStrides = DECAYED_TYPE_OF( new_strides );
         TensorView<TF,Shape,NewStrides> res( data, _shape, new_strides );
@@ -45,30 +43,29 @@ UTP void DTP::with_same_shape( auto &&func ) const {
     } );
 }
 
-UTP void DTP::spill_to( TensorView &that ) {
+UTP HD void DTP::spill_to( TensorView &that ) {
     that.get_data_from( *this );
     _raw_ptr = that._raw_ptr;
-    _arch = that._arch;
 }
 
-UTP void DTP::fill_with( TF value ) {
+UTP HD void DTP::fill_with( TF value ) {
     for_each_index( [&]( auto ...indices ) {
         operator()( indices... ) = value;
     } );
 }
 
 
-UTP auto DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
+UTP HD auto DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
     if ( indices.size() )
         return operator()( indices[ Ct<int,0>() ], indices.without_index( Ct<int,0>() ), rem... );
     return operator()( rem... );
 }
 
-UTP auto DTP::operator()( const auto &index, auto ...rem ) const {
+UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
     return row( index )( rem... );
 }
 
-UTP TF &DTP::operator[]( const auto &index ) const {
+UTP HD TF &DTP::operator[]( const auto &index ) const {
     auto selection = operator()( index );
     return selection.item();
 }
@@ -90,27 +87,27 @@ UTP HD TF &DTP::item() const {
 //     return TensorView<TF,NewShape,NewStrides>( ptr, new_shape, new_strides );
 // }
 
-UTP Strides DTP::strides() const {
+UTP HD Strides DTP::strides() const {
     return _strides;
 }
 
-UTP SI DTP::stride( auto d ) const {
+UTP HD SI DTP::stride( auto d ) const {
     return _strides[ d ];
 }
 
-UTP PI DTP::total_size() const {
+UTP HD PI DTP::total_size() const {
     PI res = 1;
     for( PI d = 0; d < rank(); ++d )
         res *= size( d );
     return res;
 }
 
-UTP auto DTP::size() const {
+UTP HD auto DTP::size() const {
     ASSERT( rank() == 1 );
     return shape( Ct<int,0>() );
 }
 
-UTP bool DTP::surely_null() const {
+UTP HD bool DTP::surely_null() const {
     if ( is_invalid() )
         return true;
     // empty tensor (any dimension == 0)
@@ -125,38 +122,38 @@ UTP bool DTP::surely_null() const {
     return false;
 }
 
-UTP bool DTP::is_invalid() const {
-    return _raw_ptr == reinterpret_cast<const RawPtr>( &_sentinel );
+UTP HD bool DTP::is_invalid() const {
+    return _raw_ptr == sentinel();
 }
 
-UTP bool DTP::is_valid() const {
-    return _raw_ptr != reinterpret_cast<const RawPtr>( &_sentinel );
+UTP HD bool DTP::is_valid() const {
+    return _raw_ptr != sentinel();
 }
 
-UTP auto DTP::empty() const {
+UTP HD auto DTP::empty() const {
     return _shape.has_value( []( auto size ) { return size == Ct<int,0>(); } );
 }
 
-UTP auto DTP::rank() const {
+UTP HD auto DTP::rank() const {
     return  _shape.size();
 }
 
-UTP TF* DTP::data() const {
+UTP HD TF* DTP::data() const {
     return reinterpret_cast<TF *>( _raw_ptr );
 }
 
-UTP auto DTP::begin() const {
+UTP HD auto DTP::begin() const {
     // ASSERT( rank() == 1 );
     // return StrideIterator<TF>{ _raw_ptr, _strides[ 0 ], 0 };
     TODO;
 }
 
-UTP auto DTP::end() const {
+UTP HD auto DTP::end() const {
     // return StrideIterator<TF>{ _raw_ptr, _strides[ 0 ], _shape[ 0 ] };
     TODO;
 }
 
-UTP auto DTP::squeeze( auto axis, PI index ) const {
+UTP HD auto DTP::squeeze( auto axis, PI index ) const {
     auto new_shape   = _shape.without_axis( axis );
     auto new_strides = _strides.without_axis( axis );
     using NewShape   = DECAYED_TYPE_OF( new_shape );
@@ -165,11 +162,11 @@ UTP auto DTP::squeeze( auto axis, PI index ) const {
     return TensorView<TF,NewShape,NewStrides>( ptr, new_shape, new_strides );
 }
 
-UTP auto DTP::row( PI index ) const {
+UTP HD auto DTP::row( PI index ) const {
     return squeeze( Ct<int,0>(), index );
 }
 
-UTP auto DTP::unsqueeze( auto axis ) const {
+UTP HD auto DTP::unsqueeze( auto axis ) const {
     // Append a dimension of size 1.
     // The stride for the new axis is sizeof(T): matches contiguous layout when the source is contiguous.
     // For a size-1 axis the stride value is irrelevant for correctness, but we set it consistently.
@@ -178,7 +175,7 @@ UTP auto DTP::unsqueeze( auto axis ) const {
     TODO;
 }
 
-UTP bool DTP::is_contiguous() const {
+UTP HD bool DTP::is_contiguous() const {
     // Check that strides match the standard row-major (C-order) contiguous layout.
     SI expected = sizeof( TF );
     for ( int i = int( rank() ) - 1; i >= 0; --i ) {
@@ -217,7 +214,7 @@ UTP bool DTP::is_contiguous() const {
 //     }
 // }
 
-UTP void DTP::for_each_index( auto &&func ) const {
+UTP HD void DTP::for_each_index( auto &&func ) const {
     _shape.for_each_index( func );
 }
 

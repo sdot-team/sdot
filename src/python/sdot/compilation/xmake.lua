@@ -33,7 +33,7 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     -- debug / release changes
     if is_mode("release") then
         add_defines("NB_COMPACT_ASSERTIONS")
-        add_cxxflags("-Wnan-infinity-disabled")
+        -- add_cxxflags("-Wnan-infinity-disabled")
         add_cxxflags("-march=native")
         add_cxxflags("-ffast-math")
         add_cxxflags("-O3")
@@ -46,7 +46,9 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     if os.getenv("SDOT_XMAKE_NEEDS_CUDA") == "1" then
         add_rules("cuda.build")
         add_cuflags("-diag-suppress 1160", {force = true})
-        add_cuflags("--expt-relaxed-constexpr", "--use_fast_math", "--extended-lambda")
+        add_cuflags("--expt-relaxed-constexpr", "--use_fast_math", "--extended-lambda", "-extended-lambda")
+    else
+        add_cxxflags("-fdiagnostics-absolute-paths")
     end
 
     -- MacOS specificities
