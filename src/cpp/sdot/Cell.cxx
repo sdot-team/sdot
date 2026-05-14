@@ -1,6 +1,5 @@
 #pragma once
 
-#include "support/RecursiveMapOfUniqueSortedIndices.h"
 #include "support/Matrix.h"
 #include "support/index.h"
 
@@ -70,7 +69,6 @@ UTP void DTP::init_as_aligned_simplex( TI cut_id ) {
 
 UTP void DTP::init_as_unbounded() {
     init_as_aligned_simplex( CellBoundary::INFINITE );
-    nb_index_corrections = 2;
 }
 
 UTP typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
@@ -141,7 +139,7 @@ UTP void DTP::for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI s
     }
 }
 
-UTP void DTP::for_each_simplex( auto &&func ) {
+UTP void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch> &item_map, auto &&func ) {
     constexpr int ct_simplex = ct_dim >= 0 ? ct_dim + 1 : -1;
     if ( nb_vertices == 0 )
         return;
@@ -159,12 +157,10 @@ UTP void DTP::for_each_simplex( auto &&func ) {
     }
 
     // make a list
-    RecursiveMapOfUniqueSortedIndices<ct_dim - 1,TI,Arch> item_map( map_items, nb_map_items, dim - 1, nb_cuts );
-    item_map.reserve( nb_vertices );
-
     Vector<TI,Arch,ct_simplex> simplex( Size(), dim + 1 );
+    item_map.reserve( nb_vertices );
     for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        Vector<TI,Arch,ct_dim> cut_indices( vertex_indices.row( num_vertex ) );
+        Vector<TI,Arch,ct_dim> cut_indices( vertex_indices( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
@@ -259,12 +255,12 @@ UTP void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP TF DTP::measure() {
-    const TI nb_vertices = nb_vertices();
+UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch> &item_map ) {
+    const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
     if ( ! is_fully_closed() )
-        return std::numeric_limits<TF>::infinity();
+        return std::numeric_limits<TF>::max();
 
     // 2D: shoelace formula
     if ( dim == 2 ) {
@@ -280,8 +276,7 @@ UTP TF DTP::measure() {
     // nD: fan triangulation
     Matrix<TF,Arch,ct_dim> M( Size(), dim );
     TF sum = 0;
-
-    for_each_simplex( [&]( const auto &simplex ) {
+    for_each_simplex( item_map, [&]( const auto &simplex ) {
         const TI v0 = simplex[ 0 ];
         auto M = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( TI row, TI col ) {
             return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
@@ -363,7 +358,7 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         check_if_fully_closed();
 }
 
-UTP PI DTP::scalar_products( const auto &cut_dir, auto cut_dot ) {
+UTP PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
     PI nb_out = 0;
     for ( PI v = 0; v < nb_vertices; ++v ) {
         TF sp = vertex_positions( v, 0 ) * cut_dir[ 0 ];
@@ -401,68 +396,68 @@ UTP void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
 }
 
 UTP void DTP::process_edges( PI nc ) {
-    MapOfUniqueSortedIndices<ctd_sub(ct_dim,2),TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
-    face_map.reserve( nb_vertices() + nb_edges );
+    // MapOfUniqueSortedIndices<ctd_sub(ct_dim,2),TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
+    // face_map.reserve( nb_vertices() + nb_edges );
 
-    // store exterior edge indices in index_corrections,
-    // create the new vertices,
-    // create the new edges
-    nb_index_corrections = 0;
-    for ( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
-        const PI n0 = edge_indices( num_edge, 0 );
-        const PI n1 = edge_indices( num_edge, 1 );
-        const TF s0 = sps[ n0 ];
-        const TF s1 = sps[ n1 ];
-        const bool e0 = s0 > 0;
-        const bool e1 = s1 > 0;
-        if ( e0 == e1 ) {
-            if ( e0 )
-                index_corrections[ nb_index_corrections++ ] = num_edge;
-            continue;
-        }
+    // // store exterior edge indices in index_corrections,
+    // // create the new vertices,
+    // // create the new edges
+    // nb_index_corrections = 0;
+    // for ( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
+    //     const PI n0 = edge_indices( num_edge, 0 );
+    //     const PI n1 = edge_indices( num_edge, 1 );
+    //     const TF s0 = sps[ n0 ];
+    //     const TF s1 = sps[ n1 ];
+    //     const bool e0 = s0 > 0;
+    //     const bool e1 = s1 > 0;
+    //     if ( e0 == e1 ) {
+    //         if ( e0 )
+    //             index_corrections[ nb_index_corrections++ ] = num_edge;
+    //         continue;
+    //     }
 
-        // add the new vertex
-        const TF sc = s0 / ( s1 - s0 );
-        const PI nn = nb_vertices++;
-        for ( PI d = 0; d < dim; ++d ) {
-            const TF p0 = vertex_positions( n0, d );
-            const TF p1 = vertex_positions( n1, d );
-            vertex_positions( nn, d ) = p0 - sc * ( p1 - p0 );
-        }
-        for ( PI d = 0; d < dim - 1; ++d )
-            vertex_indices( nn, d ) = edge_indices( num_edge, 2 + d );
-        vertex_indices( nn, dim - 1 ) = nc;
+    //     // add the new vertex
+    //     const TF sc = s0 / ( s1 - s0 );
+    //     const PI nn = nb_vertices++;
+    //     for ( PI d = 0; d < dim; ++d ) {
+    //         const TF p0 = vertex_positions( n0, d );
+    //         const TF p1 = vertex_positions( n1, d );
+    //         vertex_positions( nn, d ) = p0 - sc * ( p1 - p0 );
+    //     }
+    //     for ( PI d = 0; d < dim - 1; ++d )
+    //         vertex_indices( nn, d ) = edge_indices( num_edge, 2 + d );
+    //     vertex_indices( nn, dim - 1 ) = nc;
 
-        // update the edge
-        edge_indices( num_edge, ! e0 ) = nn;
+    //     // update the edge
+    //     edge_indices( num_edge, ! e0 ) = nn;
 
-        // register the face => vertex correspondance, or create the new edge if already done
-        for ( PI ind_to_remove = 0; ind_to_remove < dim - 1; ++ind_to_remove ) {
-            auto face_inds = Vector<PI,Arch,ctd_sub(ct_dim,2)>::with_func( dim - 2, [&]( PI i ) {
-                return edge_indices( num_edge, 2 + i + ( i >= ind_to_remove ) );
-            } );
+    //     // register the face => vertex correspondance, or create the new edge if already done
+    //     for ( PI ind_to_remove = 0; ind_to_remove < dim - 1; ++ind_to_remove ) {
+    //         auto face_inds = Vector<PI,Arch,ctd_sub(ct_dim,2)>::with_func( dim - 2, [&]( PI i ) {
+    //             return edge_indices( num_edge, 2 + i + ( i >= ind_to_remove ) );
+    //         } );
 
-            // first time we see the face -> store vertex index
-            auto face_corr = face_map[ face_inds ];
-            if ( ! face_corr ) {
-                face_corr = nn;
-                continue;
-            }
+    //         // first time we see the face -> store vertex index
+    //         auto face_corr = face_map[ face_inds ];
+    //         if ( ! face_corr ) {
+    //             face_corr = nn;
+    //             continue;
+    //         }
 
-            // else, create the new edge
-            const PI ne = nb_index_corrections ? nb_index_corrections-- : nb_edges++;
-            edge_indices( ne, 0 ) = face_corr;
-            edge_indices( ne, 1 ) = nn;
-            for ( PI d = 0; d < dim - 2; ++d )
-                edge_indices( ne, 2 + d ) = face_inds[ d ];
-            edge_indices( ne, 2 + dim - 2 ) = nc;
-        }
-    }
+    //         // else, create the new edge
+    //         const PI ne = nb_index_corrections ? nb_index_corrections-- : nb_edges++;
+    //         edge_indices( ne, 0 ) = face_corr;
+    //         edge_indices( ne, 1 ) = nn;
+    //         for ( PI d = 0; d < dim - 2; ++d )
+    //             edge_indices( ne, 2 + d ) = face_inds[ d ];
+    //         edge_indices( ne, 2 + dim - 2 ) = nc;
+    //     }
+    // }
 
-    // in `index_corrections`, we have the edges that have to be removed (sorted indices)
-    P( index_corrections );
-    exit( 0 );
-    //
+    // // in `index_corrections`, we have the edges that have to be removed (sorted indices)
+    // P( index_corrections );
+    // exit( 0 );
+    // //
 }
 
 UTP void DTP::remove_unused_vertices( PI nb_vertices_orig ) {
@@ -525,160 +520,160 @@ UTP void DTP::apply_cut_corr() {
 }
 
 UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) {
-    const SI old_nb_vertices = nb_vertices;
+    // const SI old_nb_vertices = nb_vertices;
 
-    // helper to copy vertex_positions and cut_planes/cut_ids together
-    auto copy_vertex_data = [&]( PI dst, PI src ) {
-        for ( PI d = 0; d < 2; ++d )
-            vertex_positions( dst, d ) = vertex_positions( src, d );
-    };
-    auto copy_cut_data = [&]( PI dst, PI src ) {
-        for ( PI d = 0; d < 3; ++d )
-            cut_planes( dst, d ) = cut_planes( src, d );
-        cut_ids( dst ) = cut_ids( src );
-    };
-    auto copy_vertex_and_cut_data = [&]( PI dst, PI src ) {
-        copy_vertex_data( dst, src );
-        copy_cut_data( dst, src );
-    };
+    // // helper to copy vertex_positions and cut_planes/cut_ids together
+    // auto copy_vertex_data = [&]( PI dst, PI src ) {
+    //     for ( PI d = 0; d < 2; ++d )
+    //         vertex_positions( dst, d ) = vertex_positions( src, d );
+    // };
+    // auto copy_cut_data = [&]( PI dst, PI src ) {
+    //     for ( PI d = 0; d < 3; ++d )
+    //         cut_planes( dst, d ) = cut_planes( src, d );
+    //     cut_ids( dst ) = cut_ids( src );
+    // };
+    // auto copy_vertex_and_cut_data = [&]( PI dst, PI src ) {
+    //     copy_vertex_data( dst, src );
+    //     copy_cut_data( dst, src );
+    // };
 
-    auto ext = [&]( PI num_vertex ) {
-        return sps[ num_vertex ] > 0;
-    };
+    // auto ext = [&]( PI num_vertex ) {
+    //     return sps[ num_vertex ] > 0;
+    // };
 
-    // need to add a vertex
-    if ( nb_out == 1 ) {
-        const SI n1 = index( sps, []( TF sp ) { return sp > 0; } );
-        const SI n0 = ( n1 + old_nb_vertices - 1 ) % old_nb_vertices;
-        const SI n2 = ( n1 + 1 ) % old_nb_vertices;
+    // // need to add a vertex
+    // if ( nb_out == 1 ) {
+    //     const SI n1 = index( sps, []( TF sp ) { return sp > 0; } );
+    //     const SI n0 = ( n1 + old_nb_vertices - 1 ) % old_nb_vertices;
+    //     const SI n2 = ( n1 + 1 ) % old_nb_vertices;
 
-        // compute new vertex positions
-        const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ];
-        const TF d01 = sp0 / ( sp1 - sp0 );
-        const TF d12 = sp1 / ( sp2 - sp1 );
-        TF p01[ 2 ], p12[ 2 ];
-        for ( PI d = 0; d < 2; ++d ) {
-            const TF p0 = vertex_positions( n0, d );
-            const TF p1 = vertex_positions( n1, d );
-            const TF p2 = vertex_positions( n2, d );
-            p01[ d ] = p0 - d01 * ( p1 - p0 );
-            p12[ d ] = p1 - d12 * ( p2 - p1 );
-        }
+    //     // compute new vertex positions
+    //     const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ];
+    //     const TF d01 = sp0 / ( sp1 - sp0 );
+    //     const TF d12 = sp1 / ( sp2 - sp1 );
+    //     TF p01[ 2 ], p12[ 2 ];
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         const TF p0 = vertex_positions( n0, d );
+    //         const TF p1 = vertex_positions( n1, d );
+    //         const TF p2 = vertex_positions( n2, d );
+    //         p01[ d ] = p0 - d01 * ( p1 - p0 );
+    //         p12[ d ] = p1 - d12 * ( p2 - p1 );
+    //     }
 
-        // get room for the new point and the new cut
-        nb_vertices = old_nb_vertices + 1;
-        nb_edges = old_nb_vertices + 1;
-        nb_cuts = old_nb_vertices + 1;
-        for( SI nn = old_nb_vertices; --nn > n1; )
-            copy_vertex_and_cut_data( nn + 1, nn );
-        copy_cut_data( n1 + 1, n1 );
+    //     // get room for the new point and the new cut
+    //     nb_vertices = old_nb_vertices + 1;
+    //     nb_edges = old_nb_vertices + 1;
+    //     nb_cuts = old_nb_vertices + 1;
+    //     for( SI nn = old_nb_vertices; --nn > n1; )
+    //         copy_vertex_and_cut_data( nn + 1, nn );
+    //     copy_cut_data( n1 + 1, n1 );
 
-        // set data for the new point and the new cut
-        for ( PI d = 0; d < 2; ++d ) {
-            vertex_positions( n1 + 0, d ) = p01[ d ];
-            vertex_positions( n1 + 1, d ) = p12[ d ];
-            cut_planes( n1, d ) = cut_dir[ d ];
-        }
-        cut_planes( n1, 2 ) = cut_dot;
-        cut_ids[ n1 ] = cut_id;
-        return;
-    }
+    //     // set data for the new point and the new cut
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         vertex_positions( n1 + 0, d ) = p01[ d ];
+    //         vertex_positions( n1 + 1, d ) = p12[ d ];
+    //         cut_planes( n1, d ) = cut_dir[ d ];
+    //     }
+    //     cut_planes( n1, 2 ) = cut_dot;
+    //     cut_ids[ n1 ] = cut_id;
+    //     return;
+    // }
 
-    // we stay on the same number of vertices
-    if ( nb_out == 2 ) {
-        const SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
-        const SI n1 = ( n0 + 1 ) % old_nb_vertices;
-        const SI n2 = ( n0 + 2 ) % old_nb_vertices;
-        const SI n3 = ( n0 + 3 ) % old_nb_vertices;
+    // // we stay on the same number of vertices
+    // if ( nb_out == 2 ) {
+    //     const SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
+    //     const SI n1 = ( n0 + 1 ) % old_nb_vertices;
+    //     const SI n2 = ( n0 + 2 ) % old_nb_vertices;
+    //     const SI n3 = ( n0 + 3 ) % old_nb_vertices;
 
-        // compute new vertex positions
-        const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
-        const TF d01 = sp0 / ( sp1 - sp0 );
-        const TF d23 = sp2 / ( sp3 - sp2 );
-        TF p01[ 2 ], p23[ 2 ];
-        for ( PI d = 0; d < 2; ++d ) {
-            const TF p0 = vertex_positions( n0, d );
-            const TF p1 = vertex_positions( n1, d );
-            const TF p2 = vertex_positions( n2, d );
-            const TF p3 = vertex_positions( n3, d );
-            p01[ d ] = p0 - d01 * ( p1 - p0 );
-            p23[ d ] = p2 - d23 * ( p3 - p2 );
-        }
+    //     // compute new vertex positions
+    //     const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
+    //     const TF d01 = sp0 / ( sp1 - sp0 );
+    //     const TF d23 = sp2 / ( sp3 - sp2 );
+    //     TF p01[ 2 ], p23[ 2 ];
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         const TF p0 = vertex_positions( n0, d );
+    //         const TF p1 = vertex_positions( n1, d );
+    //         const TF p2 = vertex_positions( n2, d );
+    //         const TF p3 = vertex_positions( n3, d );
+    //         p01[ d ] = p0 - d01 * ( p1 - p0 );
+    //         p23[ d ] = p2 - d23 * ( p3 - p2 );
+    //     }
 
-        // set data for the new point and the new cut
-        for ( PI d = 0; d < 2; ++d ) {
-            vertex_positions( n1, d ) = p01[ d ];
-            vertex_positions( n2, d ) = p23[ d ];
-            cut_planes( n1, d ) = cut_dir[ d ];
-        }
-        cut_planes( n1, 2 ) = cut_dot;
-        cut_ids[ n1 ] = cut_id;
-        return;
-    }
+    //     // set data for the new point and the new cut
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         vertex_positions( n1, d ) = p01[ d ];
+    //         vertex_positions( n2, d ) = p23[ d ];
+    //         cut_planes( n1, d ) = cut_dir[ d ];
+    //     }
+    //     cut_planes( n1, 2 ) = cut_dot;
+    //     cut_ids[ n1 ] = cut_id;
+    //     return;
+    // }
 
-    SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
-    SI n1 = ( n0 + 1 ) % old_nb_vertices;
-    SI n2 = index( [&]( SI n2 ) { return ext( n2 ) && ! ext( ( n2 + 1 ) % old_nb_vertices ); } );
-    SI n3 = ( n2 + 1 ) % old_nb_vertices;
+    // SI n0 = index( [&]( SI n0 ) { return ! ext( n0 ) && ext( ( n0 + 1 ) % old_nb_vertices ); } );
+    // SI n1 = ( n0 + 1 ) % old_nb_vertices;
+    // SI n2 = index( [&]( SI n2 ) { return ext( n2 ) && ! ext( ( n2 + 1 ) % old_nb_vertices ); } );
+    // SI n3 = ( n2 + 1 ) % old_nb_vertices;
 
-    // compute new vertex positions
-    const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
-    const TF d01 = sp0 / ( sp1 - sp0 );
-    const TF d23 = sp2 / ( sp3 - sp2 );
-    TF p01[ 2 ], p23[ 2 ];
-    for ( PI d = 0; d < 2; ++d ) {
-        const TF p0 = vertex_positions( n0, d );
-        const TF p1 = vertex_positions( n1, d );
-        const TF p2 = vertex_positions( n2, d );
-        const TF p3 = vertex_positions( n3, d );
-        p01[ d ] = p0 - d01 * ( p1 - p0 );
-        p23[ d ] = p2 - d23 * ( p3 - p2 );
-    }
+    // // compute new vertex positions
+    // const TF sp0 = sps[ n0 ], sp1 = sps[ n1 ], sp2 = sps[ n2 ], sp3 = sps[ n3 ];
+    // const TF d01 = sp0 / ( sp1 - sp0 );
+    // const TF d23 = sp2 / ( sp3 - sp2 );
+    // TF p01[ 2 ], p23[ 2 ];
+    // for ( PI d = 0; d < 2; ++d ) {
+    //     const TF p0 = vertex_positions( n0, d );
+    //     const TF p1 = vertex_positions( n1, d );
+    //     const TF p2 = vertex_positions( n2, d );
+    //     const TF p3 = vertex_positions( n3, d );
+    //     p01[ d ] = p0 - d01 * ( p1 - p0 );
+    //     p23[ d ] = p2 - d23 * ( p3 - p2 );
+    // }
 
-    // remove intermediate points
-    if ( n1 < n2 ) {
-        const PI nb_to_remove = n2 - ( n1 + 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
-        nb_vertices = nb_new_vertices;
-        nb_edges = nb_new_vertices;
-        nb_cuts = nb_new_vertices;
+    // // remove intermediate points
+    // if ( n1 < n2 ) {
+    //     const PI nb_to_remove = n2 - ( n1 + 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
+    //     nb_vertices = nb_new_vertices;
+    //     nb_edges = nb_new_vertices;
+    //     nb_cuts = nb_new_vertices;
 
-        copy_cut_data( n2 - nb_to_remove, n2 );
-        for( SI nn = n2 + 1; nn < old_nb_vertices; ++nn )
-            copy_vertex_and_cut_data( nn - nb_to_remove, nn );
+    //     copy_cut_data( n2 - nb_to_remove, n2 );
+    //     for( SI nn = n2 + 1; nn < old_nb_vertices; ++nn )
+    //         copy_vertex_and_cut_data( nn - nb_to_remove, nn );
 
-        // set data for the new point and the new cut
-        n2 = n1 + 1;
-        for ( PI d = 0; d < 2; ++d ) {
-            vertex_positions( n1, d ) = p01[ d ];
-            vertex_positions( n2, d ) = p23[ d ];
-            cut_planes( n1, d ) = cut_dir[ d ];
-        }
-        cut_planes( n1, 2 ) = cut_dot;
-        cut_ids[ n1 ] = cut_id;
-    } else {
-        const PI nb_to_remove = n2 + ( old_nb_vertices - n1 - 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
-        nb_vertices = nb_new_vertices;
-        nb_edges = nb_new_vertices;
-        nb_cuts = nb_new_vertices;
+    //     // set data for the new point and the new cut
+    //     n2 = n1 + 1;
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         vertex_positions( n1, d ) = p01[ d ];
+    //         vertex_positions( n2, d ) = p23[ d ];
+    //         cut_planes( n1, d ) = cut_dir[ d ];
+    //     }
+    //     cut_planes( n1, 2 ) = cut_dot;
+    //     cut_ids[ n1 ] = cut_id;
+    // } else {
+    //     const PI nb_to_remove = n2 + ( old_nb_vertices - n1 - 1 ), nb_new_vertices = old_nb_vertices - nb_to_remove;
+    //     nb_vertices = nb_new_vertices;
+    //     nb_edges = nb_new_vertices;
+    //     nb_cuts = nb_new_vertices;
 
-        if ( n2 ) {
-            for( SI nn = n2; nn <= n1; ++nn )
-                copy_vertex_and_cut_data( nn - n2, nn );
-            n0 -= n2;
-            n1 -= n2;
-            n2 = 0;
-            n3 = 1;
-        }
+    //     if ( n2 ) {
+    //         for( SI nn = n2; nn <= n1; ++nn )
+    //             copy_vertex_and_cut_data( nn - n2, nn );
+    //         n0 -= n2;
+    //         n1 -= n2;
+    //         n2 = 0;
+    //         n3 = 1;
+    //     }
 
-        // set data for the new point and the new cut
-        for ( PI d = 0; d < 2; ++d ) {
-            vertex_positions( n1, d ) = p01[ d ];
-            vertex_positions( n2, d ) = p23[ d ];
-            cut_planes( n1, d ) = cut_dir[ d ];
-        }
-        cut_planes( n1, 2 ) = cut_dot;
-        cut_ids[ n1 ] = cut_id;
-    }
+    //     // set data for the new point and the new cut
+    //     for ( PI d = 0; d < 2; ++d ) {
+    //         vertex_positions( n1, d ) = p01[ d ];
+    //         vertex_positions( n2, d ) = p23[ d ];
+    //         cut_planes( n1, d ) = cut_dir[ d ];
+    //     }
+    //     cut_planes( n1, 2 ) = cut_dot;
+    //     cut_ids[ n1 ] = cut_id;
+    // }
 }
 
 UTP void DTP::get_data_from( const auto &src_cell ) {

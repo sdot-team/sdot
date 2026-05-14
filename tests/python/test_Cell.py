@@ -72,8 +72,7 @@ def test_cell_2D_basic():
     info( c.cut_planes )
     info( c.cut_ids )
 
-    info( c.index_corrections )
-    # info( c.measure )
+    info( c.measure )
     # info( c.measure )
     # ic( c.faces )
 

@@ -143,14 +143,21 @@ UTP HD TF* DTP::data() const {
 }
 
 UTP HD auto DTP::begin() const {
-    // ASSERT( rank() == 1 );
-    // return StrideIterator<TF>{ _raw_ptr, _strides[ 0 ], 0 };
-    TODO;
+    if constexpr ( ct_rank == 1 || ct_rank == 0 ) {
+        return data();
+    } else {
+        TODO;
+    }
 }
 
 UTP HD auto DTP::end() const {
-    // return StrideIterator<TF>{ _raw_ptr, _strides[ 0 ], _shape[ 0 ] };
-    TODO;
+    if constexpr ( ct_rank == 0 ) {
+        return data() + 1;
+    } else if constexpr ( ct_rank == 1 ) {
+        return data() + size();
+    } else {
+        TODO;
+    }
 }
 
 UTP HD auto DTP::squeeze( auto axis, PI index ) const {

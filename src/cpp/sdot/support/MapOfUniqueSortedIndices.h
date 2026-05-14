@@ -61,7 +61,6 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
 
     /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
-        P( offset_in_map_items, nb_map_items() );
         next_offset = 1;
         offset = 0;
     }

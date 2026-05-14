@@ -15,11 +15,11 @@ class Cell:
     """
 
     # workspaces
-    index_corrections : Workspace( Tensor( "nb_index_corrections[]", dtype = int ) )
-    used_flags        : Workspace( Tensor( "nb_used_flags[]", dtype = int ) )
-    map_items         : Workspace( Tensor( "nb_map_items[]", dtype = int ) )
-    links             : Workspace( Tensor( "nb_links[]", dtype = int ) )
-    sps               : Workspace( Tensor( "nb_vertices[]" ) )
+    # index_corrections : Workspace( Tensor( "nb_index_corrections[]", dtype = int ) )
+    # used_flags        : Workspace( Tensor( "nb_used_flags[]", dtype = int ) )
+    # map_items         : Workspace( Tensor( "nb_map_items[]", dtype = int ) )
+    # links             : Workspace( Tensor( "nb_links[]", dtype = int ) )
+    # sps               : Workspace( Tensor( "nb_vertices[]" ) )
 
     # data
     vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_axes = [ "dim" ] )
@@ -168,7 +168,13 @@ class Cell:
 
     @property
     def measure( self ) -> any:
-        return cpp_binding( "measure", "sdot/cell/measure.h" )( Return( driver.empty( [] ) ), self )
+        return driver.call(
+            "arch.run_single( [p] HD () mutable { RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts ); p.output = p.cell.measure( item_map ); } );",
+            "", # "arch.run_single( [p] HD () mutable { p.output = p.cell.measure(); } );",
+            map_items = Workspace( Tensor( "nb_map_items[]", dtype = int ), max_of_nb_map_items = 256 ),
+            output = Return( Tensor() ),
+            cell = self
+        )
 
     def cut( self, cut_dir_or_plane, cut_off = None, cut_id = BOUNDARY ):
         cut_plane = driver.t1( cut_dir_or_plane )
