@@ -101,6 +101,8 @@ class Cell:
         assert frame is not None
         dim = frame.shape[ -1 ]
 
+        info( batch_sizes )
+
         return cast( cls, driver.call(
             "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } );",
             "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } );",

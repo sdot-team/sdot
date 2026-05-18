@@ -41,10 +41,9 @@ class CallArg_Tensor( CallArg ):
                 orig = python_class.shape
             shape = [ AxisExpr( s ) for s in list( orig ) ]
 
-        if dtype is None:
-            dtype = float
-        if not isinstance( dtype, Dtype ):
-            dtype = Dtype.factory( dtype )
+        if dtype is None and python_value is not None:
+            dtype = Dtype.factory( python_value.dtype )
+        assert isinstance( dtype, Dtype )
 
         res = CallArg_Tensor()
 
@@ -195,8 +194,8 @@ class CallArg_Tensor( CallArg ):
             lst = names[ : -1 ] + [ name ]
             template_args.add( f"ct_{ '_'.join( lst ) }", "TI", 4 )
 
-        if ( self.dtype is float ) or ( self.dtype is None ):
-            template_args.add( self.dtype_name(), "typename", 0 )
+        if self.dtype.floating_point and self.dtype.size is None:
+            template_args.add( "TF", "typename", 0 )
 
         template_args.add( "TI", "typename", 1 ) # always needed
 
@@ -270,7 +269,7 @@ class CallArg_Tensor( CallArg ):
             return f"DynamicAxis<TI,{ shape_t },{ strides_t }>"
         return f"TensorView<{ self.dtype.cpp_name },{ shape_t },{ strides_t }>"
 
-    def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
+    def get_axes( self, axes: dict, ct_axes: dict[ str, int ] ):
         for s in self.shape:
             s.get_axes( axes )
 

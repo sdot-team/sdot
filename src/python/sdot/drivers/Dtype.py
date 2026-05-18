@@ -1,13 +1,9 @@
-
-from numpy import sign
-
-
 class Dtype:
     """
     """
 
-    def __init__( self, floating_point: bool, size: int, signed = True, driver_version = None ) -> None:
-        self.driver_version = driver_version # will be update during driver instantiation
+    def __init__( self, floating_point: bool = True, size: int | None = None, signed = True, driver_version = None ) -> None:
+        self._driver_version = driver_version # updated during driver instantiation is some cases
         self.floating_point = floating_point
         self.signed = signed
         self.size = size
@@ -17,49 +13,77 @@ class Dtype:
         if isinstance( value, Dtype ):
             return Dtype( value.floating_point, value.size, value.signed, value.driver_version )
 
-        if value is float:
-            from .driver import driver
-            return driver.ftype
+        if value is float or value is None:
+            return Dtype.fp()
 
         if value is int:
-            from .driver import driver
-            return driver.itype
+            return Dtype.si()
 
         # -------------- str --------------
-        value = str( value ).lower()
+        sv = str( value ).lower()
 
-        if value == "int":
-            return Dtype.si( size = 64 )
+        if sv == "int":
+            return Dtype.si()
 
-        if value == "float":
+        if sv.startswith( "fp" ):
+            return Dtype.fp( size = int( sv[ 2: ] ) )
+
+        if sv.startswith( "float" ):
+            return Dtype.fp( size = int( sv[ 5: ] ) )
+
+        if sv.startswith( "si" ):
+            return Dtype.si( size = int( sv[ 2: ] ) )
+
+        if sv.startswith( "int" ):
+            return Dtype.si( size = int( sv[ 3: ] ) )
+
+        if sv.startswith( "pi" ):
+            return Dtype.pi( size = int( sv[ 2: ] ) )
+
+        if sv.startswith( "unsigned" ):
+            return Dtype.pi( size = int( sv[ 8: ] ) )
+
+        # -------------- numpy --------------
+        import numpy
+        if value is numpy.float16:
+            return Dtype.fp( size = 16 )
+        if value is numpy.float32:
             return Dtype.fp( size = 32 )
-
-        if value == "double":
+        if value is numpy.float64:
             return Dtype.fp( size = 64 )
 
-        if value.startswith( "fp" ):
-            return Dtype.fp( size = int( value[ 2: ] ) )
+        if value is numpy.uint8:
+            return Dtype.pi( size = 8 )
+        if value is numpy.uint16:
+            return Dtype.pi( size = 16 )
+        if value is numpy.uint32:
+            return Dtype.pi( size = 32 )
+        if value is numpy.uint64:
+            return Dtype.pi( size = 64 )
 
-        if value.startswith( "pi" ):
-            return Dtype.pi( size = int( value[ 2: ] ) )
-
-        if value.startswith( "si" ):
-            return Dtype.si( size = int( value[ 2: ] ) )
+        if value is numpy.int8:
+            return Dtype.si( size = 8 )
+        if value is numpy.int16:
+            return Dtype.si( size = 16 )
+        if value is numpy.int32:
+            return Dtype.si( size = 32 )
+        if value is numpy.int64:
+            return Dtype.si( size = 64 )
 
         raise ValueError( f"unsupported type name: { str( value ) }" )
 
     @staticmethod
-    def fp( size: int ):
+    def fp( size: int | None = None ):
         """ make a floating point type """
         return Dtype( floating_point = True, size = size )
 
     @staticmethod
-    def si( size: int ):
+    def si( size: int | None = None ):
         """ make a signed integer type """
         return Dtype( floating_point = False, size = size, signed = True )
 
     @staticmethod
-    def pi( size: int ):
+    def pi( size: int | None = None ):
         """ make a signed integer type """
         return Dtype( floating_point = False, size = size, signed = False )
 
@@ -74,8 +98,20 @@ class Dtype:
     @property
     def cpp_name( self ):
         if self.floating_point:
+            if self.size is None:
+                return "TF"
             return f"FP{ self.size }"
+
+        if self.size is None:
+            return "TI"
         return f"SI{ self.size }"
+
+    @property
+    def driver_version( self ):
+        if self._driver_version:
+            return self._driver_version
+        from .driver import driver
+        return driver.driver_dtype_version( self.floating_point, self.signed, self.size )
 
     def __eq__( self, value, / ) -> bool:
         if not isinstance( value, Dtype ):
@@ -87,8 +123,9 @@ class Dtype:
         return not self.__eq__( value )
 
     def jax_ffi_tensor_type( self ) -> str:
+        from .driver import driver
         if self.floating_point:
-            return f"xla::ffi::F{ self.size }"
+            return f"xla::ffi::F{ self.size or driver.ftype.size }"
         if self.signed:
-            return f"xla::ffi::S{ self.size }"
-        return f"xla::ffi::U{ self.size }"
+            return f"xla::ffi::S{ self.size or driver.itype.size }"
+        return f"xla::ffi::U{ self.size or driver.itype.size }"

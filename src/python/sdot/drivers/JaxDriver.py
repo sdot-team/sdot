@@ -36,31 +36,52 @@ class JaxDriver:
         self.ftype  = ftype
         self.itype  = itype
 
-        # fill device_type for ftype
-        assert ftype.floating_point == True
-        match ftype.size:
-            case 32:
-                ftype.driver_version = jnp.float32
-            case 64:
-                # jax.config.update( "jax_enable_x64", True )
-                ftype.driver_version = jnp.float64
-            case _:
-                raise ValueError( f"unsupported ftype size: { ftype.size }" )
-
-        # fill device_type for itype
+        # fill device_type for ftype and itype
+        itype._driver_version = self.driver_dtype_version( itype.floating_point, itype.signed, itype.size )
+        ftype._driver_version = self.driver_dtype_version( ftype.floating_point, ftype.signed, ftype.size )
         assert itype.floating_point == False
-        match itype.size:
-            case 32:
-                itype.driver_version = jnp.int32
-            case 64:
-                jax.config.update( "jax_enable_x64", True )
-                itype.driver_version = jnp.int64
-            case _:
-                raise ValueError( f"unsupported itype size: { itype.size }" )
+        assert ftype.floating_point == True
+        if itype.size == 64:
+            jax.config.update( "jax_enable_x64", True )
 
         #
         device.driver_version = device.driver_version_for_jax( jax.devices )
 
+    def driver_dtype_version( self, floating_point, signed, size ):
+        if floating_point:
+            if size == 16:
+                return jnp.float16
+            if size == 32:
+                return jnp.float32
+            if size == 64:
+                return jnp.float64
+            if size is None:
+                return self.ftype._driver_version
+            raise ValueError( f"unsupported ftype size: { size }" )
+
+        if signed:
+            if size == 8:
+                return jnp.int8
+            if size == 16:
+                return jnp.int16
+            if size == 32:
+                return jnp.int32
+            if size == 64:
+                return jnp.int64
+            if size is None:
+                return self.itype._driver_version
+            raise ValueError( f"unsupported itype size: { size }" )
+
+        if size == 8:
+            return jnp.uint8
+        if size == 16:
+            return jnp.uint16
+        if size == 32:
+            return jnp.uint32
+        if size == 64:
+            return jnp.uint64
+
+        raise ValueError( f"unsupported itype size: { size }" )
 
     @staticmethod
     def default_device_for( ftype ):
@@ -185,7 +206,7 @@ class JaxDriver:
     def array( self, data, dtype = None ):
         if data is None:
             return None
-        return jnp.asarray( data, dtype = dtype or self.ftype.driver_version, device = self.device.driver_version )
+        return jnp.asarray( data, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
 
     def t3( self, tensor, dtype = None ):
         """ make a rank 3 tensor """
@@ -208,13 +229,10 @@ class JaxDriver:
         if tensor is None:
             return tensor
 
-        if dtype is None or dtype is float:
-            dtype = self.dtype
-        elif dtype is int:
-            dtype = self.itype
+        dtype = Dtype.factory( dtype or self.ftype )
 
         if isinstance( tensor, jax.ShapeDtypeStruct ):
-            return jnp.empty( [ s or 0 for s in tensor.shape ], dtype = tensor.dtype )
+            return jnp.empty( [ s or 0 for s in tensor.shape ], dtype = dtype.driver_version )
 
         res = jnp.asarray( tensor, dtype = dtype.driver_version, device = self.device.driver_version )
 
@@ -442,19 +460,19 @@ class JaxDriver:
         return res
 
     def ffi_tensor_input_bind_code( self, ndim, dtype: Dtype ) -> str:
-        return f"Arg<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
+        return f"Arg<xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>>()"
 
     def ffi_tensor_input_arg_code( self, ndim, dtype: Dtype ) -> str:
-        return f"xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>"
+        return f"xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>"
 
     def ffi_tensor_output_bind_code( self, ndim, dtype: Dtype ) -> str:
-        return f"Ret<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
+        return f"Ret<xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>>()"
 
     def ffi_tensor_output_arg_code( self, ndim, dtype: Dtype ) -> str:
-        return f"xla::ffi::ResultBuffer<{ dtype.jax_ffi_tensor_type() }>"
+        return f"xla::ffi::ResultBuffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>"
 
     def ffi_tensor_output_spec( self, shape, dtype: Dtype ):
-        return jax.ShapeDtypeStruct( shape, self.find_dtype( dtype ) )
+        return jax.ShapeDtypeStruct( shape, dtype.driver_version )
 
     def ffi_parameter_bind_code( self, dtype, name: str ) -> str:
         return f"Attr<{ self.normalized_type_for( dtype ) }>( \"{ name }\" )"

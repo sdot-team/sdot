@@ -1,6 +1,7 @@
 from ..compilation.CallArg_Tensor import CallArg_Tensor
 from ..compilation.IoCategory import IoCategory
 from ..drivers.driver import driver
+from ..drivers.Dtype import Dtype
 from .AxisExpr import AxisExpr
 
 import numpy
@@ -27,7 +28,7 @@ class Tensor:
 
     ct_axes : list
     shape : list[ AxisExpr ]
-    dtype : any # we do not use Dtype because the actual value will be specified by the driver
+    dtype : Dtype
     name : str
 
     def __init__( self, *axis_exprs, dtype = None, ct_axes = None, represents_a_dynamic_axis = "" ):
@@ -39,7 +40,7 @@ class Tensor:
 
         self.ct_axes = list( ct_axes ) if ct_axes is not None else []
         self.shape = [ AxisExpr( s ) for s in axis_exprs ]
-        self.dtype = dtype
+        self.dtype = Dtype.factory( dtype )
 
         # add argument variables in ct_axes
         for expr in self.shape:

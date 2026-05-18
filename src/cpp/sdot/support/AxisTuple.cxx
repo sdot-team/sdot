@@ -65,7 +65,7 @@ UTP HD auto DTP::operator[]( TI u ) const {
     if constexpr( ct_rank == 1 )
         return front_value;
     else
-        return u ? next_values[ u - 1 ] : front_value;
+        return u ? SI( next_values[ u - 1 ] ) : front_value;
 }
 
 UTP HD auto DTP::has_value( auto &&func ) const {

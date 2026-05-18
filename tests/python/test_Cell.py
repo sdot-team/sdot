@@ -101,7 +101,7 @@ def test_cell_2D_batch():
 
 if __name__ == "__main__":
     # test_cell_2D_basic()
-    # test_cell_2D_grad()
-    test_cell_2D_batch()
+    test_cell_2D_grad()
+    # test_cell_2D_batch()
     # test_cell_2D_diff()
     # test_cell_3D()

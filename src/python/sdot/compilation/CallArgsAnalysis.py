@@ -94,7 +94,7 @@ class CallArgsAnalysis:
         from ..drivers.driver import driver
 
         res = [ fi.output_spec for fi in self.tensor_outputs ]
-        res.append( driver.ffi_tensor_output_spec( [ self.u64_output_size ], "PI64" ) )
+        res.append( driver.ffi_tensor_output_spec( [ self.u64_output_size ], Dtype.factory( "PI64" ) ) )
         return res
 
     @property

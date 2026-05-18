@@ -306,10 +306,10 @@ class CallArg_Aggregate( CallArg ):
         if template_args:
             includes.add( "sdot/support/AxisTuple.h" )
             if unbatch_version is not None:
-                lines.append(  "    auto  batch_sizes() const { return AxisTuple<TI,Arch,1>( Values(), TI( batch_size ) ); }" )
+                lines.append(  "    auto batch_sizes() const { return AxisTuple<TI,Arch,1>( Values(), TI( batch_size ) ); }" )
             else:
-                lines.append(  "    auto  batch_sizes() const { return AxisTuple<TI,Arch,0>( Values() ); }" )
-            lines.append(  "    auto  slice( AxisTuple<TI,Arch,0> ) const { return *this; }" )
+                lines.append(  "    auto batch_sizes() const { return AxisTuple<TI,Arch,0>( Values() ); }" )
+            lines.append(  "    auto slice( AxisTuple<TI,Arch,0> ) const { return *this; }" )
 
         # axis accessor methods
         if axes:
