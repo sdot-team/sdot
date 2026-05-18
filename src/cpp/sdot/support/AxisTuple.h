@@ -59,19 +59,8 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return front_value; return next_values[ u - 1 ]; }
-    HD bool      all_value     ( auto &&func ) const { if ( ! func( front_value ) ) return false; return bool( next_values.all_value( func ) ); }
-
-    HD bool      has_value     ( auto &&func ) const {
-        if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
-            if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
-                return true;
-            else
-                return next_values.has_value( func );
-        } else {
-            return func( front_value ) || next_values.has_value( func );
-        }
-    }
-
+    HD auto      has_value     ( auto &&func ) const;
+    HD auto      all_value     ( auto &&func ) const;
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
     HD auto      size          () const { return Ct<int,ct_rank>(); }
 
@@ -102,19 +91,8 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( ct_front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return Ct<TI,ct_front_value>(); else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return ct_front_value; return next_values[ u - 1 ]; }
-    HD auto      all_value     ( auto &&func ) const { if constexpr ( ! func( Ct<int,ct_front_value>() ) ) return Ct<bool,false>(); else return next_values.all_value( func ); }
-
-    HD bool      has_value     ( auto &&func ) const {
-        if constexpr ( requires { DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value; } ) {
-            if constexpr( DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value )
-                return true;
-            else
-                return next_values.has_value( func );
-        } else {
-            return func( Ct<TI,ct_front_value>() ) || next_values.has_value( func );
-        }
-    }
-
+    HD auto      has_value     ( auto &&func ) const;
+    HD auto      all_value     ( auto &&func ) const;
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << ct_front_value, ", " ); }
     HD auto      size          () const { return Ct<int,ct_rank>(); }
 
@@ -144,20 +122,8 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { return ( &front_value )[ u ]; }
-
-    HD bool      all_value     ( auto &&func ) const { if ( ! func( front_value ) ) return false; return bool( next_values.all_value( func ) ); }
-
-    HD bool      has_value     ( auto &&func ) const {
-        if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
-            if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
-                return true;
-            else
-                return next_values.has_value( func );
-        } else {
-            return func( front_value ) || next_values.has_value( func );
-        }
-    }
-
+    HD auto      has_value     ( auto &&func ) const;
+    HD auto      all_value     ( auto &&func ) const;
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
     HD auto      size          () const { return Ct<int,ct_rank>(); }
 

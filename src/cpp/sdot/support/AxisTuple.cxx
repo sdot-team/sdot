@@ -20,6 +20,28 @@ UTP auto DTP::without_index( TI u ) const {
     } );
 }
 
+UTP HD auto DTP::has_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+        if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
+            return Ct<bool,true>();
+        else
+            return next_values.has_value( func );
+    } else {
+        return func( front_value ) || next_values.has_value( func );
+    }
+}
+
+UTP HD auto DTP::all_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+        if constexpr( ! DECAYED_TYPE_OF( func( front_value ) )::value )
+            return Ct<bool,false>();
+        else
+            return next_values.all_value( func );
+    } else {
+        return func( front_value ) && next_values.has_value( func );
+    }
+}
+
 #undef UTP
 #undef DTP
 
@@ -37,6 +59,28 @@ UTP auto DTP::without_index( TI u ) const {
     } );
 }
 
+UTP HD auto DTP::has_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value; } ) {
+        if constexpr( DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value )
+            return Ct<bool,true>();
+        else
+            return next_values.has_value( func );
+    } else {
+        return func( Ct<TI,ct_front_value>() ) || next_values.has_value( func );
+    }
+}
+
+UTP HD auto DTP::all_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value; } ) {
+        if constexpr( ! DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value )
+            return Ct<bool,false>();
+        else
+            return next_values.all_value( func );
+    } else {
+        return func( Ct<TI,ct_front_value>() ) && next_values.has_value( func );
+    }
+}
+
 #undef UTP
 #undef DTP
 
@@ -52,6 +96,28 @@ UTP auto DTP::without_index( TI u ) const {
             return Res( Values(), arr[ Js + ( TI( Js ) >= u ? 1 : 0 ) ]... );
         }( std::make_index_sequence<ct_rank-1>{} );
     } );
+}
+
+UTP HD auto DTP::has_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+        if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
+            return Ct<bool,true>();
+        else
+            return next_values.has_value( func );
+    } else {
+        return func( front_value ) || next_values.has_value( func );
+    }
+}
+
+UTP HD auto DTP::all_value( auto &&func ) const {
+    if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+        if constexpr( ! DECAYED_TYPE_OF( func( front_value ) )::value )
+            return Ct<bool,false>();
+        else
+            return next_values.all_value( func );
+    } else {
+        return func( front_value ) && next_values.has_value( func );
+    }
 }
 
 #undef UTP
