@@ -38,7 +38,7 @@ from .Bsp import Bsp as Bsp
 # from .OtSolver import OtSolver as OtSolver
 
 # hardware/framework interfaces
-from .driver import driver as driver
+from .drivers.driver import driver as driver
 
 # inject info/infox as builtins so tests can use them without explicit import
 # import builtins as _builtins

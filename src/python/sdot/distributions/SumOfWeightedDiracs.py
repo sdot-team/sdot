@@ -1,6 +1,6 @@
 from ..aggregate import Tensor, aggregate
 from .Distribution import Distribution
-from ..driver import driver
+from ..drivers.driver import driver
 from typing import TYPE_CHECKING
 
 @aggregate
@@ -36,4 +36,3 @@ class SumOfWeightedDiracs( Distribution ):
             return SumOfWeightedDiracs( self.positions, new_weights, None )
 
         return self
-

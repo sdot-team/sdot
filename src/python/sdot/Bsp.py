@@ -1,5 +1,5 @@
 from .aggregate import aggregate, Tensor, Return
-from .driver import driver
+from .drivers.driver import driver
 
 from typing import TYPE_CHECKING
 
@@ -330,4 +330,3 @@ class Bsp:
 #     if nb_points > config.max_points_per_node:
 #         return IntermediateNode( indices, positions, nb_points, dim, cell, config, min_max_pts )
 #     return FinalNode( indices, positions, cell, config, min_max_pts )
-

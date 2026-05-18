@@ -1,47 +1,85 @@
 import numpy as np
 import torch
 
-class PyTorchDriver:
+from .TorchFramework import TorchFramework
+from .Device import Device
+from .Dtype import Dtype
+
+class TorchDriver:
     """
 
     """
-    def __init__( self, normalized_dtype: str, normalized_device: str ):
-        self.device = PyTorchDriver.find_device( normalized_device )
-        self.dtype = PyTorchDriver.find_dtype( normalized_dtype )
+    def __init__( self, framework: TorchFramework, device: Device | None, ftype: Dtype | None, itype: Dtype | None ):
+        if device is None:
+            device = TorchDriver.default_device_for( ftype )
+        if itype is None:
+            itype = TorchDriver.default_itype_for( device )
+        if ftype is None:
+            ftype = TorchDriver.default_ftype_for( device )
 
-    @property
-    def name( self ) -> str:
-        return "torch"
+        #
+        self.framework = framework
+        self.device = device
+        self.ftype  = ftype
+        self.itype  = itype
+
+        # fill device_type for ftype
+        assert ftype.floating_point == True
+        match ftype.size:
+            case 32:
+                ftype.driver_version = torch.float32
+            case 64:
+                # jax.config.update( "jax_enable_x64", True )
+                ftype.driver_version = torch.float64
+            case _:
+                raise ValueError( f"unsupported ftype size: { ftype.size }" )
+
+        # fill device_type for itype
+        assert itype.floating_point == False
+        match itype.size:
+            case 32:
+                itype.driver_version = torch.int32
+            case 64:
+                itype.driver_version = torch.int64
+            case _:
+                raise ValueError( f"unsupported itype size: { itype.size }" )
+
 
     @staticmethod
-    def default_normalized_device_for( user_normalized_dtype ):
+    def default_device_for( ftype ):
+        # cuda
         if torch.cuda.is_available():
-            return "cuda:0"
+            from .CudaGpu import CudaGpu
+            return CudaGpu( 0 )
+
         # Metal (MPS) only supports FP32
-        if torch.backends.mps.is_available() and user_normalized_dtype == "FP32":
-            return "metal"
-        return "cpu"
+        if torch.backends.mps.is_available() and ftype == "FP32":
+            from .AppleGpu import AppleGpu
+            return AppleGpu()
 
-
-    @staticmethod
-    def find_device( normalized_device: str ):
-        """ find the torch device from a normalized name like cpu, cuda:1, metal """
-        if normalized_device.startswith( "cpu" ):
-            return torch.device( "cpu" )
-        if normalized_device.startswith( "cuda" ):
-            # idx = normalized_device.split( ":" )[ 1 ] if ":" in normalized_device else "0"
-            return torch.device( "cuda" ) # :{ idx }
-        if normalized_device.startswith( "metal" ):
-            return torch.device( "mps" )
-        raise RuntimeError( f"Unknown type { normalized_device }" )
+        # cpu
+        from .Cpu import Cpu
+        return Cpu()
 
     @staticmethod
-    def find_dtype( normalized_dtype: str ):
-        if normalized_dtype == "FP32":
-            return torch.float32
-        if normalized_dtype == "FP64":
-            return torch.float64
-        raise RuntimeError( f"Unknown type { normalized_dtype }" )
+    def default_ftype_for( device: Device ):
+        if device.is_apple_gpu:
+            return Dtype.fp( 32 )
+        return Dtype.fp( 64 )
+
+    @staticmethod
+    def default_itype_for( device: Device ):
+        if device.is_apple_gpu:
+            return Dtype.si( 32 )
+        return Dtype.si( 64 )
+
+
+
+
+
+
+
+
 
     @property
     def array_type( self ):
@@ -55,7 +93,7 @@ class PyTorchDriver:
                                 torch.uint8, torch.uint16, torch.uint32, torch.uint64 ] )
 
     def is_int_dtype( self, dtype ):
-        return dtype in PyTorchDriver._INT_DTYPES
+        return dtype in TorchDriver._INT_DTYPES
 
     def any_requires_grad( self, tensors ) -> bool:
         return any( t.requires_grad for t in tensors )

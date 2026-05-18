@@ -1,5 +1,6 @@
 from typing_extensions import Optional, overload
-from typing import cast, Literal
+from typing import TYPE_CHECKING, cast
+
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
@@ -7,27 +8,89 @@ import jax.numpy as jnp
 
 from ..compilation.CallArgsAnalysis import CallArgsAnalysis
 
+from .JaxFramework import JaxFramework
+from .Device import Device
+from .Dtype import Dtype
+
 import importlib
 import numpy
 import jax
 import re
 
-map_of_plan_methods = {}
 
 class JaxDriver:
     """
     JAX implementation for sdot centralization.
     """
-    def __init__( self, normalized_dtype : str, normalized_device: str ):
-        self.device = JaxDriver.find_device( normalized_device )
-        self.dtype = JaxDriver.find_dtype( None, normalized_dtype )
-        self.itype = jnp.int64
+    def __init__( self, framework: JaxFramework, device: Device | None, ftype: Dtype | None, itype: Dtype | None ):
+        if device is None:
+            device = JaxDriver.default_device_for( ftype )
+        if itype is None:
+            itype = JaxDriver.default_itype_for( device )
+        if ftype is None:
+            ftype = JaxDriver.default_ftype_for( device )
 
-        # if normalized_dtype == "FP64":
-        # 64 bits for ints
-        jax.config.update( "jax_enable_x64", True )
+        #
+        self.framework = framework
+        self.device = device
+        self.ftype  = ftype
+        self.itype  = itype
 
-        self.map_of_plan_methods = map_of_plan_methods
+        # fill device_type for ftype
+        assert ftype.floating_point == True
+        match ftype.size:
+            case 32:
+                ftype.driver_version = jnp.float32
+            case 64:
+                # jax.config.update( "jax_enable_x64", True )
+                ftype.driver_version = jnp.float64
+            case _:
+                raise ValueError( f"unsupported ftype size: { ftype.size }" )
+
+        # fill device_type for itype
+        assert itype.floating_point == False
+        match itype.size:
+            case 32:
+                itype.driver_version = jnp.int32
+            case 64:
+                jax.config.update( "jax_enable_x64", True )
+                itype.driver_version = jnp.int64
+            case _:
+                raise ValueError( f"unsupported itype size: { itype.size }" )
+
+        #
+        device.driver_version = device.driver_version_for_jax( jax.devices )
+
+
+    @staticmethod
+    def default_device_for( ftype ):
+        platforms = { d.platform for d in jax.devices() }
+        if "gpu" in platforms:
+            from .CudaGpu import CudaGpu
+            return CudaGpu( 0 )
+
+        # Metal (jax-metal) only supports FP32
+        if "METAL" in platforms and ftype == "FP32":
+            from .AppleGpu import AppleGpu
+            return AppleGpu()
+
+        from .Cpu import Cpu
+        return Cpu()
+
+    @staticmethod
+    def default_ftype_for( device: Device ):
+        if device.is_apple_gpu:
+            return Dtype.fp( 32 )
+        return Dtype.fp( 64 )
+
+    @staticmethod
+    def default_itype_for( device: Device ):
+        if device.is_apple_gpu:
+            return Dtype.si( 32 )
+        return Dtype.si( 64 )
+
+
+
 
     class CapacityOverflow( RuntimeError ):
         """Raised when a dynamic-capacity tensor overflows inside jax.jit.
@@ -54,16 +117,6 @@ class JaxDriver:
     @property
     def name( self ) -> str:
         return "jax"
-
-    @staticmethod
-    def default_normalized_device_for( user_normalized_dtype ):
-        platforms = { d.platform for d in jax.devices() }
-        if "gpu" in platforms:
-            return "cuda:0"
-        # Metal (jax-metal) only supports FP32
-        if "METAL" in platforms and user_normalized_dtype == "FP32":
-            return "metal"
-        return "cpu"
 
     @staticmethod
     def find_device( normalized_device: str ):
@@ -119,14 +172,20 @@ class JaxDriver:
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
 
-    @overload
-    def array( self, data: None, dtype = None ) -> None: ...
-    @overload
-    def array( self, data, dtype = None ) -> jax.Array: ...
+    def nb_threads( self, **kwargs ):
+        return self._hardware.nb_threads( **kwargs )
+
+
+    if TYPE_CHECKING:
+        @overload
+        def array( self, data: None, dtype = None ) -> None: ...
+        @overload
+        def array( self, data, dtype = None ) -> jax.Array: ...
+
     def array( self, data, dtype = None ):
         if data is None:
             return None
-        return jnp.asarray( data, dtype = dtype or self.dtype, device = self.device )
+        return jnp.asarray( data, dtype = dtype or self.ftype.driver_version, device = self.device.driver_version )
 
     def t3( self, tensor, dtype = None ):
         """ make a rank 3 tensor """
@@ -157,7 +216,7 @@ class JaxDriver:
         if isinstance( tensor, jax.ShapeDtypeStruct ):
             return jnp.empty( [ s or 0 for s in tensor.shape ], dtype = tensor.dtype )
 
-        res = jnp.asarray( tensor, dtype = dtype, device = self.device )
+        res = jnp.asarray( tensor, dtype = dtype.driver_version, device = self.device.driver_version )
 
         if ndim is not None and res.ndim != ndim:
             if name is not None:
@@ -179,16 +238,16 @@ class JaxDriver:
         return self.tn( tensor, 2, dtype = self.itype )
 
     def ones( self, shape, dtype = None ):
-        return jnp.ones( shape, dtype = dtype or self.dtype, device = self.device )
+        return jnp.ones( shape, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
 
     def zeros( self, shape, dtype = None ):
-        return jnp.zeros( shape, dtype = dtype or self.dtype, device = self.device )
+        return jnp.zeros( shape, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
 
-    def linspace( self, a, b, n ):
-        return jnp.linspace( a, b, n, dtype = self.dtype, device = self.device )
+    def linspace( self, a, b, n, dtype = None ):
+        return jnp.linspace( a, b, n, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
 
     def empty( self, shape, dtype = None ):
-        return jnp.zeros( shape, dtype = self.find_dtype( dtype ) or self.dtype, device = self.device )
+        return jnp.zeros( shape, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
 
     def expand_dims( self, tensor, index ):
         return jnp.expand_dims( tensor, index )
@@ -213,43 +272,6 @@ class JaxDriver:
 
     def to_numpy( self, t ):
         return numpy.array( t )
-
-    def normalized_type_for( self, dtype ):
-        if dtype is None or dtype is float:
-            return self.normalized_type_for( self.dtype )
-
-        if dtype is int:
-            return self.normalized_type_for( self.itype )
-
-        if dtype == jnp.float32:
-            return "FP32"
-        if dtype == jnp.float64:
-            return "FP64"
-
-        if dtype == jnp.int32:
-            return "SI32"
-        if dtype == jnp.int64:
-            return "SI64"
-
-        if dtype == jnp.uint32:
-            return "PI32"
-        if dtype == jnp.uint64:
-            return "PI64"
-
-        if dtype in [ "FP32", "FP64", "PI32", "PI64", "SI32", "SI64" ]:
-            return dtype
-
-        raise NotImplementedError( f"for dtype { dtype }" )
-
-    @property
-    def normalized_device_type( self ):
-        if self.device.platform == "gpu":
-            return "cuda"
-        return "cpu"
-
-    @property
-    def normalized_framework( self ):
-        return "jax"
 
     def is_a_tensor( self, value ):
         return isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct, ad_util.SymbolicZero ) )
@@ -419,51 +441,23 @@ class JaxDriver:
             return res[ 0 ]
         return res
 
-    def ffi_tensor_input_bind_code( self, ndim, dtype ) -> str:
-        return f"Arg<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>()"
+    def ffi_tensor_input_bind_code( self, ndim, dtype: Dtype ) -> str:
+        return f"Arg<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
 
-    def ffi_tensor_input_arg_code( self, ndim, dtype ) -> str:
-        return f"xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>"
+    def ffi_tensor_input_arg_code( self, ndim, dtype: Dtype ) -> str:
+        return f"xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>"
 
-    def ffi_tensor_output_bind_code( self, ndim, dtype ) -> str:
-        return f"Ret<xla::ffi::Buffer<{ self.ffi_tensor_type_code( dtype ) }>>()"
+    def ffi_tensor_output_bind_code( self, ndim, dtype: Dtype ) -> str:
+        return f"Ret<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
 
-    def ffi_tensor_output_arg_code( self, ndim, dtype ) -> str:
-        return f"xla::ffi::ResultBuffer<{ self.ffi_tensor_type_code( dtype ) }>"
+    def ffi_tensor_output_arg_code( self, ndim, dtype: Dtype ) -> str:
+        return f"xla::ffi::ResultBuffer<{ dtype.jax_ffi_tensor_type() }>"
 
-    def ffi_tensor_output_spec( self, shape, dtype ):
+    def ffi_tensor_output_spec( self, shape, dtype: Dtype ):
         return jax.ShapeDtypeStruct( shape, self.find_dtype( dtype ) )
 
     def ffi_parameter_bind_code( self, dtype, name: str ) -> str:
         return f"Attr<{ self.normalized_type_for( dtype ) }>( \"{ name }\" )"
-
-    def ffi_tensor_type_code( self, dtype ) -> str:
-        """ C++ jax name for dtype """
-
-        if dtype is None or dtype is float:
-            return self.ffi_tensor_type_code( self.dtype )
-        if dtype is int:
-            return self.ffi_tensor_type_code( self.itype )
-
-        if isinstance( dtype, str ):
-            return self.ffi_tensor_type_code( self.find_dtype( dtype ) )
-
-        if dtype == jax.numpy.float32 or dtype == "FP32":
-            return "xla::ffi::F32"
-        if dtype == jax.numpy.float64 or dtype == "FP64":
-            return "xla::ffi::F64"
-        if dtype == jax.numpy.int32 or dtype == "SI32":
-            return "xla::ffi::S32"
-        if dtype == jax.numpy.int64 or dtype == "SI64":
-            return "xla::ffi::S64"
-        if dtype == jax.numpy.uint8 or dtype == "PI8":
-            return "xla::ffi::U8"
-        if dtype == jax.numpy.uint32 or dtype == "PI32":
-            return "xla::ffi::U32"
-        if dtype == jax.numpy.uint64 or dtype == "PI64":
-            return "xla::ffi::U64"
-
-        raise NotImplementedError( f"for dtype { dtype }" )
 
     def is_zero_tensor( self, value ):
         return isinstance( value, ad_util.SymbolicZero )
@@ -574,7 +568,7 @@ class JaxDriver:
 
     def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
         # get signature — include device type to avoid CPU/GPU cache collision
-        base_signature = [ code, grad_code, main_list.arguments.signature(), self.normalized_device_type ] + includes
+        base_signature = [ code, grad_code, main_list.arguments.signature(), self.device.signature ] + includes
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
@@ -612,7 +606,7 @@ class JaxDriver:
 
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
-        platform = "gpu" if self.device.platform == "gpu" else "cpu"
+        platform = "gpu" if self.device == "gpu" else "cpu"
         module = importlib.import_module( "sdot.generated_files." + module_name )
         jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = platform )
         if make_backward_binding:
@@ -634,10 +628,7 @@ class JaxDriver:
         lines.append( "namespace nb = nanobind;" )
         lines.append( "using namespace sdot;" )
         lines.append( "" )
-        if self.normalized_device_type == "cuda":
-            lines.append( "using Arch = Gpu;" )
-        else:
-            lines.append( "using Arch = Cpu;" )
+        lines.append( f"using Arch = { self.device.cpp_type };" )
         lines.append( "" )
 
         # --- forward handler ---
@@ -667,10 +658,10 @@ class JaxDriver:
 
         #
         from ..compilation.make_dylib_from_source import make_dylib_from_source
-        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.normalized_device_type )
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device.name )
 
     def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
-        is_gpu = self.normalized_device_type == "cuda"
+        is_gpu = self.device.is_cuda_gpu
 
         fai.make_parameters_struct( includes, lines, struct_name )
         lines.append( "" )

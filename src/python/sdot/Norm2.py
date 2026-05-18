@@ -1,5 +1,5 @@
 from .aggregate import aggregate, Tensor
-from .driver import driver
+from .drivers.driver import driver
 from typing import TYPE_CHECKING
 
 

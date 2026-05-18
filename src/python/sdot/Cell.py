@@ -1,6 +1,6 @@
 from .aggregate import aggregate, Workspace, Tensor, Return
 from typing import TYPE_CHECKING, Self, cast
-from .driver import driver
+from .drivers.driver import driver
 import numpy
 
 # constant
@@ -102,8 +102,8 @@ class Cell:
         dim = frame.shape[ -1 ]
 
         return cast( cls, driver.call(
-            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.cell.slice( bi ).init_as_hypercube( p.frame( bi ), p.cut_id( bi ) ); } );",
-            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.cell.slice( bi ).init_as_hypercube_bwd( p.frame( bi ), p, bi ); } );",
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } );",
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } );",
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
             frame = frame,
@@ -124,9 +124,21 @@ class Cell:
     @property
     def measure( self ) -> any:
         return driver.call(
-            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.nb_map_items = 0; RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts ); p.output = p.cell.measure( item_map ); } );",
-            "",
-            map_items = Workspace( Tensor( "nb_map_items[]", dtype = int ), max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, self.nb_cuts ) ),
+            """
+            auto pr = arch.paraller_runner( p.cell.batch_sizes() );
+            pr.for_each_thread( [p] HD ( int num_thread, auto &&for_each_bi ) mutable {
+                p.nb_map_items = 0;
+                RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts );
+                for_each_bi( [p,item_map] HD ( auto batch_indices ) mutable {
+                    p.output( batch_indices ) = p.cell.slice( batch_indices ).measure( item_map );
+                } );
+            );
+            """,
+            map_items = Workspace(
+                Tensor( "nb_threads", "nb_map_items[]", dtype = int ),
+                max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, self.nb_cuts ),
+                nb_threads = driver.nb_threads()
+            ),
             output = Return( Tensor() ),
             cell = self
         )

@@ -9,6 +9,8 @@ struct WithOffset;
 ///
 template<class TI,int num_axis,TI value>
 struct KnownAxisSize {
+    KnownAxisSize( TI /*value*/ ) {}
+    KnownAxisSize() {}
 };
 
 template<class TO,TO offset,class TI,int num_axis,TI value>

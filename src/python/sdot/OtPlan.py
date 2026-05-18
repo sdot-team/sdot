@@ -3,7 +3,7 @@ from .aggregate import Tensor, Return, aggregate
 from .distributions.SumOfWeightedDiracs import SumOfWeightedDiracs
 from .distributions.Distribution import Distribution
 from .PowerDiagram import PowerDiagram
-from .driver import driver
+from .drivers.driver import driver
 
 @aggregate
 class OtPlan:
@@ -66,6 +66,3 @@ def optimal_transport_plan( f: Distribution, g: Distribution, ground_metric = No
         pass
 
     return res
-
-
-

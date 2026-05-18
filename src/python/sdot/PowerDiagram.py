@@ -1,6 +1,6 @@
 from .aggregate import aggregate, Workspace, Tensor, Return
 from .distributions.Distribution import Distribution
-from .driver import driver
+from .drivers.driver import driver
 
 from .CellWorkspace import BatchOfCellWorkspace
 from .MatrixTerms import MatrixTerms

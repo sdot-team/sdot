@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AxisTuple.h"
-#include "Arch.h"
+#include "Cpu.h"
 
 namespace sdot {
 

@@ -4,6 +4,8 @@ from ..aggregate.Workspace import Workspace
 from ..aggregate.Return import Return
 from ..aggregate.Tensor import Tensor
 
+from ..drivers.Dtype import Dtype
+
 from .IoCategory import IoCategory
 
 from .CallArg_Aggregate import CallArg_Aggregate
@@ -76,7 +78,7 @@ class CallArgsAnalysis:
 
     @property
     def ffi_inputs( self ):
-        from ..driver import driver
+        from ..drivers.driver import driver
 
         import numpy
         res = [ fi.ffi_value for fi in self.differentiable_tensor_inputs + self.non_differentiable_tensor_inputs ]
@@ -89,7 +91,7 @@ class CallArgsAnalysis:
 
     @property
     def ffi_outputs( self ):
-        from ..driver import driver
+        from ..drivers.driver import driver
 
         res = [ fi.output_spec for fi in self.tensor_outputs ]
         res.append( driver.ffi_tensor_output_spec( [ self.u64_output_size ], "PI64" ) )
@@ -174,8 +176,8 @@ class CallArgsAnalysis:
 
         # u8_input
         if len( self.u8_input_values ):
-            from ..driver import driver
-            declarations.append( driver.ffi_tensor_input_arg_code( 1, "PI8" ) + " u8_input_buffer" )
+            from ..drivers.driver import driver
+            declarations.append( driver.ffi_tensor_input_arg_code( 1, Dtype.factory( "PI8" ) ) + " u8_input_buffer" )
 
         # parameters
         for parameter in self.parameters:
@@ -187,8 +189,8 @@ class CallArgsAnalysis:
 
         # u64_output
         if self.u64_output_size:
-            from ..driver import driver
-            declarations.append( driver.ffi_tensor_output_arg_code( 1, "PI64" ) + " u64_output_buffer" )
+            from ..drivers.driver import driver
+            declarations.append( driver.ffi_tensor_output_arg_code( 1, Dtype.factory( "PI64" ) ) + " u64_output_buffer" )
 
         return ", ".join( declarations )
 
@@ -202,8 +204,8 @@ class CallArgsAnalysis:
             inp.get_input_bind_chain( items )
 
         if len( self.u8_input_values ):
-            from ..driver import driver
-            items.append( driver.ffi_tensor_input_bind_code( 1, "PI8" ) )
+            from ..drivers.driver import driver
+            items.append( driver.ffi_tensor_input_bind_code( 1, Dtype.factory( "PI8" ) ) )
 
         for parameter in self.parameters:
             parameter.get_input_bind_chain( items )
@@ -212,8 +214,8 @@ class CallArgsAnalysis:
             out.get_output_bind_chain( items )
 
         if self.u64_output_size:
-            from ..driver import driver
-            items.append( driver.ffi_tensor_output_bind_code( 1, "PI64" ) )
+            from ..drivers.driver import driver
+            items.append( driver.ffi_tensor_output_bind_code( 1, Dtype.factory( "PI64" ) ) )
 
         return items
 

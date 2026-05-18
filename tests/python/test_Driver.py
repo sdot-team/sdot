@@ -1,4 +1,45 @@
+from sdot.util import all_equal
 import sdot
+
+def test_choices():
+    sdot.driver.ftype = "FP64"
+    assert sdot.driver.ftype.floating_point == True
+    assert sdot.driver.ftype == "FP64"
+    assert sdot.driver.ftype != "FP32"
+
+    sdot.driver.ftype = "FP32"
+    assert sdot.driver.ftype == "FP32"
+    assert sdot.driver.ftype != "FP64"
+
+    sdot.driver.itype = "SI64"
+    assert sdot.driver.itype.floating_point == False
+    assert sdot.driver.itype == "SI64"
+    assert sdot.driver.itype != "SI32"
+
+    sdot.driver.itype = "SI32"
+    assert sdot.driver.itype == "SI32"
+    assert sdot.driver.itype != "SI64"
+
+    sdot.driver.device = "gpu"
+    assert( sdot.driver.device == "CudaGpu" )
+    assert( sdot.driver.device == "CudaGpu:0" )
+
+    sdot.driver.framework = "jax"
+    assert( sdot.driver.framework == "Jax" )
+    assert( sdot.driver.framework != "Torch" )
+
+    sdot.driver.framework = "pytorch"
+    assert( sdot.driver.framework == "Torch" )
+    assert( sdot.driver.framework != "Jax" )
+
+def test_ffi_basic():
+    input = sdot.driver.array( [ 3. ] )
+    assert all_equal( sdot.driver.call(
+        "p.output[ 0 ] = DECAYED_TYPE_OF( p.output.size() )::value; p.output[ 1 ] = p.dim; for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 2 ] = 2 * p.input[ i ]; p.output[ 2 * i + 3 ] = 3 * p.input[ i ]; }",
+        output = sdot.Return( sdot.Tensor( "2 + 2 * dim", ct_axes = [ "dim" ] ), dim = input.size ),
+        input = input
+    ), [ 4, 1, 6, 9 ] )
+
 
 # def test_driver():
 #     # will force jax
@@ -75,10 +116,6 @@ import sdot
 #     yo = Yo( b = [ [ 1 ] ] )
 #     res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems[]", "dim", ct_axes = [ "dim" ] ), max_of_nb_elems = 5, dim = 3 ), "inp": yo }, axes = { "dim": 2 }, grad = False )
 #     info( res )
-
-def test_ffi_basic():
-    input = sdot.driver.array( [ 3. ] )
-    info( sdot.driver.call( "for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 0 ] = 2 * p.input[ i ]; p.output[ 2 * i + 1 ] = 3 * p.input[ i ]; }", output = sdot.Return( sdot.Tensor( "2 * dim", ct_axes = [ "dim" ] ), dim = input.size ), input = input ) )
 
 def test_mlir_basic():
     info( sdot.driver.call( "p.output = p.input[ 0 ] + p.input[ 1 ];", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
@@ -225,14 +262,15 @@ def test_gpu_basic():
 # ic( x )
 # ic( r )
 if __name__ == "__main__":
+    # test_choices()
+    test_ffi_basic()
     # test_alac_grad()
-    # test_ffi_basic()
     # test_mlir_basic()
     # test_growing_capacity()
     # test_grad()
     # test_grad_symbolic_zero()
     # test_grad_perturbed()
-    test_gpu_basic()
+    # test_gpu_basic()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

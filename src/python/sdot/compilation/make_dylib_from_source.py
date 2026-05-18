@@ -1,5 +1,5 @@
 from sdot.generated_files import compilation_directories
-from ..driver import driver
+from ..drivers.driver import driver
 from pathlib import Path
 import subprocess
 import sysconfig
@@ -36,7 +36,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
     python_include = sysconfig.get_path( "include" )
 
     jax_include = []
-    if driver.normalized_framework == "jax":
+    if driver.framework == "jax":
         try:
             import jax.ffi
             jax_include = [ jax.ffi.include_dir() ]

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common_types.h"
-#include "Arch.h" // IWYU pragma: export
+#include "Cpu.h" // IWYU pragma: export
 #include <span>
 
 #ifdef USE_ZPP

@@ -1,7 +1,7 @@
 from ..aggregate.AxisExpr import AxisExpr
-from ..driver import driver
-from ..util import index
-from ..util import find
+from ..drivers.driver import driver
+from ..drivers.Dtype import Dtype
+from ..util import index, find
 
 from .IoCategory import IoCategory
 from .CallArg import CallArg
@@ -19,7 +19,7 @@ class CallArg_Tensor( CallArg ):
     comes_from_basic_array    : bool
     is_differentiable         : bool
     shape                     : list[ AxisExpr ]
-    dtype                     : any
+    dtype                     : Dtype
 
     tensor_type_input_index   : int
     validity_output_index     : int
@@ -43,6 +43,8 @@ class CallArg_Tensor( CallArg ):
 
         if dtype is None:
             dtype = float
+        if not isinstance( dtype, Dtype ):
+            dtype = Dtype.factory( dtype )
 
         res = CallArg_Tensor()
 
@@ -61,7 +63,7 @@ class CallArg_Tensor( CallArg ):
         # Tensor attributes
         res.represents_a_dynamic_axis = represents_a_dynamic_axis
         res.comes_from_basic_array = comes_from_basic_array
-        res.is_differentiable = not driver.is_int_dtype( dtype )
+        res.is_differentiable = dtype.floating_point
         res.shape = shape
         res.dtype = dtype
 
@@ -186,7 +188,7 @@ class CallArg_Tensor( CallArg ):
         ct_values = []
         for ct_variable in self.ct_axes.keys():
             ct_values.append( f"{ ct_variable }_{ self.get_axis_variable( ct_variable, False ) }" )
-        return f"T{ self.ndim }{ driver.normalized_type_for( self.dtype ) }{ '-'.join( ct_values ) }"
+        return f"T{ self.ndim }{ Dtype.factory( self.dtype ).cpp_name }{ '-'.join( ct_values ) }"
 
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
@@ -266,14 +268,7 @@ class CallArg_Tensor( CallArg ):
         strides_t = f"AxisTuple<TI,Arch,{ self.ndim }>"
         if self.represents_a_dynamic_axis:
             return f"DynamicAxis<TI,{ shape_t },{ strides_t }>"
-        return f"TensorView<{ self.dtype_name() },{ shape_t },{ strides_t }>"
-
-    def dtype_name( self ):
-        if self.dtype is float or self.dtype is None:
-            return "TF"
-        if self.dtype is int:
-            return "TI"
-        return driver.normalized_type_for( self.dtype )
+        return f"TensorView<{ self.dtype.cpp_name },{ shape_t },{ strides_t }>"
 
     def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
         for s in self.shape:

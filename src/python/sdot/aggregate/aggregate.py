@@ -1,6 +1,6 @@
-from sdot.aggregate.Workspace import Workspace
 from ..util.get_all_annotations import get_all_annotations
-from ..driver import driver
+from ..drivers.driver import driver
+from .Workspace import Workspace
 from .Tensor import Tensor
 
 from typing import TypeVar

@@ -1,5 +1,5 @@
+from ..drivers.driver import driver
 from .IoCategory import IoCategory
-from ..driver import driver
 
 from typing import TYPE_CHECKING, Optional, Self
 from weakref import ref

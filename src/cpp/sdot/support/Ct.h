@@ -8,6 +8,13 @@ template<class T,T i>
 struct Ct {
     static constexpr T value = i;
 
+    /**/ Ct( T value ) {
+        ASSERT( value == i );
+    }
+
+    /**/ Ct() {
+    }
+
     constexpr operator T() const {
         return i;
     }

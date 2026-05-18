@@ -201,7 +201,7 @@ class OtSolver:
     def _bindings( self ):
         ct_dim = self.g.dim if self.g.dim <= 4 else -1
         p_func, includes = type( self.g ).BaseVersion.primitive_function( self.g, False )
-        dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func ] + includes ) ) }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+        dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func ] + includes ) ) }_{ ct_dim }d_{ driver.normalized_dtype }_{ driver.normalized_device_type.signature() }"
 
         def src_func():
             # inputs of backward_args and forward_args

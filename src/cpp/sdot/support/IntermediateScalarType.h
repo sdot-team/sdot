@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Arch.h"
+#include "Cpu.h"
 
 namespace sdot {
 

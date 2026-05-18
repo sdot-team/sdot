@@ -110,7 +110,7 @@ def solve_nd( bindings, bsp : Bsp, g : Distribution ):
 def _ot_plan_1d( f : BatchOfDistributions, g : BatchOfDistributions ):
     p_func, g_func, includes = type( g ).BaseVersion.primitive_function( g )
 
-    dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type }"
+    dylib_name = f"ot_plan_{ encode_base62( "||".join( [ p_func, g_func ] + includes ) ) }_1d_{ driver.normalized_dtype }_{ driver.normalized_device_type.signature() }"
 
     def src_func():
         # inputs of backward_args and forward_args

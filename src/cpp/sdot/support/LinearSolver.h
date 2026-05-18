@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common_types.h"
-#include "Arch.h"
+#include "Cpu.h"
 
 namespace sdot {
 

@@ -1,6 +1,6 @@
 from ..aggregate import Tensor, Return, aggregate
 from .Distribution import Distribution
-from ..driver import driver
+from ..drivers.driver import driver
 from typing import TYPE_CHECKING
 
 # from itertools import product as iproduct

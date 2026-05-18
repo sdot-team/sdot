@@ -1,7 +1,8 @@
-from ..driver import driver
+from ..drivers.driver import driver
 
 from .IoCategory import IoCategory
 from .CallArg import CallArg
+
 
 class CallArg_Parameter( CallArg ):
     """
