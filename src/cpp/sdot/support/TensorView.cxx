@@ -56,9 +56,16 @@ UTP HD void DTP::fill_with( TF value ) {
 
 
 UTP HD auto DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } ) {
-    if ( indices.size() )
-        return operator()( indices[ Ct<int,0>() ], indices.without_index( Ct<int,0>() ), rem... );
-    return operator()( rem... );
+    if constexpr ( requires { DECAYED_TYPE_OF( indices.size() )::value; } ) {
+        if constexpr ( DECAYED_TYPE_OF( indices.size() )::value )
+            return operator()( indices[ Ct<int,0>() ], indices.without_index( Ct<int,0>() ), rem... );
+        else
+            return operator()( rem... );
+    } else {
+        if ( indices.size() )
+            return operator()( indices[ Ct<int,0>() ], indices.without_index( Ct<int,0>() ), rem... );
+        return operator()( rem... );
+    }
 }
 
 UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
@@ -111,13 +118,13 @@ UTP HD bool DTP::surely_null() const {
     if ( is_invalid() )
         return true;
     // empty tensor (any dimension == 0)
-    if ( _shape.has_value( []( auto size ) { return size < Ct<int,1>(); } ) )
+    if ( _shape.has_value( []( auto size ) -> bool { return size < Ct<int,1>(); } ) )
         return true;
     // all strides zero (rank > 0) → surely-null by construction: all elements alias data()[0] == 0
-    if ( rank() > 0 && ! _strides.has_value( []( auto s ) { return s != SI(0); } ) )
+    if ( rank() > 0 && ! _strides.has_value( []( auto size ) -> bool { return size != Ct<int,0>(); } ) )
         return true;
     // single scalar: check value
-    if ( ! _shape.has_value( []( auto size ) { return size > Ct<int,1>(); } ) )
+    if ( ! _shape.has_value( []( auto size ) -> bool { return size > Ct<int,1>(); } ) )
         return *data() == 0;
     return false;
 }
@@ -161,8 +168,8 @@ UTP HD auto DTP::end() const {
 }
 
 UTP HD auto DTP::squeeze( auto axis, PI index ) const {
-    auto new_shape   = _shape.without_axis( axis );
-    auto new_strides = _strides.without_axis( axis );
+    auto new_shape   = _shape.without_index( axis );
+    auto new_strides = _strides.without_index( axis );
     using NewShape   = DECAYED_TYPE_OF( new_shape );
     using NewStrides = DECAYED_TYPE_OF( new_strides );
     auto ptr = reinterpret_cast<TF *>( _raw_ptr + _strides[ axis ] * index );

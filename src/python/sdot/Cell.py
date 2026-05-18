@@ -1,7 +1,7 @@
 from .aggregate import aggregate, Workspace, Tensor, Return
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Self, cast
 from .driver import driver
-
+import numpy
 
 # constant
 INFINITE = -2
@@ -13,13 +13,6 @@ class Cell:
     """
 
     """
-
-    # workspaces
-    # index_corrections : Workspace( Tensor( "nb_index_corrections[]", dtype = int ) )
-    # used_flags        : Workspace( Tensor( "nb_used_flags[]", dtype = int ) )
-    # map_items         : Workspace( Tensor( "nb_map_items[]", dtype = int ) )
-    # links             : Workspace( Tensor( "nb_links[]", dtype = int ) )
-    # sps               : Workspace( Tensor( "nb_vertices[]" ) )
 
     # data
     vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_axes = [ "dim" ] )
@@ -34,147 +27,124 @@ class Cell:
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
 
-        max_of_nb_index_corrections: int
-        max_of_nb_used_flags: int
-        max_of_nb_map_items: int
-        max_of_nb_links: int
+        BatchVersion: Self
 
         max_of_nb_vertices: int
         max_of_nb_edges: int
         max_of_nb_cuts: int
+
+        nb_vertices: numpy.array
+        nb_edges: numpy.array
+        nb_cuts: numpy.array
+
         dim: int
 
+    # ---------------------------------- ctors ----------------------------------
+    @classmethod
+    def unbounded( cls, dim ):
+        return cast( cls, driver.call( "p.cell.init_as_unbounded();", cell = Return( cls, **cls._return_parameters( dim ) ) ) )
 
-    @staticmethod
-    def unbounded( dim ):
-        return cast( Cell, driver.call( "p.cell.init_as_unbounded();", cell = Return( Cell, **Cell._return_parameters( dim ) ) ) )
+    @classmethod
+    def aligned_hypercube( cls, min_coords_or_dim = None, max_coords = None, dim = None, cut_id = BOUNDARY ):
+        is_batch = hasattr( cls, 'BatchItemVersion' )
 
-    @staticmethod
-    def _return_parameters( dim ):
-        return dict(
-            max_of_nb_index_corrections = 64,
-            max_of_nb_used_flags = 64,
-            max_of_nb_map_items = 64,
-            max_of_nb_links = 64 * 8,
-
-            max_of_nb_vertices = 64,
-            max_of_nb_edges = 64,
-            max_of_nb_cuts = 64,
-            dim = dim,
-        )
-
-    # @staticmethod
-    # def hypercube( frame, bnd = BOUNDARY ):
-    #     frame = driver.array( frame )
-    #     assert frame is not None
-    #     return Cell( frame.shape[ 1 ], lambda cell: cpp_binding( "make_hypercube", "sdot/cell/Cell.h" )( Output( cell ), frame, bnd ) )
-
-    # @staticmethod
-    # def aligned_simplex( dim, bnd = BOUNDARY ):
-    #     return Cell( dim, lambda cell: cpp_binding( "make_aligned_simplex", "sdot/cell/Cell.h" )( Output( cell ), bnd ) )
-
-
-    # def __init__( self, dim, nb_vertices_capacity = 50, nb_edges_capacity = 50, nb_cuts_capacity = 50 ):
-    #     self.vertex_positions = driver.empty( [ nb_vertices_capacity, dim ] )
-    #     self.cut_planes = driver.empty( [ nb_cuts_capacity, dim + 1 ] )
-    #     self.cut_ids = driver.empty( [ nb_cuts_capacity ], dtype = driver.itype )
-
-    #     self.is_fully_closed = 0
-    #     self.nb_vertices = 0
-    #     self.nb_edges = 0
-    #     self.nb_cuts = 0
-
-    #     if dim != 2:
-    #         self.large_vertex_indices = driver.empty( [ nb_vertices_capacity, dim ], dtype = driver.int_type )
-    #         self.large_edge_indices = driver.empty( [ nb_edges_capacity, dim + 1 ], dtype = driver.int_type )
-
-    #     #     driver.call( "make_empty_cell", "sdot/cell/Cell.h", cell = Mutable( self ) )
-    #     #     return
-
-    #     # # assuming tensors
-    #     # self.__default_init__( *args, **kwargs )
-
-
-    @staticmethod
-    def aligned_hypercube( min_coords_or_dim = None, max_coords = None, dim = None, bnd = BOUNDARY ):
-        if isinstance( min_coords_or_dim, int ):
-            assert max_coords is None
-            assert dim is None
-            min_coords = driver.zeros( [ min_coords_or_dim ] )
-            dim = min_coords_or_dim
-        elif min_coords_or_dim is None:
-            assert dim is not None
-            min_coords = driver.zeros( [ dim ] )
-        else:
+        if is_batch:
+            # batched: min_coords is (batch_size, dim), max_coords is (batch_size, dim)
             min_coords = driver.array( min_coords_or_dim )
-            dim = min_coords.shape[ 0 ]
+            max_coords = driver.array( max_coords ) if max_coords is not None else driver.ones( list( min_coords.shape ) )
+            assert min_coords is not None
+            assert max_coords is not None
 
-        if max_coords is None:
-            max_coords = driver.ones( [ dim ] )
+            batch_size = min_coords.shape[ 0 ]
+            dim        = min_coords.shape[ 1 ]
+
+            diff  = max_coords - min_coords                        # (batch_size, dim)
+            eye   = driver.array( numpy.eye( dim ) )[ None, :, : ] # (1, dim, dim)
+            diag  = eye * diff[ :, None, : ]                       # (batch_size, dim, dim)
+            frame = driver.concatenate( [ min_coords[ :, None, : ] ] + [ diag[ :, r:r+1, : ] for r in range( dim ) ], axis = 1 )
+
+            cut_id = driver.array( cut_id )
+            if cut_id.ndim == 0:
+                cut_id = driver.repeat( cut_id, ( batch_size ) )
+
+            return cls.hypercube( frame, cut_id = cut_id )
         else:
-            max_coords = driver.array( max_coords )
+            if isinstance( min_coords_or_dim, int ):
+                assert max_coords is None and dim is None
+                min_coords = driver.zeros( [ min_coords_or_dim ] )
+                dim = min_coords_or_dim
+            elif min_coords_or_dim is None:
+                assert dim is not None
+                min_coords = driver.zeros( [ dim ] )
+            else:
+                min_coords = driver.array( min_coords_or_dim )
+                dim = min_coords.shape[ 0 ]
 
-        diff = max_coords - min_coords
-        diag = driver.array( numpy.eye( dim ) ) * diff
-        frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
+            if max_coords is None:
+                max_coords = driver.ones( [ dim ] )
+            else:
+                max_coords = driver.array( max_coords )
 
-        return Cell.hypercube( frame, bnd = bnd )
+            assert max_coords is not None and min_coords is not None and dim is not None
 
-    # @property
-    # def vertex_positions( self ):
-    #     assert self.large_vertex_positions is not None
-    #     return self.large_vertex_positions[ : self.nb_vertices, : ]
+            diff  = max_coords - min_coords
+            diag  = cast( numpy.array, driver.array( numpy.eye( dim ) ) ) * diff
+            frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
 
-    # @property
-    # def vertex_indices( self ):
-    #     if self.dim == 2:
-    #         nb = int( self.nb_vertices )
-    #         k = numpy.arange( nb )
-    #         kp = ( k + nb - 1 ) % nb
-    #         return numpy.stack( [ numpy.minimum( k, kp ), numpy.maximum( k, kp ) ], axis = 1 )
+            return cls.hypercube( frame, cut_id = cut_id )
 
-    #     if self.large_vertex_indices is None:
-    #         return None
+    @classmethod
+    def hypercube( cls, frame, cut_id : any = BOUNDARY ):
+        batch_sizes = [ frame.shape[ 0 ] ] if hasattr( cls, 'BatchItemVersion' ) else []
+        cut_id = driver.array( cut_id )
+        frame = driver.array( frame )
+        assert frame is not None
+        dim = frame.shape[ -1 ]
 
-    #     return self.large_vertex_indices[ : self.nb_vertices, : ]
+        return cast( cls, driver.call(
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.cell.slice( bi ).init_as_hypercube( p.frame( bi ), p.cut_id( bi ) ); } );",
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.cell.slice( bi ).init_as_hypercube_bwd( p.frame( bi ), p, bi ); } );",
+            cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
+            cut_id = cut_id,
+            frame = frame,
+        ) )
 
-    # @property
-    # def edge_indices( self ):
-    #     if self.dim == 2:
-    #         nb = int( self.nb_vertices )
-    #         k = numpy.arange( nb )
-    #         return numpy.stack( [ k, ( k + 1 ) % nb, k ], axis = 1 )
-
-    #     if self.large_edge_indices is None:
-    #         return None
-
-    #     return self.large_edge_indices[ : self.nb_edges, : ]
-
-    # @property
-    # def cut_planes( self ):
-    #     if self.large_cut_planes is None:
-    #         return None
-    #     return self.large_cut_planes[ : self.nb_cuts, : ]
-
-    # @property
-    # def cut_ids( self ):
-    #     return self.cut_ids[ : self.nb_cuts, : ]
-
-    @property
-    def faces( self ) -> list:
-        res = cpp_binding( "faces", "sdot/cell/faces.h" )( self )
-        assert res is not None
-        return res
+    @classmethod
+    def _return_parameters( cls, dim, batch_sizes = [] ):
+        kw = dict(
+            max_of_nb_vertices = 64,
+            max_of_nb_edges    = 64,
+            max_of_nb_cuts     = 64,
+            dim                = dim,
+        )
+        if batch_sizes:
+            kw[ 'batch_size' ] = batch_sizes[ 0 ]
+        return kw
 
     @property
     def measure( self ) -> any:
         return driver.call(
-            "arch.run_single( [p] HD () mutable { RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts ); p.output = p.cell.measure( item_map ); } );",
-            "", # "arch.run_single( [p] HD () mutable { p.output = p.cell.measure(); } );",
-            map_items = Workspace( Tensor( "nb_map_items[]", dtype = int ), max_of_nb_map_items = 256 ),
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto bi ) mutable { p.nb_map_items = 0; RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts ); p.output = p.cell.measure( item_map ); } );",
+            "",
+            map_items = Workspace( Tensor( "nb_map_items[]", dtype = int ), max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, self.nb_cuts ) ),
             output = Return( Tensor() ),
             cell = self
         )
+
+    @staticmethod
+    def _max_of_nb_map_items( dim, nb_cuts = None ):
+        if nb_cuts is None:
+            nb_cuts = 256
+        res = 0
+        if dim >= 2:
+            res += nb_cuts
+        if dim >= 3:
+            res += nb_cuts * nb_cuts
+        if dim >= 4:
+            for _ in range( 3, dim ):
+                res += nb_cuts * nb_cuts
+        return res
+
 
     def cut( self, cut_dir_or_plane, cut_off = None, cut_id = BOUNDARY ):
         cut_plane = driver.t1( cut_dir_or_plane )
@@ -182,14 +152,6 @@ class Cell:
             cut_off = driver.t0( cut_off )
             cut_plane = driver.hstack( [ cut_plane, driver.expand_dims( cut_off, 0 ) ] )
         cpp_binding( "cut", "sdot/cell/cut.h" )( Output( self ), cut_plane, cut_id )
-
-    def cpp_class_name( self, driver ):
-        return f"Cell<{ driver.normalized_dtype },{ self.dim },Cpu>"
-
-    @classmethod
-    def cpp_class_name_for( cls, **kwargs ):
-        dim = kwargs.get( 'dim', -1 )
-        return f"Cell<TF,{ dim },Cpu>"
 
     def plot( self, plotter = None, offset = None ):
         import pyvista

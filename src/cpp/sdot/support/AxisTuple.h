@@ -59,15 +59,26 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return front_value; return next_values[ u - 1 ]; }
-    HD auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
-    HD auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
+    HD bool      all_value     ( auto &&func ) const { if ( ! func( front_value ) ) return false; return bool( next_values.all_value( func ) ); }
+
+    HD bool      has_value     ( auto &&func ) const {
+        if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+            if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
+                return true;
+            else
+                return next_values.has_value( func );
+        } else {
+            return func( front_value ) || next_values.has_value( func );
+        }
+    }
+
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
-    HD int       size          () const { return ct_rank; }
+    HD auto      size          () const { return Ct<int,ct_rank>(); }
 
     HD auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
 
-    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    HD auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_index ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_index( Ct<U,u-1>() ) ); }
+    HD auto      without_index ( TI u ) const;
 
     TI           front_value;
     Next         next_values;
@@ -91,15 +102,26 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( ct_front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return Ct<TI,ct_front_value>(); else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { if ( u == 0 ) return ct_front_value; return next_values[ u - 1 ]; }
-    HD auto      all_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( ! res ) return res; return next_values.all_value( func ); }
-    HD auto      has_value     ( auto &&func ) const { auto res = func( Ct<int,ct_front_value>() ); if ( res ) return res; return next_values.has_value( func ); }
+    HD auto      all_value     ( auto &&func ) const { if constexpr ( ! func( Ct<int,ct_front_value>() ) ) return Ct<bool,false>(); else return next_values.all_value( func ); }
+
+    HD bool      has_value     ( auto &&func ) const {
+        if constexpr ( requires { DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value; } ) {
+            if constexpr( DECAYED_TYPE_OF( func( Ct<TI,ct_front_value>() ) )::value )
+                return true;
+            else
+                return next_values.has_value( func );
+        } else {
+            return func( Ct<TI,ct_front_value>() ) || next_values.has_value( func );
+        }
+    }
+
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << ct_front_value, ", " ); }
-    HD int       size          () const { return ct_rank; }
+    HD auto      size          () const { return Ct<int,ct_rank>(); }
 
     HD auto      front_shape   () const { return AxisTuple<TI,Arch,1,KnownAxisSize<TI,0,ct_front_value>>( Values(), ct_front_value ); }
 
-    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    HD auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_index ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_index( Ct<U,u-1>() ) ); }
+    HD auto      without_index ( TI u ) const;
 
     Next         next_values;
 };
@@ -122,15 +144,27 @@ public:
     HD auto      apply_values  ( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) { return cb( front_value, nxt... ); } ); }
     T_Uu HD auto operator[]    ( Ct<U,u> ) const { if constexpr ( u == 0 ) return front_value; else return next_values[ Ct<U,u-1>() ]; }
     HD auto      operator[]    ( TI u ) const { return ( &front_value )[ u ]; }
-    HD auto      all_value     ( auto &&func ) const { auto res = func( front_value ); if ( ! res ) return res; return next_values.all_value( func ); }
-    HD auto      has_value     ( auto &&func ) const { auto res = func( front_value ); if ( res ) return res; return next_values.has_value( func ); }
+
+    HD bool      all_value     ( auto &&func ) const { if ( ! func( front_value ) ) return false; return bool( next_values.all_value( func ) ); }
+
+    HD bool      has_value     ( auto &&func ) const {
+        if constexpr ( requires { DECAYED_TYPE_OF( func( front_value ) )::value; } ) {
+            if constexpr( DECAYED_TYPE_OF( func( front_value ) )::value )
+                return true;
+            else
+                return next_values.has_value( func );
+        } else {
+            return func( front_value ) || next_values.has_value( func );
+        }
+    }
+
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) prefix = "[ "; next_values.display( os << prefix << front_value, ", " ); }
-    HD int       size          () const { return ct_rank; }
+    HD auto      size          () const { return Ct<int,ct_rank>(); }
 
     HD auto      front_shape   () const { return AxisTuple<TI,Arch,1>( Values(), front_value ); }
 
-    T_Uu HD auto without_axis  ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_axis( Ct<U,u-1>() ) ); }
-    HD auto      without_axis  ( TI u ) const;
+    T_Uu HD auto without_index ( Ct<U,u> ) const { if constexpr ( u == 0 ) return next_values; else return concat( front_shape(), next_values.without_index( Ct<U,u-1>() ) ); }
+    HD auto      without_index ( TI u ) const;
 
     TI           front_value;
     Next         next_values;
@@ -153,7 +187,7 @@ public:
     HD auto      has_value     ( auto &&/*func*/ ) const { return Ct<bool,false>(); }
     HD auto      operator[]    ( TI /*u*/ ) const -> TI { ASSERT( false ); return 0; }
     HD void      display       ( auto &os, const char *prefix = nullptr ) const { if ( prefix == nullptr ) os << "[]"; else os << " ]"; }
-    HD int       size          () const { return 0; }
+    HD auto      size          () const { return Ct<int,0>(); }
 };
 
 } // namespace sdot

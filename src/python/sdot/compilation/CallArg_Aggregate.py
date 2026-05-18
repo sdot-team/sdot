@@ -205,7 +205,7 @@ class CallArg_Aggregate( CallArg ):
                     res = val.shape[ tensor_axes[ num_case ] ]
                     return ( res - int( vector[ num_case ] ) ) // int( coeff )
 
-        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self }'" )
+        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self.name_in_parent }'" )
 
     def axis_variable_equation( self, axes: dict, use_attributes: bool ):
         """
@@ -289,17 +289,27 @@ class CallArg_Aggregate( CallArg ):
 
         lines = []
 
-        # row accessor (batch → single-row)
+        # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:
-            includes.add( f"./{ unbatch_version.__name__ }.h" )
-            lines.append(  "    auto row( PI index ) const {" )
-            lines.append( f"        return { unbatch_version.__name__ }{{" )
+            includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
+            lines.append(  "    auto  slice( PI index ) const {" )
+            lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
             for ct_axis_name in ct_axes:
                 lines.append( f"            .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
             for name, argument in self.sub_dict.items():
                 lines.append( f"            .{ name } = { name }.row( index )," )
             lines.append(  "        };" )
             lines.append(  "    }" )
+            lines.append(  "    auto  slice( auto bi ) const { return slice( PI( bi[ Ct<int,0>() ] ) ).slice( bi.without_index( Ct<int,0>() ) ); }" )
+
+        # batch_sizes() + slice(AxisTuple<TI,Arch,0>): available when tensor fields are present (TI and Arch in scope)
+        if template_args:
+            includes.add( "sdot/support/AxisTuple.h" )
+            if unbatch_version is not None:
+                lines.append(  "    auto  batch_sizes() const { return AxisTuple<TI,Arch,1>( Values(), TI( batch_size ) ); }" )
+            else:
+                lines.append(  "    auto  batch_sizes() const { return AxisTuple<TI,Arch,0>( Values() ); }" )
+            lines.append(  "    auto  slice( AxisTuple<TI,Arch,0> ) const { return *this; }" )
 
         # axis accessor methods
         if axes:

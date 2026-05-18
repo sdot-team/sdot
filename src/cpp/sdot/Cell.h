@@ -15,7 +15,10 @@ struct Cell {
 
     //
     void     init_as_aligned_simplex( TI cut_id );
+    void     init_as_hypercube      ( const auto &frame, const auto &cut_id );
     void     init_as_unbounded      ();
+
+    void     init_as_hypercube_bwd  ( const auto &frame, auto &p, const auto &batch_index );
 
     // retrieve info in tensors --------------------------------------------------------------
     Pt       vertex_position        ( PI num_vertex ) const;

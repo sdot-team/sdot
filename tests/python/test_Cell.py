@@ -56,7 +56,6 @@ def test_cell_3D_basic():
     info( c.cut_planes )
     info( c.cut_ids )
 
-    info( c.index_corrections )
     # info( c.measure )
     # info( c.measure )
     # ic( c.faces )
@@ -64,7 +63,7 @@ def test_cell_3D_basic():
     # c.plot()
 
 def test_cell_2D_basic():
-    c = sdot.Cell.unbounded( 2 )
+    c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ 2, 1, 1 ] )
 
     # c.cut( [ 1, 0 ], 0.3 )
     info( c.vertex_positions )
@@ -78,7 +77,24 @@ def test_cell_2D_basic():
 
     # c.plot()
 
+def test_cell_2D_grad():
+    def f( s ):
+        c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ s, s, 1 ] )
+        return c.vertex_positions[ 1, 0 ]
+
+    info( f( 2 ) )
+
+    import jax
+    info( jax.grad( f )( 2.0 ) )
+
+def test_cell_2D_batch():
+    # c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ 2, 1, 1 ], batch_size = 4 )
+    c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ 2, 1, 1 ], [ 3, 1, 1 ] ] )
+    info( c.vertex_positions[ :, 1, 0 ] )
+
 if __name__ == "__main__":
-    test_cell_2D_basic()
+    # test_cell_2D_basic()
+    # test_cell_2D_grad()
+    test_cell_2D_batch()
     # test_cell_2D_diff()
     # test_cell_3D()

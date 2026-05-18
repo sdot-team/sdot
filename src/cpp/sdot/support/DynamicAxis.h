@@ -19,10 +19,12 @@ public:
 
     // slicing/subparts
     auto         operator()     ( auto...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,typename TT::Shape,typename TT::Strides>( num_dynamic_axis, capacity, new_sizes ); }
+    auto         row            ( auto index ) const { return operator()( index ); }
 
     // info
     bool         is_invalid     () const { return sizes.is_invalid(); }
     bool         is_valid       () const { return sizes.is_valid(); }
+    PI           shape          ( PI ind ) const { return sizes.shape( ind ); }
     PI           size           ( PI ind ) const { return sizes.size( ind ); }
 
     // assuming rank == 0

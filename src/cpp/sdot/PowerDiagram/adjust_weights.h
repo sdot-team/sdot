@@ -159,8 +159,8 @@ void center_weights( auto &p ) {
 
     with_worker_for( p.target_distribution, [&]( auto &&distribution_worker ) {
         distribution_worker.with_preparation_for_cell_traversal( p.cell_workspace, p.cells, [&]( auto &distribution_worker ) {
-            auto cell_workspace = p.cell_workspace.row( 0 );
-            auto cell = p.cells.row( 0 );
+            auto cell_workspace = p.cell_workspace.slice( 0 );
+            auto cell = p.cells.slice( 0 );
             CellWorker cw( cell, cell_workspace, cell.dim() );
             distribution_worker.init_cell( cell );
 

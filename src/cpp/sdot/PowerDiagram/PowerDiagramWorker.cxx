@@ -22,8 +22,8 @@ UTP int DTP::for_each_point_in_bsp( auto &&func ) {
 UTP int DTP::for_each_cell( auto &&density, auto &&func ) {
     using Pt = Vector<TF,Arch,ct_dim,Arch>;
 
-    CellWorkspace<Arch,TF,TI> cell_workspace = cell_workspaces.row( 0 );
-    Cell<ct_dim,Arch,TF,TI> cell = cells.row( 0 );
+    CellWorkspace<Arch,TF,TI> cell_workspace = cell_workspaces.slice( 0 );
+    Cell<ct_dim,Arch,TF,TI> cell = cells.slice( 0 );
     CellWorker<ct_dim,Arch,TF,TI> cell_worker( cell, cell_workspace, cell.dim() );
 
     return for_each_point_in_bsp( [&]( auto i0 ) {

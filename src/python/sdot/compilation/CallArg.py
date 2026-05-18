@@ -97,7 +97,8 @@ class CallArg:
             if name := p().name_in_parent:
                 l.append( name )
             p = p().parent
-        return str.join( "_", l[ :-1 ] )
+        l.reverse()
+        return str.join( "_", l[ 1: ] )
 
     def init_CallArgs_backward_version( self, res, parent ):
         res.io_category = IoCategory.pure_input()
@@ -106,7 +107,7 @@ class CallArg:
         res.python_class = self.python_class
 
         res.name_in_parent = self.name_in_parent
-        res.parent = parent
+        res.parent = ref( parent ) if parent is not None else None
 
-        res.ctor_kwargs = None
-        res.ctor_args = None
+        res.ctor_kwargs = self.ctor_kwargs
+        res.ctor_args   = self.ctor_args

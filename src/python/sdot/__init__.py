@@ -14,7 +14,7 @@ from .distributions.SplineGrid import SplineGrid as SplineGrid
 from .aggregate.Return import Return as Return
 from .aggregate.Tensor import Tensor as Tensor
 
-from typing import TYPE_CHECKING, cast
+# from typing import TYPE_CHECKING, cast
 
 # from .aggregate import aggregate as aggregate, TensorField as TensorField
 # from .UndefinedTensor import UndefinedTensor as UndefinedTensor
@@ -29,7 +29,7 @@ from .OtPlan import OtPlan as OtPlan, optimal_transport_plan as optimal_transpor
 
 # from .Polynomial import Polynomial as Polynomial
 from .PowerDiagram import PowerDiagram as PowerDiagram
-from .Cell import Cell as Cell
+from .Cell import Cell as Cell, BatchOfCell as BatchOfCell
 from .Bsp import Bsp as Bsp
 
 # from .ot_plan import ot_plan as ot_plan, distance as distance, distances as distances, barycenters as barycenters

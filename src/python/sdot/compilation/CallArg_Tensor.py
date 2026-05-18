@@ -21,8 +21,8 @@ class CallArg_Tensor( CallArg ):
     shape                     : list[ AxisExpr ]
     dtype                     : any
 
+    tensor_type_input_index   : int
     validity_output_index     : int
-    tensor_type_input_index      : int
 
     num_in_input_sub_list     : int
     num_in_dynamic_axes       : int
@@ -75,6 +75,8 @@ class CallArg_Tensor( CallArg ):
         if call_args and represents_a_dynamic_axis:
             res.num_in_dynamic_axes = len( call_args.dynamix_axes )
             call_args.dynamix_axes.append( res )
+
+        res.orig_parent = None
 
         # input or mutable -> need an input tensor
         if io_category.has_input:
@@ -153,12 +155,16 @@ class CallArg_Tensor( CallArg ):
                 break
             call_arg = call_arg.parent()
 
+        # orig_parent takes priority for ct_axes lookup (e.g. gradient tensors whose
+        # parent is the backward aggregate, not the original one that holds the values)
+        lookup_parent = self.orig_parent or self.parent
+
         # tensor
-        if is_a_dyn_size and name in self.parent().sub_dict:
-            return self.parent().sub_dict[ name ].python_value.item()
+        if is_a_dyn_size and name in lookup_parent().sub_dict:
+            return lookup_parent().sub_dict[ name ].python_value.item()
 
         #
-        if enclosing := self.parent().python_value:
+        if enclosing := lookup_parent().python_value:
             return getattr( enclosing, name )
 
         raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }', or in ctor args" )
@@ -209,14 +215,23 @@ class CallArg_Tensor( CallArg ):
             call_arg = call_arg.parent()
         raise KeyError( name )
 
+    def _is_ct_axis( self, n ) -> bool:
+        """True if axis n is declared compile-time (all terms in ct_axes, no dynamic selection)."""
+        expr = self.shape[ n ]
+        for term in expr.terms:
+            if term.variable.selection is not None or term.variable.arguments is not None:
+                return False
+            if term.variable.name not in self.ct_axes:
+                return False
+        return True
+
     def _ct_axis_value( self, n ):
-        """Return the compile-time value for axis n, or None if runtime-only."""
+        """Return the concrete compile-time value for axis n, or None if unavailable."""
+        if not self._is_ct_axis( n ):
+            return None
         expr = self.shape[ n ]
         if not expr.terms:
             return expr.offset
-        for term in expr.terms:
-            if term.variable.selection is not None or term.variable.arguments is not None:
-                return None
         try:
             return int( expr.value( self._get_kwarg_only, False ) )
         except ( KeyError, RuntimeError ):
@@ -227,22 +242,21 @@ class CallArg_Tensor( CallArg ):
         known = []
         if not self.comes_from_basic_array:
             for n in range( self.ndim ):
-                val = self._ct_axis_value( n )
-                if val is not None:
-                    if not for_a_particular_binding:
-                        expr = self.shape[ n ]
-                        ops = []
-                        if expr.offset:
-                           ops.append( str( expr.offset ) )
-                        for term in expr.terms:
-                            if term.coeff == 1:
-                                ops.append( f'ct_{ term.variable.name }' )
-                            else:
-                                ops.append( f'{ term.coeff } * ct_{ term.variable.name }' )
-                        if ops:
-                            val = ' + '.join( ops )
+                if for_a_particular_binding:
+                    val = self._ct_axis_value( n )
+                    if val is not None:
+                        known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
+                elif self._is_ct_axis( n ):
+                    expr = self.shape[ n ]
+                    ops = []
+                    if expr.offset:
+                       ops.append( str( expr.offset ) )
+                    for term in expr.terms:
+                        if term.coeff == 1:
+                            ops.append( f'ct_{ term.variable.name }' )
                         else:
-                            val = '0'
+                            ops.append( f'{ term.coeff } * ct_{ term.variable.name }' )
+                    val = ' + '.join( ops ) if ops else '0'
                     known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         suffix = ( "," + ",".join( known ) ) if known else ""
         return f"AxisTuple<TI,Arch,{ self.ndim }{ suffix }>"
@@ -354,6 +368,7 @@ class CallArg_Tensor( CallArg ):
         res = CallArg_Tensor()
         self.init_CallArgs_backward_version( res, parent )
 
+        res.orig_parent = self.parent
         res.ct_axes = self.ct_axes
 
         res.represents_a_dynamic_axis = self.represents_a_dynamic_axis

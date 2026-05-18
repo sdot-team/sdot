@@ -1,5 +1,5 @@
-from typing_extensions import Optional
-from typing import cast
+from typing_extensions import Optional, overload
+from typing import cast, Literal
 from jax._src.custom_derivatives import CustomVJPPrimal
 from jax._src import ad_util
 import jax.core as jax_core
@@ -119,6 +119,10 @@ class JaxDriver:
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
 
+    @overload
+    def array( self, data: None, dtype = None ) -> None: ...
+    @overload
+    def array( self, data, dtype = None ) -> jax.Array: ...
     def array( self, data, dtype = None ):
         if data is None:
             return None
@@ -194,6 +198,9 @@ class JaxDriver:
 
     def stack( self, tensors, axis ):
         return jnp.stack( tensors, axis=axis )
+
+    def concatenate( self, tensors, axis ):
+        return jnp.concatenate( tensors, axis=axis )
 
     def linalg_solve( self, A, b ):
         return jnp.linalg.solve( A, b )
@@ -335,7 +342,7 @@ class JaxDriver:
 
             def _call_prim( differentiable_inputs ):
                 fai.update_differentiable_input_values_with( differentiable_inputs )
-                prim = get_or_create( module_name, fai.ffi_outputs )
+                prim = get_or_create( module_name, fai.ffi_outputs, fai.ffi_attributes )
                 ret = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
                 if isinstance( ret, jax.Array ):
                     return ( ret, )
@@ -484,7 +491,7 @@ class JaxDriver:
                 try:
                     while True:
                         func = jax.ffi.ffi_call( module_name, fai.ffi_outputs )
-                        eager_ret = func( *fai.ffi_inputs )
+                        eager_ret = func( *fai.ffi_inputs, **fai.ffi_attributes )
                         if isinstance( eager_ret, jax.Array ):
                             eager_ret = ( eager_ret, )
                         else:
@@ -503,7 +510,7 @@ class JaxDriver:
                 except Exception:
                     pass  # abstract inputs — will use runtime callback below
 
-            prim = get_or_create( module_name, fai.ffi_outputs )
+            prim = get_or_create( module_name, fai.ffi_outputs, fai.ffi_attributes )
             ret = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
             if isinstance( ret, jax.Array ):
                 ret = ( ret, )
@@ -524,7 +531,7 @@ class JaxDriver:
 
         elif inside_jit:
             # No dynamic axes: plain JIT call.
-            prim = get_or_create( module_name, fai.ffi_outputs )
+            prim = get_or_create( module_name, fai.ffi_outputs, fai.ffi_attributes )
             ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
             if isinstance( ret, jax.Array ):
                 ret = ( ret, )
@@ -534,7 +541,7 @@ class JaxDriver:
         else:
             # Eager mode: retry loop until capacity is sufficient.
             while True:
-                prim = get_or_create( module_name, fai.ffi_outputs )
+                prim = get_or_create( module_name, fai.ffi_outputs, fai.ffi_attributes )
                 ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
 
                 if isinstance( ret, jax.Array ):

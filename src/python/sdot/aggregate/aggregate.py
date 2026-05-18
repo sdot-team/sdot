@@ -81,6 +81,12 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     _setup_distribution_class( cls.BatchVersion )
     _setup_distribution_class( cls )
 
+    # copy classmethods from base to variants (variants are created as empty classes, no inheritance)
+    for variant in [ clu, clb, clt ]:
+        for name, val in vars( cls ).items():
+            if isinstance( val, classmethod ) and name not in vars( variant ):
+                setattr( variant, name, val )
+
     return cls
 
 

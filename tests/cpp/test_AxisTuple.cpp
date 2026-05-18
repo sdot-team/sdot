@@ -8,7 +8,7 @@ TEST_CASE( "AxisTuple", "" ) {
     SECTION( "no ct axis" ) {
         AxisTuple<int,Cpu,3> shape( Values(), 10, 20, 30 );
         CHECK_REPR( shape, "[ 10, 20, 30 ]" );
-        CHECK_REPR( shape.without_axis( Ct<int,1>() ), "[ 10, 30 ]" );
+        CHECK_REPR( shape.without_index( Ct<int,1>() ), "[ 10, 30 ]" );
         CHECK_REPR( (shape[ Ct<int,0>() ]), 10 );
         CHECK_REPR( (shape[ Ct<int,1>() ]), 20 );
         CHECK_REPR( (shape[ Ct<int,2>() ]), 30 );
@@ -21,7 +21,7 @@ TEST_CASE( "AxisTuple", "" ) {
         AxisTuple<int,Cpu,3,KnownAxisSize<int,1,50>> epahs( Values(), 40, 50, 60 );
         CHECK_REPR( shape, "[ 10, 20, 30 ]" );
         CHECK_REPR( concat( shape, epahs ), "[ 10, 20, 30, 40, 50, 60 ]" );
-        CHECK_REPR( shape.without_axis( Ct<int,1>() ), "[ 10, 30 ]" );
+        CHECK_REPR( shape.without_index( Ct<int,1>() ), "[ 10, 30 ]" );
         CHECK_REPR( (shape[ Ct<int,0>() ]), 10 );
         CHECK_REPR( (shape[ Ct<int,1>() ]), 20 );
         CHECK_REPR( (shape[ Ct<int,2>() ]), 30 );

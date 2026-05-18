@@ -67,6 +67,145 @@ UTP void DTP::init_as_aligned_simplex( TI cut_id ) {
         cut_ids( num_cut ) = cut_id;
 }
 
+UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
+    is_fully_closed = cut_id != CellBoundary::INFINITE;
+    nb_vertices = PI( 1 ) << dim;
+    nb_edges = dim * ( PI( 1 ) << ( dim - 1 ) );
+    nb_cuts = 2 * dim;
+
+    // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
+    auto FT = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) {
+        return TF( frame( 1 + c, r ) );
+    } );
+
+    // vertex_positions: origin + sum of selected axes; vertex_indices: cut 2b or 2b+1 per axis
+    const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
+    for ( PI k = 0; k < nb_vertices; ++k ) {
+        const PI l = ( dim != 2 ? k : vertex_ordering_2D[ k ] );
+        for ( PI d = 0; d < dim; ++d ) {
+            TF pos = frame( 0, d );
+            for ( PI b = 0; b < dim; ++b )
+                if ( ( k >> b ) & 1 )
+                    pos += frame( 1 + b, d );
+            vertex_positions( l, d ) = pos;
+        }
+    }
+
+    // vertex_indices
+    if ( dim >= 2 ) {
+        for ( PI k = 0; k < nb_vertices; ++k )
+            for ( PI b = 0; b < dim; ++b )
+                vertex_indices( k, b ) = 2 * b + ( ( k >> b ) & 1 );
+    }
+
+    // edge_indices: edges in direction b, from vertex k (bit b=0) to k|(1<<b)
+    if ( dim >= 2 ) {
+        for ( PI b = 0, e = 0; b < dim; ++b ) {
+            for ( PI k = 0; k < nb_vertices; ++k ) {
+                if ( ( k >> b ) & 1 )
+                    continue;
+                edge_indices( e, 0 ) = k;
+                edge_indices( e, 1 ) = k | ( PI( 1 ) << b );
+                for ( PI d = 0, col = 2; d < dim; ++d ) {
+                    if ( d == b )
+                        continue;
+                    edge_indices( e, col++ ) = 2 * d + ( ( k >> d ) & 1 );
+                }
+                ++e;
+            }
+        }
+    }
+
+    // cut planes: row d of F^{-1} via shared FT
+    const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
+    for ( PI d = 0; d < dim; ++d ) {
+        auto e_d = Vector<TF,Arch,ct_dim>::with_func( dim, [d]( PI i ) {
+            return i == d ? TF( 1 ) : TF( 0 );
+        } );
+        const auto row = FT.solve_ge( e_d );
+
+        TF row_dot_origin = 0;
+        for ( PI c = 0; c < dim; ++c )
+            row_dot_origin += row[ c ] * frame( 0, c );
+
+        const PI r0 = ( dim != 2 ? 2 * d + 0 : cut_ordering_2D[ 2 * d + 0 ] );
+        for ( PI c = 0; c < dim; ++c )
+            cut_planes( r0, c ) = -row[ c ];
+        cut_planes( r0, dim ) = -row_dot_origin;
+        cut_ids( r0 ) = cut_id;
+
+        const PI r1 = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
+        for ( PI c = 0; c < dim; ++c )
+            cut_planes( r1, c ) = row[ c ];
+        cut_planes( r1, dim ) = row_dot_origin + 1;
+        cut_ids( r1 ) = cut_id;
+    }
+}
+
+UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
+    // Fwd: F[r][c] = frame(1+r,c),  A = F^{-1},  row_d = A[d,:] via F^T * row_d = e_d.
+    //
+    // grad_frame(0,c)   = Σ_l gV(l,c)  +  Σ_d G_dot_d * A[d,c]
+    // grad_frame(1+b,c) = Σ_{k: bit b} gV(l(k),c)  -  (A · tGR^T · A)[b,c]
+    //
+    // where G_dot_d = gC(r1,dim) - gC(r0,dim),
+    //       tGR[d,c] = gC(r1,c) - gC(r0,c) + G_dot_d * frame(0,c).
+
+    using Mat = Matrix<TF,Arch,ct_dim>;
+    using Vec = Vector<TF,Arch,ct_dim>;
+
+    auto gV = p.input_grad_for_cell_vertex_positions( batch_index );
+    auto gC = p.input_grad_for_cell_cut_planes( batch_index );
+    auto gF = p.output_grad_for_frame( batch_index );
+
+    const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
+    const PI cut_ordering_2D[]    = { 3, 1, 0, 2 };
+
+    gF.fill_with( TF( 0 ) );
+
+    // vertex positions: gF(0,c) += Σ_l gV(l,c);  gF(1+b,c) += Σ_{k: bit b} gV(l(k),c)
+    if ( ! gV.surely_null() ) {
+        for ( PI k = 0; k < ( PI( 1 ) << dim ); ++k ) {
+            const PI l = ( dim != 2 ? k : vertex_ordering_2D[ k ] );
+            for ( PI c = 0; c < dim; ++c ) {
+                const TF g = gV( l, c );
+                gF( 0, c ) += g;
+                for ( PI b = 0; b < dim; ++b )
+                    if ( ( k >> b ) & 1 )
+                        gF( 1 + b, c ) += g;
+            }
+        }
+    }
+
+    // cut planes: gF(0,c) += G_dot_d * A[d,c];  gF(1+b,c) -= (A tGR^T A)[b,c]
+    if ( ! gC.surely_null() ) {
+        auto FT  = Mat::with_func( dim, [&]( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
+        auto A   = Mat( Size(), dim, TF( 0 ) );
+        auto tGR = Mat( Size(), dim, TF( 0 ) );
+
+        for ( PI d = 0; d < dim; ++d ) {
+            const PI r0    = ( dim != 2 ? 2 * d + 0 : cut_ordering_2D[ 2 * d + 0 ] );
+            const PI r1    = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
+            const TF G_dot = gC( r1, dim ) - gC( r0, dim );
+
+            const auto row = FT.solve_ge( Vec::with_func( dim, [d]( PI i ) { return i == d ? TF( 1 ) : TF( 0 ); } ) );
+            for ( PI c = 0; c < dim; ++c ) {
+                A  ( d, c ) = row[ c ];
+                tGR( d, c ) = gC( r1, c ) - gC( r0, c ) + G_dot * frame( 0, c );
+                gF ( 0, c ) += G_dot * row[ c ];
+            }
+        }
+
+        // gF(1+b, c) -= (A tGR^T A)[b,c] = Σ_i (A[b,:] · tGR[i,:]) * A[i,c]
+        for ( PI b = 0; b < dim; ++b )
+            for ( PI i = 0; i < dim; ++i ) {
+                TF s = 0;
+                for ( PI c = 0; c < dim; ++c )  s += A( b, c ) * tGR( i, c );
+                for ( PI c = 0; c < dim; ++c )  gF( 1 + b, c ) -= s * A( i, c );
+            }
+    }
+}
+
 UTP void DTP::init_as_unbounded() {
     init_as_aligned_simplex( CellBoundary::INFINITE );
 }
