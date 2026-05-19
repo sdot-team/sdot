@@ -9,7 +9,7 @@ template<class TI, class Arch, int ct_rank, class... Attrs> class AxisTuple;
 // ------------------------------------------------------ CPU ------------------------------------------------------
 struct Cpu {
     T_T void           with_reservation( PI size, auto &&func ) const { T *res = new T[ size ]; func( res ); delete [] res; }
-    auto               parallel_runner ( auto batch_sizes, int max_nb_threads ) { return ParallelRunner_Cpu( batch_sizes, max_nb_threads ); }
+    auto               parallel_runner ( auto batch_sizes, int max_nb_threads, int threads_per_block = 1 ) { return ParallelRunner_Cpu( batch_sizes, max_nb_threads ); }
     auto               run_single      ( auto &&func ) { func(); }
 
     void               run             ( auto batch_sizes, auto &&func ) {

@@ -2,8 +2,6 @@
 
 #include "KnownAxisSize.h"
 #include "common_types.h"
-#include "CtdInt.h"
-#include "Cpu.h" // IWYU pragma: export
 #include "Ct.h"  // IWYU pragma: export
 
 namespace sdot {

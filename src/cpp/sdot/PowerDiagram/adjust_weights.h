@@ -194,8 +194,8 @@ void center_weights( auto &p ) {
             Pt diracs_width = ( ma_di - mi_di ) / 2;
 
             // adjust the weights
-            Pt scal = Pt::with_func( dim, [&]( PI d ) { return cube_width / diracs_width[ d ] - 1; } );
-            Pt grad = Pt::with_func( dim, [&]( PI d ) { return 2 * ( diracs_center[ d ] - cube_center[ d ] ); } );
+            Pt scal = Pt::with_func( [&]( PI d ) { return cube_width / diracs_width[ d ] - 1; } );
+            Pt grad = Pt::with_func( [&]( PI d ) { return 2 * ( diracs_center[ d ] - cube_center[ d ] ); } );
             for( PI n = 0; n < p.power_diagram.positions.size( 0 ); ++n ) {
                 TF w = dot( grad, Pt( p.power_diagram.positions.row( n ) ) );
                 for( PI d = 0; d < dim; ++d )

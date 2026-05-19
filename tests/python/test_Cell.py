@@ -88,6 +88,8 @@ def test_cell_2D_grad():
     info( jax.grad( f )( 2.0 ) )
 
 def test_cell_2D_batch():
+    # sdot.driver.device = "gpu"
+
     def f( s ):
         c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
         info( c.measure )

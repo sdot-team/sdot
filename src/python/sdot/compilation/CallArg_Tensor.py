@@ -192,7 +192,7 @@ class CallArg_Tensor( CallArg ):
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
             lst = names[ : -1 ] + [ name ]
-            template_args.add( f"ct_{ '_'.join( lst ) }", "TI", 4 )
+            template_args.add( f"ct_{ '_'.join( lst ) }_value", "TI", 4 )
 
         if self.dtype.floating_point and self.dtype.size is None:
             template_args.add( "TF", "typename", 0 )
@@ -254,9 +254,9 @@ class CallArg_Tensor( CallArg ):
                        ops.append( str( expr.offset ) )
                     for term in expr.terms:
                         if term.coeff == 1:
-                            ops.append( f'ct_{ term.variable.name }' )
+                            ops.append( f'ct_{ term.variable.name }_value' )
                         else:
-                            ops.append( f'{ term.coeff } * ct_{ term.variable.name }' )
+                            ops.append( f'{ term.coeff } * ct_{ term.variable.name }_value' )
                     val = ' + '.join( ops ) if ops else '0'
                     known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         suffix = ( "," + ",".join( known ) ) if known else ""

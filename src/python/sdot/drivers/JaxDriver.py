@@ -676,7 +676,7 @@ class JaxDriver:
 
         #
         from ..compilation.make_dylib_from_source import make_dylib_from_source
-        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device.name )
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device )
 
     def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
         is_gpu = self.device.is_cuda_gpu

@@ -285,7 +285,7 @@ class CallArg_Aggregate( CallArg ):
             argument.get_axes( axes, ct_axes )
 
         for ct_axis_name in ct_axes:
-            template_args.add( f"ct_{ ct_axis_name }", "int", 0 )
+            template_args.add( f"ct_{ ct_axis_name }_value", "int", 0 )
 
         lines = []
 
@@ -304,7 +304,7 @@ class CallArg_Aggregate( CallArg ):
             lines.append( f"    auto operator()( AxisTuple<TI,Arch,{ len( batch_axes ) }> bi ) const {{" )
             lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
             for ct_axis_name in ct_axes:
-                lines.append( f"            .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
+                lines.append( f"            .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )
             for name, argument in self.sub_dict.items():
                 lines.append( f"            .{ name } = { name }( bi )," )
             lines.append(  "        };" )
@@ -318,7 +318,7 @@ class CallArg_Aggregate( CallArg ):
                 complete_axis_name = f"max_of_{ axis_name }" if axis_selection is not None else axis_name
 
                 if axis_name in ct_axes and ct_axes[ axis_name ] is None: # always a ct_axis -> make a constexpr
-                    lines.append( f"    static constexpr SI { complete_axis_name } = ct_{ axis_name };" )
+                    lines.append( f"    static constexpr SI { complete_axis_name } = ct_{ axis_name }_value;" )
                 else: # else, attribute to be filled during construction
                     lines.append( f"    SI { complete_axis_name };" )
 
@@ -331,7 +331,7 @@ class CallArg_Aggregate( CallArg ):
             s = argument.beg_with_same_shape( name, s, lines )
         lines.append( s + f"{ base_cpp_name } new_value{{" )
         for ct_axis_name in ct_axes:
-            lines.append( s + f"    .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
+            lines.append( s + f"    .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )
         for name, argument in self.sub_dict.items():
             lines.append( s + f"    .{ name } = { name }," )
         lines.append( s + "};" )
@@ -342,7 +342,7 @@ class CallArg_Aggregate( CallArg ):
 
         # compile-time axis members
         for ct_axis_name in ct_axes:
-            lines.append( f"    CtdInt<TI,ct_{ ct_axis_name }> ct_{ ct_axis_name }_inst;" )
+            lines.append( f"    Ct<TI,ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
 
         # data members
         for name, argument in self.sub_dict.items():
@@ -395,7 +395,7 @@ class CallArg_Aggregate( CallArg ):
 
         # ct axes
         for ct_axis_name in ct_axes:
-            lines.append( f"{ beg_line }    .ct_{ ct_axis_name }_inst = CtdInt<TI,{ self.get_variable_value( ct_axis_name ) }>()," )
+            lines.append( f"{ beg_line }    .ct_{ ct_axis_name } = Ct<TI,{ self.get_variable_value( ct_axis_name ) }>()," )
 
         for name, argument in self.sub_dict.items():
             lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + '    ' ) }," )

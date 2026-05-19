@@ -28,7 +28,7 @@ template<int order,int dim,class TF,class Arch>
 struct Integral<Polynomial<order,dim,Arch,TF>,Simplex<dim,dim+1,TF,Arch>> {
     static auto integral( const Polynomial<order,dim,Arch,TF> &pol, const Simplex<dim,dim+1,TF,Arch> &simplex ) {
         // M(j, i) = j-th component of i-th edge vector
-        auto M = SimpleSquareMatrix<TF,dim,Arch>::with_func( dim, [&]( PI row, PI col ) {
+        auto M = Matrix<TF,dim,Arch>::with_func( [&]( PI row, PI col ) {
             return simplex.pts[ col + 1 ][ row ] - simplex.pts[ 0 ][ row ];
         } );
         const TF jac = std::abs( M.determinant() );
@@ -108,7 +108,7 @@ struct Integral<Polynomial<order,dim,Arch,TF>,Simplex<dim,dim,TF,Arch>> {
     static auto integral( const Polynomial<order,dim,Arch,TF> &pol, const Simplex<dim,dim,TF,Arch> &simplex ) {
         constexpr int sdim = dim - 1;  // parameter-space dimension
 
-        auto G = SimpleSquareMatrix<TF,sdim,Arch>::with_func( sdim, [&]( PI r, PI c ) {
+        auto G = Matrix<TF,Arch,sdim>::with_func( [&]( PI r, PI c ) {
             TF dot = 0;
             for ( PI j = 0; j < PI( dim ); ++j )
                 dot += ( simplex.pts[ r + 1 ][ j ] - simplex.pts[ 0 ][ j ] )

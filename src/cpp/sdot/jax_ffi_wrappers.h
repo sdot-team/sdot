@@ -14,6 +14,9 @@
 #include <xla/ffi/api/ffi.h>
 #include <utility>
 
+#include "support/CudaGpu.h" // IWYU pragma: export
+#include "support/Cpu.h" // IWYU pragma: export
+
 namespace sdot {
 
 

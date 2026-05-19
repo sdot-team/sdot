@@ -74,7 +74,7 @@ UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     nb_cuts = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
-    auto FT = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) {
+    auto FT = Matrix<TF,Arch,ct_dim_value>::with_func( [=] HD ( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
 
@@ -119,7 +119,7 @@ UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = Vector<TF,Arch,ct_dim>::with_func( dim, [d]( PI i ) {
+        auto e_d = Vector<TF,Arch,ct_dim_value>::with_func( [d] HD ( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -151,8 +151,8 @@ UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &bat
     // where G_dot_d = gC(r1,dim) - gC(r0,dim),
     //       tGR[d,c] = gC(r1,c) - gC(r0,c) + G_dot_d * frame(0,c).
 
-    using Mat = Matrix<TF,Arch,ct_dim>;
-    using Vec = Vector<TF,Arch,ct_dim>;
+    using Mat = Matrix<TF,Arch,dim>;
+    using Vec = Vector<TF,Arch,dim>;
 
     auto gV = p.input_grad_for_cell_vertex_positions( batch_index );
     auto gC = p.input_grad_for_cell_cut_planes( batch_index );
@@ -179,16 +179,16 @@ UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &bat
 
     // cut planes: gF(0,c) += G_dot_d * A[d,c];  gF(1+b,c) -= (A tGR^T A)[b,c]
     if ( ! gC.surely_null() ) {
-        auto FT  = Mat::with_func( dim, [&]( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
-        auto A   = Mat( Size(), dim, TF( 0 ) );
-        auto tGR = Mat( Size(), dim, TF( 0 ) );
+        auto FT  = Mat::with_func( [=] HD ( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
+        auto A   = Mat( FillWith(), TF( 0 ) );
+        auto tGR = Mat( FillWith(), TF( 0 ) );
 
         for ( PI d = 0; d < dim; ++d ) {
             const PI r0    = ( dim != 2 ? 2 * d + 0 : cut_ordering_2D[ 2 * d + 0 ] );
             const PI r1    = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
             const TF G_dot = gC( r1, dim ) - gC( r0, dim );
 
-            const auto row = FT.solve_ge( Vec::with_func( dim, [d]( PI i ) { return i == d ? TF( 1 ) : TF( 0 ); } ) );
+            const auto row = FT.solve_ge( Vec::with_func( [d] HD ( PI i ) { return i == d ? TF( 1 ) : TF( 0 ); } ) );
             for ( PI c = 0; c < dim; ++c ) {
                 A  ( d, c ) = row[ c ];
                 tGR( d, c ) = gC( r1, c ) - gC( r0, c ) + G_dot * frame( 0, c );
@@ -248,44 +248,42 @@ UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_ve
 }
 
 /// Fan triangulation — recursive core.
-UTP void DTP::for_each_simplex_rec( const auto &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
+UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,Arch,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
     // register the new vertex
     simplex[ simplex_size++ ] = num_vertex;
 
-    const PI nb_cut_indices = cut_indices.size();
-    if ( nb_cut_indices == 0 ) {
+    if constexpr ( d == 0 ) {
         func( simplex );
-        return;
-    }
+    } else {
+        for( PI ind_to_remove = 0; ind_to_remove < d; ++ind_to_remove ) {
+            // first time we see this item -> use vertex `num_vertex`as reference for this item
+            auto new_cut_indices = cut_indices.without_index( ind_to_remove );
+            auto ic = item_map[ new_cut_indices ];
+            if ( ! ic ) {
+                ic = num_vertex;
+                continue;
+            }
 
-    for( PI ind_to_remove = 0; ind_to_remove < nb_cut_indices; ++ind_to_remove ) {
-        // first time we see this item -> use vertex `num_vertex`as reference for this item
-        auto new_cut_indices = cut_indices.without_index( ind_to_remove );
-        auto ic = item_map[ new_cut_indices ];
-        if ( ! ic ) {
-            ic = num_vertex;
-            continue;
+
+            // else, try to make a new simplex
+            const PI next_num_vertex = ic;
+            if( already_in_simplex( simplex, simplex_size, next_num_vertex ) )
+                continue;
+
+            // and continue the recursion
+            for_each_simplex_rec( new_cut_indices, simplex, simplex_size, next_num_vertex, item_map, func );
         }
-
-
-        // else, try to make a new simplex
-        const PI next_num_vertex = ic;
-        if( already_in_simplex( simplex, simplex_size, next_num_vertex ) )
-            continue;
-
-        // and continue the recursion
-        for_each_simplex_rec( new_cut_indices, simplex, simplex_size, next_num_vertex, item_map, func );
     }
 }
 
-UTP void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch> &item_map, auto &&func ) {
-    constexpr int ct_simplex = ct_dim >= 0 ? ct_dim + 1 : -1;
+UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map, auto &&func ) {
+    constexpr int ct_simplex = dim + 1;
     if ( nb_vertices == 0 )
         return;
 
     //
     if ( dim == 2 ) {
-        Vector<TI,Arch,ct_simplex> simplex( Size(), dim + 1 );
+        Vector<TI,Arch,ct_simplex> simplex;
         simplex[ 0 ] = 0;
         for( TI num_vertex = 3; num_vertex <= nb_vertices; ++num_vertex ) {
             simplex[ 1 ] = num_vertex - 2;
@@ -296,10 +294,10 @@ UTP void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Ar
     }
 
     // make a list
-    Vector<TI,Arch,ct_simplex> simplex( Size(), dim + 1 );
+    Vector<TI,Arch,ct_simplex> simplex;
     item_map.reserve( nb_vertices );
     for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        Vector<TI,Arch,ct_dim> cut_indices( vertex_indices( num_vertex ) );
+        Vector<TI,Arch,dim> cut_indices( vertex_indices( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
@@ -308,7 +306,7 @@ UTP void DTP::for_each_facet( auto &&func ) {
     const PI nb_vertices = nb_vertices;
 
     if ( dim == 2 ) {
-        Simplex<ct_dim,ct_dim,TF,Arch> simplex;
+        Simplex<ct_dim,dim,TF,Arch> simplex;
         for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
             simplex.pts[ 0 ] = vertex_position( num_vertex );
             simplex.pts[ 1 ] = vertex_position( ( num_vertex + 1 ) % nb_vertices );
@@ -394,7 +392,7 @@ UTP void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch> &item_map ) {
+UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map ) {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
@@ -413,14 +411,14 @@ UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch> &ite
     }
 
     // nD: fan triangulation
-    Matrix<TF,Arch,ct_dim> M( Size(), dim );
     TF sum = 0;
-    for_each_simplex( item_map, [&]( const auto &simplex ) {
+    TF *p_sum = &sum; // captured by value in GD lambda (same device thread → valid pointer)
+    for_each_simplex( item_map, [&] GD ( const auto &simplex ) {
         const TI v0 = simplex[ 0 ];
-        auto M = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( TI row, TI col ) {
+        auto M = Matrix<TF,Arch,dim>::with_func( [&] HD ( TI row, TI col ) {
             return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
         } );
-        sum += std::abs( M.determinant() );
+        *p_sum += std::abs( M.determinant() );
     } );
 
     return sum / factorial( dim );
@@ -851,11 +849,11 @@ UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id )
 UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
-    auto M  = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) {
+    auto M  = Matrix<TF,Arch,ct_dim>::with_func( [&]( PI r, PI c ) {
         return cut_planes( ci[ r ], c );
     } );
 
-    auto V = Vector<TF,Arch,ct_dim>::with_func( dim, [&]( PI i ) {
+    auto V = Vector<TF,Arch,ct_dim>::with_func( [&]( PI i ) {
         return cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
     } );
 
@@ -913,7 +911,7 @@ UTP void DTP::disp_cell() {
     info( nb_vertices() );
     for( PI i = 0; i < nb_vertices(); ++i ) {
         auto pos = Vector<TF,Arch,ct_dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
-        auto cut = Vector<TF,Arch,ctd_add(ct_dim,1)>::with_func( dim + 1, [&]( PI d ) { return cut_planes( i, d ); } );
+        auto cut = Vector<TF,Arch,ct_dim+1>::with_func( [&]( PI d ) { return cut_planes( i, d ); } );
         info( pos, cut );
     }
 }
@@ -933,8 +931,8 @@ UTP void DTP::check_consistency() {
         PI ci[ ct_dim ];
         get_cut_inds( v, ci );
 
-        auto M = Matrix<TF,Arch,ct_dim>::with_func( dim, [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
-        auto V = Vector<TF,Arch,ct_dim>::with_func( dim, [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
+        auto M = Matrix<TF,Arch,ct_dim>::with_func( [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
+        auto V = Vector<TF,Arch,ct_dim>::with_func( [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
         const auto pos = M.solve_ge( V );
 
         for ( PI d = 0; d < dim; ++d )
@@ -942,7 +940,7 @@ UTP void DTP::check_consistency() {
     }
 }
 
-template<class Value,int ct_dim,class Arch,class TF,class TI>
+template<class Value,int ct_dim_value,class Arch,class TF,class TI>
 struct Integral<Value,DTP> {
     static auto integral( const Value &value, DTP &cw ) {
         // infinite cell
@@ -952,7 +950,7 @@ struct Integral<Value,DTP> {
         // simplex
         TF sum = 0;
         cw.for_each_simplex( [&]( const auto &simplex_indices ) {
-            Simplex<ct_dim,ct_dim+1,TF,Arch> simplex;
+            Simplex<ct_dim_value,ct_dim_value+1,TF,Arch> simplex;
             for( TI d = 0; d < cw.dim + 1; ++d )
                 simplex.pts[ d ] = cw.vertex_positions.row( simplex_indices[ d ] );
             sum += sdot::integral( value, simplex );

@@ -1,4 +1,5 @@
 from sdot.generated_files import compilation_directories
+from ..drivers.Device import Device
 from ..drivers.driver import driver
 from pathlib import Path
 import subprocess
@@ -10,9 +11,9 @@ import re
 import os
 
 
-def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, device_type: str ):
+def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, device: Device ):
     # .cu extension lets xmake route the file through nvcc (defines __CUDACC__)
-    ext = ".cu" if device_type.startswith( "cuda" ) else ".cpp"
+    ext = ".cu" if device.is_cuda_gpu else ".cpp"
     path = compilation_directories.src_dir( dylib_name ) / f"binding{ ext }"
     try:
         old_code = path.read_text()
@@ -22,10 +23,10 @@ def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, d
         path.write_text( code )
 
     # make the dylib
-    make_dylib_from_files( dylib_name, [ path ] + other_src_paths, device_type )
+    make_dylib_from_files( dylib_name, [ path ] + other_src_paths, device )
 
 
-def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
+def make_dylib_from_files( dylib_name: str, src_paths: list, device: Device ):
     """Invoke xmake to build *dylib_name* from *src_paths*."""
 
     project_root = Path( __file__ ).absolute().parents[ 4 ]
@@ -73,7 +74,7 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device_type: str ):
         **os.environ,
         **( { "XMAKE_ROOT": "y" } if hasattr( os, "getuid" ) and os.getuid() == 0 else {} ),
         "SDOT_XMAKE_OUTPUT_DIR" : str( compilation_directories.dylib_dir() ),
-        "SDOT_XMAKE_NEEDS_CUDA" : str( int( device_type.startswith( "cuda" ) ) ),
+        "SDOT_XMAKE_NEEDS_CUDA" : str( int( device.is_cuda_gpu ) ),
         "SDOT_XMAKE_REQUIRES"   : str.join( ",", [ "zpp_bits", "eigen" ] ),
         "SDOT_XMAKE_INCLUDES"   : str.join( ",", map( str, [
                                       nanobind_ext_include,

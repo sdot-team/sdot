@@ -5,51 +5,53 @@
 
 namespace sdot {
 
-#define UTP template<class T,class Arch,int ct_size>
-#define DTP Matrix<T,Arch,ct_size>
+#define UTP  template<class T,class Arch,int ct_size>
+#define UTPH template<class T,class Arch,int ct_size> HD
+#define DTP  Matrix<T,Arch,ct_size>
 
-UTP Matrix<T,Arch,(ct_size>0?ct_size-1:-1)> DTP::without_row_and_col( PI wr, PI wc ) const {
-    Matrix<T,Arch,(ct_size>0?ct_size-1:-1)> res( Size(), size() - 1 );
-    for( PI r = 0; r < res.size(); ++r )
-        for( PI c = 0; c < res.size(); ++c )
+UTP Matrix<T,Arch,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
+    Matrix<T,Arch,ct_size-1> res;
+    for( PI r = 0; r < res.nb_rows(); ++r )
+        for( PI c = 0; c < res.nb_cols(); ++c )
             res( r, c ) = operator()( r + ( r >= wr ), c + ( c >= wc ) );
     return res;
 }
 
-UTP auto DTP::with_func( PI size, auto &&func ) {
-    Matrix<T,Arch,ct_size> res( Size(), size );
-    for( PI r = 0; r < size; ++r )
-        for( PI c = 0; c < size; ++c )
+UTPH auto DTP::with_func( auto &&func ) {
+    Matrix<T,Arch,ct_size> res;
+    for( PI r = 0; r < ct_size; ++r )
+        for( PI c = 0; c < ct_size; ++c )
             res( r, c ) = func( r, c );
     return res;
 }
 
 UTP DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
     Matrix res = *this;
-    for( PI r = 0; r < size(); ++r )
+    for( PI r = 0; r < nb_rows(); ++r )
         res( r, c ) = col[ r ];
     return res;
 }
 
 UTP DTP::Vec DTP::diagonal() const {
-    Vec res( Size(), size() );
-    for( PI i = 0; i < size(); ++i )
+    Vec res( Size(), nb_rows() );
+    for( PI i = 0; i < nb_rows(); ++i )
         res[ i ] = operator()( i, i );
     return res;
 }
 
-UTP T DTP::determinant() const {
-    if ( size() == 1 )
+UTPH T DTP::determinant() const {
+    if constexpr ( ct_size == 1 ) {
         return operator()( 0, 0 );
-
-    T sgn = 1, res = 0;
-    for( PI r = 0; r < size(); ++r, sgn = -sgn )
-        res += sgn * operator()( r, 0 ) * without_row_and_col( r, 0 ).determinant();
-    return res;
+    } else {
+        T sgn = 1, res = 0;
+        for( PI r = 0; r < nb_rows(); ++r, sgn = -sgn )
+            res += sgn * operator()( r, 0 ) * without_row_and_col( r, 0 ).determinant();
+        return res;
+    }
 }
 
 UTP DTP DTP::cholesky() const {
-    const PI nd = size();
+    const PI nd = nb_rows();
     Matrix L( nd );
     for ( PI i = 0; i < nd; ++i )
         for ( PI j = 0; j < nd; ++j )
@@ -74,15 +76,15 @@ UTP DTP DTP::cholesky() const {
 
 UTP DTP::Vec DTP::solve( const Vec &vec ) const {
     T d = determinant();
-    Vec res( Size(), size() );
     T sgn = 1;
-    for( PI c = 0; c < size(); ++c, sgn = -sgn )
+    Vec res;
+    for( PI c = 0; c < nb_rows(); ++c, sgn = -sgn )
         res[ c ] = with_replaced_col( c, vec ).determinant() / d;
     return res;
 }
 
-UTP DTP::Vec DTP::solve_ge( Vec b ) const {
-    const PI n = size();
+UTPH DTP::Vec DTP::solve_ge( Vec b ) const {
+    const PI n = nb_rows();
     Matrix A = *this;
 
     // forward elimination with partial pivoting
@@ -106,7 +108,7 @@ UTP DTP::Vec DTP::solve_ge( Vec b ) const {
     }
 
     // back substitution (x initialised to 0 so zero-pivot rows stay 0)
-    Vec x( Size(), n );
+    Vec x;
     for ( PI i = 0; i < n; ++i )
         x[ i ] = T( 0 );
     for ( PI p = n; p-- > 0; ) {
@@ -121,9 +123,9 @@ UTP DTP::Vec DTP::solve_ge( Vec b ) const {
 }
 
 UTP DTP DTP::inverse() const {
-    const PI n = size();
+    const PI n = nb_rows();
     Matrix A = *this;
-    Matrix inv = with_func( n, []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
+    Matrix inv = with_func( []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
 
     for ( PI p = 0; p < n; ++p ) {
         // partial pivot
@@ -131,24 +133,34 @@ UTP DTP DTP::inverse() const {
         for ( PI r = p + 1; r < n; ++r )
             if ( std::abs( A( r, p ) ) > std::abs( A( pivot, p ) ) )
                 pivot = r;
-        for ( PI c = 0; c < n; ++c ) std::swap( A( p, c ), A( pivot, c ) );
-        for ( PI c = 0; c < n; ++c ) std::swap( inv( p, c ), inv( pivot, c ) );
+        for ( PI c = 0; c < n; ++c )
+            std::swap( A( p, c ), A( pivot, c ) );
+        for ( PI c = 0; c < n; ++c )
+            std::swap( inv( p, c ), inv( pivot, c ) );
 
-        if ( A( p, p ) == T(0) ) continue;
+        if ( A( p, p ) == T( 0 ) )
+            continue;
 
-        const T inv_diag = T(1) / A( p, p );
-        for ( PI c = 0; c < n; ++c ) { A( p, c ) *= inv_diag; inv( p, c ) *= inv_diag; }
+        const T inv_diag = T( 1 ) / A( p, p );
+        for ( PI c = 0; c < n; ++c ) {
+            A( p, c ) *= inv_diag;
+            inv( p, c ) *= inv_diag;
+        }
 
         for ( PI r = 0; r < n; ++r ) {
             if ( r == p ) continue;
             const T f = A( r, p );
-            for ( PI c = 0; c < n; ++c ) { A( r, c ) -= f * A( p, c ); inv( r, c ) -= f * inv( p, c ); }
+            for ( PI c = 0; c < n; ++c ) {
+                A( r, c ) -= f * A( p, c );
+                inv( r, c ) -= f * inv( p, c );
+            }
         }
     }
     return inv;
 }
 
 
+#undef UTPH
 #undef UTP
 #undef DTP
 

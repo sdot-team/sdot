@@ -36,6 +36,7 @@ inline static const char *type_name( CtType<FP32> ) { return "FP32"; }
 struct SizeAndCtorArgs {};
 struct Function {};
 struct Reserved {};
+struct FillWith {};
 struct Values {};
 struct Shape {};
 struct Rank {};

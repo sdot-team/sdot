@@ -8,7 +8,7 @@ namespace sdot {
 //
 template<class TI,class Arch,int ct_rank_0,class... attributes_0,int ct_rank_1,class... attributes_1>
 auto concat( const AxisTuple<TI,Arch,ct_rank_0,attributes_0...> &t0, const AxisTuple<TI,Arch,ct_rank_1,attributes_1...> &t1 ) {
-    using TR = AxisTuple<TI,Arch,ctd_add(ct_rank_0,ct_rank_1),attributes_0...,typename WithOffset<int,ct_rank_0,attributes_1>::type...>;
+    using TR = AxisTuple<TI,Arch,ct_rank_0+ct_rank_1,attributes_0...,typename WithOffset<int,ct_rank_0,attributes_1>::type...>;
     return t0.apply_values( [&]( auto ...v0 ) {
         return t1.apply_values( [&]( auto ...v1 ) {
             return TR( Values(), v0..., v1... );
