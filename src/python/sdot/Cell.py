@@ -141,15 +141,15 @@ class Cell:
         return driver.call(
             """
             auto pr = arch.parallel_runner( p.cell.batch_sizes(), p.max_nb_threads );
-            //pr.for_each_thread( [p] GD ( auto ti, auto &&for_each_bi ) mutable {
-                //auto nb_map_items = p.nb_map_items( ti.global_id() );
-                //nb_map_items = 0;
-                //RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
-                //
-                //for_each_bi( [&] GD ( auto bi ) mutable {
-                //    p.output( bi ) = p.cell( bi ).measure( item_map );
-                //} );
-            //} );
+            pr.for_each_thread( [p] GD ( auto ti, auto &&for_each_bi ) mutable {
+                auto nb_map_items = p.nb_map_items( ti.global_id() );
+                nb_map_items = 0;
+                RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
+
+                for_each_bi( [&] GD ( auto bi ) mutable {
+                    p.output( bi ) = p.cell( bi ).measure( item_map );
+                } );
+            } );
             """,
             map_items = Workspace(
                 Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),

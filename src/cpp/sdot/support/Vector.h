@@ -11,10 +11,14 @@ namespace sdot {
 
 /// static size vector (like a std::array)
 template<class T,class Arch,int ct_size>
-class Vector {
+class alignas( T ) Vector {
 public:
     using             value_type                  = T;
-    char              _storage[ sizeof( T ) * ct_size ];
+    #ifdef __CUDA_ARCH__
+        char          _storage[ sizeof( T ) * ct_size + bool( ct_size == 0 ) ];
+    #else
+        char          _storage[ sizeof( T ) * ct_size ];
+    #endif
 
     /**/              HD Vector                   ( const auto &values ) requires( requires { values.size(); } );
     /**/              HD Vector                   ( FillWith, auto &&...ctor_args );

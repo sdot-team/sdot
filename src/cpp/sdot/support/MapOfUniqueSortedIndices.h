@@ -11,14 +11,14 @@ namespace sdot {
 ///
 template<class TI>
 struct IntWithOffset {
-    void operator=  ( TI v ) { value = offset + v; }
+    HD void operator=  ( TI v ) { value = offset + v; }
 
-    bool has_a_value() const { return value >= offset; }
-    bool operator!  () const { return value < offset; }
-    operator TI     () const { return value - offset; }
+    HD bool has_a_value() const { return value >= offset; }
+    HD bool operator!  () const { return value < offset; }
+    HD      operator TI() const { return value - offset; }
 
-    TI  offset;
-    TI& value;
+    TI      offset;
+    TI&     value;
 };
 
 ///
@@ -28,24 +28,24 @@ struct MapOfUniqueSortedIndices;
 // Od
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<0,TI,Arch> {
-    /**/ MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, int /* dim */, TI /* max_inp_value */ ) {
+    HD MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, int /* dim */, TI /* max_inp_value */ ) {
     }
 
-    void reserve_full_capacity() {
+    HD void reserve_full_capacity() {
         offset = 1;
         value = 0;
     }
 
-    void reserve( TI /* reservation */ ) {
+    HD void reserve( TI /* reservation */ ) {
         offset = 1;
         value = 0;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &/* key */ ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &/* key */ ) {
         return { offset, value };
     }
 
-    void for_each_item( auto &&func ) const {
+    HD void for_each_item( auto &&func ) const {
         if ( value >= offset )
             func( Vector<TI,Arch,0>( Values() ), value - offset );
     }
@@ -59,20 +59,20 @@ template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<1,TI,Arch> {
     using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
-    /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
         next_offset = 1;
         offset = 0;
     }
 
-    void reserve_full_capacity() {
+    HD void reserve_full_capacity() {
         next_offset = 1;
         offset = 1;
         for( TI i = 0; i < max_inp_value; ++i )
             values[ offset_in_map_items + i ] = 0;
     }
 
-    void reserve( TI reservation ) {
+    HD void reserve( TI reservation ) {
         if ( next_offset == 1 )
             for( TI i = 0; i < max_inp_value; ++i )
                 values[ offset_in_map_items + i ] = 0;
@@ -81,11 +81,11 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,Arch,1> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,1> &key ) {
         return { offset, values[ key[ 0 ] - offset_in_map_items ] };
     }
 
-    void for_each_item( auto &&func ) const {
+    HD void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
             if ( values[ offset_in_map_items + i ] >= offset )
                 func( Vector<TI,Arch,1>( Values(), i ), values[ offset_in_map_items + i ] - offset );
@@ -103,20 +103,20 @@ template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<2,TI,Arch> {
     using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
-    /**/ MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
         next_offset = 1;
         offset = 0;
     }
 
-    void reserve_full_capacity() {
+    HD void reserve_full_capacity() {
         next_offset = 1;
         offset = 1;
         for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
             values[ offset_in_map_items + i ] = 0;
     }
 
-    void reserve( TI reservation ) {
+    HD void reserve( TI reservation ) {
         if ( next_offset == 1 )
             for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
                 values[ offset_in_map_items + i ] = 0;
@@ -125,11 +125,11 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
         next_offset += reservation;
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,Arch,2> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,2> &key ) {
         return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
     }
 
-    void for_each_item( auto &&func ) const {
+    HD void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i ) {
             for( PI j = 0; j < values.size(); ++j ) {
                 PI k = offset_in_map_items + i * max_inp_value + j;

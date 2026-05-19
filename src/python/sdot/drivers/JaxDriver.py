@@ -635,7 +635,7 @@ class JaxDriver:
 
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
-        platform = "gpu" if self.device == "gpu" else "cpu"
+        platform = "gpu" if self.device.is_cuda_gpu else "cpu"
         module = importlib.import_module( "sdot.generated_files." + module_name )
         jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = platform )
         if make_backward_binding:
@@ -714,7 +714,7 @@ class JaxDriver:
         if len( fai.u8_input_values ):
             if is_gpu:
                 lines.append( f"    std::vector<PI8> _u8_host( { len( fai.u8_input_values ) } );" )
-                lines.append( "    cudaMemcpy( _u8_host.data(), u8_input_buffer.typed_data(), _u8_host.size() * sizeof( PI8 ), cudaMemcpyDeviceToHost );" )
+                lines.append( "    cudaMemcpy( _u8_host.data(), u8_input_buffer.typed_data(), _u8_host.size() * sizeof( PI8 ), cudaMemcpyDefault );" )
                 lines.append( "    const PI8 *u8_input = _u8_host.data();" )
             else:
                 lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )
@@ -727,7 +727,17 @@ class JaxDriver:
                 lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
 
         # conversions
-        fai.tensor_conversions( lines )
+        if is_gpu:
+            conv_lines = []
+            fai.tensor_conversions( conv_lines )
+            for line in conv_lines:
+                if 'dynamic_axis_output(' in line and line.rstrip().endswith( ';' ):
+                    line = line.rstrip()[ :-1 ].rstrip()
+                    assert line.endswith( ')' ), f"unexpected line format: {line}"
+                    line = line[ :-1 ] + ', stream );'
+                lines.append( line )
+        else:
+            fai.tensor_conversions( lines )
 
         # beg try block
         lines.append( "    try {" )

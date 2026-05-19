@@ -42,7 +42,7 @@ struct Shape {};
 struct Rank {};
 struct Size {};
 
-template<class TF> TF factorial( TF n ) {
+template<class TF> HD TF factorial( TF n ) {
     TF res = 1;
     for ( PI i = 2; i <= n; ++i )
         res *= TF( i );

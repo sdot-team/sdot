@@ -1,3 +1,4 @@
+import faulthandler; faulthandler.enable()
 import sdot
 
 def test_cell_2D_diff():
@@ -93,12 +94,9 @@ def test_cell_2D_batch():
 
     def f( s ):
         c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
-        infox( 2 )
-
         info( c.measure )
         return c.measure[ 0 ]
 
-    info( "f( 2 )" )
     info( f( 2 ) )
 
     # import jax

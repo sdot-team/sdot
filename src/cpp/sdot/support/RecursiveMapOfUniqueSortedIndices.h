@@ -14,23 +14,23 @@ public:
     using Curr = MapOfUniqueSortedIndices<ct_dim,TI,Arch>;
     using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
-    /**/ RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
+    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
         curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
         next( map_items, nb_map_items, dim, max_inp_value ) {
     }
 
-    void reserve_full_capacity() {
+    HD void reserve_full_capacity() {
         curr.reserve_full_capacity();
         next.reserve_full_capacity();
     }
 
-    void reserve( TI reservation ) {
+    HD void reserve( TI reservation ) {
         curr.reserve( reservation );
         next.reserve( reservation );
     }
 
     template<int i>
-    IntWithOffset<TI> operator[]( const Vector<TI,Arch,i> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,i> &key ) {
         if constexpr( i == ct_dim )
             return curr[ key ];
         else
@@ -49,18 +49,18 @@ public:
     using Curr = MapOfUniqueSortedIndices<0,TI,Arch>;
     using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
 
-    /**/ RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
+    HD  RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
     }
 
-    void reserve_full_capacity() {
+    HD void reserve_full_capacity() {
         curr.reserve_full_capacity();
     }
 
-    void reserve( TI reservation ) {
+    HD void reserve( TI reservation ) {
         curr.reserve( reservation );
     }
 
-    IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &key ) {
         return curr.operator[]( key );
     }
 

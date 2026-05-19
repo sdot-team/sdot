@@ -144,9 +144,21 @@ auto dynamic_axis_input( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla
 template<class Shape, xla::ffi::DataType dtype>
 auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid ) {
     auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
-    res.sizes.fill_with( 0 );
+    if ( valid )
+        res.sizes.fill_with( 0 );
     return res;
 }
+
+#ifdef __CUDACC__
+template<class Shape, xla::ffi::DataType dtype>
+auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid, cudaStream_t stream ) {
+    using TF = typename SdotTypeFor<dtype>::type;
+    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
+    if ( valid )
+        cudaMemsetAsync( buf->typed_data(), 0, buf->element_count() * sizeof( TF ), stream );
+    return res;
+}
+#endif
 
 template<class Shape, xla::ffi::DataType dtype>
 auto dynamic_axis_mutable( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {
