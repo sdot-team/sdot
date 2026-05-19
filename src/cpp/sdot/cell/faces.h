@@ -9,7 +9,7 @@ namespace sdot {
 /// list of vertices for each face
 template<class TF, int ct_dim, class Arch>
 std::vector<std::vector<PI>> faces( const Cell<TF,ct_dim,Arch> &cell ) {
-    constexpr int ct_nb_face_inds = ct_dim >= 2 ? ct_dim - 2 : -1;
+    constexpr int ct_nb_face_inds = ct_dim - 2;
     const PI nb_vertices = cell.nb_vertices();
     const PI nb_edges = cell.nb_edges();
     const PI nb_cuts = cell.nb_cuts();
@@ -29,7 +29,7 @@ std::vector<std::vector<PI>> faces( const Cell<TF,ct_dim,Arch> &cell ) {
     // for each edge, find the connected faces
     std::vector<std::vector<PI>> faces_to_edges;
     for( PI num_edge = 0; num_edge < nb_edges; ++num_edge ) {
-        auto face_inds = Vector<PI32,ct_nb_face_inds,Arch>::with_func( dim - 2, [&]( PI i ) {
+        auto face_inds = Vector<PI32,ct_nb_face_inds,Arch>::with_func( [&]( PI i ) {
             return cell.edge_indices( num_edge, i + ( i >= num_edge ) );
         } );
 

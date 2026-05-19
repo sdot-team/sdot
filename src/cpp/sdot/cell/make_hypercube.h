@@ -17,7 +17,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     cell.nb_cuts() = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
-    auto FT = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
+    auto FT = Matrix<TF,ct_dim,Arch>::with_func( [&]( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
 
@@ -62,7 +62,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = Vector<TF,Arch,ct_dim,Arch>::with_func( dim, [d]( PI i ) {
+        auto e_d = Vector<TF,Arch,ct_dim,Arch>::with_func( [d]( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -90,7 +90,7 @@ UTP void make_hypercube_backward( const DTP &cell, const auto &frame, SI /*cut_i
     const PI nb_vertices = PI(1) << dim;
 
     // R = FT^{-1} (same FT as in forward)
-    const auto FT = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( dim, [&]( PI r, PI c ) {
+    const auto FT = SimpleSquareMatrix<TF,ct_dim,Arch>::with_func( [&]( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
     const auto R = FT.inverse();

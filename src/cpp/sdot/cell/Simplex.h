@@ -13,7 +13,7 @@ struct Simplex {
     TF measure() const {
         using namespace std;
         if constexpr ( npt == dim + 1 ) {
-            auto M = Matrix<TF,Arch,dim>::with_func( dim, [&]( auto row, auto col ) { return pts[ row + 1 ][ col ] - pts[ 0 ][ col ]; } );
+            auto M = Matrix<TF,Arch,dim>::with_func( [&]( auto row, auto col ) { return pts[ row + 1 ][ col ] - pts[ 0 ][ col ]; } );
             return abs( M.determinant() );
         } else {
             TODO;
