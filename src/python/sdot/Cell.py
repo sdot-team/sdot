@@ -104,16 +104,8 @@ class Cell:
         dim = frame.shape[ -1 ]
 
         return cast( cls, driver.call(
-            """
-            arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable {
-                p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) );
-            } );
-            """,
-            """
-            arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable {
-                p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
-            } );
-            """,
+            """ arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
+            """ arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
             frame = frame,
@@ -138,16 +130,18 @@ class Cell:
         max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, max_nb_cuts )
         max_nb_threads = driver.nb_threads()
 
+        # info( self.vertex_positions[ :, 1, 0 ] )
+
         return driver.call(
             """
             auto pr = arch.parallel_runner( p.cell.batch_sizes(), p.max_nb_threads );
             pr.for_each_thread( [p] GD ( auto ti, auto &&for_each_bi ) mutable {
-                auto nb_map_items = p.nb_map_items( ti.global_id() );
-                nb_map_items = 0;
-                RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
+                // auto nb_map_items = p.nb_map_items( ti.global_id() );
+                // nb_map_items = 0;
+                // RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
 
                 for_each_bi( [&] GD ( auto bi ) mutable {
-                    p.output( bi ) = p.cell( bi ).measure( item_map );
+                    p.output( bi ) = p.cell( bi ).vertex_positions( 1, 0 ); // measure( item_map );
                 } );
             } );
             """,

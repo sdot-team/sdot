@@ -10,10 +10,10 @@ template<class TI, class Arch, int ct_rank, class... Attrs> class AxisTuple;
 // ------------------------------------------------------ CPU ------------------------------------------------------
 struct Cpu {
     T_T void           with_reservation( PI size, auto &&func ) const { T *res = new T[ size ]; func( res ); delete [] res; }
-    auto               parallel_runner ( auto batch_sizes, int max_nb_threads, int threads_per_block = 1 ) { return ParallelRunner_Cpu( batch_sizes, max_nb_threads ); }
-    auto               run_single      ( auto &&func ) { func(); }
+    auto               parallel_runner ( auto batch_sizes, int max_nb_threads, int threads_per_block = 1 ) const { return ParallelRunner_Cpu( batch_sizes, max_nb_threads ); }
+    auto               run_single      ( auto &&func ) const { func(); }
 
-    void               run             ( auto batch_sizes, auto &&func ) {
+    void               run             ( auto batch_sizes, auto &&func ) const {
         using BT = std::decay_t<decltype( batch_sizes )>;
         using TI = typename BT::TI;
         constexpr int N = BT::ct_rank;
@@ -22,7 +22,8 @@ struct Cpu {
         } );
     }
 
-    void               run_parallel    ( auto batch_sizes, auto &&func ) { run( batch_sizes, func ); }
+    void               run_parallel    ( auto batch_sizes, auto &&func ) const { run( batch_sizes, func ); }
+    void               copy            ( void *dst, const void *src, PI n_bytes ) const { std::memcpy( dst, src, n_bytes ); }
     void               zero_fill       ( void *ptr, PI n, PI elem_size ) const { std::memset( ptr, 0, n * elem_size ); }
     static const char* name            () { return "cpu"; }
 };

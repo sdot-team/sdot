@@ -714,7 +714,10 @@ class JaxDriver:
         if len( fai.u8_input_values ):
             if is_gpu:
                 lines.append( f"    std::vector<PI8> _u8_host( { len( fai.u8_input_values ) } );" )
-                lines.append( "    cudaMemcpy( _u8_host.data(), u8_input_buffer.typed_data(), _u8_host.size() * sizeof( PI8 ), cudaMemcpyDefault );" )
+                # u8_input may be uploaded to device asynchronously on `stream`; enqueue D2H on the
+                # same stream so it is ordered after the upload, then sync to read on host
+                lines.append( "    cudaMemcpyAsync( _u8_host.data(), u8_input_buffer.typed_data(), _u8_host.size() * sizeof( PI8 ), cudaMemcpyDefault, stream );" )
+                lines.append( "    cudaStreamSynchronize( stream );" )
                 lines.append( "    const PI8 *u8_input = _u8_host.data();" )
             else:
                 lines.append( "    const PI8 *u8_input = u8_input_buffer.typed_data();" )

@@ -63,7 +63,7 @@ struct ParallelRunner_Gpu {
 
 // ------------------------------------------------------ CudaGpu ------------------------------------------------------
 struct CudaGpu {
-    explicit           CudaGpu             ( cudaStream_t s ) : stream( s ) { cudaGetDevice( &device_id ); }
+    explicit           CudaGpu         ( cudaStream_t s ) : stream( s ) { cudaGetDevice( &device_id ); }
 
     T_T struct         Vector          { using type = thrust::device_vector<T>; };
 
@@ -72,6 +72,7 @@ struct CudaGpu {
     auto               run_single      ( auto &&func ) const { _gpu_run_single_kernel<<<1, 1, 0, stream>>>( func ); }
     void               run             ( auto batch_sizes, auto &&func ) const { _gpu_run_kernel<<<1, 1, 0, stream>>>( func, batch_sizes ); }
     void               run_parallel    ( auto batch_sizes, auto &&func ) const { _gpu_run_kernel<<<1, 1, 0, stream>>>( func, batch_sizes ); }
+    __host__ void      copy            ( void *dst, const void *src, PI n_bytes ) const { cudaMemcpyAsync( dst, src, n_bytes, cudaMemcpyDefault, stream ); }
     __host__ void      zero_fill       ( void *ptr, PI n, PI elem_size ) const { cudaMemsetAsync( ptr, 0, n * elem_size, stream ); }
     static auto        raw_ptr         ( auto &&vec ) { return thrust::raw_pointer_cast( vec.data() ); }
     static const char *name            () { return "CudaGpu"; }

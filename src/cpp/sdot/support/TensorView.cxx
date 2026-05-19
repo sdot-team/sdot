@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CrossArchCopy.h"
 #include "StrideIterator.h"
 // #include "VectorFactory.h"
 #include "TensorView.h"
@@ -11,6 +12,22 @@
 
 namespace sdot {
 
+// Namespace-scope functors for arch-aware element-wise ops.
+// Lambda bodies inside HD/GD template methods from .cxx files cause issues with
+// some nvcc versions when the lambda references class-level template params (TF).
+// Using concrete struct operator() avoids the problem.
+template<class DstTV, class SrcTV, class BI>
+struct _TensorCopyFunctor {
+    DstTV dst; SrcTV src;
+    GD void operator()( BI bi ) const { dst( bi ).item() = src( bi ).item(); }
+};
+
+template<class DstTV, class ValT, class BI>
+struct _TensorFillFunctor {
+    DstTV dst; ValT value;
+    GD void operator()( BI bi ) const { dst( bi ).item() = value; }
+};
+
 #define UTP template<class TF,class Shape,class Strides>
 #define DTP TensorView<TF,Shape,Strides>
 
@@ -21,17 +38,38 @@ UTP HD DTP DTP::make_invalid( Shape shape, Strides strides ) {
 UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawPtr>( data ) ), _strides( strides ), _shape( shape ) {
 }
 
-UTP HD void DTP::get_data_from( const auto &that, const auto &size_to_take ) {
-    for_each_index( [&]( auto indices ) {
-        operator()( indices ) = that( indices );
-    }, 0, size_to_take );
+UTP HD void DTP::get_data_from( const auto &that, const auto & /*size_to_take*/ ) {
+    for_each_index( [&]( auto... indices ) {
+        operator()( indices... ) = TF( that( indices... ) );
+    } );
 }
 
 UTP HD void DTP::get_data_from( const auto &that ) {
     if ( is_contiguous() )
+        // HD: memcpy is valid only when both tensors share the current execution context's
+        // memory space (CPU host→CPU tensor, or GPU kernel→same-device tensor).
+        // For host-side cross-arch copies use get_data_from(dst_arch, src_arch, that).
         std::memcpy( data(), that.data(), sizeof( TF ) * total_size() );
     else
         get_data_from( that, shape() );
+}
+
+UTP void DTP::get_data_from( const auto &arch, const auto &that ) requires requires { arch.copy( (void*)nullptr, (const void*)nullptr, PI{} ); } {
+    if ( is_contiguous() && that.is_contiguous() )
+        arch.copy( data(), that.data(), sizeof( TF ) * total_size() );
+    else {
+        using ArchT = std::decay_t<decltype( arch )>;
+        using BiType = AxisTuple<TI, ArchT, ct_rank>;
+        using Functor = _TensorCopyFunctor<DTP, DECAYED_TYPE_OF( that ), BiType>;
+        arch.run( _shape, Functor{ *this, that } );
+    }
+}
+
+UTP void DTP::fill_with( const auto &arch, TF value ) {
+    using ArchT = std::decay_t<decltype( arch )>;
+    using BiType = AxisTuple<TI, ArchT, ct_rank>;
+    using Functor = _TensorFillFunctor<DTP, TF, BiType>;
+    arch.run( _shape, Functor{ *this, value } );
 }
 
 UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {

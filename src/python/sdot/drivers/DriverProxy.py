@@ -46,6 +46,8 @@ class DriverProxy:
         * SDOT_DEVICE
         * SDOT_FTYPE  -> float point type
         * SDOT_ITYPE  -> integer type (signed)
+
+        * SDOT_VERBOSE
     """
 
     # if TYPE_CHECKING:

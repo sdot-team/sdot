@@ -33,16 +33,25 @@ public:
     // scalar value/reference for a rank 0 tensor
     HD               operator TF        () const { ASSERT( rank() == 0 ); return *data(); }
 
+    HD void          operator=          ( const TensorView &that ) { get_data_from( that, _shape ); }
     HD void          operator=          ( TF value ) { ASSERT( rank() == 0 ); *data() = value; }
+
     HD void          operator+=         ( TF value ) { ASSERT( rank() == 0 ); *data() += value; }
     HD void          operator-=         ( TF value ) { ASSERT( rank() == 0 ); *data() -= value; }
 
     HD TF&           item               () const;
 
-    // data copy / transfer
+    // data copy / transfer — arch-unaware (HD, valid in device code)
     HD void          get_data_from      ( const auto &that, const auto &size_to_take );
     HD void          get_data_from      ( const auto &that );
     HD void          fill_with          ( TF value );
+
+    // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
+    void             get_data_from      ( const auto &arch, const auto &that ) requires requires { arch.copy( (void*)nullptr, (const void*)nullptr, PI{} ); };
+    void             fill_with          ( const auto &arch, TF value );
+
+    // cross-arch copy: dst and src may live on different devices
+    void             get_data_from      ( const auto &dst_arch, const auto &src_arch, const auto &that ) requires requires { arch_copy( dst_arch, (void*)nullptr, src_arch, (const void*)nullptr, PI{} ); };
 
     HD void          spill_to           ( TensorView &that ); ///< copie data of this to that, and use data from that
 
@@ -81,7 +90,7 @@ public:
 
     void             with_same_shape    ( const auto &arch, auto &&func ) const;
 
-private:
+// private:
     static HD RawPtr sentinel           () { return RawPtr( nullptr ) + 1; }
 
     RawPtr           _raw_ptr;          ///<
