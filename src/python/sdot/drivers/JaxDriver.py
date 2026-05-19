@@ -727,17 +727,7 @@ class JaxDriver:
                 lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
 
         # conversions
-        if is_gpu:
-            conv_lines = []
-            fai.tensor_conversions( conv_lines )
-            for line in conv_lines:
-                if 'dynamic_axis_output(' in line and line.rstrip().endswith( ';' ):
-                    line = line.rstrip()[ :-1 ].rstrip()
-                    assert line.endswith( ')' ), f"unexpected line format: {line}"
-                    line = line[ :-1 ] + ', stream );'
-                lines.append( line )
-        else:
-            fai.tensor_conversions( lines )
+        fai.tensor_conversions( lines )
 
         # beg try block
         lines.append( "    try {" )

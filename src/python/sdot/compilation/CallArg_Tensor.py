@@ -334,7 +334,8 @@ class CallArg_Tensor( CallArg ):
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_output( { ct_shape }{ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+            suf = ", arch" if base == "dynamic_axis" else ""
+            return f"{ base }_output( { ct_shape }{ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ suf } )"
 
         # pure input
         if self.io_category.has_input and not self.io_category.want_output:

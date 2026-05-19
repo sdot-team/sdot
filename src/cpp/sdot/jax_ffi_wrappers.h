@@ -141,24 +141,14 @@ auto dynamic_axis_input( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla
     return DynamicAxis( num_dynamic_axis, capacity, tensor_view_input( cd, buf, valid ) );
 }
 
-template<class Shape, xla::ffi::DataType dtype>
-auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid ) {
-    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
-    if ( valid )
-        res.sizes.fill_with( 0 );
-    return res;
-}
-
-#ifdef __CUDACC__
-template<class Shape, xla::ffi::DataType dtype>
-auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid, cudaStream_t stream ) {
+template<class Shape, xla::ffi::DataType dtype, class Arch>
+auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid, const Arch &arch ) {
     using TF = typename SdotTypeFor<dtype>::type;
     auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
     if ( valid )
-        cudaMemsetAsync( buf->typed_data(), 0, buf->element_count() * sizeof( TF ), stream );
+        arch.zero_fill( buf->typed_data(), buf->element_count(), sizeof( TF ) );
     return res;
 }
-#endif
 
 template<class Shape, xla::ffi::DataType dtype>
 auto dynamic_axis_mutable( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {

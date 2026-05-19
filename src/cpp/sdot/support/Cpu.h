@@ -2,6 +2,7 @@
 
 #include "ParallelRunner_Cpu.h"
 #include "common_types.h"
+#include <cstring>
 
 namespace sdot {
 template<class TI, class Arch, int ct_rank, class... Attrs> class AxisTuple;
@@ -22,6 +23,7 @@ struct Cpu {
     }
 
     void               run_parallel    ( auto batch_sizes, auto &&func ) { run( batch_sizes, func ); }
+    void               zero_fill       ( void *ptr, PI n, PI elem_size ) const { std::memset( ptr, 0, n * elem_size ); }
     static const char* name            () { return "cpu"; }
 };
 
