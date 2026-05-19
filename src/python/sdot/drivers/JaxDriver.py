@@ -194,7 +194,7 @@ class JaxDriver:
         return jnp.issubdtype( dtype, jnp.integer )
 
     def nb_threads( self, **kwargs ):
-        return self._hardware.nb_threads( **kwargs )
+        return self.device.nb_threads( **kwargs )
 
 
     if TYPE_CHECKING:
@@ -460,16 +460,16 @@ class JaxDriver:
         return res
 
     def ffi_tensor_input_bind_code( self, ndim, dtype: Dtype ) -> str:
-        return f"Arg<xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>>()"
+        return f"Arg<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
 
     def ffi_tensor_input_arg_code( self, ndim, dtype: Dtype ) -> str:
-        return f"xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>"
+        return f"xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>"
 
     def ffi_tensor_output_bind_code( self, ndim, dtype: Dtype ) -> str:
-        return f"Ret<xla::ffi::Buffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>>()"
+        return f"Ret<xla::ffi::Buffer<{ dtype.jax_ffi_tensor_type() }>>()"
 
     def ffi_tensor_output_arg_code( self, ndim, dtype: Dtype ) -> str:
-        return f"xla::ffi::ResultBuffer<{ Dtype.factory( dtype ).jax_ffi_tensor_type() }>"
+        return f"xla::ffi::ResultBuffer<{ dtype.jax_ffi_tensor_type() }>"
 
     def ffi_tensor_output_spec( self, shape, dtype: Dtype ):
         return jax.ShapeDtypeStruct( shape, dtype.driver_version )

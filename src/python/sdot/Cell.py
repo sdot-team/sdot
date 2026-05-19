@@ -28,6 +28,8 @@ class Cell:
         def __default_init__( self, *args, **kwargs ): ...
 
         BatchVersion: Self
+        batch_axes_dict: dict
+        batch_axes: list
 
         max_of_nb_vertices: int
         max_of_nb_edges: int
@@ -101,11 +103,9 @@ class Cell:
         assert frame is not None
         dim = frame.shape[ -1 ]
 
-        info( batch_sizes )
-
         return cast( cls, driver.call(
-            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } );",
-            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell.slice( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } );",
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } );",
+            "arch.run_parallel( p.cell.batch_sizes(), [p] HD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } );",
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
             frame = frame,
@@ -115,33 +115,41 @@ class Cell:
     def _return_parameters( cls, dim, batch_sizes = [] ):
         kw = dict(
             max_of_nb_vertices = 64,
-            max_of_nb_edges    = 64,
-            max_of_nb_cuts     = 64,
-            dim                = dim,
+            max_of_nb_edges = 64,
+            max_of_nb_cuts = 64,
+            dim = dim,
         )
         if batch_sizes:
-            kw[ 'batch_size' ] = batch_sizes[ 0 ]
+            kw[ 'batch_size_Cell' ] = batch_sizes[ 0 ]
         return kw
 
     @property
     def measure( self ) -> any:
+        max_nb_cuts = self.nb_cuts.max()
+
+        max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, max_nb_cuts )
+        max_nb_threads = driver.nb_threads()
+
         return driver.call(
             """
-            auto pr = arch.paraller_runner( p.cell.batch_sizes() );
-            pr.for_each_thread( [p] HD ( int num_thread, auto &&for_each_bi ) mutable {
-                p.nb_map_items = 0;
-                RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items, p.nb_map_items, p.cell.dim - 1, p.cell.nb_cuts );
-                for_each_bi( [p,item_map] HD ( auto batch_indices ) mutable {
-                    p.output( batch_indices ) = p.cell.slice( batch_indices ).measure( item_map );
+            auto pr = arch.parallel_runner( p.cell.batch_sizes(), p.max_nb_threads );
+            pr.for_each_thread( [p] HD ( int num_thread, int nb_threads, auto &&for_each_bi ) mutable {
+                auto nb_map_items = p.nb_map_items( num_thread );
+                nb_map_items = 0;
+                RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( num_thread ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
+
+                for_each_bi( [&] HD ( auto bi ) mutable {
+                    p.output( bi ) = p.cell( bi ).measure( item_map );
                 } );
-            );
+            } );
             """,
             map_items = Workspace(
-                Tensor( "nb_threads", "nb_map_items[]", dtype = int ),
-                max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, self.nb_cuts ),
-                nb_threads = driver.nb_threads()
+                Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
+                max_of_nb_map_items = max_of_nb_map_items,
+                max_nb_threads = max_nb_threads
             ),
-            output = Return( Tensor() ),
+            output = Return( Tensor( *self.batch_axes ), **self.batch_axes_dict ),
+            max_nb_cuts = max_nb_cuts,
             cell = self
         )
 

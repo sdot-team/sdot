@@ -34,16 +34,19 @@ class CallArgsAnalysis:
         # add tensors for output dynamic shapes
         nargs = args.copy()
         dynamic_shapes = {}
+        source_kwargs  = {}
         for arg in nargs.values():
             if isinstance( arg, ( Return, Workspace ) ) and isinstance( arg.return_type, Tensor ):
                 for expr in arg.return_type.shape:
                     for term in expr.terms:
                         if term.variable.selection is not None:
-                            dynamic_shapes[ term.variable.name ] = term.variable.selection
+                            n = term.variable.name
+                            dynamic_shapes[ n ] = term.variable.selection
+                            source_kwargs.setdefault( n, {} ).update( getattr( arg, 'type_kwargs', {} ) )
 
         for name, selection in dynamic_shapes.items():
             if name not in nargs:
-                nargs[ name ] = Workspace( Tensor( *selection, dtype = int, represents_a_dynamic_axis = name ) )
+                nargs[ name ] = Workspace( Tensor( *selection, dtype = int, represents_a_dynamic_axis = name ), **source_kwargs.get( name, {} ) )
 
         # base parameters
         self.non_differentiable_tensor_inputs = []

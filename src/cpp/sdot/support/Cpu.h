@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ParallelRunner_Cpu.h"
 #include "common_types.h"
 
 namespace sdot {
@@ -8,7 +9,7 @@ template<class TI, class Arch, int ct_rank, class... Attrs> class AxisTuple;
 // ------------------------------------------------------ CPU ------------------------------------------------------
 struct Cpu {
     T_T void           with_reservation( PI size, auto &&func ) const { T *res = new T[ size ]; func( res ); delete [] res; }
-    auto               paraller_runner ( auto batch_sizes, PI nb_bytes_per_thread ) { return ParallelRunner_Cpu( batch_sizes, nb_bytes_per_thread ); }
+    auto               parallel_runner ( auto batch_sizes, int max_nb_threads ) { return ParallelRunner_Cpu( batch_sizes, max_nb_threads ); }
     auto               run_single      ( auto &&func ) { func(); }
 
     void               run             ( auto batch_sizes, auto &&func ) {

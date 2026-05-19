@@ -156,6 +156,11 @@ UTP auto DTP::without_index( TI u ) const {
 #define UTP template<class _TI,class _Arch>
 #define DTP AxisTuple<_TI,_Arch,0>
 
+UTP HD void DTP::for_each_index_split( int index, int /*size*/, auto &&func ) const {
+    if ( index == 0 )
+        func( AxisTuple<TI,Arch,0>( Values() ) );
+}
+
 UTP HD void DTP::for_each_index( auto &&func, auto ...indices_so_far ) const { func( indices_so_far... ); }
 UTP HD auto DTP::apply_values( auto &&cb ) const { return cb(); }
 UTP HD auto DTP::operator[]( TI ) const -> TI { ASSERT( false ); return 0; }

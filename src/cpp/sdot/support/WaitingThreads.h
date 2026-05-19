@@ -23,15 +23,15 @@ struct WaitingThreads {
             t.join();
     }
 
-    void run( const std::function<void( int num_thread )> &func, int max_nb_threads = -1 ) {
-        if ( max_nb_threads < 0 )
+    void run( const std::function<void( int num_thread, int nb_threads )> &func, int max_nb_threads = -1 ) {
+        if ( max_nb_threads < 0 || max_nb_threads > nb_threads )
             max_nb_threads = nb_threads;
 
         {
             std::unique_lock<std::mutex> lock( mutex );
-            func_to_execute   = &func;
             active_nb_threads = max_nb_threads;
-            nb_active         = max_nb_threads;
+            nb_active = max_nb_threads;
+            func_to_execute = &func;
             ++work_version;
         }
         cv_work.notify_all();
@@ -46,13 +46,18 @@ struct WaitingThreads {
         while ( true ) {
             std::unique_lock<std::mutex> lock( mutex );
             cv_work.wait( lock, [&]{ return stop || work_version != seen_version; } );
-            if ( stop ) break;
-            seen_version  = work_version;
-            if ( num_thread >= active_nb_threads ) continue;
-            auto *f       = func_to_execute;
+            if ( stop )
+                break;
+
+            seen_version = work_version;
+
+            if ( num_thread >= active_nb_threads )
+                continue;
+
+            auto *f = func_to_execute;
             lock.unlock();
 
-            (*f)( num_thread );
+            ( *f )( num_thread, active_nb_threads );
 
             lock.lock();
             if ( --nb_active == 0 )
@@ -60,16 +65,16 @@ struct WaitingThreads {
         }
     }
 
-    const std::function<void( int num_thread )> *func_to_execute;
-    std::vector<std::thread>                     threads;
-    std::condition_variable                      cv_work;
-    std::condition_variable                      cv_done;
-    std::mutex                                   mutex;
-    int                                          nb_threads;
-    int                                          nb_active;
-    int                                          active_nb_threads;
-    int                                          work_version;
-    bool                                         stop;
+    const std::function<void( int num_thread, int nb_threads )> *func_to_execute;
+    std::vector<std::thread> threads;
+    std::condition_variable cv_work;
+    std::condition_variable cv_done;
+    std::mutex mutex;
+    int nb_threads;
+    int nb_active;
+    int active_nb_threads;
+    int work_version;
+    bool stop;
 };
 
 WaitingThreads &waiting_threads() {

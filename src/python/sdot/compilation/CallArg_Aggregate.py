@@ -275,9 +275,9 @@ class CallArg_Aggregate( CallArg ):
         from .TemplateArgs import TemplateArgs
 
         template_args = TemplateArgs()
-        includes      = set()
-        ct_axes       : dict[ str, int ] = {}
-        axes          : dict = {}
+        includes = set()
+        ct_axes : dict[ str, int ] = {}
+        axes : dict = {}
 
         for name, argument in self.sub_dict.items():
             argument.get_template_args( template_args, [ name ] )
@@ -289,27 +289,27 @@ class CallArg_Aggregate( CallArg ):
 
         lines = []
 
+        # batch_sizes() + slice(AxisTuple<TI,Arch,0>)
+        includes.add( "sdot/support/AxisTuple.h" )
+        batch_axes = getattr( self.python_class, "batch_axes", [] )
+        batch_axes_values = ", ".join( [ "Values()" ] + [ f"TI( { batch_axis } )" for batch_axis in batch_axes ] )
+        lines.append(  f"    auto batch_sizes() const {{ return AxisTuple<TI,Arch,{ len( batch_axes ) }>( { batch_axes_values } ); }}" )
+        lines.append(  "    auto operator()( AxisTuple<TI,Arch,0> ) const { return *this; }" )
+
         # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
-            lines.append(  "    auto  slice( PI index ) const {" )
+
+            assert len( batch_axes )
+            lines.append( f"    auto operator()( AxisTuple<TI,Arch,{ len( batch_axes ) }> bi ) const {{" )
             lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
             for ct_axis_name in ct_axes:
                 lines.append( f"            .ct_{ ct_axis_name }_inst = CtdInt<TI,ct_{ ct_axis_name }>()," )
             for name, argument in self.sub_dict.items():
-                lines.append( f"            .{ name } = { name }.row( index )," )
+                lines.append( f"            .{ name } = { name }( bi )," )
             lines.append(  "        };" )
             lines.append(  "    }" )
-            lines.append(  "    auto  slice( auto bi ) const { return slice( PI( bi[ Ct<int,0>() ] ) ).slice( bi.without_index( Ct<int,0>() ) ); }" )
-
-        # batch_sizes() + slice(AxisTuple<TI,Arch,0>): available when tensor fields are present (TI and Arch in scope)
-        if template_args:
-            includes.add( "sdot/support/AxisTuple.h" )
-            if unbatch_version is not None:
-                lines.append(  "    auto batch_sizes() const { return AxisTuple<TI,Arch,1>( Values(), TI( batch_size ) ); }" )
-            else:
-                lines.append(  "    auto batch_sizes() const { return AxisTuple<TI,Arch,0>( Values() ); }" )
-            lines.append(  "    auto slice( AxisTuple<TI,Arch,0> ) const { return *this; }" )
+            # lines.append(  "    auto operator()( auto bi ) const { return slice( PI( bi[ Ct<int,0>() ] ) ).slice( bi.without_index( Ct<int,0>() ) ); }" )
 
         # axis accessor methods
         if axes:

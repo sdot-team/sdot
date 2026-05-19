@@ -234,8 +234,8 @@ class CallArg_Tensor( CallArg ):
         if not expr.terms:
             return expr.offset
         try:
-            return int( expr.value( self._get_kwarg_only, False ) )
-        except ( KeyError, RuntimeError ):
+            return int( expr.value( self.get_axis_variable, False ) )
+        except ( KeyError, RuntimeError, AttributeError, TypeError ):
             return None
 
     def shape_type( self, for_a_particular_binding ):

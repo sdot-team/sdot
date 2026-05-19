@@ -80,18 +80,17 @@ def test_cell_2D_basic():
 def test_cell_2D_grad():
     def f( s ):
         c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ s, s, 1 ] )
-        return c.vertex_positions[ 1, 0 ]
+        return c.measure
 
-    info( f( 2 ) )
+    infox( f( 2 ) )
 
     import jax
     info( jax.grad( f )( 2.0 ) )
 
 def test_cell_2D_batch():
-    # c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ 2, 1, 1 ], batch_size = 4 )
     def f( s ):
         c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
-        infox( c.measure )
+        info( c.measure )
         return c.measure[ 0 ]
 
     info( f( 2 ) )
@@ -101,7 +100,7 @@ def test_cell_2D_batch():
 
 if __name__ == "__main__":
     # test_cell_2D_basic()
-    test_cell_2D_grad()
-    # test_cell_2D_batch()
+    # test_cell_2D_grad()
+    test_cell_2D_batch()
     # test_cell_2D_diff()
     # test_cell_3D()

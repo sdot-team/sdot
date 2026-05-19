@@ -1,0 +1,3 @@
+
+class BatchOfAggregate:
+    pass

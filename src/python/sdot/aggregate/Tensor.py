@@ -69,21 +69,23 @@ class Tensor:
             res += s.ndim
         return res
 
-    def make_variant( self, batch_version: int, unidimensional_version: int ) -> 'Tensor':
+    def make_variant( self, additional_batch_axes: list[ str ], unidimensional_version: int ) -> 'Tensor':
         res = Tensor()
         res.represents_a_dynamic_axis = self.represents_a_dynamic_axis
         res.comes_from_a_dim_list = False
         res.removed_dim_axes = []
         res.dtype = self.dtype
 
+        # ct_axes
         if unidimensional_version:
             res.ct_axes = [ ct_axis for ct_axis in self.ct_axes if ct_axis != "dim" ]
         else:
             res.ct_axes = list( self.ct_axes )
 
+        # shape
         res.shape = []
-        if batch_version:
-            res.shape.append( AxisExpr( "batch_size" ) )
+        for additional_batch_axis in additional_batch_axes:
+            res.shape.append( AxisExpr( additional_batch_axis ) )
         for n, expr in enumerate( self.shape ):
             nexpr = expr
             if unidimensional_version:

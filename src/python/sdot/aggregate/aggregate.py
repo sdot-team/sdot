@@ -1,5 +1,6 @@
 from ..util.get_all_annotations import get_all_annotations
 from ..drivers.driver import driver
+from .BatchOfAggregate import BatchOfAggregate
 from .Workspace import Workspace
 from .Tensor import Tensor
 
@@ -35,6 +36,7 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     """
     # base fields
     fields = get_all_annotations( cls )
+    name = cls.__name__
 
     # add tensors for dynamic shapes
     dynamic_shapes = {}
@@ -47,45 +49,57 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
                     if term.variable.selection is not None:
                         dynamic_shapes[ term.variable.name ] = term.variable.selection
 
-    for name, selection in dynamic_shapes.items():
-        if name not in fields:
-            t = Tensor( *selection, dtype = int, represents_a_dynamic_axis = name )
-            cls.__annotations__[ name ] = t
-            fields[ name ] = t
+    for axis_name, selection in dynamic_shapes.items():
+        if axis_name not in fields:
+            t = Tensor( *selection, dtype = int, represents_a_dynamic_axis = axis_name )
+            cls.__annotations__[ axis_name ] = t
+            fields[ axis_name ] = t
+
+    # batch axis name
+    bn = f"batch_size_{ name }"
 
     # make the variants (batch, unidim, ...)
-    clu = _make_variant( cls, fields, batch_version = 0, unidimensional_version = 1 )
-    clb = _make_variant( cls, fields, batch_version = 1, unidimensional_version = 0 )
-    clt = _make_variant( cls, fields, batch_version = 1, unidimensional_version = 1 )
+    clu = _make_variant( cls, fields, f"{ name }1d"       , (                   ), additional_batch_axes = []    , unidimensional_version = 1 )
+    clb = _make_variant( cls, fields, f"BatchOf{ name }"  , ( BatchOfAggregate, ), additional_batch_axes = [ bn ], unidimensional_version = 0 )
+    clt = _make_variant( cls, fields, f"BatchOf{ name }1d", ( BatchOfAggregate, ), additional_batch_axes = [ bn ], unidimensional_version = 1 )
+
+    # batch axes
+    setattr( cls, "batch_axes", []     )
+    setattr( clu, "batch_axes", []     )
+    setattr( clb, "batch_axes", [ bn ] )
+    setattr( clt, "batch_axes", [ bn ] )
 
     # links beteen variants
-    cls.UnidimensionalBatchVersion = clt
-    cls.UnidimensionalVersion = clu
-    cls.BatchVersion = clb
-    cls.BaseVersion = cls
+    setattr( cls, "UnidimensionalBatchVersion", clt )
+    setattr( cls, "UnidimensionalVersion", clu )
+    setattr( cls, "BatchVersion", clb )
+    setattr( cls, "BaseVersion", cls )
 
-    clu.MultidimensionalVersion = cls
-    clu.BatchVersion = clt
-    clu.BaseVersion = cls
+    setattr( clu, "MultidimensionalVersion", cls )
+    setattr( clu, "BatchVersion", clt )
+    setattr( clu, "BaseVersion", cls )
 
-    clb.BatchItemVersion = cls
-    clb.BaseVersion = cls
+    setattr( clb, "BatchItemVersion", cls )
+    setattr( clb, "BaseVersion", cls )
 
-    clt.MultidimensionalVersion = clb
-    clt.BatchItemVersion = clu
-    clt.BaseVersion = cls
+    setattr( clt, "MultidimensionalVersion", clb )
+    setattr( clt, "BatchItemVersion", clu )
+    setattr( clt, "BaseVersion", cls )
 
     # add generated methods and properties for these variants
-    _setup_distribution_class( cls.UnidimensionalBatchVersion )
-    _setup_distribution_class( cls.UnidimensionalVersion )
-    _setup_distribution_class( cls.BatchVersion )
+    _setup_distribution_class( clu )
+    _setup_distribution_class( clb )
+    _setup_distribution_class( clt )
     _setup_distribution_class( cls )
 
-    # copy classmethods from base to variants (variants are created as empty classes, no inheritance)
+    # copy methods and properties from base to variants (variants are empty classes, no inheritance)
     for variant in [ clu, clb, clt ]:
-        for name, val in vars( cls ).items():
-            if isinstance( val, classmethod ) and name not in vars( variant ):
-                setattr( variant, name, val )
+        for attr_name, val in vars( cls ).items():
+            if attr_name.startswith( '__' ):
+                continue
+            if isinstance( val, ( classmethod, staticmethod, property ) ) or ( callable( val ) and not isinstance( val, type ) ):
+                if attr_name not in vars( variant ):
+                    setattr( variant, attr_name, val )
 
     return cls
 
@@ -97,24 +111,12 @@ def variants_of( cls ): # : Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[
     return u, b, t
 
 
-def _make_variant( cls, fields: dict, batch_version : int, unidimensional_version : int ):
-    variant_name = cls.__name__
-    if batch_version:
-        variant_name = 'BatchOf' + variant_name
-    if unidimensional_version:
-        variant_name += "1d"
-
-    parents = ()
-
+def _make_variant( cls, fields: dict, variant_name: str, parents: tuple, additional_batch_axes: [], unidimensional_version: int ):
     res = type( variant_name, parents, {} )
     for name, field in fields.items():
-        # synthetic attribtues
-        # if getattr( field, "represents_a_dynamic_axis", None ):
-        #     continue
-
         # make the new field
         if make_variant := getattr( field, "make_variant", None ):
-            field = make_variant( batch_version, unidimensional_version )
+            field = make_variant( additional_batch_axes, unidimensional_version )
 
         # store it
         res.__annotations__[ name ] = field
@@ -174,6 +176,15 @@ def _setup_distribution_class( cls ):
                     value = annotation( value )
             object.__setattr__( self, name, value )
         cls.__setattr__ = __setattr__
+
+    # --- batch_axes_dict -----------
+    if 'batch_axes_dict' not in vars( cls ):
+        def batch_axes_dict( self ):
+            res = {}
+            for batch_axis in self.batch_axes:
+                res[ batch_axis ] = getattr( self, batch_axis )
+            return res
+        cls.batch_axes_dict = property( batch_axes_dict )
 
     # --- dim -----------
     if 'dim' not in vars( cls ) and cls.__name__.endswith( "1d" ):
