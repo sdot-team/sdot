@@ -17,8 +17,8 @@ UTP Matrix<T,Arch,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
     return res;
 }
 
-UTPH auto DTP::with_func( auto &&func ) {
-    Matrix<T,Arch,ct_size> res;
+UTP GD DTP DTP::with_func( auto &&func ) {
+    Matrix res;
     for( PI r = 0; r < ct_size; ++r )
         for( PI c = 0; c < ct_size; ++c )
             res( r, c ) = func( r, c );

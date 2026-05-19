@@ -31,11 +31,11 @@ public:
     HD TF&           operator[]         ( const auto &index ) const;
 
     // scalar value/reference for a rank 0 tensor
-    HD               operator TF        () const requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); return *data(); }
+    HD               operator TF        () const { ASSERT( rank() == 0 ); return *data(); }
 
-    HD void          operator=          ( TF value ) requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); *data() = value; }
-    HD void          operator+=         ( TF value ) requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); *data() += value; }
-    HD void          operator-=         ( TF value ) requires ( ct_rank <= 0 ) { ASSERT( rank() == 0 ); *data() -= value; }
+    HD void          operator=          ( TF value ) { ASSERT( rank() == 0 ); *data() = value; }
+    HD void          operator+=         ( TF value ) { ASSERT( rank() == 0 ); *data() += value; }
+    HD void          operator-=         ( TF value ) { ASSERT( rank() == 0 ); *data() -= value; }
 
     HD TF&           item               () const;
 

@@ -34,7 +34,7 @@ UTP HD void DTP::get_data_from( const auto &that ) {
         get_data_from( that, shape() );
 }
 
-UTP HD void DTP::with_same_shape( const auto &arch, auto &&func ) const {
+UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {
     arch.template with_reservation<TF>( total_size(), [&]( TF *data ) {
         auto new_strides = contiguous_strides( _shape );
         using NewStrides = DECAYED_TYPE_OF( new_strides );
@@ -117,6 +117,8 @@ UTP HD auto DTP::size() const {
 UTP HD bool DTP::surely_null() const {
     if ( is_invalid() )
         return true;
+
+    /* Version using lambdas and Ct<> (causes nvcc to crash in some cases)
     // empty tensor (any dimension == 0)
     if ( _shape.has_value( []( auto size ) -> bool { return size < Ct<int,1>(); } ) )
         return true;
@@ -126,6 +128,39 @@ UTP HD bool DTP::surely_null() const {
     // single scalar: check value
     if ( ! _shape.has_value( []( auto size ) -> bool { return size > Ct<int,1>(); } ) )
         return *data() == 0;
+    */
+
+    PI r = PI( rank() );
+
+    // empty tensor (any dimension == 0)
+    for ( PI i = 0; i < r; ++i )
+        if ( _shape[ i ] == 0 )
+            return true;
+
+    // all strides zero (rank > 0) → surely-null by construction: all elements alias data()[0] == 0
+    if ( r > 0 ) {
+        bool all_strides_zero = true;
+        for ( PI i = 0; i < r; ++i ) {
+            if ( _strides[ i ] != 0 ) {
+                all_strides_zero = false;
+                break;
+            }
+        }
+        if ( all_strides_zero )
+            return *data() == 0;
+    }
+
+    // single scalar: check value
+    bool single_scalar = true;
+    for ( PI i = 0; i < r; ++i ) {
+        if ( _shape[ i ] > 1 ) {
+            single_scalar = false;
+            break;
+        }
+    }
+    if ( single_scalar )
+        return *data() == 0;
+
     return false;
 }
 

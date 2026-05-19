@@ -22,6 +22,10 @@ class JaxDriver:
     """
     JAX implementation for sdot centralization.
     """
+
+    if TYPE_CHECKING:
+        device: any
+
     def __init__( self, framework: JaxFramework, device: Device | None, ftype: Dtype | None, itype: Dtype | None ):
         if device is None:
             device = JaxDriver.default_device_for( ftype )
@@ -97,6 +101,13 @@ class JaxDriver:
 
         from .Cpu import Cpu
         return Cpu()
+
+    @property
+    def available_gpus( self ):
+        res = 0
+        for device in jax.devices():
+            res += "gpu" in device.platform
+        return res
 
     @staticmethod
     def default_ftype_for( device: Device ):

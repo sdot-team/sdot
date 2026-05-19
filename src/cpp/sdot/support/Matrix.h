@@ -16,7 +16,7 @@ public:
     /**/          HD      Matrix                  ( FillWith, T value ) : _content( FillWith(), value ) {}
     /**/          HD      Matrix                  () {}
 
-    HD static auto        with_func               ( auto &&func );
+    GD static Matrix      with_func               ( auto &&func );
 
     HD const T&           operator()              ( PI r, PI c ) const { return _content[ r * ct_size + c ]; }
     HD T&                 operator()              ( PI r, PI c ) { return _content[ r * ct_size + c ]; }

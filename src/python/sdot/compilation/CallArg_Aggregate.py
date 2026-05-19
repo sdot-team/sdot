@@ -126,7 +126,7 @@ class CallArg_Aggregate( CallArg ):
             attributes_macro = f"#define ATTRIBUTES_OF_{ cpp_name }"
 
         all_lines = [ "#pragma once", "" ] + inc_lines + [ "", parameters_declaration_macro, "", parameter_names_macro, "", attributes_macro ]
-        code = "\n".join( all_lines )
+        code = "\n".join( all_lines ) + "\n"
 
         from ..generated_files.compilation_directories import generated_includes_dir
         path = generated_includes_dir() / f"{ self.base_cpp_name() }.h"
@@ -293,15 +293,15 @@ class CallArg_Aggregate( CallArg ):
         includes.add( "sdot/support/AxisTuple.h" )
         batch_axes = getattr( self.python_class, "batch_axes", [] )
         batch_axes_values = ", ".join( [ "Values()" ] + [ f"TI( { batch_axis } )" for batch_axis in batch_axes ] )
-        lines.append(  f"    auto batch_sizes() const {{ return AxisTuple<TI,Arch,{ len( batch_axes ) }>( { batch_axes_values } ); }}" )
-        lines.append(  "    auto operator()( AxisTuple<TI,Arch,0> ) const { return *this; }" )
+        lines.append(  f"    HD auto batch_sizes() const {{ return AxisTuple<TI,Arch,{ len( batch_axes ) }>( { batch_axes_values } ); }}" )
+        lines.append(  "    HD auto operator()( AxisTuple<TI,Arch,0> ) const { return *this; }" )
 
         # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
 
             assert len( batch_axes )
-            lines.append( f"    auto operator()( AxisTuple<TI,Arch,{ len( batch_axes ) }> bi ) const {{" )
+            lines.append( f"    HD auto operator()( AxisTuple<TI,Arch,{ len( batch_axes ) }> bi ) const {{" )
             lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
             for ct_axis_name in ct_axes:
                 lines.append( f"            .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )

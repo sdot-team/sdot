@@ -15,7 +15,7 @@ namespace sdot {
 #define UTP PARAMETERS_DECLARATION_OF_Cell
 #define DTP Cell<PARAMETER_NAMES_OF_Cell>
 
-UTP void DTP::init_as_aligned_simplex( TI cut_id ) {
+UTP GD void DTP::init_as_aligned_simplex( TI cut_id ) {
     is_fully_closed = cut_id != CellBoundary::INFINITE;
     nb_vertices = dim + 1;
     nb_edges = ( dim + 1 ) * dim / 2;
@@ -67,14 +67,14 @@ UTP void DTP::init_as_aligned_simplex( TI cut_id ) {
         cut_ids( num_cut ) = cut_id;
 }
 
-UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
+UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     is_fully_closed = cut_id != CellBoundary::INFINITE;
     nb_vertices = PI( 1 ) << dim;
     nb_edges = dim * ( PI( 1 ) << ( dim - 1 ) );
     nb_cuts = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
-    auto FT = Matrix<TF,Arch,ct_dim_value>::with_func( [=] HD ( PI r, PI c ) {
+    Matrix<TF,Arch,dim> FT = Matrix<TF,Arch,dim>::with_func( [=] GD ( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
 
@@ -119,7 +119,7 @@ UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = Vector<TF,Arch,ct_dim_value>::with_func( [d] HD ( PI i ) {
+        auto e_d = Vector<TF,Arch,dim>::with_func( [d] GD ( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -142,7 +142,7 @@ UTP void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     }
 }
 
-UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
+UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
     // Fwd: F[r][c] = frame(1+r,c),  A = F^{-1},  row_d = A[d,:] via F^T * row_d = e_d.
     //
     // grad_frame(0,c)   = Σ_l gV(l,c)  +  Σ_d G_dot_d * A[d,c]
@@ -179,9 +179,9 @@ UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &bat
 
     // cut planes: gF(0,c) += G_dot_d * A[d,c];  gF(1+b,c) -= (A tGR^T A)[b,c]
     if ( ! gC.surely_null() ) {
-        auto FT  = Mat::with_func( [=] HD ( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
-        auto A   = Mat( FillWith(), TF( 0 ) );
-        auto tGR = Mat( FillWith(), TF( 0 ) );
+        Mat FT  = Mat::with_func( [=] GD ( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
+        Mat A   = Mat( FillWith(), TF( 0 ) );
+        Mat tGR = Mat( FillWith(), TF( 0 ) );
 
         for ( PI d = 0; d < dim; ++d ) {
             const PI r0    = ( dim != 2 ? 2 * d + 0 : cut_ordering_2D[ 2 * d + 0 ] );
@@ -206,7 +206,7 @@ UTP void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &bat
     }
 }
 
-UTP void DTP::init_as_unbounded() {
+UTP GD void DTP::init_as_unbounded() {
     init_as_aligned_simplex( CellBoundary::INFINITE );
 }
 
@@ -303,10 +303,10 @@ UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_valu
 }
 
 UTP void DTP::for_each_facet( auto &&func ) {
-    const PI nb_vertices = nb_vertices;
+    const PI nb_vertices = this->nb_vertices;
 
     if ( dim == 2 ) {
-        Simplex<ct_dim,dim,TF,Arch> simplex;
+        Simplex<dim,dim,TF,Arch> simplex;
         for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
             simplex.pts[ 0 ] = vertex_position( num_vertex );
             simplex.pts[ 1 ] = vertex_position( ( num_vertex + 1 ) % nb_vertices );
@@ -413,9 +413,9 @@ UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch
     // nD: fan triangulation
     TF sum = 0;
     TF *p_sum = &sum; // captured by value in GD lambda (same device thread → valid pointer)
-    for_each_simplex( item_map, [&] GD ( const auto &simplex ) {
+    for_each_simplex( item_map, [=,this] GD ( const auto &simplex ) {
         const TI v0 = simplex[ 0 ];
-        auto M = Matrix<TF,Arch,dim>::with_func( [&] HD ( TI row, TI col ) {
+        auto M = Matrix<TF,Arch,dim>::with_func( [=,this] GD ( TI row, TI col ) {
             return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
         } );
         *p_sum += std::abs( M.determinant() );
@@ -425,7 +425,7 @@ UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch
 }
 
 UTP T_d auto DTP::simplex_from_indices( const Vector<TI,Arch,d> &indices ) const {
-    Simplex<ct_dim,d,TF,Arch> res;
+    Simplex<dim,d,TF,Arch> res;
     for( PI i = 0; i < d; ++i )
         res.pts[ i ] = vertex_position( indices[ i ] );
     return res;
@@ -533,7 +533,7 @@ UTP void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
 }
 
 UTP void DTP::process_edges( PI nc ) {
-    // MapOfUniqueSortedIndices<ctd_sub(ct_dim,2),TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
+    // MapOfUniqueSortedIndices<dim-2,TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
     // face_map.reserve( nb_vertices() + nb_edges );
 
     // // store exterior edge indices in index_corrections,
@@ -849,11 +849,11 @@ UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id )
 UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
-    auto M  = Matrix<TF,Arch,ct_dim>::with_func( [&]( PI r, PI c ) {
+    auto M  = Matrix<TF,Arch,dim>::with_func( [&]( PI r, PI c ) {
         return cut_planes( ci[ r ], c );
     } );
 
-    auto V = Vector<TF,Arch,ct_dim>::with_func( [&]( PI i ) {
+    auto V = Vector<TF,Arch,dim>::with_func( [&]( PI i ) {
         return cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
     } );
 
@@ -910,8 +910,8 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
 UTP void DTP::disp_cell() {
     info( nb_vertices() );
     for( PI i = 0; i < nb_vertices(); ++i ) {
-        auto pos = Vector<TF,Arch,ct_dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
-        auto cut = Vector<TF,Arch,ct_dim+1>::with_func( [&]( PI d ) { return cut_planes( i, d ); } );
+        auto pos = Vector<TF,Arch,dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
+        auto cut = Vector<TF,Arch,dim+1>::with_func( [&]( PI d ) { return cut_planes( i, d ); } );
         info( pos, cut );
     }
 }
@@ -928,11 +928,11 @@ UTP void DTP::check_consistency() {
     };
 
     for( PI v = 0; v < nb_vertices(); ++v ) {
-        PI ci[ ct_dim ];
+        PI ci[ dim ];
         get_cut_inds( v, ci );
 
-        auto M = Matrix<TF,Arch,ct_dim>::with_func( [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
-        auto V = Vector<TF,Arch,ct_dim>::with_func( [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
+        auto M = Matrix<TF,Arch,dim>::with_func( [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
+        auto V = Vector<TF,Arch,dim>::with_func( [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
         const auto pos = M.solve_ge( V );
 
         for ( PI d = 0; d < dim; ++d )

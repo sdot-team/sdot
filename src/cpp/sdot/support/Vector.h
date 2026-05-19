@@ -14,6 +14,7 @@ template<class T,class Arch,int ct_size>
 class Vector {
 public:
     using             value_type                  = T;
+    char              _storage[ sizeof( T ) * ct_size ];
 
     /**/              HD Vector                   ( const auto &values ) requires( requires { values.size(); } );
     /**/              HD Vector                   ( FillWith, auto &&...ctor_args );
@@ -32,7 +33,7 @@ public:
     HD const T&       operator[]                  ( PI index ) const;
     HD T&             operator[]                  ( PI index );
 
-    bool              operator<                   ( const Vector &that ) const;
+    // bool              operator<                   ( const Vector &that ) const;
 
     HD static Vector  with_value_at               ( PI index, T value ); ///< 0 ... 0 value 0 ... 0. `value` is positionned at `index`
     HD static Vector  with_func                   ( auto &&func );
@@ -85,8 +86,6 @@ public:
     #ifdef            USE_ZPP
     using             serialize                  = zpp::bits::members<1>;
     #endif
-
-    char              values[ sizeof( T ) * ct_size ];
 };
 
 

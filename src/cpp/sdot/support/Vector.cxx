@@ -76,9 +76,9 @@ UTPH T& DTP::operator[]( PI index ) {
     return data()[ index ];
 }
 
-UTP bool DTP::operator<( const Vector &that ) const {
-    return std::ranges::lexicographical_compare( operator std::span<T>(), that.operator std::span<T>() );
-}
+// UTP bool DTP::operator<( const Vector &that ) const {
+//     return std::ranges::lexicographical_compare( operator std::span<T>(), that.operator std::span<T>() );
+// }
 
 UTPH DTP DTP::with_func( auto &&func ) {
     Vector res;
@@ -117,11 +117,11 @@ UTPH auto DTP::without_index( PI ind_to_remove ) const {
 }
 
 UTPH const T* DTP::data() const {
-    return reinterpret_cast<const T *>( values );
+    return reinterpret_cast<const T *>( this->_storage );
 }
 
 UTPH T* DTP::data() {
-    return reinterpret_cast<T *>( values );
+    return reinterpret_cast<T *>( this->_storage );
 }
 
 UTPH auto DTP::begin() const {
