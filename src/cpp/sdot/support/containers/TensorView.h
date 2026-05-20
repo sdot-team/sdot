@@ -2,19 +2,26 @@
 
 #include "AxisTuple.h"
 #include "Vector.h"
+#include "Ptr.h"
+#include "memory_kind_of.h"
 
 namespace sdot {
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
-template<class TF,class _Shape,class _Strides>
+///   Kind = the memory kind the data lives in (drives the informed pointer Ptr<...,Kind>).
+///   It defaults from the shape's legacy Arch tag during the migration.
+template<class TF,class _Shape,class _Strides,class _Kind = memory_kind_of_t<typename _Shape::Arch>>
 class TensorView {
 public:
     using            value_type         = TF;
     using            Strides            = _Strides;
     using            Shape              = _Shape;
+    using            Kind               = _Kind;
+    using            memory_kind        = _Kind; ///< makes a TensorView space-aware for run()/make_accessible
 
     SCInt            ct_rank            = Shape::ct_rank;
-    using            RawPtr             = std::conditional_t<std::is_const_v<TF>,const std::byte*,std::byte*>;
+    using            RawByte            = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
+    using            RawPtr             = Ptr<RawByte,Kind>; ///< informed byte pointer (address + memory kind)
     using            Arch               = Shape::Arch;
     using            TI                 = Shape::TI;
 

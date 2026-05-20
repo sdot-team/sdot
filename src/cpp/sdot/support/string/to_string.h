@@ -1,6 +1,6 @@
 #pragma once
 
-#include "display.h"
+#include "../display.h"
 #include <sstream>
 
 namespace sdot {

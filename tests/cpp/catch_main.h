@@ -1,7 +1,7 @@
 #include <catch2/benchmark/catch_benchmark_all.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include "../../src/cpp/sdot/support/to_string.h" // IWYU pragma: export
+#include "../../src/cpp/sdot/support/string/to_string.h" // IWYU pragma: export
 
 #define CHECK_REPR( A, B ) \
     CHECK( to_string( A ) == to_string( B ) )

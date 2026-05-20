@@ -28,14 +28,14 @@ struct _TensorFillFunctor {
     GD void operator()( BI bi ) const { dst( bi ).item() = value; }
 };
 
-#define UTP template<class TF,class Shape,class Strides>
-#define DTP TensorView<TF,Shape,Strides>
+#define UTP template<class TF,class Shape,class Strides,class Kind>
+#define DTP TensorView<TF,Shape,Strides,Kind>
 
 UTP HD DTP DTP::make_invalid( Shape shape, Strides strides ) {
-    return TensorView( reinterpret_cast<TF *>( sentinel() ), shape, strides );
+    return TensorView( sentinel().template as<TF>(), shape, strides );
 }
 
-UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawPtr>( data ) ), _strides( strides ), _shape( shape ) {
+UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( reinterpret_cast<RawByte *>( data ) ), _strides( strides ), _shape( shape ) {
 }
 
 UTP HD void DTP::get_data_from( const auto &that, const auto & /*size_to_take*/ ) {
@@ -219,7 +219,7 @@ UTP HD auto DTP::rank() const {
 }
 
 UTP HD TF* DTP::data() const {
-    return reinterpret_cast<TF *>( _raw_ptr );
+    return _raw_ptr.template as<TF>();
 }
 
 UTP HD auto DTP::begin() const {
@@ -245,8 +245,8 @@ UTP HD auto DTP::squeeze( auto axis, PI index ) const {
     auto new_strides = _strides.without_index( axis );
     using NewShape   = DECAYED_TYPE_OF( new_shape );
     using NewStrides = DECAYED_TYPE_OF( new_strides );
-    auto ptr = reinterpret_cast<TF *>( _raw_ptr + _strides[ axis ] * index );
-    return TensorView<TF,NewShape,NewStrides>( ptr, new_shape, new_strides );
+    auto ptr = ( _raw_ptr + _strides[ axis ] * index ).template as<TF>();
+    return TensorView<TF,NewShape,NewStrides,Kind>( ptr, new_shape, new_strides );
 }
 
 UTP HD auto DTP::row( PI index ) const {
