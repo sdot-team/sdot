@@ -4,16 +4,16 @@
 
 namespace sdot {
 
-// AxisTuple is only named in make_item (a template, instantiated where AxisTuple is
+// AxisValues is only named in make_item (a template, instantiated where AxisValues is
 // complete); a forward declaration is enough here and avoids an include cycle with
-// AxisTuple.h, whose all_indices() returns an IndexRange.
-template<class TI,int ct_rank,class... attributes> class AxisTuple;
+// AxisValues.h, whose all_indices() returns an IndexRange.
+template<class TI,int ct_rank,class... attributes> class AxisValues;
 
 /// Iterable set of all the multi-indices of a shape — the "list" consumed by run_*().
 ///
-/// Obtained from `shape.all_indices()`. The shape (an AxisTuple) only knows the axis
+/// Obtained from `shape.all_indices()`. The shape (an AxisValues) only knows the axis
 /// sizes; walking the index space lives here. Each item is a multi-index, materialized
-/// as an AxisTuple whose values are the coordinates (so it plugs directly into
+/// as an AxisValues whose values are the coordinates (so it plugs directly into
 /// `TensorView::operator()`, which accepts any size()/[]/without_index multi-index).
 template<class Shape>
 struct IndexRange {
@@ -50,9 +50,9 @@ struct IndexRange {
         }
     }
 
-    /// build a multi-index AxisTuple from a pack of coordinates (rank = nb of coordinates)
+    /// build a multi-index AxisValues from a pack of coordinates (rank = nb of coordinates)
     HD static auto make_item( auto ...coords ) {
-        return AxisTuple<TI,int( sizeof...( coords ) )>( Values(), coords... );
+        return AxisValues<TI,int( sizeof...( coords ) )>( Values(), coords... );
     }
 
 private:

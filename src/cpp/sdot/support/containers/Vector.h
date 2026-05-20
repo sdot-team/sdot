@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common_types.h"
-#include "Ct.h"
+#include "../common_types.h"
+#include "../Ct.h"
 
 #ifdef USE_ZPP
 #include <zpp_bits.h>
@@ -37,7 +37,7 @@ public:
     HD const T&       operator[]                  ( PI index ) const;
     HD T&             operator[]                  ( PI index );
 
-    // bool              operator<                   ( const Vector &that ) const;
+    // bool           operator<                   ( const Vector &that ) const;
 
     HD static Vector  with_value_at               ( PI index, T value ); ///< 0 ... 0 value 0 ... 0. `value` is positionned at `index`
     HD static Vector  with_func                   ( auto &&func );

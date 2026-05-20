@@ -93,7 +93,7 @@ void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     for_each_possible_ExecutionSpace( [&]( auto execution_space ) {
         if ( num_execution_space++ != best_execution_space )
             return;
-        RunDetails::_get_args_on( execution_space, Ct<int,sizeof...( args )>(), FORWARD( args )..., [&]( auto &&...args ) {
+        RunDetails::_get_args_on( execution_space, Ct<int,1+sizeof...( args )>(), FORWARD( list ), FORWARD( args )..., [&]( auto &&list, auto &&...args ) {
             execution_space.run_parallel( FORWARD( list ), FORWARD( func ), FORWARD( args )... );
         } );
     } );

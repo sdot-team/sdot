@@ -12,7 +12,7 @@ class RecursiveMapOfUniqueSortedIndices {
 public:
     using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch>;
     using Curr = MapOfUniqueSortedIndices<ct_dim,TI,Arch>;
-    using TV = TensorView<TI,AxisTuple<TI,1>,AxisTuple<TI,1>>;
+    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
 
     HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
         curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
@@ -47,7 +47,7 @@ template<class TI,class Arch>
 class RecursiveMapOfUniqueSortedIndices<0,TI,Arch> {
 public:
     using Curr = MapOfUniqueSortedIndices<0,TI,Arch>;
-    using TV = TensorView<TI,AxisTuple<TI,1>,AxisTuple<TI,1>>;
+    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
 
     HD  RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
     }

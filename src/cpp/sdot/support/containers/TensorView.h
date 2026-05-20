@@ -1,37 +1,33 @@
 #pragma once
 
-#include "AxisTuple.h"
-#include "IndexRange.h"
+#include "../hardware/Ptr.h"
+#include "AxisValues.h"
 #include "Vector.h"
-#include "Ptr.h"
 
 namespace sdot {
-
-struct MemorySpace_CpuRam; // default memory space (defined in hardware/); fwd-declared to avoid an include cycle
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
 ///   MemorySpace = where the data lives (drives the informed pointer Ptr<...,MemorySpace>).
 ///   The shape no longer carries any arch/memory tag; it is a parameter of the view.
-template<class TF,class _Shape,class _Strides,class _MemorySpace = MemorySpace_CpuRam>
+template<class TF,class _Shape,class _Strides,class _MemorySpace>
 class TensorView {
 public:
+    using            MemorySpace        = _MemorySpace;
     using            value_type         = TF;
     using            Strides            = _Strides;
     using            Shape              = _Shape;
-    using            MemorySpace        = _MemorySpace;
-    using            memory_kind        = _MemorySpace; ///< makes a TensorView space-aware for run()/make_accessible
 
     SCInt            ct_rank            = Shape::ct_rank;
     using            RawByte            = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
     using            RawPtr             = Ptr<RawByte,_MemorySpace>; ///< informed byte pointer (address + memory space)
     using            TI                 = Shape::TI;
 
-    static HD auto   make_invalid       ( Shape shape, Strides strides ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
+    static HD auto   make_invalid       ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
-    HD               TensorView         ( TF *data, Shape shape, Strides strides );
+    HD               TensorView         ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
 
     // operator() produces a new tensor
-    HD auto          operator()         ( const auto &indices, auto ...rem ) const requires ( requires { indices.size(); } );
+    HD auto          operator()         ( const auto &indices, auto ...rem ) const requires ( requires { DECAYED_TYPE_OF( indices.size() )::value; } );
     HD auto          operator()         ( const auto &index, auto ...rem ) const;
     HD auto          operator()         () const { return *this; }
 
@@ -68,7 +64,7 @@ public:
     HD SI            stride             ( auto d ) const;
 
     // shape
-    HD PI            total_size         () const;
+    HD PI            nb_items         () const;
     HD auto          shape              ( auto d ) const { return _shape[ d ]; }
     HD Shape         shape              () const { return _shape; }
     HD auto          empty              () const;
@@ -101,6 +97,7 @@ public:
 // private:
     static HD RawPtr sentinel           () { return RawPtr( nullptr ) + 1; }
 
+    MemorySpace      _memory_space;     ///<
     RawPtr           _raw_ptr;          ///<
     Strides          _strides;          ///< byte strides
     Shape            _shape;            ///<

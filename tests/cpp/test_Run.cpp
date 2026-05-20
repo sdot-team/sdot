@@ -7,7 +7,7 @@ using namespace sdot;
 // minimal batch_sizes: 1D range supporting the split iteration the runners use
 struct Range {
     void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
-    //PI   nb_items           () const { return n; }
+    PI   size               () const { return n; }
     PI   n;
 };
 
@@ -145,7 +145,7 @@ struct PerThreadProbe {
 };
 
 TEST_CASE( "per-thread variable", "" ) {
-    run_parallel( Range{ 5 }, PerThreadProbe{}, 10, 20 );
     run_sequential( Range{ 5 }, PerThreadProbe{}, 10, 20 );
+    run_parallel( Range{ 5 }, PerThreadProbe{}, 10, 20 );
 }
 

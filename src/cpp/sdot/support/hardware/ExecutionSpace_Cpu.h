@@ -1,14 +1,15 @@
 #pragma once
 
 #include "../containers/for_each_item_split.h"
-#include "RunTraits.h"
+#include "../containers/nb_items.h"
 #include "ExecutionSpace.h"
 #include "WaitingThreads.h"
 #include "CpuThreadInfo.h"
+#include "RunTraits.h"
 
 namespace sdot {
 
-// host execution / host RAM — stateless, {}-constructible
+// host execution
 struct ExecutionSpace_Cpu : ExecutionSpace {
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         waiting_threads().run( [&]( int num_thread, int nb_threads ) {
@@ -18,7 +19,7 @@ struct ExecutionSpace_Cpu : ExecutionSpace {
                     func( item, FORWARD( args )... );
                 } );
             }, FORWARD( args )... );
-        }, RunTraits::max_cpu_threads( func, args... ) );
+        }, std::min( nb_items( list ), PI( RunTraits::max_cpu_threads( func, args... ) ) ) );
     }
 };
 

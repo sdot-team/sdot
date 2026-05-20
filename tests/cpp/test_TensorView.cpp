@@ -1,3 +1,4 @@
+#include "../../src/cpp/sdot/support/hardware/MemorySpace_CpuRam.h"
 #include "../../src/cpp/sdot/support/containers/TensorView.h"
 #include "catch_main.h"
 
@@ -33,9 +34,9 @@ struct T2 {
 TEST_CASE( "TensorView", "" ) {
     SECTION( "no ct axis" ) {
         double data[] = { 1, 2, 3, 4 };
-        using Strides = AxisTuple<int,2>;
-        using Shape = AxisTuple<int,2>;
-        TensorView<double,Shape,Strides> t( data, Shape( Values(), 2, 2 ), Strides( Values(), 2 * sizeof( double ), sizeof( double ) ) );
+        using Strides = AxisValues<int,2>;
+        using Shape = AxisValues<int,2>;
+        TensorView<double,Shape,Strides,MemorySpace_CpuRam> t( data, Shape( Values(), 2, 2 ), Strides( Values(), 2 * sizeof( double ), sizeof( double ) ) );
         T2 t2{ .values = { { 1, 2 }, { 3, 4 } } };
         CHECK_REPR( t, t2 );
         CHECK_REPR( t( 0 ), t2( 0 ) );
