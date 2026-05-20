@@ -3,6 +3,7 @@
 // #include "StrideIterator.h"
 // #include "StrideIterator.h"
 // #include "CrossArchCopy.h"
+#include "../hardware/Run.h"
 #include "IndexRange.h"
 #include "TensorView.h"
 
@@ -20,7 +21,7 @@ namespace details::TensorView {
     // some nvcc versions when the lambda references class-level template params (TF).
     // Using concrete struct operator() avoids the problem.
     template<class DstTV, class SrcTV, class BI>
-    struct _TensorCopyFunctor {
+    struct TensorCopyFunctor {
         DstTV dst;
         SrcTV src;
         GD void operator()( BI bi ) const {
@@ -29,7 +30,7 @@ namespace details::TensorView {
     };
 
     template<class DstTV, class ValT, class BI>
-    struct _TensorFillFunctor {
+    struct TensorFillFunctor {
         DstTV dst;
         ValT value;
         GD void operator()( BI bi ) const {
@@ -48,30 +49,26 @@ UTP HD DTP DTP::make_invalid( Shape shape, Strides strides, MemorySpace memory_s
 UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides, MemorySpace memory_space ) : _memory_space( memory_space ), _raw_ptr( reinterpret_cast<RawByte *>( data ) ), _strides( strides ), _shape( shape ) {
 }
 
-UTP HD void DTP::get_data_from( const auto &that ) {
-    if ( is_contiguous() )
-        // HD: memcpy is valid only when both tensors share the current execution context's
-        // memory space (CPU host→CPU tensor, or GPU kernel→same-device tensor).
-        // For host-side cross-arch copies use get_data_from(dst_arch, src_arch, that).
-        std::memcpy( data(), that.data(), sizeof( TF ) * nb_items() );
-    else
-        get_data_from( that, shape() );
+UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {
+
 }
 
-UTP void DTP::get_data_from( const auto &arch, const auto &that ) requires requires { arch.copy( (void*)nullptr, (const void*)nullptr, PI{} ); } {
-    if ( is_contiguous() && that.is_contiguous() )
-        arch.copy( data(), that.data(), sizeof( TF ) * nb_items() );
-    else {
-        using BiType = AxisValues<TI, ct_rank>;
-        using Functor = details::TensorView::_TensorCopyFunctor<DTP, DECAYED_TYPE_OF( that ), BiType>;
-        arch.run( _shape, Functor{ *this, that } );
+UTP CPU_ONLY void DTP::get_data_from( const auto &that ) {
+    // contiguous -> copy works for all the cases
+    if ( is_contiguous() && that.is_contiguous() ) {
+        copy( data(), that.data(), nb_items() );
+        return;
     }
+
+    // same memory space -> for each on indices
+    run_sequential( _shape.all_indices(), details::TensorView::TensorCopyFunctor( *this, that ) );
+
+    // else
+    TODO;
 }
 
-UTP void DTP::fill_with( const auto &arch, TF value ) {
-    using BiType = AxisValues<TI, ct_rank>;
-    using Functor = details::TensorView::_TensorFillFunctor<DTP, TF, BiType>;
-    arch.run( _shape, Functor{ *this, value } );
+UTP void DTP::fill_with( TF value ) {
+    run_parallel( _shape.all_indices(), details::TensorView::TensorFillFunctor{ *this, value } );
 }
 
 UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {

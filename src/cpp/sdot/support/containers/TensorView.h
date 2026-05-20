@@ -26,6 +26,8 @@ public:
 
     HD               TensorView         ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
 
+    MemorySpace      memory_space       () const { return _memory_space; }
+
     // operator() produces a new tensor
     HD auto          operator()         ( const auto &indices, auto ...rem ) const requires ( requires { DECAYED_TYPE_OF( indices.size() )::value; } );
     HD auto          operator()         ( const auto &index, auto ...rem ) const;
@@ -46,12 +48,11 @@ public:
     HD TF&           item               () const;
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    HD void          get_data_from      ( const auto &that, const auto &size_to_take );
-    HD void          get_data_from      ( const auto &that );
+    void             make_accessible    ( auto execution_space, auto &&func ) const;
+    CPU_ONLY void    get_data_from      ( const auto &that );
     HD void          fill_with          ( TF value );
 
     // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
-    void             get_data_from      ( const auto &arch, const auto &that ) requires requires { arch.copy( (void*)nullptr, (const void*)nullptr, PI{} ); };
     void             fill_with          ( const auto &arch, TF value );
 
     // cross-arch copy: dst and src may live on different devices
@@ -64,7 +65,7 @@ public:
     HD SI            stride             ( auto d ) const;
 
     // shape
-    HD PI            nb_items         () const;
+    HD PI            nb_items           () const;
     HD auto          shape              ( auto d ) const { return _shape[ d ]; }
     HD Shape         shape              () const { return _shape; }
     HD auto          empty              () const;

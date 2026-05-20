@@ -13,4 +13,8 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 struct MemorySpace {};
 
+auto memory_space( const auto &value ) requires requires { value.memory_space(); } {
+    return value.memory_space();
+}
+
 } // namespace sdot

@@ -20,9 +20,11 @@
 #define FORWARD( v )           std::forward<decltype( v )>( v )
 
 #ifdef __CUDACC__
+#  define CPU_ONLY  __host__
 #  define HD  __host__ __device__
 #  define GD  __device__  // for generic (auto-param) lambdas: __host__ __device__ cannot be generic in CUDA
 #else
+#  define CPU_ONLY
 #  define HD
 #  define GD
 #endif

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../common_macros.h"
-#include "MemorySpace.h" // IWYU pragma: export
 
 namespace sdot {
 
@@ -28,7 +27,7 @@ struct Ptr {
     HD Ptr           operator-    ( auto off ) const { return Ptr( raw - off, memory_space ); }
 
     // reinterpret to another element type, keeping the same memory kind
-    template<class U> HD U *as    () const { return reinterpret_cast<U *>( raw ); }
+    T_U HD U*        as           () const { return reinterpret_cast<U *>( raw ); }
 
     HD explicit      operator bool() const { return raw != nullptr; }
     HD bool          operator==   ( const Ptr &o ) const { return memory_space == o.memory_space && raw == o.raw; }
