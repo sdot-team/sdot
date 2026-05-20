@@ -5,9 +5,8 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 // Free-function dispatch.
 //
-//   run_parallel  ( batch_sizes, func, args... );          // space inferred from the args
-//   run_parallel  ( space, batch_sizes, func, args... );   // explicit space (e.g. XLA stream)
-//   run_sequential( ... );                                 // == run_parallel with a single thread
+//   run_parallel  ( list, func, args... ); // space inferred from the args
+//   run_sequential( ... );                 // == run_parallel with a single thread
 //
 // The hardware is implied by the data: each space-aware `arg` exposes a
 // `memory_kind`. When no execution space is given, it is inferred from the args
@@ -23,23 +22,11 @@ namespace sdot {
 // GPU: a single device thread).
 // ---------------------------------------------------------------------------
 
-// internal dispatch (defined in Run.cxx): max_nb_threads < 0 means "all threads".
-// template<class Space, class BatchSizes, class F, class... Args>
-//     requires ExecutionSpace<Space>
-// void _run( const Space &space, int max_nb_threads, const BatchSizes &batch_sizes, F &&func, Args &&...args );
+// /// call func for each list item, parallel way
+// void run_parallel( auto &&list, auto &&func, auto &&...args );
 
-// // --- run_parallel ---
-// template<class Space, class BatchSizes, class F, class... Args>
-//     requires ExecutionSpace<Space>
-// void run_parallel( const Space &space, const BatchSizes &batch_sizes, F &&func, Args &&...args ) {
-//     _run( space, -1, batch_sizes, std::forward<F>( func ), std::forward<Args>( args )... );
-// }
-
-/// call func for each batch value, parallel way
-void run_parallel( const auto &batch_sizes, auto &&func, auto &&...args );
-
-/// call func for each batch value, one by one
-void run_sequential( const auto &batch_sizes, auto &&func, auto &&...args );
+// /// call func for each list item, one by one
+// void run_sequential( auto &&list, auto &&func, auto &&...args );
 
 } // namespace sdot
 
