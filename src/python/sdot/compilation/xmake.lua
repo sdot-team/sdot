@@ -24,11 +24,18 @@ add_requires(requires)
 
 -- ──────────────────────────── target ─────────────────────────────────────────
 
+-- "shared" -> python extension module (bindings) ; "binary" -> standalone executable (tests)
+local target_kind = os.getenv("SDOT_XMAKE_KIND") or "shared"
+
 target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     set_targetdir(os.getenv("SDOT_XMAKE_OUTPUT_DIR") or "build")
-    add_rules("python.module")
     set_languages("cxx20")
-    set_kind("shared")
+    if target_kind == "binary" then
+        set_kind("binary")
+    else
+        add_rules("python.module")
+        set_kind("shared")
+    end
 
     -- debug / release changes
     if is_mode("release") then
@@ -54,8 +61,8 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
         add_cxxflags("-fdiagnostics-absolute-paths")
     end
 
-    -- MacOS specificities
-    if is_plat("macosx") then
+    -- MacOS specificities (undefined symbols resolved at load time — only for the python module)
+    if is_plat("macosx") and target_kind ~= "binary" then
         add_ldflags("-Wl,-undefined,dynamic_lookup")
         add_shflags("-Wl,-undefined,dynamic_lookup")
     end

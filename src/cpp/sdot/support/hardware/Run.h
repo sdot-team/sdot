@@ -22,11 +22,11 @@ namespace sdot {
 // GPU: a single device thread).
 // ---------------------------------------------------------------------------
 
-// /// call func for each list item, parallel way
-// void run_parallel( auto &&list, auto &&func, auto &&...args );
+/// call func for each list item, parallel way
+void run_parallel( auto &&list, auto &&func, auto &&...args );
 
-// /// call func for each list item, one by one
-// void run_sequential( auto &&list, auto &&func, auto &&...args );
+/// call func for each list item, one by one
+void run_sequential( auto &&list, auto &&func, auto &&...args );
 
 } // namespace sdot
 

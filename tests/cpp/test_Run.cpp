@@ -6,9 +6,9 @@ using namespace sdot;
 
 // minimal batch_sizes: 1D range supporting the split iteration the runners use
 struct Range {
+    void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
+    //PI   nb_items           () const { return n; }
     PI   n;
-    void for_each_index_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
-    PI   nb_items           () const { return n; }
 };
 
 // // space-aware data argument (carries a memory kind on its pointer)

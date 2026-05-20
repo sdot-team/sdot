@@ -1,28 +1,29 @@
 #pragma once
 
 #include "AxisTuple.h"
+#include "IndexRange.h"
 #include "Vector.h"
 #include "Ptr.h"
-#include "memory_kind_of.h"
 
 namespace sdot {
 
+struct MemorySpace_CpuRam; // default memory space (defined in hardware/); fwd-declared to avoid an include cycle
+
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
-///   Kind = the memory kind the data lives in (drives the informed pointer Ptr<...,Kind>).
-///   It defaults from the shape's legacy Arch tag during the migration.
-template<class TF,class _Shape,class _Strides,class _Kind = memory_kind_of_t<typename _Shape::Arch>>
+///   MemorySpace = where the data lives (drives the informed pointer Ptr<...,MemorySpace>).
+///   The shape no longer carries any arch/memory tag; it is a parameter of the view.
+template<class TF,class _Shape,class _Strides,class _MemorySpace = MemorySpace_CpuRam>
 class TensorView {
 public:
     using            value_type         = TF;
     using            Strides            = _Strides;
     using            Shape              = _Shape;
-    using            Kind               = _Kind;
-    using            memory_kind        = _Kind; ///< makes a TensorView space-aware for run()/make_accessible
+    using            MemorySpace        = _MemorySpace;
+    using            memory_kind        = _MemorySpace; ///< makes a TensorView space-aware for run()/make_accessible
 
     SCInt            ct_rank            = Shape::ct_rank;
     using            RawByte            = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
-    using            RawPtr             = Ptr<RawByte,Kind>; ///< informed byte pointer (address + memory kind)
-    using            Arch               = Shape::Arch;
+    using            RawPtr             = Ptr<RawByte,_MemorySpace>; ///< informed byte pointer (address + memory space)
     using            TI                 = Shape::TI;
 
     static HD auto   make_invalid       ( Shape shape, Strides strides ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel

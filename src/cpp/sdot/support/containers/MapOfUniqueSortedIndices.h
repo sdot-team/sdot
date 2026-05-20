@@ -57,7 +57,7 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
 // 1d
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<1,TI,Arch> {
-    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
+    using TV = TensorView<TI,AxisTuple<TI,1>,AxisTuple<TI,1>>;
 
     HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
@@ -101,7 +101,7 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
 // 2d. TODO: hash table ?
 template<class TI,class Arch>
 struct MapOfUniqueSortedIndices<2,TI,Arch> {
-    using TV = TensorView<TI,AxisTuple<TI,Arch,1>,AxisTuple<TI,Arch,1>>;
+    using TV = TensorView<TI,AxisTuple<TI,1>,AxisTuple<TI,1>>;
 
     HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );

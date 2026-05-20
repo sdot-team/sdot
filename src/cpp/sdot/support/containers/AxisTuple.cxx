@@ -1,14 +1,15 @@
 #pragma once
 
 #include "AxisTuple.h"
+#include "IndexRange.h"
 #include <utility>
 
 namespace sdot {
 
 //
-template<class TI,class Arch,int ct_rank_0,class... attributes_0,int ct_rank_1,class... attributes_1>
-auto concat( const AxisTuple<TI,Arch,ct_rank_0,attributes_0...> &t0, const AxisTuple<TI,Arch,ct_rank_1,attributes_1...> &t1 ) {
-    using TR = AxisTuple<TI,Arch,ct_rank_0+ct_rank_1,attributes_0...,typename WithOffset<int,ct_rank_0,attributes_1>::type...>;
+template<class TI,int ct_rank_0,class... attributes_0,int ct_rank_1,class... attributes_1>
+auto concat( const AxisTuple<TI,ct_rank_0,attributes_0...> &t0, const AxisTuple<TI,ct_rank_1,attributes_1...> &t1 ) {
+    using TR = AxisTuple<TI,ct_rank_0+ct_rank_1,attributes_0...,typename WithOffset<int,ct_rank_0,attributes_1>::type...>;
     return t0.apply_values( [&]( auto ...v0 ) {
         return t1.apply_values( [&]( auto ...v1 ) {
             return TR( Values(), v0..., v1... );
@@ -17,8 +18,8 @@ auto concat( const AxisTuple<TI,Arch,ct_rank_0,attributes_0...> &t0, const AxisT
 }
 
 // ---- runtime front value -----------------------------------------------------------
-#define UTP template<class _TI,class _Arch,int _ct_rank,class... ct_tail>
-#define DTP AxisTuple<_TI,_Arch,_ct_rank,ct_tail...>
+#define UTP template<class _TI,int _ct_rank,class... ct_tail>
+#define DTP AxisTuple<_TI,_ct_rank,ct_tail...>
 
 UTP HD DTP::AxisTuple( Function, auto &&func, auto index ) : front_value( func( index ) ), next_values( Function(), FORWARD( func ), index + Ct<int,1>() ) {
 }
@@ -29,26 +30,7 @@ UTP HD DTP::AxisTuple( Function, auto &&func ) : AxisTuple( Function(), func, Ct
 UTP HD DTP::AxisTuple( Values, TI front_value, auto... next_values ) : front_value( front_value ), next_values( Values(), next_values... ) {
 }
 
-UTP HD void DTP::for_each_index_split( int index, int size, auto &&func ) const {
-    if constexpr ( ct_rank == 0 ) {
-        if ( index == 0 )
-            func( AxisTuple<TI,Arch,0>( Values() ) );
-    } else if constexpr ( ct_rank == 1 ) {
-        for( TI i = index; i < front_value; i += size )
-            func( AxisTuple<TI,Arch,1>( Values(), i ) );
-    } else {
-        TI cpt = 0;
-        for_each_index( [&]( auto indices ) {
-            if ( cpt++ % size == index )
-                func( indices );
-        } );
-    }
-}
-
-UTP HD void DTP::for_each_index( auto &&func, auto ...indices_so_far ) const {
-    for( TI i = 0; i < front_value; ++i )
-        next_values.for_each_index( func, indices_so_far..., i );
-}
+UTP HD auto DTP::all_indices() const { return IndexRange<DTP>{ *this }; }
 
 UTP HD auto DTP::apply_values( auto &&cb ) const { return next_values.apply_values( [&]( auto ...nxt ) {
     return cb( front_value, nxt... ); } );
@@ -65,7 +47,7 @@ UTP HD auto DTP::operator[]( TI u ) const {
     if constexpr( ct_rank == 1 )
         return front_value;
     else
-        return u ? SI( next_values[ u - 1 ] ) : front_value;
+        return u ? SI( next_values[ u - 1 ] ) : SI( front_value );
 }
 
 UTP HD auto DTP::has_value( auto &&func ) const {
@@ -90,10 +72,6 @@ UTP HD auto DTP::all_value( auto &&func ) const {
     }
 }
 
-UTP HD auto DTP::nb_items() const {
-    return front_value * next_values.nb_items();
-}
-
 UTP HD void DTP::display( auto &os, const char *prefix ) const {
     if ( prefix == nullptr )
         prefix = "[ ";
@@ -105,7 +83,7 @@ UTP HD auto DTP::size() const {
 }
 
 UTP HD auto DTP::front_shape() const {
-    return AxisTuple<TI,Arch,1>( Values(), front_value );
+    return AxisTuple<TI,1>( Values(), front_value );
 }
 
 UTP T_Uu HD auto DTP::without_index( Ct<U,u> ) const {
@@ -116,7 +94,7 @@ UTP T_Uu HD auto DTP::without_index( Ct<U,u> ) const {
 }
 
 UTP auto DTP::without_index( TI u ) const {
-    using Res = AxisTuple<TI,Arch,ct_rank-1>;
+    using Res = AxisTuple<TI,ct_rank-1>;
     return apply_values( [&]( auto ...vals ) {
         TI arr[ ct_rank ] = { TI( vals )... };
         return [&]<std::size_t... Js>( std::index_sequence<Js...> ) {
@@ -153,20 +131,14 @@ UTP auto DTP::without_index( TI u ) const {
 // #undef DTP
 
 // ---- rank 0 ------------------------------------------------------------------------
-#define UTP template<class _TI,class _Arch>
-#define DTP AxisTuple<_TI,_Arch,0>
+#define UTP template<class _TI>
+#define DTP AxisTuple<_TI,0>
 
-UTP HD void DTP::for_each_index_split( int index, int /*size*/, auto &&func ) const {
-    if ( index == 0 )
-        func( AxisTuple<TI,Arch,0>( Values() ) );
-}
-
-UTP HD void DTP::for_each_index( auto &&func, auto ...indices_so_far ) const { func( indices_so_far... ); }
+UTP HD auto DTP::all_indices() const { return IndexRange<DTP>{ *this }; }
 UTP HD auto DTP::apply_values( auto &&cb ) const { return cb(); }
 UTP HD auto DTP::operator[]( TI ) const -> TI { ASSERT( false ); return 0; }
 UTP HD auto DTP::all_value( auto &&/*func*/ ) const { return Ct<bool,true>(); }
 UTP HD auto DTP::has_value( auto &&/*func*/ ) const { return Ct<bool,false>(); }
-UTP HD auto DTP::nb_items() const { return Ct<TI,1>(); }
 UTP HD void DTP::display( auto &os, const char *prefix ) const { if ( prefix == nullptr ) os << "[]"; else os << " ]"; }
 UTP HD auto DTP::size() const { return Ct<int,0>(); }
 

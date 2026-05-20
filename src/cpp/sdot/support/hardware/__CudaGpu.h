@@ -28,7 +28,7 @@ __global__ void _gpu_run_kernel( F func, BT batch_sizes ) {
     using TI = typename BT::TI;
     constexpr int N = BT::ct_rank;
     batch_sizes.for_each_index( [&]( auto ...is ) {
-        func( AxisTuple<TI,CudaGpu,N>( Values(), is... ) );
+        func( AxisTuple<TI,N>( Values(), is... ) );
     } );
 }
 

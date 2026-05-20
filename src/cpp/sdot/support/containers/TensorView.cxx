@@ -28,8 +28,8 @@ struct _TensorFillFunctor {
     GD void operator()( BI bi ) const { dst( bi ).item() = value; }
 };
 
-#define UTP template<class TF,class Shape,class Strides,class Kind>
-#define DTP TensorView<TF,Shape,Strides,Kind>
+#define UTP template<class TF,class Shape,class Strides,class MemorySpace>
+#define DTP TensorView<TF,Shape,Strides,MemorySpace>
 
 UTP HD DTP DTP::make_invalid( Shape shape, Strides strides ) {
     return TensorView( sentinel().template as<TF>(), shape, strides );
@@ -39,8 +39,8 @@ UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides ) : _raw_ptr( rei
 }
 
 UTP HD void DTP::get_data_from( const auto &that, const auto & /*size_to_take*/ ) {
-    for_each_index( [&]( auto... indices ) {
-        operator()( indices... ) = TF( that( indices... ) );
+    for_each_index( [&]( auto item ) {
+        operator()( item ) = TF( that( item ) );
     } );
 }
 
@@ -58,16 +58,14 @@ UTP void DTP::get_data_from( const auto &arch, const auto &that ) requires requi
     if ( is_contiguous() && that.is_contiguous() )
         arch.copy( data(), that.data(), sizeof( TF ) * total_size() );
     else {
-        using ArchT = std::decay_t<decltype( arch )>;
-        using BiType = AxisTuple<TI, ArchT, ct_rank>;
+        using BiType = AxisTuple<TI, ct_rank>;
         using Functor = _TensorCopyFunctor<DTP, DECAYED_TYPE_OF( that ), BiType>;
         arch.run( _shape, Functor{ *this, that } );
     }
 }
 
 UTP void DTP::fill_with( const auto &arch, TF value ) {
-    using ArchT = std::decay_t<decltype( arch )>;
-    using BiType = AxisTuple<TI, ArchT, ct_rank>;
+    using BiType = AxisTuple<TI, ct_rank>;
     using Functor = _TensorFillFunctor<DTP, TF, BiType>;
     arch.run( _shape, Functor{ *this, value } );
 }
@@ -76,7 +74,7 @@ UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {
     arch.template with_reservation<TF>( total_size(), [&]( TF *data ) {
         auto new_strides = contiguous_strides( _shape );
         using NewStrides = DECAYED_TYPE_OF( new_strides );
-        TensorView<TF,Shape,NewStrides> res( data, _shape, new_strides );
+        TensorView<TF,Shape,NewStrides,MemorySpace> res( data, _shape, new_strides );
         func( res );
     } );
 }
@@ -87,8 +85,8 @@ UTP HD void DTP::spill_to( TensorView &that ) {
 }
 
 UTP HD void DTP::fill_with( TF value ) {
-    for_each_index( [&]( auto ...indices ) {
-        operator()( indices... ) = value;
+    for_each_index( [&]( auto item ) {
+        operator()( item ) = value;
     } );
 }
 
@@ -302,7 +300,7 @@ UTP HD bool DTP::is_contiguous() const {
 // }
 
 UTP HD void DTP::for_each_index( auto &&func ) const {
-    _shape.for_each_index( func );
+    IndexRange<Shape>{ _shape }.for_each_item( FORWARD( func ) );
 }
 
 // UTP auto DTP::contiguous_strides( const Sizes &ext ) -> Strides {

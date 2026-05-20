@@ -20,7 +20,7 @@ public:
     Batch( Arch arch ) : arch( arch ) {}
 
     void run( auto &&func ) {
-        arch.run_single( [func] HD () mutable { func( AxisTuple<TI,Arch,0>( Values() ) ); } );
+        arch.run_single( [func] HD () mutable { func( AxisTuple<TI,0>( Values() ) ); } );
     }
 
     Arch arch;
@@ -36,7 +36,7 @@ public:
 
     void run( auto &&func ) {
         for ( TI i = 0; i < size0; ++i )
-            arch.run_single( [func, i] HD () mutable { func( AxisTuple<TI,Arch,1>( Values(), i ) ); } );
+            arch.run_single( [func, i] HD () mutable { func( AxisTuple<TI,1>( Values(), i ) ); } );
     }
 
     Arch arch;

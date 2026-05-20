@@ -4,11 +4,11 @@
 ///
 /// Usage (in a generated XLA FFI handler):
 ///
-///   auto tv = tensor_view_input ( CtType<AxisTuple<PI,Cpu,2>>(), buf     );
-///   auto tv = tensor_view_output( CtType<AxisTuple<PI,Cpu,0>>(), res_buf );
+///   auto tv = tensor_view_input ( CtType<AxisTuple<PI,2>>(), buf     );
+///   auto tv = tensor_view_output( CtType<AxisTuple<PI,0>>(), res_buf );
 ///
 /// Axes with a compile-time known size use KnownAxisSize in the AxisTuple:
-///   auto tv = tensor_view_input( CtType<AxisTuple<PI,Cpu,2,KnownAxisSize<PI,1,3>>>(), buf );
+///   auto tv = tensor_view_input( CtType<AxisTuple<PI,2,KnownAxisSize<PI,1,3>>>(), buf );
 
 #include "support/DynamicAxis.h"
 #include <xla/ffi/api/ffi.h>
@@ -36,7 +36,7 @@ template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
 
 template<class Shape, std::size_t... Is>
 auto _zero_strides_impl( std::index_sequence<Is...> ) {
-    using Strides = AxisTuple<typename Shape::TI, typename Shape::Arch, Shape::ct_rank>;
+    using Strides = AxisTuple<typename Shape::TI,Shape::ct_rank>;
     return Strides( Values(), ( (void)Is, SI(0) )... );
 }
 
@@ -51,7 +51,7 @@ auto zero_strides() {
 
 template<class TF, class Shape, std::size_t... Is>
 auto _contiguous_strides_impl( const Shape &shape, std::index_sequence<Is...> ) {
-    using Strides = AxisTuple<typename Shape::TI,typename Shape::Arch,Shape::ct_rank>;
+    using Strides = AxisTuple<typename Shape::TI,Shape::ct_rank>;
     if constexpr ( Shape::ct_rank == 0 ) {
         return Strides( Values() );
     } else {

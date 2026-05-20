@@ -55,12 +55,12 @@ namespace RunDetails {
 
     // force max_cpu_threads to 1
     template<class Func>
-    struct RunSequentialWrapper : RunFunctorTraits::RunFunctorWrapper<Func> {
+    struct RunSequentialWrapper : RunTraits::RunFunctorWrapper<Func> {
         int max_cpu_threads( auto &&.../* args */ ) { return Ct<int,1>(); }
     };
 } // namespace RunDetails
 
-void run_parallel( const auto &list, auto &&func, auto &&...args ) {
+void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     // prepare a cost list
     constexpr PI ne = decltype( nb_possible_ExecutionSpace() )::value;
     double cost_for_each_execution_space[ ne ];
@@ -94,7 +94,7 @@ void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         if ( num_execution_space++ != best_execution_space )
             return;
         RunDetails::_get_args_on( execution_space, Ct<int,sizeof...( args )>(), FORWARD( args )..., [&]( auto &&...args ) {
-            execution_space.run_parallel( list, FORWARD( func ), FORWARD( args )... );
+            execution_space.run_parallel( FORWARD( list ), FORWARD( func ), FORWARD( args )... );
         } );
     } );
 }
