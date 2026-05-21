@@ -57,26 +57,23 @@ UTP HD auto DTP::data() const {
     return Ptr<TF,MemorySpace>( _raw_ptr.template as<TF>(), _memory_space );
 }
 
-template<class Src,class TF>
-struct GetValue {
-    void HD operator()( auto dst ) {
-        copy( dst, src, 1 );
-        res = *dst;
-    }
-    Src src;
-    TF  res;
-};
-
 UTP HD TF DTP::value() const {
     static_assert( ct_rank == 0 );
     auto ec = current_execution_context();
     if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value )
         return *data();
     else {
-        GetValue gv( data(), TF() );
-        auto m = native_memory_space( ec );
-        m.with_reservation<TF>( 1, gv );
-        return gv.res;
+        // #ifdef __CUDA_ARCH__
+        //         // unreachable: the static dispatch keeps non-device-accessible data off the device
+        //         // (and there is no cudaMemcpy on the device to pull it in).
+        //         return TF{};
+        // #else
+        // host: pull a single element in (D2H copy) and return it
+        TF res;
+        auto ms = native_memory_space( ec );
+        copy( Ptr( &res, ms ), data(), 1 );
+        return res;
+        // #endif
     }
 }
 

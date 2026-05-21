@@ -194,10 +194,10 @@ TEST_CASE( "TensorView::make_accessible — CPU pass-through", "" ) {
 
 #ifdef __CUDACC__
 TEST_CASE( "GPU tensor", "" ) {
-    double host[ 4 ] = { 1, 2, 3, 4 };
+    double data[ 4 ] = { 1, 2, 3, 4 };
     MemorySpace_GlobalCudaRam gpu_ram;
     gpu_ram.with_reservation<double>( 4, [&]( auto dev ) {
-        copy( dev, Ptr<double,MemorySpace_CpuRam>( host ), 4 );
+        copy( dev, Ptr<double,MemorySpace_CpuRam>( data ), 4 );
         cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
 
         TensorView dt( dev.raw, tuple( 4 ), tuple( sizeof( double ) ), dev.memory_space );
@@ -205,8 +205,10 @@ TEST_CASE( "GPU tensor", "" ) {
         // cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
 
         // copy( ExecutionSpace_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );
-        // info( dt[ 0 ] );
+        info( dt[ 0 ].value() );
     } );
-    info( 32 );
+
+    // TensorView t( data, tuple( 4 ), tuple( sizeof( double ) ), MemorySpace_CpuRam{} );
+    // info( t );
 }
 #endif // __CUDACC__

@@ -17,10 +17,10 @@ struct MemorySpace_CpuRam : MemorySpace {
 
 constexpr auto operator==( MemorySpace_CpuRam, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
 
-auto accessible_from( ExecutionSpace_Cpu, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
+constexpr auto accessible_from( ExecutionSpace_Cpu, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
 
 /// memory space a CPU execution space allocates into when it must materialize data
-auto native_memory_space( ExecutionSpace_Cpu ) { return MemorySpace_CpuRam{}; }
+constexpr auto native_memory_space( ExecutionSpace_Cpu ) {return MemorySpace_CpuRam{}; }
 
 T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items ) { std::memcpy( dst.raw, src.raw, nb_items * sizeof( T ) ); }
 

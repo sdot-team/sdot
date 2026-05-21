@@ -7,8 +7,8 @@
 #include "MemorySpace_CpuRam.h"
 #include "accessible_from.h"
 #include "MemorySpace.h"
-#include "Ptr.h"
 #include "../Ct.h"
+#include "Ptr.h"
 
 namespace sdot {
 
@@ -16,8 +16,9 @@ namespace sdot {
 struct MemorySpace_GlobalCudaRam : MemorySpace {
     auto HD execution_space() const { return ExecutionSpace_Cuda{}; }
 
-    /// allocate `n` items of T on the device, expose them (as an informed Ptr) to `func`, then release
-    T_T HD void with_reservation( PI n, auto &&func ) const {
+    /// allocate `n` items of T on the device, expose them (as an informed Ptr) to `func`, then release.
+    /// cudaMalloc/cudaFree are host APIs -> __host__ only.
+    T_T __host__ void with_reservation( PI n, auto &&func ) const {
         T *p = nullptr;
         cudaMalloc( reinterpret_cast<void **>( &p ), n * sizeof( T ) );
         func( Ptr<T,MemorySpace_GlobalCudaRam>( p, *this ) );
@@ -29,25 +30,42 @@ constexpr auto operator==( MemorySpace_GlobalCudaRam, MemorySpace_GlobalCudaRam 
 constexpr auto operator==( MemorySpace_GlobalCudaRam, auto                      ) { return Ct<bool,false>(); }
 constexpr auto operator==( auto                     , MemorySpace_GlobalCudaRam ) { return Ct<bool,false>(); }
 
-auto accessible_from( ExecutionSpace_Cuda, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
+HD auto accessible_from( ExecutionSpace_Cuda, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
 
 /// memory space a CUDA execution space allocates into when it must materialize data
-auto native_memory_space( ExecutionSpace_Cuda ) { return MemorySpace_GlobalCudaRam{}; }
+HD auto native_memory_space( ExecutionSpace_Cuda ) { return MemorySpace_GlobalCudaRam{}; }
 
-// Transfer primitive copy( execution_space, dst_ptr, src_ptr, nb_items ): the execution
-// space carries the stream; the (dst,src) memory-space types select the direction.
-// CPU → GPU (enqueued on the target stream)
+// Transfer primitive copy( dst_ptr, src_ptr, nb_items[, es] ): the (dst,src) memory-space types
+// select the direction; the execution space carries the stream.
+//
+// Inter-space transfers go through cudaMemcpy, which is a host API -> __host__ only (calling them
+// from device code is therefore a natural compile error).
 T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
-    cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyHostToDevice, es.stream );
+    #ifdef __CUDA_ARCH__
+        __trap();
+    #else
+        cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyHostToDevice, es.stream );
+    #endif
 }
-// GPU → GPU (same stream; TODO: peer copy for different devices)
-T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
-    cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyDeviceToDevice, es.stream );
-}
-// GPU → CPU (target is the host: no host stream, so drive it on the GPU memory's stream, then sync)
 T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
-    cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyDeviceToHost, es.stream );
-    cudaStreamSynchronize( es.stream );
+    #ifdef __CUDA_ARCH__
+        __trap();
+    #else
+        cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyDeviceToHost, es.stream );
+        cudaStreamSynchronize( es.stream );
+    #endif
+}
+
+// device -> device: feasible from both sides -> HD, and this is where __CUDA_ARCH__ legitimately
+// picks an *implementation* (both branches are valid): in a kernel, an internal element copy; from
+// the host, cudaMemcpy. (TODO: peer copy for different devices.)
+T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
+    #ifdef __CUDA_ARCH__
+        for ( PI i = 0; i < nb_items; ++i )
+            dst.raw[ i ] = src.raw[ i ];
+    #else
+        cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyDeviceToDevice, es.stream );
+    #endif
 }
 
 } // namespace sdot

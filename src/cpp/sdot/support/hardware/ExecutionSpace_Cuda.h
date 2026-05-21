@@ -34,7 +34,13 @@ struct ExecutionSpace_Cuda : public ExecutionSpace {
     cudaStream_t        stream;         ///< stream this execution space enqueues onto
 
     explicit HD ExecutionSpace_Cuda( cudaStream_t s ) : stream( s ) {}
+    // default_stream is a host symbol; in device code (where the context is only used as a
+    // compile-time tag for accessible_from) the stream value is irrelevant, so use 0 there.
+#ifdef __CUDA_ARCH__
+    HD ExecutionSpace_Cuda() : stream( 0 ) {}
+#else
     HD ExecutionSpace_Cuda() : stream( default_stream ) {}
+#endif
 
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
