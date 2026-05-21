@@ -1,6 +1,7 @@
 #pragma once
 
- #include "common_macros.h"
+#include "containers/TypePromote.h"
+#include "common_macros.h"
 
 namespace sdot {
 
@@ -23,6 +24,16 @@ struct Ct {
         os << "Ct(" << i  << ")";
     }
 };
+
+template<class A,A i,class B,B j>
+struct TypePromote<Ct<A,i>,Ct<B,j>> { static_assert( i == j ); using type = Ct<typename TypePromote<A,B>::type,i>; };
+
+template<class A,A i,class B>
+struct TypePromote<Ct<A,i>,B> { using type = TypePromote<A,B>::type; };
+
+template<class A,class B,B j>
+struct TypePromote<A,Ct<B,j>> { using type = TypePromote<A,B>::type; };
+
 
 // Ct Ct
 template<class T0,T0 v0,class T1,T1 v1> constexpr auto operator+( Ct<T0,v0>, Ct<T1,v1> ) { using TR = DECAYED_TYPE_OF( v0 + v1 ); return Ct<TR,v0 + v1>(); }

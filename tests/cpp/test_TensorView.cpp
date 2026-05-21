@@ -1,5 +1,5 @@
-#include "../../src/cpp/sdot/support/hardware/MemorySpace_CpuRam.h"
 #include "../../src/cpp/sdot/support/containers/contiguous_strides.h"
+#include "../../src/cpp/sdot/support/hardware/MemorySpace_CpuRam.h"
 #include "../../src/cpp/sdot/support/containers/TensorView.h"
 #include "../../src/cpp/sdot/support/hardware/Run.h"
 #include "catch_main.h"

@@ -7,6 +7,11 @@ namespace sdot {
 void display( std::ostream &os, const auto &value ) {
     if constexpr ( requires { value.display( os ); } ) {
         value.display( os );
+    if constexpr ( requires { value.for_each_item( []( const auto & ) {} ); } ) {
+        std::size_t cpt = 0;
+        value.for_each_item( [&]( const auto &item ) {
+            display( os << ( cpt++ ? ", " : "" ), item );
+        } );
     } else if constexpr ( requires { os << value; } ) {
         os << value;
     } else if constexpr ( requires { DECAYED_TYPE_OF( value.shape().size() )::value; } ) {
