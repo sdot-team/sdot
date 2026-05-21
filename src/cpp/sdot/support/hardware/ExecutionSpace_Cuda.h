@@ -33,8 +33,8 @@ struct ExecutionSpace_Cuda : public ExecutionSpace {
     static cudaStream_t default_stream; ///< process-wide default, set by the bindings
     cudaStream_t        stream;         ///< stream this execution space enqueues onto
 
-    /**/ ExecutionSpace_Cuda(                       ) : stream( default_stream ) {}
-    explicit ExecutionSpace_Cuda( cudaStream_t s    ) : stream( s              ) {}
+    explicit HD ExecutionSpace_Cuda( cudaStream_t s ) : stream( s ) {}
+    HD ExecutionSpace_Cuda() : stream( default_stream ) {}
 
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         // one thread per item for now (round-robin in the kernel tolerates any grid size).

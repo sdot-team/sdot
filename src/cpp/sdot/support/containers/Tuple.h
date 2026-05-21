@@ -14,22 +14,24 @@ class Tuple;
 template<class Head,class... Tail>
 class Tuple<Head,Tail...> {
 public:
-    using        Next            = Tuple<Tail...>;
+    SCInt        ct_size            = 1 + sizeof...( Tail );
+    using        Next               = Tuple<Tail...>;
 
-    HD           Tuple           ( Function, auto &&func, auto index ); ///< allows for starting with index != 0
-    HD           Tuple           ( Function, auto &&func );
+    HD           Tuple              ( Function, auto &&func, auto index ); ///< allows for starting with index != 0
+    HD           Tuple              ( Function, auto &&func );
 
-    HD           Tuple           ( Values, auto head, auto... tail );
-    HD           Tuple           ( const Tuple &that ) = default;
-    HD           Tuple           () = default;
+    HD           Tuple              ( Values, auto head, auto... tail );
+    T_VT HD      Tuple              ( const Tuple<T...> &that );
+    HD           Tuple              ( const Tuple &that ) = default;
+    HD           Tuple              () = default;
 
-    HD void      for_each_item   ( auto &&cb_func ) const;
-    HD auto      apply_values    ( auto &&cb_func ) const;
-    HD auto      operator[]      ( auto &&index ) const;
-    HD auto      size            () const;
+    HD void      for_each_item      ( auto &&cb_func ) const;
+    HD auto      apply_values       ( auto &&cb_func ) const;
+    HD auto      operator[]         ( auto &&index ) const;
+    HD auto      size               () const;
 
-    HD auto      without_index   ( auto index ) const;
-    HD auto      all_indices     () const; ///< the list of all multi-indices, for run_*()
+    HD auto      with_appended_value( auto &&new_value ) const;
+    HD auto      without_index      ( auto index ) const;
 
     Head         head;
     Next         tail;
@@ -39,16 +41,20 @@ public:
 template<>
 class Tuple<> {
 public:
-    HD           Tuple           ( Function, auto &&/*func*/, auto /*index*/ );
-    HD           Tuple           ( Function, auto &&/*func*/ );
-    HD           Tuple           ( const Tuple &that ) = default;
-    HD           Tuple           ( Values );
-    HD           Tuple           () = default;
+    SCInt        ct_size            = 0;
 
-    HD void      for_each_item   ( auto &&/* cb */ ) const;
-    HD auto      apply_values    ( auto &&cb ) const;
-    HD Void      operator[]      ( auto ) const;
-    HD auto      size            () const;
+    HD           Tuple              ( Function, auto &&/*func*/, auto /*index*/ );
+    HD           Tuple              ( Function, auto &&/*func*/ );
+    HD           Tuple              ( const Tuple &that ) = default;
+    HD           Tuple              ( Values );
+    HD           Tuple              () = default;
+
+    HD void      for_each_item      ( auto &&/* cb */ ) const;
+    HD auto      apply_values       ( auto &&cb ) const;
+    HD Void      operator[]         ( auto ) const;
+    HD auto      size               () const;
+
+    HD auto      with_appended_value( auto &&new_value ) const;
 };
 
 auto tuple( auto &&...a ) {
@@ -61,6 +67,12 @@ auto concat( const Tuple<A...> &a, const Tuple<B...> &b ) {
         return b.apply_values( [&]( auto... vb ) {
             return tuple( va..., vb... );
         } );
+    } );
+}
+
+auto map( auto &&list, auto &&func ) { // requires requires { list.apply_values( []( auto... ) {} ); } {
+    return list.apply_values( [&]( auto... values ) {
+        return tuple( func( values )... );
     } );
 }
 

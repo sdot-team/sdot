@@ -46,7 +46,7 @@ public:
 
     HD auto           with_pushed_value           ( T value ) const;
     HD auto           without_index               ( PI ind_to_remove ) const;
-    T_d HD auto       from                        () const { return Vector<T,Arch,ct_size-d>( std::span( begin() + d, end() ) ); }
+    // T_d HD auto       from                        () const { return Vector<T,Arch,ct_size-d>( std::span( begin() + d, end() ) ); }
 
     HD constexpr auto size                        () const { return Ct<int,ct_size>(); }
 

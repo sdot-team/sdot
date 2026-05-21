@@ -1,6 +1,7 @@
 #pragma once
 
-#include "../common_macros.h"
+#include "current_execution_context.h"
+#include "accessible_from.h"
 
 namespace sdot {
 
@@ -29,9 +30,14 @@ struct Ptr {
     // reinterpret to another element type, keeping the same memory kind
     T_U HD U*        as           () const { return reinterpret_cast<U *>( raw ); }
 
+    //
     HD explicit      operator bool() const { return raw != nullptr; }
     HD bool          operator==   ( const Ptr &o ) const { return memory_space == o.memory_space && raw == o.raw; }
     HD bool          operator!=   ( const Ptr &o ) const { return ! operator==( o ); }
+
+    //
+    HD T&            operator*    () const { static_assert( DECAYED_TYPE_OF( accessible_from( current_execution_context(), memory_space ) )::value ); return *raw; }
+
 
     MemorySpace      memory_space; ///< void structure by default
     T*               raw;

@@ -16,6 +16,9 @@ UTP HD DTP::Tuple( Function, auto &&func, auto index ) : head( func( index ) ), 
 UTP HD DTP::Tuple( Function, auto &&func ) : Tuple( Function(), func, Ct<int,0>() ) {
 }
 
+UTP T_VT HD DTP::Tuple( const Tuple<T...> &that ) : head( that.head ), tail( that.tail ) {
+}
+
 UTP HD DTP::Tuple( Values, auto head, auto... tail ) : head( head ), tail( Values(), tail... ) {
 }
 
@@ -38,15 +41,23 @@ UTP HD auto DTP::operator[]( auto &&index ) const {
             return head;
     } else {
         using TR = TypePromote<Head,Tail...>::type;
-        if ( index )
-            return TR( tail[ index - Ct<int,1>() ] );
-        else
+        if constexpr ( sizeof...( Tail ) == 0 )
             return TR( head );
+        else if ( index == 0 )
+            return TR( head );
+        else
+            return TR( tail[ index - 1_c ] );
     }
 }
 
 UTP HD auto DTP::size() const {
     return Ct<int,1 + sizeof...( Tail )>();
+}
+
+UTP HD auto DTP::with_appended_value( auto &&new_value ) const {
+    return apply_values( [&]( auto ...values ) {
+        return tuple( values..., new_value );
+    } );
 }
 
 UTP HD auto DTP::without_index( auto index ) const {
@@ -91,6 +102,10 @@ UTP HD auto DTP::apply_values( auto &&cb ) const {
 
 UTP HD Void DTP::operator[]( auto ) const {
     return {};
+}
+
+UTP HD auto DTP::with_appended_value( auto &&new_value ) const {
+    return tuple( new_value );
 }
 
 UTP HD auto DTP::size() const {
