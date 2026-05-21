@@ -22,16 +22,16 @@ struct IndexRange {
     Shape shape;
 
     /// total number of multi-indices (product of the axis sizes; 1 for a rank-0 shape)
-    HD auto nb_items() const {
+    constexpr auto nb_items() const {
         return shape.apply_values( [&]( auto ...sizes ) { return ( TI( 1 ) * ... * TI( sizes ) ); } );
     }
 
     /// Visit every multi-index in row-major order, calling `func( multi_index )` for each.
-    HD void for_each_item( auto &&func ) const { _rec( shape, func ); }
+    constexpr void for_each_item( auto &&func ) const { _rec( shape, func ); }
 
     /// Visit the multi-indices handled by thread `index` out of `size` threads, calling
     /// `func( multi_index )` for each. Items are spread round-robin (item k -> thread k % size).
-    HD void for_each_item_split( int index, int size, auto &&func ) const {
+    constexpr void for_each_item_split( int index, int size, auto &&func ) const {
         if constexpr ( Shape::ct_rank == 0 ) {
             // single item (the empty multi-index) -> only thread 0 runs it
             if ( index == 0 )
@@ -51,14 +51,14 @@ struct IndexRange {
     }
 
     /// build a multi-index AxisValues from a pack of coordinates (rank = nb of coordinates)
-    HD static auto make_item( auto ...coords ) {
+    constexpr static auto make_item( auto ...coords ) {
         return AxisValues<TI,int( sizeof...( coords ) )>( Values(), coords... );
     }
 
 private:
     /// recurse over the axes of `sub`, accumulating coordinates, then yield each full item
     template<class Sub>
-    HD static void _rec( const Sub &sub, auto &&func, auto ...coords ) {
+    constexpr static void _rec( const Sub &sub, auto &&func, auto ...coords ) {
         if constexpr ( Sub::ct_rank == 0 )
             func( make_item( coords... ) );
         else

@@ -4,6 +4,8 @@
 // #include "StrideIterator.h"
 // #include "CrossArchCopy.h"
 #include "../hardware/Run.h"
+#include "../hardware/MemorySpace_CpuRam.h" // accessible_from / native_memory_space (host)
+#include "contiguous_strides.h"
 #include "IndexRange.h"
 #include "TensorView.h"
 
@@ -50,7 +52,23 @@ UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides, MemorySpace memo
 }
 
 UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {
-
+    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value ) {
+        // data already reachable from this execution space → no transfer
+        func( *this );
+    } else {
+        // materialize a contiguous copy in the execution space's native memory space, bring
+        // the data in (transfer driven by execution_space's stream), run, then release.
+        // NB: assumes a contiguous source; strided cross-space transfer is a TODO.
+        auto dst_ms = native_memory_space( execution_space );
+        using DstMS = DECAYED_TYPE_OF( dst_ms );
+        dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
+            auto strides = contiguous_strides<TF>( _shape );
+            TensorView<TF,Shape,DECAYED_TYPE_OF( strides ),DstMS> dst( buf.raw, _shape, strides, dst_ms );
+            copy( execution_space, buf, Ptr<TF,MemorySpace>( data(), _memory_space ), nb_items() );
+            func( dst );
+            // TODO in/out: copy dst → *this back after func, depending on the argument category
+        } );
+    }
 }
 
 UTP CPU_ONLY void DTP::get_data_from( const auto &that ) {
@@ -72,10 +90,11 @@ UTP void DTP::fill_with( TF value ) {
 }
 
 UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {
-    arch.template with_reservation<TF>( nb_items(), [&]( TF *data ) {
-        auto new_strides = contiguous_strides( _shape );
+    arch.template with_reservation<TF>( nb_items(), [&]( auto buf ) {
+        auto new_strides = contiguous_strides<TF>( _shape );
         using NewStrides = DECAYED_TYPE_OF( new_strides );
-        TensorView<TF,Shape,NewStrides,MemorySpace> res( data, _shape, new_strides );
+        using BufMS      = typename DECAYED_TYPE_OF( buf )::MemorySpace;
+        TensorView<TF,Shape,NewStrides,BufMS> res( buf.raw, _shape, new_strides, buf.memory_space );
         func( res );
     } );
 }
@@ -84,13 +103,6 @@ UTP HD void DTP::spill_to( TensorView &that ) {
     that.get_data_from( *this );
     _raw_ptr = that._raw_ptr;
 }
-
-UTP HD void DTP::fill_with( TF value ) {
-    for_each_index( [&]( auto item ) {
-        operator()( item ) = value;
-    } );
-}
-
 
 UTP HD auto DTP::operator()( const auto &indices, auto ...rem ) const requires ( requires { DECAYED_TYPE_OF( indices.size() )::value; } ) {
     if constexpr ( DECAYED_TYPE_OF( indices.size() )::value )
@@ -103,15 +115,7 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
     return row( index )( rem... );
 }
 
-UTP HD TF &DTP::operator[]( const auto &index ) const {
-    auto selection = operator()( index );
-    return selection.item();
-}
-
-UTP HD TF &DTP::item() const {
-    static_assert( ct_rank == 0, "..." );
-    return *data();
-}
+// operator[] and item() are single-context inline accessors in TensorView.h (SDOT_DATA_ACCESSOR)
 
 UTP HD Strides DTP::strides() const {
     return _strides;
@@ -124,7 +128,7 @@ UTP HD SI DTP::stride( auto d ) const {
 UTP HD PI DTP::nb_items() const {
     PI res = 1;
     for( PI d = 0; d < rank(); ++d )
-        res *= size( d );
+        res *= shape( d );
     return res;
 }
 

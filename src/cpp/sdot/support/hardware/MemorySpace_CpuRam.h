@@ -1,19 +1,26 @@
 #pragma once
 
 #include "ExecutionSpace_Cpu.h"
+#include "accessible_from.h" // IWYU pragma: export
 #include "MemorySpace.h"
-#include "../Ct.h"
 #include "Ptr.h"
+
+#include <cstring>
 
 namespace sdot {
 
 /// pageable host memory
 struct MemorySpace_CpuRam : MemorySpace {
+    /// allocate `n` items of T in this memory space, expose them (as an informed Ptr) to `func`, then release
+    T_T CPU_ONLY void with_reservation( PI n, auto &&func ) const { T *p = new T[ n ]; func( Ptr<T,MemorySpace_CpuRam>( p, *this ) ); delete [] p; }
 };
 
 constexpr auto operator==( MemorySpace_CpuRam, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
 
-auto transfer_cost( ExecutionSpace_Cpu, MemorySpace_CpuRam, auto &&/*get_nb_bytes*/ ) { return Ct<int,0>(); }
+auto accessible_from( ExecutionSpace_Cpu, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
+
+/// memory space a CPU execution space allocates into when it must materialize data
+auto native_memory_space( ExecutionSpace_Cpu ) { return MemorySpace_CpuRam{}; }
 
 T_T CPU_ONLY inline void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items ) { std::memcpy( dst.raw, src.raw, nb_items * sizeof( T ) ); }
 

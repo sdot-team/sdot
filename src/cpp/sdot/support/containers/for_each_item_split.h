@@ -5,7 +5,7 @@
 
 namespace sdot {
 
-HD void for_each_item_split( auto &&list, PI rel, PI mod, auto &&func ) requires ( requires { list.for_each_item_split( rel, mod, FORWARD( func ) ); } || requires { for_each_item( FORWARD( list ), FORWARD( func ) ); } ) {
+constexpr void for_each_item_split( auto &&list, PI rel, PI mod, auto &&func ) requires ( requires { list.for_each_item_split( rel, mod, FORWARD( func ) ); } || requires { for_each_item( FORWARD( list ), FORWARD( func ) ); } ) {
     if constexpr ( requires { list.for_each_item_split( rel, mod, FORWARD( func ) ); } ) {
         list.for_each_item_split( rel, mod, FORWARD( func ) );
     } else {

@@ -1,9 +1,7 @@
 #pragma once
 
-#include "for_each_possible_ExecutionSpace.h"
-#include "approximate_execution_cost.h"
+#include "execution_space_for.h"
 #include "make_accessible.h"
-#include "transfer_cost.h"
 #include "Run.h"
 
 #include "../common_types.h"
@@ -61,41 +59,12 @@ namespace RunDetails {
 } // namespace RunDetails
 
 void run_parallel( auto &&list, auto &&func, auto &&...args ) {
-    // prepare a cost list
-    constexpr PI ne = decltype( nb_possible_ExecutionSpace() )::value;
-    double cost_for_each_execution_space[ ne ];
-    for( PI num_execution_space = 0; num_execution_space < ne; ++num_execution_space )
-        cost_for_each_execution_space[ num_execution_space ] = 0;
+    // statically chosen from the args' memory spaces (single type -> only this branch compiles)
+    auto execution_space = execution_space_for( args... );
 
-    // get transfer cost
-    auto add_cost_for_arg = [&]( const auto &arg ) {
-        PI num_execution_space = 0;
-        for_each_possible_ExecutionSpace( [&]( auto execution_space ) {
-            cost_for_each_execution_space[ num_execution_space++ ] = transfer_cost( execution_space, arg );
-        } );
-    };
-    ( add_cost_for_arg( args ), ... );
-
-    // add approximate execution cost
-    PI num_execution_space = 0;
-    for_each_possible_ExecutionSpace( [&]( auto execution_space ) {
-        cost_for_each_execution_space[ num_execution_space++ ] = approximate_execution_cost( execution_space, list, func, args... );
-    } );
-
-    // find best_execution_space
-    PI best_execution_space = 0;
-    for( PI num_execution_space = 1; num_execution_space < ne; ++num_execution_space )
-        if ( cost_for_each_execution_space[ best_execution_space ] > cost_for_each_execution_space[ num_execution_space ] )
-            best_execution_space = num_execution_space;
-
-    // exec on best_execution_space
-    num_execution_space = 0;
-    for_each_possible_ExecutionSpace( [&]( auto execution_space ) {
-        if ( num_execution_space++ != best_execution_space )
-            return;
-        RunDetails::_get_args_on( execution_space, Ct<int,1+sizeof...( args )>(), FORWARD( list ), FORWARD( args )..., [&]( auto &&list, auto &&...args ) {
-            execution_space.run_parallel( FORWARD( list ), FORWARD( func ), FORWARD( args )... );
-        } );
+    // make every arg accessible from that space (pass-through or transfer), then run
+    RunDetails::_get_args_on( execution_space, Ct<int,1+sizeof...( args )>(), FORWARD( list ), FORWARD( args )..., [&]( auto &&list, auto &&...args ) {
+        execution_space.run_parallel( FORWARD( list ), FORWARD( func ), FORWARD( args )... );
     } );
 }
 

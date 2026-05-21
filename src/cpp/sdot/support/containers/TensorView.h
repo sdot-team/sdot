@@ -1,10 +1,25 @@
 #pragma once
 
 #include "../hardware/Ptr.h"
+#include "../hardware/memory_accessibility.h"
 #include "AxisValues.h"
 #include "Vector.h"
 
 namespace sdot {
+
+// Declares a data accessor (one that dereferences elements) as two single-context overloads:
+// __host__ when the view's data is host-accessible, __device__ when device-accessible (derived
+// from accessible_from). The wrong-context overload simply doesn't exist, so dereferencing a
+// host view in device code (or vice versa) is a compile error rather than UB — and no HD method
+// compiles a device pass over host memory. SIG = signature (incl. const), BODY = { ... }.
+#ifdef __CUDACC__
+#  define SDOT_DATA_ACCESSOR( SIG, BODY ) \
+        __host__   SIG requires ( host_accessible_v<MemorySpace>   ) BODY \
+        __device__ SIG requires ( device_accessible_v<MemorySpace> ) BODY
+#else
+#  define SDOT_DATA_ACCESSOR( SIG, BODY ) \
+        SIG requires ( host_accessible_v<MemorySpace> ) BODY
+#endif
 
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
 ///   MemorySpace = where the data lives (drives the informed pointer Ptr<...,MemorySpace>).
@@ -12,97 +27,118 @@ namespace sdot {
 template<class TF,class _Shape,class _Strides,class _MemorySpace>
 class TensorView {
 public:
-    using            MemorySpace        = _MemorySpace;
-    using            value_type         = TF;
-    using            Strides            = _Strides;
-    using            Shape              = _Shape;
+    using            MemorySpace          = _MemorySpace;
+    using            value_type           = TF;
+    using            Strides              = _Strides;
+    using            Shape                = _Shape;
 
-    SCInt            ct_rank            = Shape::ct_rank;
-    using            RawByte            = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
-    using            RawPtr             = Ptr<RawByte,_MemorySpace>; ///< informed byte pointer (address + memory space)
-    using            TI                 = Shape::TI;
+    SCInt            ct_rank              = Shape::ct_rank;
+    using            RawByte              = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
+    using            RawPtr               = Ptr<RawByte,_MemorySpace>; ///< informed byte pointer (address + memory space)
+    using            TI                   = Shape::TI;
 
-    static HD auto   make_invalid       ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
+    static HD auto   make_invalid         ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
-    HD               TensorView         ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
+    HD               TensorView           ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
 
-    MemorySpace      memory_space       () const { return _memory_space; }
+    // Eigen-like view semantics: copy-construction shares the data (shallow), while operator=
+    // copies the elements (deep). The defaulted copy-ctor also silences -Wdeprecated-copy.
+    HD               TensorView           ( const TensorView & ) = default;
+
+    void             for_each_memory_space( auto &&func ) const { func( _memory_space, [&]{ return nb_items() * sizeof( TF ); } ); }
+    MemorySpace      memory_space         () const { return _memory_space; }
+
+    /// expose the memory space (+ a byte-count getter) so run_*() can infer/cost the execution space
 
     // operator() produces a new tensor
-    HD auto          operator()         ( const auto &indices, auto ...rem ) const requires ( requires { DECAYED_TYPE_OF( indices.size() )::value; } );
-    HD auto          operator()         ( const auto &index, auto ...rem ) const;
-    HD auto          operator()         () const { return *this; }
+    HD auto          operator()           ( const auto &indices, auto ...rem ) const requires ( requires { DECAYED_TYPE_OF( indices.size() )::value; } );
+    HD auto          operator()           ( const auto &index, auto ...rem ) const;
+    HD auto          operator()           () const { return *this; }
 
-    // operator[] allows to get a scalar value/reference for a rank 1 tensor
-    HD TF&           operator[]         ( const auto &index ) const;
+    // --- element accessors: single-context (see SDOT_DATA_ACCESSOR), so a host view can't be
+    //     dereferenced in device code and vice versa. operator() (sub-views, no deref) stays HD.
+
+    // scalar value/reference for a rank 1 tensor
+    SDOT_DATA_ACCESSOR( TF& operator[]( const auto &index ) const, { return operator()( index ).item(); } )
 
     // scalar value/reference for a rank 0 tensor
-    HD               operator TF        () const { ASSERT( rank() == 0 ); return *data(); }
+    SDOT_DATA_ACCESSOR( operator TF() const, { static_assert( ct_rank == 0 ); return *data(); } )
 
-    HD void          operator=          ( const TensorView &that ) { get_data_from( that, _shape ); }
-    HD void          operator=          ( TF value ) { ASSERT( rank() == 0 ); *data() = value; }
+    // element-wise copy into this view, so a( ... ) = b( ... ) works on host AND inside GPU kernels
+    // (serial over the indices; meant for small tensors — use get_data_from for bulk). Several
+    // operator= overloads so a same-type RHS still deep-copies (suppresses the implicit shallow copy).
+    SDOT_DATA_ACCESSOR( void copy_elements_from( const auto &that ) const, { _shape.all_indices().for_each_item( [&]( auto idx ) { ( *this )[ idx ] = that[ idx ]; } ); } )
+    SDOT_DATA_ACCESSOR( void operator=( const TensorView &that ), { copy_elements_from( that ); } )
+    SDOT_DATA_ACCESSOR( void operator=( TF value ), { static_assert( ct_rank == 0 ); *data() = value; } )
+    SDOT_DATA_ACCESSOR( void operator+=( TF value ), { static_assert( ct_rank == 0 ); *data() += value; } )
+    SDOT_DATA_ACCESSOR( void operator-=( TF value ), { static_assert( ct_rank == 0 ); *data() -= value; } )
+#ifdef __CUDACC__
+    __host__   void  operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
+    __device__ void  operator=( const auto &that ) requires ( device_accessible_v<MemorySpace> && requires { that.shape(); } ) { copy_elements_from( that ); }
+#else
+    void             operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
+#endif
 
-    HD void          operator+=         ( TF value ) { ASSERT( rank() == 0 ); *data() += value; }
-    HD void          operator-=         ( TF value ) { ASSERT( rank() == 0 ); *data() -= value; }
-
-    HD TF&           item               () const;
+    SDOT_DATA_ACCESSOR( TF& item() const, { static_assert( ct_rank == 0 ); return *data(); } )
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    void             make_accessible    ( auto execution_space, auto &&func ) const;
-    CPU_ONLY void    get_data_from      ( const auto &that );
-    HD void          fill_with          ( TF value );
+    void             make_accessible      ( auto execution_space, auto &&func ) const;
+    CPU_ONLY void    get_data_from        ( const auto &that );
+    HD void          fill_with            ( TF value );
 
     // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
-    void             fill_with          ( const auto &arch, TF value );
+    void             fill_with            ( const auto &arch, TF value );
 
     // cross-arch copy: dst and src may live on different devices
-    void             get_data_from      ( const auto &dst_arch, const auto &src_arch, const auto &that ) requires requires { arch_copy( dst_arch, (void*)nullptr, src_arch, (const void*)nullptr, PI{} ); };
+    void             get_data_from        ( const auto &dst_arch, const auto &src_arch, const auto &that ) requires requires { arch_copy( dst_arch, (void*)nullptr, src_arch, (const void*)nullptr, PI{} ); };
 
-    HD void          spill_to           ( TensorView &that ); ///< copie data of this to that, and use data from that
+    HD void          spill_to             ( TensorView &that ); ///< copie data of this to that, and use data from that
 
     // strides
-    HD Strides       strides            () const;
-    HD SI            stride             ( auto d ) const;
+    HD Strides       strides              () const;
+    HD SI            stride               ( auto d ) const;
 
     // shape
-    HD PI            nb_items           () const;
-    HD auto          shape              ( auto d ) const { return _shape[ d ]; }
-    HD Shape         shape              () const { return _shape; }
-    HD auto          empty              () const;
-    HD auto          size               () const;
+    HD PI            nb_items             () const;
+    HD auto          shape                ( auto d ) const { return _shape[ d ]; }
+    HD Shape         shape                () const { return _shape; }
+    HD auto          empty                () const;
+    HD auto          size                 () const;
 
-    HD bool          not_surely_null    () const { return ! surely_null(); }
-    HD bool          surely_null        () const; ///< is_invalid() || Zero tensor
-    HD bool          is_invalid         () const; ///<
-    HD bool          is_valid           () const; ///<
+    HD bool          not_surely_null      () const { return ! surely_null(); }
+    HD bool          surely_null          () const; ///< is_invalid() || Zero tensor
+    HD bool          is_invalid           () const; ///<
+    HD bool          is_valid             () const; ///<
 
-    HD auto          rank               () const;
+    HD auto          rank                 () const;
 
-    HD TF*           data               () const;
+    HD TF*           data                 () const;
 
-    HD auto          begin              () const;
-    HD auto          end                () const;
+    HD auto          begin                () const;
+    HD auto          end                  () const;
 
-    HD void          for_each_index     ( auto &&func ) const;
+    HD void          for_each_index       ( auto &&func ) const;
 
-    HD bool          is_contiguous      () const; ///< true iff strides match row-major contiguous layout
+    HD bool          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
 
     // T_U auto      sum_along_axis_1() const -> Tensor<U,1,Arch>;
-    void             apply_cpu_version  ( auto &&func ) const;
-    HD auto          unsqueeze          ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
-    HD auto          squeeze            ( auto axis, PI index = 0 ) const;
-    HD auto          row                ( PI index ) const;
+    void             apply_cpu_version    ( auto &&func ) const;
+    HD auto          unsqueeze            ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
+    HD auto          squeeze              ( auto axis, PI index = 0 ) const;
+    HD auto          row                  ( PI index ) const;
 
-    void             with_same_shape    ( const auto &arch, auto &&func ) const;
+    void             with_same_shape      ( const auto &arch, auto &&func ) const;
 
 // private:
-    static HD RawPtr sentinel           () { return RawPtr( nullptr ) + 1; }
+    static HD RawPtr sentinel             () { return RawPtr( nullptr ) + 1; }
 
-    MemorySpace      _memory_space;     ///<
-    RawPtr           _raw_ptr;          ///<
-    Strides          _strides;          ///< byte strides
-    Shape            _shape;            ///<
+    MemorySpace      _memory_space;       ///<
+    RawPtr           _raw_ptr;            ///<
+    Strides          _strides;            ///< byte strides
+    Shape            _shape;              ///<
 };
+
+#undef SDOT_DATA_ACCESSOR
 
 } // namespace sdot
 

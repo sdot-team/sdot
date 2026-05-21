@@ -6,8 +6,8 @@ using namespace sdot;
 
 // minimal batch_sizes: 1D range supporting the split iteration the runners use
 struct Range {
-    void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
-    PI   size               () const { return n; }
+    constexpr void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
+    constexpr PI   size               () const { return n; }
     PI   n;
 };
 
@@ -135,11 +135,11 @@ struct Range {
 struct PerThreadProbe {
     // int *nb_calls; // counts per_thread invocations
     // int *out;      // out[i] = the per-thread value seen by operator()
-    void per_thread( const auto &thread_info, const auto &/* list */, auto &&cont, auto &&...args ) const {
+    HD void per_thread( const auto &thread_info, const auto &/* list */, auto &&cont, auto &&...args ) const {
         // ( *nb_calls )++;
         cont( FORWARD( args )..., thread_info.global_id() + 100 ); // inject one extra per-thread argument
     }
-    void operator()( int range_index, int a, int b, int thread_comp ) const {
+    HD void operator()( int range_index, int a, int b, int thread_comp ) const {
         info( range_index, a, b, thread_comp );
     }
 };

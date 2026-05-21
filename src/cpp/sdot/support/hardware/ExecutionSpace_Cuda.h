@@ -26,9 +26,15 @@ __global__ void _execution_space_cuda_run_parallel( List list, Func func, Args..
     }, args... );
 }
 
-// CUDA device execution + stream — {}-constructible (main device; stream set by the bindings).
+// CUDA device execution + stream — {}-constructible (uses the global default_stream; the
+// bindings set default_stream). A specific stream can be passed explicitly; mind that
+// using non-default streams requires care w.r.t. ordering/synchronization.
 struct ExecutionSpace_Cuda : public ExecutionSpace {
-    static cudaStream_t stream; ///< to be defined by the bindings
+    static cudaStream_t default_stream; ///< process-wide default, set by the bindings
+    cudaStream_t        stream;         ///< stream this execution space enqueues onto
+
+    /**/ ExecutionSpace_Cuda(                       ) : stream( default_stream ) {}
+    explicit ExecutionSpace_Cuda( cudaStream_t s    ) : stream( s              ) {}
 
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
@@ -38,6 +44,7 @@ struct ExecutionSpace_Cuda : public ExecutionSpace {
         const int nb_blocks         = ( nb_threads + threads_per_block - 1 ) / threads_per_block;
         _execution_space_cuda_run_parallel<<< nb_blocks, threads_per_block, 0, stream >>>( list, func, FORWARD( args )... );
     }
+
 };
 
 // int block = max_tpb;

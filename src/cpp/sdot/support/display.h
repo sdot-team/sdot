@@ -9,13 +9,13 @@ void display( std::ostream &os, const auto &value ) {
         value.display( os );
     } else if constexpr ( requires { os << value; } ) {
         os << value;
-    } else if constexpr ( requires { value.shape().size(); } ) {
+    } else if constexpr ( requires { DECAYED_TYPE_OF( value.shape().size() )::value; } ) {
+        constexpr int rank = DECAYED_TYPE_OF( value.shape.size() )::value;
         const auto shape = value.shape();
-        const auto rank = shape.size();
 
-        if ( rank == 0 ) {
+        if constexpr ( rank == 0 ) {
             os << value.item();
-        } else if ( rank == 1 ) {
+        } else if constexpr ( rank == 1 ) {
             for( std::size_t i = 0; i < shape[ 0 ]; ++i )
                 display( os << ( i ? ", " : "" ), value[ i ] );
         } else {
