@@ -1,30 +1,25 @@
 #pragma once
 
-#include "AxisValues.h"
-#include <utility>
+#include "Tuple.h"
 
 namespace sdot {
 
-// C-contiguous (row-major) byte strides for a given shape AxisValues, for an element type TF.
-// stride[last] = sizeof(TF) ; stride[i] = stride[i+1] * shape[i+1].
-
-auto _contiguous_strides_impl( auto head, auto... tail ) {
-    using Strides = AxisValues<typename Shape::TI,Shape::ct_rank>;
-    if constexpr ( Shape::ct_rank == 0 ) {
-        return Strides( Values() );
-    } else {
-        SI s[ Shape::ct_rank ];
-        s[ Shape::ct_rank - 1 ] = sizeof( TF );
-        for ( int i = Shape::ct_rank - 2; i >= 0; --i )
-            s[ i ] = s[ i + 1 ] * SI( shape[ i + 1 ] );
-        return Strides( Values(), SI( s[ Is ] )... );
+namespace detail::contiguous_strides {
+    auto _contiguous_strides_impl() {
+        return tuple();
+    }
+    auto _contiguous_strides_impl( auto head, auto... tail ) {
+        auto product = head * ( tail * ... * Ct<int,1>() );
+        return concat( tuple( product ), _contiguous_strides_impl( tail... ) );
     }
 }
 
-template<class TF, class Shape>
-auto contiguous_strides( const Shape &shape ) {
-    return shape.apply_values( [&]( auto ...values ) {
-        return _contiguous_strides_impl();
+// C-contiguous (row-major) byte strides for a given shape AxisValues, for an element type TF.
+// stride[last] = sizeof(TF) ; stride[i] = stride[i+1] * shape[i+1].
+template<class TF>
+auto contiguous_strides( const auto &shape ) {
+    return shape.apply_values( [&]( auto _, auto ...values ) {
+        return detail::contiguous_strides::_contiguous_strides_impl( values..., Ct<int,sizeof( TF )>() );
     } );
 }
 

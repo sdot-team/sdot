@@ -76,6 +76,20 @@ auto map( auto &&list, auto &&func ) { // requires requires { list.apply_values(
     } );
 }
 
+template<class... A>
+auto product( const Tuple<A...> &list ) {
+    return list.apply_values( [&]( auto... values ) {
+        return ( values * ... * Ct<int,1>() );
+    } );
+}
+
+template<class... A>
+auto sum( const Tuple<A...> &list ) {
+    return list.apply_values( [&]( auto... values ) {
+        return ( values + ... + Ct<int,0>() );
+    } );
+}
+
 } // namespace sdot
 
 #include "Tuple.cxx" // IWYU pragma: export

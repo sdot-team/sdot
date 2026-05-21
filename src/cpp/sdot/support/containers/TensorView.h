@@ -4,6 +4,8 @@
 #include "../hardware/MemorySpace_PinnedCpuRam.h" // IWYU pragma: export
 #include "../hardware/MemorySpace_CpuRam.h" // IWYU pragma: export
 #include "../hardware/Ptr.h"
+
+#include "contiguous_strides.h" // IWYU pragma: export
 #include "Vector.h" // IWYU pragma: export
 #include "Tuple.h" // IWYU pragma: export
 
