@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common_macros.h"
 #include <iostream>
 
 namespace sdot {
@@ -7,7 +8,7 @@ namespace sdot {
 void display( std::ostream &os, const auto &value ) {
     if constexpr ( requires { value.display( os ); } ) {
         value.display( os );
-    if constexpr ( requires { value.for_each_item( []( const auto & ) {} ); } ) {
+    } else if constexpr ( requires { value.for_each_item( []( const auto & ) {} ); } ) {
         std::size_t cpt = 0;
         value.for_each_item( [&]( const auto &item ) {
             display( os << ( cpt++ ? ", " : "" ), item );
@@ -30,10 +31,9 @@ void display( std::ostream &os, const auto &value ) {
     } else if constexpr ( requires { std::begin( value ); std::end( value ); } ) {
         auto iter = std::begin( value );
         if ( iter != std::end( value ) ) {
-            os << "[ " << *iter;
+            os << *iter;
             while( ++iter != std::end( value ) )
                 os << ", " << *iter;
-            os << " ]";
         } else
             os << "[]";
     } else {

@@ -20,11 +20,11 @@ public:
     HD           Tuple           ( Function, auto &&func );
 
     HD           Tuple           ( Values, auto head, auto... tail );
-    HD           Tuple           ( const Tuple &that );
-    HD           Tuple           ();
+    HD           Tuple           ( const Tuple &that ) = default;
+    HD           Tuple           () = default;
 
-    HD void      for_each_item   ( auto &&cb ) const { cb( head ); tail.for_each_item( FORWARD( cb ) ); }
-    HD auto      apply_values    ( auto &&cb ) const;
+    HD void      for_each_item   ( auto &&cb_func ) const;
+    HD auto      apply_values    ( auto &&cb_func ) const;
     HD auto      operator[]      ( auto &&index ) const;
     HD auto      size            () const;
 
@@ -41,9 +41,9 @@ class Tuple<> {
 public:
     HD           Tuple           ( Function, auto &&/*func*/, auto /*index*/ );
     HD           Tuple           ( Function, auto &&/*func*/ );
-    HD           Tuple           ( const Tuple &that );
+    HD           Tuple           ( const Tuple &that ) = default;
     HD           Tuple           ( Values );
-    HD           Tuple           ();
+    HD           Tuple           () = default;
 
     HD void      for_each_item   ( auto &&/* cb */ ) const;
     HD auto      apply_values    ( auto &&cb ) const;

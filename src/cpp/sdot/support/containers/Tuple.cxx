@@ -19,6 +19,11 @@ UTP HD DTP::Tuple( Function, auto &&func ) : Tuple( Function(), func, Ct<int,0>(
 UTP HD DTP::Tuple( Values, auto head, auto... tail ) : head( head ), tail( Values(), tail... ) {
 }
 
+UTP HD void DTP::for_each_item( auto &&cb ) const {
+     cb( head );
+     tail.for_each_item( FORWARD( cb ) );
+}
+
 UTP HD auto DTP::apply_values( auto &&cb ) const {
     return tail.apply_values( [&]( auto ...tail ) {
         return cb( head, tail... );
@@ -27,7 +32,7 @@ UTP HD auto DTP::apply_values( auto &&cb ) const {
 
 UTP HD auto DTP::operator[]( auto &&index ) const {
     if constexpr ( requires { DECAYED_TYPE_OF( index )::value; } ) {
-        if ( DECAYED_TYPE_OF( index )::value )
+        if constexpr ( DECAYED_TYPE_OF( index )::value )
             return tail[ index - Ct<int,1>() ];
         else
             return head;
@@ -47,13 +52,13 @@ UTP HD auto DTP::size() const {
 UTP HD auto DTP::without_index( auto index ) const {
     if constexpr ( requires { DECAYED_TYPE_OF( index )::value; } ) {
         if constexpr ( DECAYED_TYPE_OF( index )::value )
-            return tail;
-        else
             return concat( tuple( head ), tail.without_index( index - Ct<int,1>() ) );
+        else
+            return tail;
     } else {
         using TR = TypePromote<Head,Tail...>::type;
         return apply_values( [&]( auto ...vals ) {
-            TR rt_vals[] = { vals... };
+            TR rt_vals[ sizeof...( vals ) ] = { TR( vals )... };
             return Tuple<std::conditional_t<1,TR,Tail>...>( Function(), [&]( auto i ) {
                 return rt_vals[ i + ( i >= index ) ];
             } );
@@ -74,14 +79,7 @@ UTP HD DTP::Tuple( Function, auto &&/*func*/, auto /*index*/ ) {
 UTP HD DTP::Tuple( Function, auto &&/*func*/ ) {
 }
 
-UTP HD DTP::Tuple( const Tuple &/* that */ ) {
-}
-
 UTP HD DTP::Tuple( Values ) {
-}
-
-UTP HD DTP::Tuple() {
-
 }
 
 UTP HD void DTP::for_each_item( auto &&/* cb */ ) const {
