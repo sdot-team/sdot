@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../support/RecursiveMapOfUniqueSortedIndices.h"
+#include "../support/containers/RecursiveMapOfUniqueSortedIndices.h"
 #include <numeric>
 #include "Cell.h"
 

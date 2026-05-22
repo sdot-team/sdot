@@ -1,17 +1,17 @@
 #pragma once
 
-#include "../support/Vector.h"
+#include "Vector.h"
 
 namespace sdot {
 
 // _size
-template<class T,class Arch,int ct_size>
+template<class T,int ct_size>
 class Matrix {
 public:
-    struct                EigenSystem             { Vector<T,Arch,ct_size> values; /* ascending order */ Matrix<T,Arch,ct_size> vectors; /* row i = eigenvector i */ };
+    struct                EigenSystem             { Vector<T,ct_size> values; /* ascending order */ Matrix<T,ct_size> vectors; /* row i = eigenvector i */ };
     using                 value_type              = T;
-    using                 Content                 = Vector<T,Arch,ct_size*ct_size>;
-    using                 Vec                     = Vector<T,Arch,ct_size>;
+    using                 Content                 = Vector<T,ct_size*ct_size>;
+    using                 Vec                     = Vector<T,ct_size>;
 
     /**/          HD      Matrix                  ( FillWith, T value ) : _content( FillWith(), value ) {}
     /**/          HD      Matrix                  () {}
@@ -21,7 +21,7 @@ public:
     HD const T&           operator()              ( PI r, PI c ) const { return _content[ r * ct_size + c ]; }
     HD T&                 operator()              ( PI r, PI c ) { return _content[ r * ct_size + c ]; }
 
-    auto                  without_row_and_col     ( PI r, PI c ) const -> Matrix<T,Arch,ct_size-1>;
+    auto                  without_row_and_col     ( PI r, PI c ) const -> Matrix<T,ct_size-1>;
     auto                  with_replaced_col       ( PI c, const Vec &col ) const -> Matrix;
     EigenSystem           eigen_system            () const;
     HD T                  determinant             () const;

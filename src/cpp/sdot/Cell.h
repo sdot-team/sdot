@@ -1,6 +1,6 @@
 #pragma once
 
-#include "support/RecursiveMapOfUniqueSortedIndices.h"
+#include "support/containers/RecursiveMapOfUniqueSortedIndices.h"
 #include <sdot/generated_includes/Cell.h>
 
 namespace sdot {
@@ -10,8 +10,8 @@ struct Cell {
     // static constexpr int ct_dim = ct_dim_value;
     ATTRIBUTES_OF_Cell
 
-    using       Pt                     = Vector<TF,Arch,ct_dim_value>; ///< point
-    using       Ci                     = Vector<TI,Arch,ct_dim_value>; ///< cut indices
+    using       Pt                     = Vector<TF,ct_dim_value>; ///< point
+    using       Ci                     = Vector<TI,ct_dim_value>; ///< cut indices
 
     //
     HD void     init_as_aligned_simplex( TI cut_id );
@@ -32,7 +32,7 @@ struct Cell {
     Pt          solve_position         ( PI num_vertex ) const;
 
     // info, computations --------------------------------------------------------------------
-    HD void     for_each_simplex       ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map, auto &&func ); ///<
+    HD void     for_each_simplex       ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map, auto &&func ); ///<
     HD void     for_each_facet         ( auto &&func ); ///< func( facet_repr, cut_id )
     HD void     for_each_face          ( auto &&func ); ///< func( num_vertices, cut_indices_for_this_face )
 
@@ -40,9 +40,9 @@ struct Cell {
     void        disp_cell              ();
     bool        contains               ( const Pt &p ) const;
     Pt          centroid               ();
-    HD TF       measure                ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map );
+    HD TF       measure                ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map );
 
-    T_d auto    simplex_from_indices   ( const Vector<TI,Arch,d> &indices ) const;
+    T_d auto    simplex_from_indices   ( const Vector<TI,d> &indices ) const;
 
     // modifications -------------------------------------------------------------------------
     void        get_data_from          ( const auto &cell );
@@ -64,7 +64,7 @@ struct Cell {
     void        swap_and_pop           ( auto &nb, auto &&move_row ); ///< generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
     void        cut_2d                 ( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out );
 
-    T_d HD void for_each_simplex_rec   ( const Vector<TI,Arch,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
+    T_d HD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
     bool        already_in_simplex     ( auto &simplex, PI simplex_size, PI next_num_vertex );
 };
 

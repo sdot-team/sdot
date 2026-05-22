@@ -17,8 +17,8 @@
 // #include <algorithm>
 // #include <cstring>
 
-#define UTP template<class TF,class Shape,class Strides,class MemorySpace>
-#define DTP TensorView<TF,Shape,Strides,MemorySpace>
+#define UTP template<class TF,class MemorySpace,class Shape,class Strides>
+#define DTP TensorView<TF,MemorySpace,Shape,Strides>
 
 namespace sdot {
 

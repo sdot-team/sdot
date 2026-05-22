@@ -5,12 +5,12 @@
 
 namespace sdot {
 
-#define UTP  template<class T,class Arch,int ct_size>
-#define UTPH template<class T,class Arch,int ct_size> HD
-#define DTP  Matrix<T,Arch,ct_size>
+#define UTP  template<class T,int ct_size>
+#define UTPH template<class T,int ct_size> HD
+#define DTP  Matrix<T,ct_size>
 
-UTP Matrix<T,Arch,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
-    Matrix<T,Arch,ct_size-1> res;
+UTP Matrix<T,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
+    Matrix<T,ct_size-1> res;
     for( PI r = 0; r < res.nb_rows(); ++r )
         for( PI c = 0; c < res.nb_cols(); ++c )
             res( r, c ) = operator()( r + ( r >= wr ), c + ( c >= wc ) );

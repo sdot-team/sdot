@@ -18,9 +18,11 @@ class TemplateArgs:
         self._items : list[ tuple[ str, TemplateArg ] ] = []
         self._names : set[ str ]                        = set()
 
-    def add( self, name: str, cpp_type: str, priority: int, value: str ):
+    def add( self, name: str, cpp_type: str, priority: int, value: str = "" ):
         if name in self._names:
             return
+        if not value:
+            value = name
         self._items.append( ( name, TemplateArg( cpp_type, priority, value ) ) )
         self._names.add( name )
         self._items.sort( key = lambda kv: kv[ 1 ].priority )

@@ -24,7 +24,7 @@ class PolynomialGrid( Distribution ):
     knots  : [ tensor[ num_point ] for axis in axes ]. linspace(0,1) by default.
     """
 
-    values : Tensor( "shape( dim )", "nb_coeffs", ct_axes = [ "nb_coeffs" ] )
+    values : Tensor( "shape( dim )", "nb_coeffs", ct_variables = [ "nb_coeffs" ] )
     frame  : Tensor( "dim + 1", "dim" )
     knots  : Tensor( "nb_knots[ dim ]" ) # ListOfTensors( "dim", [ "shape[ index ]" ] )
 

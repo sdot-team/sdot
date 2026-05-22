@@ -7,12 +7,12 @@ namespace sdot {
 
 /** version for known ct_dim
 */
-template<int ct_dim,class TI,class Arch>
+template<int ct_dim,class TI,class MemorySpace>
 class RecursiveMapOfUniqueSortedIndices {
 public:
-    using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,Arch>;
-    using Curr = MapOfUniqueSortedIndices<ct_dim,TI,Arch>;
-    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
+    using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace>;
+    using Curr = MapOfUniqueSortedIndices<ct_dim,TI,MemorySpace>;
+    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
 
     HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
         curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
@@ -30,7 +30,7 @@ public:
     }
 
     template<int i>
-    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,i> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,i> &key ) {
         if constexpr( i == ct_dim )
             return curr[ key ];
         else
@@ -43,13 +43,13 @@ public:
 
 /** version for ct_dim == 0
 */
-template<class TI,class Arch>
-class RecursiveMapOfUniqueSortedIndices<0,TI,Arch> {
+template<class TI,class MemorySpace>
+class RecursiveMapOfUniqueSortedIndices<0,TI,MemorySpace> {
 public:
-    using Curr = MapOfUniqueSortedIndices<0,TI,Arch>;
-    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
+    using Curr = MapOfUniqueSortedIndices<0,TI,MemorySpace>;
+    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
 
-    HD  RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
+    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
     }
 
     HD void reserve_full_capacity() {
@@ -60,7 +60,7 @@ public:
         curr.reserve( reservation );
     }
 
-    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,0> &key ) {
         return curr.operator[]( key );
     }
 
@@ -69,8 +69,8 @@ public:
 
 // /** version for unknown ct dim
 // */
-// template<class InputInt,class Arch>
-// class RecursiveMapOfUniqueSortedIndices<InputInt,-1,Arch> {
+// template<class InputInt,class MemorySpace>
+// class RecursiveMapOfUniqueSortedIndices<InputInt,-1,MemorySpace> {
 // public:
 //     /**/   RecursiveMapOfUniqueSortedIndices( PI dim ) : map_vec( dim ) {}
 
@@ -79,7 +79,7 @@ public:
 //     auto   operator[]                       ( const auto &key ) { return map_vec[ key.size() ][ key ]; }
 
 // private:
-//     using  MapVec                           = std::vector<MapOfUniqueSortedIndices<InputInt,-1,Arch>>;
+//     using  MapVec                           = std::vector<MapOfUniqueSortedIndices<InputInt,-1,MemorySpace>>;
 
 //     MapVec map_vec;                         ///<
 // };

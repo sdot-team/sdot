@@ -246,7 +246,7 @@ class CallArgsAnalysis:
                 ctor_kwargs = ct.ctor_kwargs,
                 shape = ct.shape,
                 dtype = ct.dtype,
-                ct_axes = ct.ct_axes,
+                ct_variables = ct.ct_variables,
                 represents_a_dynamic_axis = ct.represents_a_dynamic_axis,
                 comes_from_basic_array = ct.comes_from_basic_array
             )
@@ -271,7 +271,7 @@ class CallArgsAnalysis:
                 ctor_kwargs = ct.ctor_kwargs,
                 shape = ct.shape,
                 dtype = ct.dtype,
-                ct_axes = ct.ct_axes,
+                ct_variables = ct.ct_variables,
                 represents_a_dynamic_axis = ct.represents_a_dynamic_axis,
                 comes_from_basic_array = ct.comes_from_basic_array
             )

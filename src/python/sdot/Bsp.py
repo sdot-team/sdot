@@ -11,7 +11,7 @@ class Bsp:
 
     sorted_vertex_indices : Tensor( "nb_vertices", dtype = int ) # vertex index -> sorted cut indices
     cell_indices : Tensor( "nb_cells[]", "4", dtype = int ) # cell index -> children indices + [ beg, end ] in sorted_vertex_indices
-    cell_bounds : Tensor( "nb_cells[]", "3 * dim + 1", ct_axes = [ "dim" ] ) # cell index -> min pt, max pt, poly bound
+    cell_bounds : Tensor( "nb_cells[]", "3 * dim + 1", ct_variables = [ "dim" ] ) # cell index -> min pt, max pt, poly bound
 
     if TYPE_CHECKING:
         nb_vertices_capacity : int

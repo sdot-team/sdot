@@ -43,7 +43,7 @@ def test_ffi_basic():
             p.output[ 2 * i + 3 ] = 3 * p.input[ i ];
         }
         """,
-        output = sdot.Return( sdot.Tensor( "2 + 2 * dim", ct_axes = [ "dim" ] ), dim = input.size ),
+        output = sdot.Return( sdot.Tensor( "2 + 2 * dim", ct_variables = [ "dim" ] ), dim = input.size ),
         input = input
     ), [ 4, 1, 6, 9 ] )
 
@@ -117,11 +117,11 @@ def test_ffi_basic():
 
 #     @aggregate
 #     class Yo:
-#         a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", "dim", ct_axes = [ "dim" ] )
+#         a : sdot.Tensor( "nb_points[ smurf, dim ]", "smurf", "dim", ct_variables = [ "dim" ] )
 #         b : sdot.Tensor( "smurf", "dim" )
 
 #     yo = Yo( b = [ [ 1 ] ] )
-#     res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems[]", "dim", ct_axes = [ "dim" ] ), max_of_nb_elems = 5, dim = 3 ), "inp": yo }, axes = { "dim": 2 }, grad = False )
+#     res = sdot.driver.call( "yo", "sdot/test/yo.h", args = { "ret": sdot.Return( sdot.Tensor( "nb_elems[]", "dim", ct_variables = [ "dim" ] ), max_of_nb_elems = 5, dim = 3 ), "inp": yo }, axes = { "dim": 2 }, grad = False )
 #     info( res )
 
 def test_mlir_basic():
@@ -249,22 +249,13 @@ def test_grad_perturbed():
     assert float( gi0 ) == 2.0
 
 
-def gpu_present():
-    import subprocess
-    import shutil
-
-    if not shutil.which( "nvidia-smi" ):
-        return False
-    r = subprocess.run( [ "nvidia-smi", "-L" ], capture_output = True, text = True )
-    return r.returncode == 0 and "GPU" in r.stdout
-
 def test_gpu_basic():
-    if gpu_present():
+    if sdot.driver.available_gpus:
         sdot.driver.device = "gpu"
     info( sdot.driver.device )
     #info( sdot.driver.call( "arch.run_single( [p] HD () { p.output.item() = double( p.input[ 0 ] + p.input[ 1 ] ); } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
     # info( sdot.driver.call( "cudaMemcpyAsync( p.output.data(), p.input.data(), sizeof( FP64 ), cudaMemcpyDeviceToDevice, stream );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
-    info( sdot.driver.call( "using P = DECAYED_TYPE_OF( p ); run_sequential( Range( 1 ), [] HD ( int, P p ) mutable { p.output = p.input[ 1 ]; }, p );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.call( "using P = DECAYED_TYPE_OF( p ); run_sequential( Range( 1 ), [] HD ( int, P p ) mutable { p.output[ 0 ] = p.input[ 1 ]; }, p );", output = sdot.Return( sdot.Tensor( "dim", ct_variables = [ "dim" ] ), dim = 2 ), input = sdot.driver.array( [ 3., 4. ] ) ) )
 
 # import jax
 

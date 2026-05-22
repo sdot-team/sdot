@@ -40,7 +40,7 @@ auto tensor_view_input( CtType<Shape>, const auto &memory_space, xla::ffi::Buffe
     using Strides = DECAYED_TYPE_OF( strides );
 
     // return type
-    using RT = TensorView<TF,Shape,Strides,MemorySpace>;
+    using RT = TensorView<TF,MemorySpace,Shape,Strides>;
 
     // symbolic zero -> clear strides
     if ( tensor_type == TENSOR_TYPE_ZERO ) {

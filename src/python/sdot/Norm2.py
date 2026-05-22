@@ -11,7 +11,7 @@ class Norm2:
     Possibility to handle periodicity using transformations
     """
 
-    transformations : Tensor( "nb_transformations", "dim + 1", "dim + 1", ct_axes = [ "dim" ] )
+    transformations : Tensor( "nb_transformations", "dim + 1", "dim + 1", ct_variables = [ "dim" ] )
 
     if TYPE_CHECKING:
         nb_transformations : int

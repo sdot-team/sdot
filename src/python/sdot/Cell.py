@@ -15,7 +15,7 @@ class Cell:
     """
 
     # data
-    vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_axes = [ "dim" ] )
+    vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_variables = [ "dim" ] )
     vertex_indices    : Tensor( "nb_vertices[]", "dim", dtype = int ) # vertex index -> sorted cut indices
     edge_indices      : Tensor( "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
     cut_planes        : Tensor( "nb_cuts[]", "dim + 1" )

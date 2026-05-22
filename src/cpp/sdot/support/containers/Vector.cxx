@@ -7,9 +7,9 @@
 
 namespace sdot {
 
-#define UTPH template<class T,class Arch,int ct_size> HD
-#define UTP template<class T,class Arch,int ct_size>
-#define DTP Vector<T,Arch,ct_size>
+#define UTPH template<class T,int ct_size> HD
+#define UTP template<class T,int ct_size>
+#define DTP Vector<T,ct_size>
 
 UTPH DTP::Vector( const auto &values ) requires( requires { values.size(); } ) {
     ASSERT( values.size() == size() );
@@ -49,7 +49,7 @@ UTPH DTP::Vector( Vector &&that ) noexcept {
         new ( data() + i ) T( std::move( that[ i ] ) );
 }
 
-UTPH Vector<T,Arch,ct_size>& DTP::operator=( const Vector &that ) {
+UTPH Vector<T,ct_size>& DTP::operator=( const Vector &that ) {
     if ( this != &that )
         for ( PI i = 0; i < size(); ++i )
             operator[]( i ) = that[ i ];
@@ -100,7 +100,7 @@ UTPH DTP DTP::with_value_at( PI index, T value ) {
 }
 
 UTPH auto DTP::with_pushed_value( T value ) const {
-    Vector<T,Arch,ct_size+1> res( Reserved{} );
+    Vector<T,ct_size+1> res( Reserved{} );
     for( PI i = 0; i < size(); ++i )
         new ( res.data() + i ) T( operator[]( i ) );
     new ( res.data() + size() ) T( value );
@@ -108,7 +108,7 @@ UTPH auto DTP::with_pushed_value( T value ) const {
 }
 
 UTPH auto DTP::without_index( PI ind_to_remove ) const {
-    Vector<T,Arch,ct_size-1> res( Reserved{} );
+    Vector<T,ct_size-1> res( Reserved{} );
     for( PI i = 0; i < ind_to_remove; ++i )
         new ( res.data() + i ) T( operator[]( i ) );
     for( PI i = ind_to_remove + 1; i < size(); ++i )

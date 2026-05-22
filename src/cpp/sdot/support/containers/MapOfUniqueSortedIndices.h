@@ -1,9 +1,5 @@
 #pragma once
 
-// #include <tl/support/containers/Vec.h>
-// #include <tl/support/Displayer.h>
-// #include <tl/support/compare.h>
-// #include "VecForCapa.h"
 #include "TensorView.h"
 
 namespace sdot {
@@ -14,20 +10,20 @@ struct IntWithOffset {
     HD void operator=  ( TI v ) { value = offset + v; }
 
     HD bool has_a_value() const { return value >= offset; }
-    HD bool operator!  () const { return value < offset; }
     HD      operator TI() const { return value - offset; }
+    HD bool operator!  () const { return value < offset; }
 
     TI      offset;
     TI&     value;
 };
 
 ///
-template<int ct_dim,class TI,class Arch>
+template<int ct_dim,class TI,class MemorySpace>
 struct MapOfUniqueSortedIndices;
 
 // Od
-template<class TI,class Arch>
-struct MapOfUniqueSortedIndices<0,TI,Arch> {
+template<class TI,class MemorySpace>
+struct MapOfUniqueSortedIndices<0,TI,MemorySpace> {
     HD MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, int /* dim */, TI /* max_inp_value */ ) {
     }
 
@@ -41,13 +37,13 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
         value = 0;
     }
 
-    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,0> &/* key */ ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,0> &/* key */ ) {
         return { offset, value };
     }
 
     HD void for_each_item( auto &&func ) const {
         if ( value >= offset )
-            func( Vector<TI,Arch,0>( Values() ), value - offset );
+            func( Vector<TI,0>( Values() ), value - offset );
     }
 
     TI offset; ///<
@@ -55,9 +51,9 @@ struct MapOfUniqueSortedIndices<0,TI,Arch> {
 };
 
 // 1d
-template<class TI,class Arch>
-struct MapOfUniqueSortedIndices<1,TI,Arch> {
-    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
+template<class TI,class MemorySpace>
+struct MapOfUniqueSortedIndices<1,TI,MemorySpace> {
+    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
 
     HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
@@ -81,14 +77,14 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
         next_offset += reservation;
     }
 
-    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,1> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,1> &key ) {
         return { offset, values[ key[ 0 ] - offset_in_map_items ] };
     }
 
     HD void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
             if ( values[ offset_in_map_items + i ] >= offset )
-                func( Vector<TI,Arch,1>( Values(), i ), values[ offset_in_map_items + i ] - offset );
+                func( Vector<TI,1>( Values(), i ), values[ offset_in_map_items + i ] - offset );
     }
 
     TI offset_in_map_items; ///<
@@ -99,9 +95,9 @@ struct MapOfUniqueSortedIndices<1,TI,Arch> {
 };
 
 // 2d. TODO: hash table ?
-template<class TI,class Arch>
-struct MapOfUniqueSortedIndices<2,TI,Arch> {
-    using TV = TensorView<TI,AxisValues<TI,1>,AxisValues<TI,1>>;
+template<class TI,class MemorySpace>
+struct MapOfUniqueSortedIndices<2,TI,MemorySpace> {
+    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
 
     HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
@@ -125,7 +121,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
         next_offset += reservation;
     }
 
-    HD IntWithOffset<TI> operator[]( const Vector<TI,Arch,2> &key ) {
+    HD IntWithOffset<TI> operator[]( const Vector<TI,2> &key ) {
         return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
     }
 
@@ -134,7 +130,7 @@ struct MapOfUniqueSortedIndices<2,TI,Arch> {
             for( PI j = 0; j < values.size(); ++j ) {
                 PI k = offset_in_map_items + i * max_inp_value + j;
                 if ( values[ k ] >= offset )
-                    func( Vector<TI,Arch,2>( Values(), i, j ), values[ k ] - offset );
+                    func( Vector<TI,2>( Values(), i, j ), values[ k ] - offset );
             }
         }
     }

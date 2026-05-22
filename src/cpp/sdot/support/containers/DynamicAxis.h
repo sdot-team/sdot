@@ -12,7 +12,7 @@ struct DynamicSizeException {
 
 
 //
-template<class TI,class Shape,class Strides,class MemorySpace>
+template<class TI,class MemorySpace,class Shape,class Strides=DECAYED_TYPE_OF( contiguous_strides<TI>( Shape() ) )>
 class DynamicAxis {
 public:
     using           Sizes          = TensorView<TI,Shape,Strides,MemorySpace>;

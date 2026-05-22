@@ -10,7 +10,7 @@
 namespace sdot {
 
 /// static size vector (like a std::array)
-template<class T,class Arch,int ct_size>
+template<class T,int ct_size>
 class alignas( T ) Vector {
 public:
     using             value_type                  = T;

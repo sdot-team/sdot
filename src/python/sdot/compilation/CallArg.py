@@ -72,7 +72,7 @@ class CallArg:
     def get_includes( self, includes: set ):
         pass
 
-    def get_axes( self, axes, ct_axes ):
+    def get_axes( self, axes, ct_variables ):
         pass
 
     def beg_with_same_shape( self, name, s, lines ):

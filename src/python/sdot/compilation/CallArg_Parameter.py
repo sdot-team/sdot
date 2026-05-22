@@ -43,7 +43,7 @@ class CallArg_Parameter( CallArg ):
     def cpp_type_name( self, main_list = None ):
         return driver.normalized_type_for( type( self.python_value ) )
 
-    def get_axes( self, axes: dict, ct_axes: dict[ int ] ):
+    def get_axes( self, axes: dict, ct_variables: dict[ int ] ):
         pass
 
     def get_input_arg_decl( self, declarations: list ):

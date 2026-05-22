@@ -15,7 +15,7 @@ namespace sdot {
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
 ///   MemorySpace = where the data lives (drives the informed pointer Ptr<...,MemorySpace>).
 ///   The shape no longer carries any arch/memory tag; it is a parameter of the view.
-template<class _TF,class _Shape,class _Strides,class _MemorySpace>
+template<class _TF,class _MemorySpace,class _Shape,class _Strides = DECAYED_TYPE_OF( contiguous_strides<_TF>( Shape() ) )>
 class TensorView {
 public:
     using            MemorySpace          = _MemorySpace;

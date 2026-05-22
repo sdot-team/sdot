@@ -18,7 +18,7 @@ class PowerDiagram:
 
     """
 
-    positions : Tensor( "nb_vertices", "dim", ct_axes = [ "dim" ] ) # vertex index ->
+    positions : Tensor( "nb_vertices", "dim", ct_variables = [ "dim" ] ) # vertex index ->
     weights : Tensor( "nb_vertices" ) # vertex index ->
     ground_metric : Norm2
     bsp : Bsp
