@@ -249,12 +249,22 @@ def test_grad_perturbed():
     assert float( gi0 ) == 2.0
 
 
+def gpu_present():
+    import subprocess
+    import shutil
+
+    if not shutil.which( "nvidia-smi" ):
+        return False
+    r = subprocess.run( [ "nvidia-smi", "-L" ], capture_output = True, text = True )
+    return r.returncode == 0 and "GPU" in r.stdout
+
 def test_gpu_basic():
-    sdot.driver.device = "gpu"
+    if gpu_present():
+        sdot.driver.device = "gpu"
     info( sdot.driver.device )
     #info( sdot.driver.call( "arch.run_single( [p] HD () { p.output.item() = double( p.input[ 0 ] + p.input[ 1 ] ); } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
     # info( sdot.driver.call( "cudaMemcpyAsync( p.output.data(), p.input.data(), sizeof( FP64 ), cudaMemcpyDeviceToDevice, stream );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
-    info( sdot.driver.call( "arch.run_single( [p] HD () mutable { p.output = p.input[ 1 ]; } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.call( "using P = DECAYED_TYPE_OF( p ); run_sequential( Range( 1 ), [] HD ( int, P p ) mutable { p.output = p.input[ 1 ]; }, p );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
 
 # import jax
 
@@ -270,14 +280,14 @@ def test_gpu_basic():
 # ic( r )
 if __name__ == "__main__":
     # test_choices()
-    test_ffi_basic()
+    # test_ffi_basic()
     # test_alac_grad()
     # test_mlir_basic()
     # test_growing_capacity()
     # test_grad()
     # test_grad_symbolic_zero()
     # test_grad_perturbed()
-    # test_gpu_basic()
+    test_gpu_basic()
     # test_codegen()
 
     # x = sdot.driver.t0( 3.0 )

@@ -197,14 +197,14 @@ class CallArg_Tensor( CallArg ):
     def get_template_args( self, template_args, names ):
         for name in self.ct_axes.keys():
             lst = names[ : -1 ] + [ name ]
-            template_args.add( f"ct_{ '_'.join( lst ) }_value", "TI", 4 )
+            template_args.add( f"ct_{ '_'.join( lst ) }_value", "TI", 4, str( self.get_axis_variable( name ) ) )
 
         if self.dtype.floating_point and self.dtype.size is None:
-            template_args.add( "TF", "typename", 0 )
+            template_args.add( "TF", "typename", 0, "TF" )
 
-        template_args.add( "TI", "typename", 1 ) # always needed
+        template_args.add( "TI", "typename", 1, "TI" ) # always needed
 
-        template_args.add( "MemorySpace", "typename", 2 )
+        template_args.add( "MemorySpace", "typename", 2, "DECAYED_TYPE_OF( memory_space )" )
 
 
     def _get_kwarg_only( self, name, is_dyn ):

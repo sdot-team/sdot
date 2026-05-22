@@ -658,6 +658,9 @@ class JaxDriver:
         lines.append( "using namespace sdot;" )
         lines.append( "" )
 
+        if self.device.is_cuda_gpu:
+            lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
+
         # --- forward handler ---
         self._handler_source( includes, lines, code, fai, module_name, "Parameters" )
         lines.append( "" )
@@ -700,11 +703,15 @@ class JaxDriver:
             arg_decl = f"{ arg_decl }, { stream_arg }" if arg_decl else stream_arg
         lines.append( f"xla::ffi::Error impl_{ module_name }{ suffix }( { arg_decl } ) {{" )
 
+        if is_gpu:
+            lines.append( "ExecutionContext_Cuda::default_stream = stream;" )
+
+        lines.append( f"    using TF = { self.ftype.cpp_name };" ) #
         lines.append( "    using TI = SI64;" ) # TODO: 32 bit systems
 
         # arch instance
         if is_gpu:
-            lines.append( f"    { self.device.cpp_type }::stream = stream;" )
+            lines.append( f"    { self.device.cpp_type }::default_stream = stream;" )
         lines.append( f"    { self.device.cpp_type } execution_context;" )
         lines.append( "    auto memory_space = native_memory_space( execution_context );" )
 
@@ -742,7 +749,7 @@ class JaxDriver:
         lines.append( '    } catch ( DynamicSizeException de ) {' )
         if is_gpu:
             # DynamicSizeException from device code is not supported yet; signal via cudaMemcpy
-            lines.append( '        PI64 _de_vals[2] = {{ 1 + de.num_dynamic_axis, de.needed_size }};' )
+            lines.append( '        PI64 _de_vals[ 2 ] = { 1 + de.num_dynamic_axis, de.needed_size };' )
             lines.append( f'        cudaMemcpyAsync( u64_output + { fai.index_dynamic_size_exception }, _de_vals, 2 * sizeof( PI64 ), cudaMemcpyHostToDevice, stream );' )
         else:
             lines.append( f'        u64_output[ { fai.index_dynamic_size_exception + 0 } ] = 1 + de.num_dynamic_axis;' )

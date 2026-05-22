@@ -14,13 +14,13 @@ struct CartesianProducts<Head,Tail...> {
     CartesianProducts( auto &&head, auto &&...tail ) : head( FORWARD( head ) ), next( FORWARD( tail )... ) {
     }
 
-    void for_each_item( auto &&func, auto &&...values_so_far ) const {
+    constexpr void for_each_item( auto &&func, auto &&...values_so_far ) const {
         head.for_each_item( [&]( auto &&value ) {
             next.for_each_item( func, values_so_far..., FORWARD( value ) );
         } );
     }
 
-    auto nb_items() const {
+    constexpr auto nb_items() const {
         return head.nb_items() * next.nb_items();
     }
 

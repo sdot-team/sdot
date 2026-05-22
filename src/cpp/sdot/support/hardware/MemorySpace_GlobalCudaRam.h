@@ -80,7 +80,7 @@ namespace detail {
     };
 }
 
-T_T T *zero_for( MemorySpace_GlobalCudaRam /* memory_space */ ) { static detail::ZeroOnGlobalCudaRam res; return res.p; }
+T_T T *zero_for( MemorySpace_GlobalCudaRam /* memory_space */ ) { static detail::ZeroOnGlobalCudaRam<T> res; return res.p; }
 
 } // namespace sdot
 

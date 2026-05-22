@@ -39,7 +39,7 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
         return row( index )( rem... );
 }
 
-UTP void DTP::operator=( const auto &that ) {
+UTP HD void DTP::operator=( const auto &that ) {
     if constexpr ( requires { that.shape(); } || requires { that.size(); } )
         copy_elements_from( that );
     else {
@@ -113,7 +113,7 @@ UTP HD auto DTP::nb_items() const {
     return product( _shape );
 }
 
-UTP void DTP::copy_elements_from( const auto &that ) const {
+UTP HD void DTP::copy_elements_from( const auto &that ) const {
     if ( _strides == that._strides && is_contiguous() ) {
         copy( data(), that.data(), nb_items() );
     } else  {

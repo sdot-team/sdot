@@ -42,10 +42,10 @@ namespace sdot {
 // }
 namespace RunDetails {
     // _get_args_on -> accesible args from execution_space
-    void _get_args_on( auto /*execution_space*/, Ct<int,0>, auto &&func, auto &&...args ) {
+    HD void _get_args_on( auto /*execution_space*/, Ct<int,0>, auto &&func, auto &&...args ) {
         func( FORWARD( args )... );
     }
-    template<int n> void _get_args_on( auto execution_space, Ct<int,n>, auto &&head, auto &&...tail ) {
+    template<int n> HD void _get_args_on( auto execution_space, Ct<int,n>, auto &&head, auto &&...tail ) {
         make_accessible( execution_space, FORWARD( head ), [&]( auto &&head ) {
             _get_args_on( execution_space, Ct<int,n-1>(), FORWARD( tail )..., FORWARD( head ) );
         } );
@@ -54,11 +54,11 @@ namespace RunDetails {
     // force max_cpu_threads to 1
     template<class Func>
     struct RunSequentialWrapper : RunTraits::RunFunctorWrapper<Func> {
-        int max_cpu_threads( auto &&.../* args */ ) { return Ct<int,1>(); }
+        HD int max_cpu_threads( auto &&.../* args */ ) { return Ct<int,1>(); }
     };
 } // namespace RunDetails
 
-void run_parallel( auto &&list, auto &&func, auto &&...args ) {
+CPU_ONLY void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     // statically chosen from the args' memory spaces (single type -> only this branch compiles)
     auto execution_space = execution_space_for( args... );
 
@@ -68,7 +68,7 @@ void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     } );
 }
 
-void run_sequential( auto &&list, auto &&func, auto &&...args ) {
+CPU_ONLY void run_sequential( auto &&list, auto &&func, auto &&...args ) {
     run_parallel( FORWARD( list ), RunDetails::RunSequentialWrapper<DECAYED_TYPE_OF(func)>{ FORWARD( func ) }, FORWARD( args )... );
 }
 

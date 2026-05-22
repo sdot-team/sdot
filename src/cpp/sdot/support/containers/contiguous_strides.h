@@ -17,10 +17,13 @@ namespace detail::contiguous_strides {
 // C-contiguous (row-major) byte strides for a given shape AxisValues, for an element type TF.
 // stride[last] = sizeof(TF) ; stride[i] = stride[i+1] * shape[i+1].
 template<class TF>
-auto contiguous_strides( const auto &shape ) {
-    return shape.apply_values( [&]( auto _, auto ...values ) {
-        return detail::contiguous_strides::_contiguous_strides_impl( values..., Ct<int,sizeof( TF )>() );
-    } );
+constexpr auto contiguous_strides( const auto &shape ) {
+    if constexpr( DECAYED_TYPE_OF( shape.size() )::value ) {
+        return shape.apply_values( [&]( auto _, auto ...values ) {
+            return detail::contiguous_strides::_contiguous_strides_impl( values..., Ct<int,sizeof( TF )>() );
+        } );
+    } else
+        return tuple();
 }
 
 } // namespace sdot

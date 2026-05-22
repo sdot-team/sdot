@@ -76,14 +76,14 @@ public:
     HD TF&           ref                  () const;
 
     // reassign
-    void             copy_elements_from   ( const auto &that ) const;
-    void             operator=            ( const TensorView &that ) { copy_elements_from( that ); }
-    void             operator=            ( const auto &that );
+    HD void          copy_elements_from   ( const auto &that ) const;
+    HD void          operator=            ( const TensorView &that ) { copy_elements_from( that ); }
+    HD void          operator=            ( const auto &that );
     HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
     void             with_same_shape      ( const auto &arch, auto &&func ) const;
-    void             make_accessible      ( auto execution_space, auto &&func ) const;
+    HD void          make_accessible      ( auto execution_space, auto &&func ) const;
     HD void          fill_with            ( TF value );
 
     //

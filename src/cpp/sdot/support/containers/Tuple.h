@@ -60,12 +60,12 @@ public:
     HD auto        with_appended_value( auto &&new_value ) const;
 };
 
-auto tuple( auto &&...a ) {
+constexpr auto tuple( auto &&...a ) {
     return Tuple<DECAYED_TYPE_OF( a )...>( Values(), a... );
 }
 
 template<class... A,class... B>
-auto concat( const Tuple<A...> &a, const Tuple<B...> &b ) {
+constexpr auto concat( const Tuple<A...> &a, const Tuple<B...> &b ) {
     return a.apply_values( [&]( auto... va ) {
         return b.apply_values( [&]( auto... vb ) {
             return tuple( va..., vb... );
@@ -73,21 +73,21 @@ auto concat( const Tuple<A...> &a, const Tuple<B...> &b ) {
     } );
 }
 
-auto map( auto &&list, auto &&func ) { // requires requires { list.apply_values( []( auto... ) {} ); } {
+constexpr auto map( auto &&list, auto &&func ) { // requires requires { list.apply_values( []( auto... ) {} ); } {
     return list.apply_values( [&]( auto... values ) {
         return tuple( func( values )... );
     } );
 }
 
 template<class... A>
-auto product( const Tuple<A...> &list ) {
+constexpr auto product( const Tuple<A...> &list ) {
     return list.apply_values( [&]( auto... values ) {
         return ( values * ... * Ct<int,1>() );
     } );
 }
 
 template<class... A>
-auto sum( const Tuple<A...> &list ) {
+constexpr auto sum( const Tuple<A...> &list ) {
     return list.apply_values( [&]( auto... values ) {
         return ( values + ... + Ct<int,0>() );
     } );

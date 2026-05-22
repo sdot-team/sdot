@@ -42,7 +42,7 @@ struct ExecutionContext_Cuda : public ExecutionContext {
         HD ExecutionContext_Cuda() : stream( default_stream ) {}
     #endif
 
-    void run_parallel( const auto &list, auto &&func, auto &&...args ) {
+    HD void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
         const int threads_per_block = 256;

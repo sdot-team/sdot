@@ -369,10 +369,17 @@ class CallArg_Aggregate( CallArg ):
         Subclasses that implement the `CallArg` interface override this with a one-argument
         version that supplies `struct_name` automatically (e.g. from `base_cpp_name()`).
         """
-        lines = [ self.base_cpp_name() + "{" ]
-
         if struct_name is None:
             struct_name = self.base_cpp_name()
+
+        from .TemplateArgs import TemplateArgs
+        template_args = TemplateArgs()
+        self.get_template_args( template_args, [] )
+        if template_args:
+            struct_name += f"<{ ','.join( t.value for n, t in template_args ) }>"
+
+        lines = [ struct_name + "{" ]
+
 
         ct_axes : dict[ str, int ] = {}
         axes : dict = {}

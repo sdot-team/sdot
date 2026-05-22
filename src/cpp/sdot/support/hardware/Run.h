@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../common_macros.h"
+
 namespace sdot {
 
 // ---------------------------------------------------------------------------
@@ -23,10 +25,10 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 
 /// call func for each list item, parallel way
-void run_parallel( auto &&list, auto &&func, auto &&...args );
+CPU_ONLY void run_parallel( auto &&list, auto &&func, auto &&...args );
 
 /// call func for each list item, one by one
-void run_sequential( auto &&list, auto &&func, auto &&...args );
+CPU_ONLY void run_sequential( auto &&list, auto &&func, auto &&...args );
 
 } // namespace sdot
 

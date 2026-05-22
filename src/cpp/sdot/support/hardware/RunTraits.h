@@ -20,7 +20,7 @@ HD void per_thread( auto &func, auto &&thread_info, auto &&list, auto &&cont, au
 
 // ----------------- CPU -----------------
 
-int max_cpu_threads( auto &&func, auto &&...args ) {
+HD int max_cpu_threads( auto &&func, auto &&...args ) {
     if constexpr( requires{ func.max_cpu_threads( args... ); } )
         return func.max_cpu_threads( args... );
     else
@@ -29,21 +29,21 @@ int max_cpu_threads( auto &&func, auto &&...args ) {
 
 // ----------------- GPU -----------------
 
-int local_gpu_memory_size( auto &&func, auto &&...args ) {
+HD int local_gpu_memory_size( auto &&func, auto &&...args ) {
     if constexpr( requires{ func.local_gpu_memory_size( args... ); } )
         return func.local_gpu_memory_size( args... );
     else
         return Ct<int,1>();
 }
 
-int nb_gpu_register_per_thread( auto &&func, auto &&...args ) {
+HD int nb_gpu_register_per_thread( auto &&func, auto &&...args ) {
     if constexpr( requires{ func.nb_gpu_register_per_thread( args... ); } )
         return func.nb_gpu_register_per_thread( args... );
     else
         return Ct<int,16>();
 }
 
-int max_gpu_threads( auto &&func, auto &&...args ) {
+HD int max_gpu_threads( auto &&func, auto &&...args ) {
     if constexpr( requires{ func.max_gpu_threads( args... ); } )
         return func.max_gpu_threads( args... );
     else
@@ -56,15 +56,15 @@ int max_gpu_threads( auto &&func, auto &&...args ) {
 /// Wrap a func, allowing to surdefine methods
 template<class Func>
 struct RunFunctorWrapper {
-    int  nb_gpu_register_per_thread( auto &&...args ) { return sdot::RunTraits::nb_gpu_register_per_thread( func, FORWARD( args )... ); }
-    int  local_gpu_memory_size     ( auto &&...args ) { return sdot::RunTraits::local_gpu_memory_size( func, FORWARD( args )... ); }
-    int  max_gpu_threads           ( auto &&...args ) { return sdot::RunTraits::max_gpu_threads( func, FORWARD( args )... ); }
+    HD int  nb_gpu_register_per_thread( auto &&...args ) { return sdot::RunTraits::nb_gpu_register_per_thread( func, FORWARD( args )... ); }
+    HD int  local_gpu_memory_size     ( auto &&...args ) { return sdot::RunTraits::local_gpu_memory_size( func, FORWARD( args )... ); }
+    HD int  max_gpu_threads           ( auto &&...args ) { return sdot::RunTraits::max_gpu_threads( func, FORWARD( args )... ); }
 
-    int  max_cpu_threads           ( auto &&...args ) { return sdot::RunTraits::max_cpu_threads( func, FORWARD( args )... ); }
+    HD int  max_cpu_threads           ( auto &&...args ) { return sdot::RunTraits::max_cpu_threads( func, FORWARD( args )... ); }
 
-    void per_thread                ( auto &&thread_info, auto &&list, auto &&cont, auto &&...args ) { return sdot::RunTraits::per_thread( func, FORWARD( thread_info ), FORWARD( list ), FORWARD( cont ), FORWARD( args )... ); }
+    HD void per_thread                ( auto &&thread_info, auto &&list, auto &&cont, auto &&...args ) { return sdot::RunTraits::per_thread( func, FORWARD( thread_info ), FORWARD( list ), FORWARD( cont ), FORWARD( args )... ); }
 
-    auto operator()                ( auto &&...args ) const { func( FORWARD( args )... ); }
+    HD auto operator()                ( auto &&...args ) const { func( FORWARD( args )... ); }
 
     Func func;
 };

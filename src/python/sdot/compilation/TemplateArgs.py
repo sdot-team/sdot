@@ -4,7 +4,8 @@ from dataclasses import dataclass
 @dataclass
 class TemplateArg:
     cpp_type : str
-    priority : int = 0
+    priority : int
+    value    : str
 
 
 class TemplateArgs:
@@ -17,10 +18,10 @@ class TemplateArgs:
         self._items : list[ tuple[ str, TemplateArg ] ] = []
         self._names : set[ str ]                        = set()
 
-    def add( self, name: str, cpp_type: str, priority: int = 0 ):
+    def add( self, name: str, cpp_type: str, priority: int, value: str ):
         if name in self._names:
             return
-        self._items.append( ( name, TemplateArg( cpp_type, priority ) ) )
+        self._items.append( ( name, TemplateArg( cpp_type, priority, value ) ) )
         self._names.add( name )
         self._items.sort( key = lambda kv: kv[ 1 ].priority )
 
