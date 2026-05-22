@@ -39,6 +39,22 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
         return row( index )( rem... );
 }
 
+UTP void DTP::operator=( const auto &that ) {
+    if constexpr ( requires { that.shape(); } || requires { that.size(); } )
+        copy_elements_from( that );
+    else {
+        static_assert( ct_rank == 0 );
+        auto ec = current_execution_context();
+        if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value ) {
+            *data() = that;
+        } else {
+            TF that_tf = that;
+            auto ms = native_memory_space( ec );
+            copy( data(), Ptr( &that_tf, ms ), 1 );
+        }
+    }
+}
+
 UTP HD auto DTP::squeeze( auto axis, PI index ) const {
     auto new_strides = _strides.without_index( axis );
     auto new_shape = _shape.without_index( axis );
@@ -65,17 +81,10 @@ UTP HD TF DTP::value() const {
     if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value )
         return *data();
     else {
-        // #ifdef __CUDA_ARCH__
-        //         // unreachable: the static dispatch keeps non-device-accessible data off the device
-        //         // (and there is no cudaMemcpy on the device to pull it in).
-        //         return TF{};
-        // #else
-        // host: pull a single element in (D2H copy) and return it
         TF res;
         auto ms = native_memory_space( ec );
         copy( Ptr( &res, ms ), data(), 1 );
         return res;
-        // #endif
     }
 }
 
@@ -85,8 +94,8 @@ UTP TF& DTP::ref() const {
 }
 
 UTP void DTP::display( std::ostream &os ) const {
-    if constexpr ( ! DECAYED_TYPE_OF( accessible_from( ExecutionSpace_Cpu{}, _memory_space ) )::value ) {
-        make_accessible( ExecutionSpace_Cpu{}, [&]( auto &&tensor ) {
+    if constexpr ( ! DECAYED_TYPE_OF( accessible_from( ExecutionContext_Cpu{}, _memory_space ) )::value ) {
+        make_accessible( ExecutionContext_Cpu{}, [&]( auto &&tensor ) {
             tensor.display( os );
         } );
     } else if constexpr ( ct_rank == 0 ) {
@@ -132,6 +141,19 @@ UTP HD auto DTP::is_contiguous() const {
 
 UTP HD void DTP::for_each_index( auto &&func ) const {
     cartesian_product( map( _shape, range<PI> ) ).for_each_item( FORWARD( func ) );
+}
+
+UTP HD auto DTP::size() const {
+    static_assert( ct_rank == 1, "..." );
+    return shape( Ct<int,0>() );
+}
+
+UTP HD auto DTP::empty() const {
+    if constexpr ( ct_rank == 0 )
+        return 0_b;
+    return _shape.apply_values( [&]( auto ...values ) {
+        return ( ( values == 0_c ) || ... || 0_b );
+    } );
 }
 
 // namespace details::TensorView {
@@ -230,10 +252,6 @@ UTP HD void DTP::for_each_index( auto &&func ) const {
 //     return res;
 // }
 
-// UTP HD auto DTP::size() const {
-//     static_assert( ct_rank == 1, "..." );
-//     return shape( Ct<int,0>() );
-// }
 
 // UTP HD bool DTP::surely_null() const {
 //     if ( is_invalid() )
@@ -276,10 +294,6 @@ UTP HD void DTP::for_each_index( auto &&func ) const {
 
 // UTP HD bool DTP::is_valid() const {
 //     return _raw_ptr != sentinel();
-// }
-
-// UTP HD auto DTP::empty() const {
-//     return _shape.has_value( []( auto size ) { return size == Ct<int,0>(); } );
 // }
 
 // UTP HD auto DTP::rank() const {

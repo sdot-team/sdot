@@ -25,12 +25,12 @@
     #define HD  __host__ __device__
     #define GD  __device__  // for generic (auto-param) lambdas: __host__ __device__ cannot be generic in CUDA
     #define SDOT_HOD( SIGNATURE, BODY ) \
-        __device__ SIGNATURE { using ES = ExecutionSpace_Cuda; BODY } \
-        __host__   SIGNATURE { using ES = ExecutionSpace_Cpu; BODY }
+        __device__ SIGNATURE { using ES = ExecutionContext_Cuda; BODY } \
+        __host__   SIGNATURE { using ES = ExecutionContext_Cpu; BODY }
 #else
     #define CPU_ONLY
     #define HD
     #define GD
     #define SDOT_HOD( SIGNATURE, BODY ) \
-        SIGNATURE { using ES = ExecutionSpace_Cpu; BODY }
+        SIGNATURE { using ES = ExecutionContext_Cpu; BODY }
 #endif

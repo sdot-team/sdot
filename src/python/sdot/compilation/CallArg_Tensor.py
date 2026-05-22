@@ -9,6 +9,11 @@ from .CallArg import CallArg
 from typing import Optional
 from weakref import ref
 
+TENSOR_TYPE_STD = 0,
+TENSOR_TYPE_ZERO = 1,
+TENSOR_TYPE_INVALID = 2,
+
+
 class CallArg_Tensor( CallArg ):
     """ input or mutable
     """
@@ -86,7 +91,7 @@ class CallArg_Tensor( CallArg ):
 
         # mutable, return or workspace -> need an output tensor
         if io_category.want_output:
-            res.validity_output_index = call_args.get_u8_input( [ 1 ] )
+            res.validity_output_index = call_args.get_u8_input( [ TENSOR_TYPE_STD ] )
             res.num_in_outputs = call_args.add_tensor_output( res )
 
         #
@@ -100,11 +105,11 @@ class CallArg_Tensor( CallArg ):
 
     @staticmethod
     def tensor_type_index( python_value ):
-        if python_value is None:
-            return 0
         if driver.is_zero_tensor( python_value ):
-            return 2
-        return 1
+            return TENSOR_TYPE_ZERO
+        if python_value is None:
+            return TENSOR_TYPE_INVALID
+        return TENSOR_TYPE_STD
 
     @property
     def ffi_value( self ):
@@ -122,7 +127,7 @@ class CallArg_Tensor( CallArg ):
             return res
 
         # if in Worspace, return None
-        if self.io_category.want_return == False:
+        if not self.io_category.want_return:
             return None
 
         # if we have a dynamic size, make a slice
@@ -199,7 +204,7 @@ class CallArg_Tensor( CallArg ):
 
         template_args.add( "TI", "typename", 1 ) # always needed
 
-        template_args.add( "Arch", "typename", 2 )
+        template_args.add( "MemorySpace", "typename", 2 )
 
 
     def _get_kwarg_only( self, name, is_dyn ):
@@ -240,34 +245,36 @@ class CallArg_Tensor( CallArg ):
 
     def shape_type( self, for_a_particular_binding ):
         """Build AxisTuple C++ type string with KnownAxisSize where axes are CT-known."""
-        known = []
-        if not self.comes_from_basic_array:
-            for n in range( self.ndim ):
-                if for_a_particular_binding:
-                    val = self._ct_axis_value( n )
-                    if val is not None:
-                        known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
-                elif self._is_ct_axis( n ):
-                    expr = self.shape[ n ]
-                    ops = []
-                    if expr.offset:
-                       ops.append( str( expr.offset ) )
-                    for term in expr.terms:
-                        if term.coeff == 1:
-                            ops.append( f'ct_{ term.variable.name }_value' )
-                        else:
-                            ops.append( f'{ term.coeff } * ct_{ term.variable.name }_value' )
-                    val = ' + '.join( ops ) if ops else '0'
-                    known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
-        suffix = ( "," + ",".join( known ) ) if known else ""
-        return f"AxisTuple<TI,Arch,{ self.ndim }{ suffix }>"
+        types = []
+        for n in range( self.ndim ):
+            if self._is_ct_axis( n ) and not self.comes_from_basic_array:
+                types.append( f"Ct<TI,{ self._ct_axis_value( n ) }>" )
+            else:
+                types.append( "TI" )
+                # if for_a_particular_binding:
+                #     val = self._ct_axis_value( n )
+                #     if val is not None:
+                #         known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
+                # elif self._is_ct_axis( n ):
+                #     expr = self.shape[ n ]
+                #     ops = []
+                #     if expr.offset:
+                #        ops.append( str( expr.offset ) )
+                #     for term in expr.terms:
+                #         if term.coeff == 1:
+                #             ops.append( f'ct_{ term.variable.name }_value' )
+                #         else:
+                #             ops.append( f'{ term.coeff } * ct_{ term.variable.name }_value' )
+                #     val = ' + '.join( ops ) if ops else '0'
+                #     known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
+        return f"Tuple<{ ','.join( types ) }>"
 
     def cpp_type_name( self, main_list ):
         shape_t   = self.shape_type( False )
-        strides_t = f"AxisTuple<TI,Arch,{ self.ndim }>"
+        strides_t = f"DECAYED_TYPE_OF( contiguous_strides<{ self.dtype.cpp_name }>( { shape_t }() ) )"
         if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<TI,{ shape_t },{ strides_t }>"
-        return f"TensorView<{ self.dtype.cpp_name },{ shape_t },{ strides_t }>"
+            return f"DynamicAxis<TI,{ shape_t },{ strides_t },MemorySpace>"
+        return f"TensorView<{ self.dtype.cpp_name },{ shape_t },{ strides_t },MemorySpace>"
 
     def get_axes( self, axes: dict, ct_axes: dict[ str, int ] ):
         for s in self.shape:
@@ -330,16 +337,15 @@ class CallArg_Tensor( CallArg ):
 
         # mutable
         if self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_mutable( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ] )"
+            return f"{ base }_mutable( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            suf = ", arch" if base == "dynamic_axis" else ""
-            return f"{ base }_output( { ct_shape }{ extr }, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ suf } )"
+            return f"{ base }_output( { ct_shape }, memory_space, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
 
         # pure input
         if self.io_category.has_input and not self.io_category.want_output:
-            return f"{ base }_input( { ct_shape }{ extr }, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ] )"
+            return f"{ base }_input( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ]{ extr } )"
 
         raise NotImplementedError
 

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ExecutionSpace_Cpu.h"
+#include "ExecutionContext_Cpu.h"
 #ifdef __CUDACC__
-#include "ExecutionSpace_Cuda.h"
+#include "ExecutionContext_Cuda.h"
 #endif
 
 namespace sdot {
@@ -18,11 +18,11 @@ namespace sdot {
 // instantiated — so e.g. a host-only call never compiles a GPU kernel.
 // ---------------------------------------------------------------------------
 
-inline auto promote( ExecutionSpace_Cpu, ExecutionSpace_Cpu ) { return ExecutionSpace_Cpu{}; }
+inline auto promote( ExecutionContext_Cpu, ExecutionContext_Cpu ) { return ExecutionContext_Cpu{}; }
 #ifdef __CUDACC__
-inline auto promote( ExecutionSpace_Cpu , ExecutionSpace_Cuda ) { return ExecutionSpace_Cuda{}; }
-inline auto promote( ExecutionSpace_Cuda, ExecutionSpace_Cpu  ) { return ExecutionSpace_Cuda{}; }
-inline auto promote( ExecutionSpace_Cuda, ExecutionSpace_Cuda ) { return ExecutionSpace_Cuda{}; }
+inline auto promote( ExecutionContext_Cpu , ExecutionContext_Cuda ) { return ExecutionContext_Cuda{}; }
+inline auto promote( ExecutionContext_Cuda, ExecutionContext_Cpu  ) { return ExecutionContext_Cuda{}; }
+inline auto promote( ExecutionContext_Cuda, ExecutionContext_Cuda ) { return ExecutionContext_Cuda{}; }
 #endif
 
 /// the execution space an argument pulls toward (its memory space's native one, else host)
@@ -30,12 +30,12 @@ auto pulled_execution_space( const auto &arg ) {
     if constexpr ( requires { arg.memory_space().execution_space(); } )
         return arg.memory_space().execution_space();
     else
-        return ExecutionSpace_Cpu{};
+        return ExecutionContext_Cpu{};
 }
 
 /// execution space chosen for a set of arguments (CPU by default, promoted to device as soon
 /// as one argument's data lives there)
-auto execution_space_for() { return ExecutionSpace_Cpu{}; }
+auto execution_space_for() { return ExecutionContext_Cpu{}; }
 auto execution_space_for( const auto &arg, const auto &...rest ) {
     return promote( pulled_execution_space( arg ), execution_space_for( rest... ) );
 }

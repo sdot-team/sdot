@@ -38,6 +38,19 @@ consteval auto operator""_c() {
     return sdot::Ct<int,v>{};
 }
 
+// 1_c will produce a Ct<bool,1>()
+template<char... Digits>
+consteval auto operator""_b() {
+    constexpr int v = [] {
+        char ds[] = { Digits... };
+        int r = 0;
+        for ( char c : ds )
+            r = r * 10 + ( c - '0' );
+        return r;
+    }();
+    return sdot::Ct<bool,bool( v )>{};
+}
+
 template<class A,A i,class B,B j>
 struct TypePromote<Ct<A,i>,Ct<B,j>> { static_assert( i == j ); using type = Ct<typename TypePromote<A,B>::type,i>; };
 

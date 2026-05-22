@@ -12,7 +12,7 @@ class CudaGpu( Device ):
 
     @property
     def name( self ):
-        return "CudaGpu"
+        return "Cuda"
 
     @property
     def signature( self ):
@@ -24,7 +24,7 @@ class CudaGpu( Device ):
 
     @property
     def cpp_type( self ):
-        return "CudaGpu"
+        return "ExecutionContext_Cuda"
 
     @property
     def is_cuda_gpu( self ):

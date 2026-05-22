@@ -27,6 +27,11 @@ UTP HD void DTP::for_each_item( auto &&cb ) const {
      tail.for_each_item( FORWARD( cb ) );
 }
 
+UTP HD void DTP::for_each_item( auto &&cb ) {
+     cb( head );
+     tail.for_each_item( FORWARD( cb ) );
+}
+
 UTP HD auto DTP::apply_values( auto &&cb ) const {
     return tail.apply_values( [&]( auto ...tail ) {
         return cb( head, tail... );
@@ -61,7 +66,7 @@ UTP HD auto DTP::operator==( const auto &that ) const {
     } );
 }
 
-UTP HD auto DTP::size() const {
+UTP HD auto DTP::size() {
     return Ct<int,1 + sizeof...( Tail )>();
 }
 
@@ -123,7 +128,7 @@ UTP HD auto DTP::with_appended_value( auto &&new_value ) const {
     return tuple( new_value );
 }
 
-UTP HD auto DTP::size() const {
+UTP HD auto DTP::size() {
     return Ct<int,0>();
 }
 

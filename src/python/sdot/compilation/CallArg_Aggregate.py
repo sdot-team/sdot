@@ -289,12 +289,10 @@ class CallArg_Aggregate( CallArg ):
 
         lines = []
 
-        # batch_sizes() + slice(AxisTuple<TI,Arch,0>)
-        includes.add( "sdot/support/AxisTuple.h" )
-        batch_axes = getattr( self.python_class, "batch_axes", [] )
-        batch_axes_values = ", ".join( [ "Values()" ] + [ f"TI( { batch_axis } )" for batch_axis in batch_axes ] )
-        lines.append(  f"    HD auto batch_sizes() const {{ return AxisTuple<TI,Arch,{ len( batch_axes ) }>( { batch_axes_values } ); }}" )
-        lines.append(  "    HD auto operator()( AxisTuple<TI,Arch,0> ) const { return *this; }" )
+        # batch_sizes() + slice()
+        batch_axes = getattr( self.python_class, 'batch_axes', [] )
+        lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
+        lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
 
         # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:
@@ -325,20 +323,20 @@ class CallArg_Aggregate( CallArg ):
             lines.append( "" )
 
         # with_same_shape
-        lines.append( "    void with_same_shape( auto &&func ) const {" )
-        s = "        "
-        for name, argument in self.sub_dict.items():
-            s = argument.beg_with_same_shape( name, s, lines )
-        lines.append( s + f"{ base_cpp_name } new_value{{" )
-        for ct_axis_name in ct_axes:
-            lines.append( s + f"    .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )
-        for name, argument in self.sub_dict.items():
-            lines.append( s + f"    .{ name } = { name }," )
-        lines.append( s + "};" )
-        lines.append( s + "func( new_value );" )
-        for name, argument in self.sub_dict.items():
-            s = argument.end_with_same_shape( name, s, lines )
-        lines.append( "    }" )
+        # lines.append( "    void with_same_shape( auto &&func ) const {" )
+        # s = "        "
+        # for name, argument in self.sub_dict.items():
+        #     s = argument.beg_with_same_shape( name, s, lines )
+        # lines.append( s + f"{ base_cpp_name } new_value{{" )
+        # for ct_axis_name in ct_axes:
+        #     lines.append( s + f"    .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )
+        # for name, argument in self.sub_dict.items():
+        #     lines.append( s + f"    .{ name } = { name }," )
+        # lines.append( s + "};" )
+        # lines.append( s + "func( new_value );" )
+        # for name, argument in self.sub_dict.items():
+        #     s = argument.end_with_same_shape( name, s, lines )
+        # lines.append( "    }" )
 
         # compile-time axis members
         for ct_axis_name in ct_axes:

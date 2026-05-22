@@ -2,7 +2,7 @@
 
 #include "../containers/for_each_item_split.h"
 #include "../containers/nb_items.h"
-#include "ExecutionSpace.h"
+#include "ExecutionContext.h"
 #include "WaitingThreads.h"
 #include "CpuThreadInfo.h"
 #include "RunTraits.h"
@@ -10,7 +10,7 @@
 namespace sdot {
 
 // host execution
-struct ExecutionSpace_Cpu : ExecutionSpace {
+struct ExecutionContext_Cpu : ExecutionContext {
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         waiting_threads().run( [&]( int num_thread, int nb_threads ) {
             CpuThreadInfo thread_info{ num_thread, nb_threads };

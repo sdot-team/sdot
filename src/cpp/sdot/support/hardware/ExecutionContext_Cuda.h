@@ -3,7 +3,7 @@
 #ifdef __CUDACC__
 
 #include "../containers/for_each_item_split.h"
-#include "ExecutionSpace.h"
+#include "ExecutionContext.h"
 #include "CudaThreadInfo.h"
 #include "RunTraits.h"
 
@@ -11,7 +11,7 @@
 
 namespace sdot {
 
-// Device kernel mirroring ExecutionSpace_Cpu's per-thread body: each device thread runs
+// Device kernel mirroring ExecutionContext_Cpu's per-thread body: each device thread runs
 // the optional per_thread() setup, then walks its share of the items (split by global id
 // over the whole grid) and calls func( item, args... ) on each.
 template<class List,class Func,class... Args>
@@ -29,18 +29,18 @@ __global__ void _execution_space_cuda_run_parallel( List list, Func func, Args..
 // CUDA device execution + stream — {}-constructible (uses the global default_stream; the
 // bindings set default_stream). A specific stream can be passed explicitly; mind that
 // using non-default streams requires care w.r.t. ordering/synchronization.
-struct ExecutionSpace_Cuda : public ExecutionSpace {
+struct ExecutionContext_Cuda : public ExecutionContext {
     static cudaStream_t default_stream; ///< process-wide default, set by the bindings
     cudaStream_t        stream;         ///< stream this execution space enqueues onto
 
-    explicit HD ExecutionSpace_Cuda( cudaStream_t s ) : stream( s ) {}
+    explicit HD ExecutionContext_Cuda( cudaStream_t s ) : stream( s ) {}
     // default_stream is a host symbol; in device code (where the context is only used as a
     // compile-time tag for accessible_from) the stream value is irrelevant, so use 0 there.
-#ifdef __CUDA_ARCH__
-    HD ExecutionSpace_Cuda() : stream( 0 ) {}
-#else
-    HD ExecutionSpace_Cuda() : stream( default_stream ) {}
-#endif
+    #ifdef __CUDA_ARCH__
+        HD ExecutionContext_Cuda() : stream( 0 ) {}
+    #else
+        HD ExecutionContext_Cuda() : stream( default_stream ) {}
+    #endif
 
     void run_parallel( const auto &list, auto &&func, auto &&...args ) {
         // one thread per item for now (round-robin in the kernel tolerates any grid size).

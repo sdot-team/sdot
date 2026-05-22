@@ -20,7 +20,7 @@ namespace sdot {
 // #endif
 
 // template<class Space, class BatchSizes, class F, class... Args>
-//     requires ExecutionSpace<Space>
+//     requires ExecutionContext<Space>
 // void _run( const Space &space, int max_nb_threads, const BatchSizes &list, F &&func, Args &&...args ) {
 //     auto body = [&]( auto &&...acc ) {
 //         if constexpr ( Space::runs_on_host ) {

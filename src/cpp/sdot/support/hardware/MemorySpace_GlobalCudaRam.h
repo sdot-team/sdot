@@ -2,8 +2,8 @@
 
 #ifdef __CUDACC__
 
-#include "ExecutionSpace_Cuda.h"
-#include "ExecutionSpace_Cpu.h"
+#include "ExecutionContext_Cuda.h"
+#include "ExecutionContext_Cpu.h"
 #include "MemorySpace_CpuRam.h"
 #include "accessible_from.h"
 #include "MemorySpace.h"
@@ -14,7 +14,7 @@ namespace sdot {
 
 /// device global memory
 struct MemorySpace_GlobalCudaRam : MemorySpace {
-    auto HD execution_space() const { return ExecutionSpace_Cuda{}; }
+    auto HD execution_space() const { return ExecutionContext_Cuda{}; }
 
     /// allocate `n` items of T on the device, expose them (as an informed Ptr) to `func`, then release.
     /// cudaMalloc/cudaFree are host APIs -> __host__ only.
@@ -30,24 +30,24 @@ constexpr auto operator==( MemorySpace_GlobalCudaRam, MemorySpace_GlobalCudaRam 
 constexpr auto operator==( MemorySpace_GlobalCudaRam, auto                      ) { return Ct<bool,false>(); }
 constexpr auto operator==( auto                     , MemorySpace_GlobalCudaRam ) { return Ct<bool,false>(); }
 
-HD auto accessible_from( ExecutionSpace_Cuda, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
+HD auto accessible_from( ExecutionContext_Cuda, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
 
 /// memory space a CUDA execution space allocates into when it must materialize data
-HD auto native_memory_space( ExecutionSpace_Cuda ) { return MemorySpace_GlobalCudaRam{}; }
+HD auto native_memory_space( ExecutionContext_Cuda ) { return MemorySpace_GlobalCudaRam{}; }
 
 // Transfer primitive copy( dst_ptr, src_ptr, nb_items[, es] ): the (dst,src) memory-space types
 // select the direction; the execution space carries the stream.
 //
 // Inter-space transfers go through cudaMemcpy, which is a host API -> __host__ only (calling them
 // from device code is therefore a natural compile error).
-T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
+T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items, ExecutionContext_Cuda es = {} ) {
     #ifdef __CUDA_ARCH__
         __trap();
     #else
         cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyHostToDevice, es.stream );
     #endif
 }
-T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
+T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionContext_Cuda es = {} ) {
     #ifdef __CUDA_ARCH__
         __trap();
     #else
@@ -59,7 +59,7 @@ T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam
 // device -> device: feasible from both sides -> HD, and this is where __CUDA_ARCH__ legitimately
 // picks an *implementation* (both branches are valid): in a kernel, an internal element copy; from
 // the host, cudaMemcpy. (TODO: peer copy for different devices.)
-T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionSpace_Cuda es = {} ) {
+T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionContext_Cuda es = {} ) {
     #ifdef __CUDA_ARCH__
         for ( PI i = 0; i < nb_items; ++i )
             dst.raw[ i ] = src.raw[ i ];
@@ -67,6 +67,20 @@ T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_Global
         cudaMemcpyAsync( dst.raw, src.raw, nb_items * sizeof( T ), cudaMemcpyDeviceToDevice, es.stream );
     #endif
 }
+
+namespace detail {
+    T_T struct ZeroOnGlobalCudaRam {
+        ZeroOnGlobalCudaRam() {
+            cudaMalloc( reinterpret_cast<void **>( &p ), sizeof( T ) );
+            T zero = 0;
+            cudaMemcpyAsync( p, &zero, sizeof( T ), cudaMemcpyHostToDevice, ExecutionContext_Cuda::default_stream );
+        }
+
+        T *p = nullptr;
+    };
+}
+
+T_T T *zero_for( MemorySpace_GlobalCudaRam /* memory_space */ ) { static detail::ZeroOnGlobalCudaRam res; return res.p; }
 
 } // namespace sdot
 

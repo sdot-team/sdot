@@ -35,7 +35,14 @@ def test_choices():
 def test_ffi_basic():
     input = sdot.driver.array( [ 3. ] )
     assert all_equal( sdot.driver.call(
-        "p.output[ 0 ] = DECAYED_TYPE_OF( p.output.size() )::value; p.output[ 1 ] = p.dim; for( PI i = 0; i < p.input.size(); ++i ) { p.output[ 2 * i + 2 ] = 2 * p.input[ i ]; p.output[ 2 * i + 3 ] = 3 * p.input[ i ]; }",
+        """
+        p.output[ 0 ] = DECAYED_TYPE_OF( p.output.size() )::value;
+        p.output[ 1 ] = p.dim;
+        for( PI i = 0; i < p.input.size(); ++i ) {
+            p.output[ 2 * i + 2 ] = 2 * p.input[ i ];
+            p.output[ 2 * i + 3 ] = 3 * p.input[ i ];
+        }
+        """,
         output = sdot.Return( sdot.Tensor( "2 + 2 * dim", ct_axes = [ "dim" ] ), dim = input.size ),
         input = input
     ), [ 4, 1, 6, 9 ] )

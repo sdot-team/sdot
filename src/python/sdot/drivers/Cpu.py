@@ -5,11 +5,11 @@ import os
 class Cpu( Device ):
     @property
     def name( self ):
-        return "cpu"
+        return "Cpu"
 
     @property
     def cpp_type( self ):
-        return "Cpu"
+        return "ExecutionContext_Cpu"
 
     @property
     def signature( self ):

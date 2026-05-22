@@ -11,133 +11,109 @@
 ///   auto tv = tensor_view_input( CtType<AxisValues<PI,2,StaticAxisValue<PI,1,3>>>(), buf );
 
 #include "support/containers/DynamicAxis.h"
+#include "support/CtType.h"
 #include <xla/ffi/api/ffi.h>
-#include <utility>
 
 namespace sdot {
 
-
-// convenience aliases for the two most common dtypes
-template<xla::ffi::DataType dtype> struct SdotTypeFor;
-template<> struct SdotTypeFor<xla::ffi::DataType::F32> { using type = FP32; };
-template<> struct SdotTypeFor<xla::ffi::DataType::F64> { using type = FP64; };
-template<> struct SdotTypeFor<xla::ffi::DataType::U32> { using type = PI32; };
-template<> struct SdotTypeFor<xla::ffi::DataType::U64> { using type = PI64; };
-template<> struct SdotTypeFor<xla::ffi::DataType::S32> { using type = SI32; };
-template<> struct SdotTypeFor<xla::ffi::DataType::S64> { using type = SI64; };
-
-
-// ------------------- zero strides -------------------
-// All-zero byte strides: every element aliases data()[0].
-// Used for surely-null tensors (SymbolicZero from JAX): not_surely_null() == false.
-
-template<class Shape, std::size_t... Is>
-auto _zero_strides_impl( std::index_sequence<Is...> ) {
-    using Strides = AxisValues<typename Shape::TI,Shape::ct_rank>;
-    return Strides( Values(), ( (void)Is, SI(0) )... );
-}
-
-template<class Shape>
-auto zero_strides() {
-    return _zero_strides_impl<Shape>( std::make_index_sequence<Shape::ct_rank>{} );
-}
-
-
-// contiguous_strides<TF>( shape ) now lives in containers/contiguous_strides.h (shared with TensorView)
-
+enum {
+    TENSOR_TYPE_STD = 0,
+    TENSOR_TYPE_ZERO = 1,
+    TENSOR_TYPE_INVALID = 2,
+};
 
 // ------------------- tensor_view_input -------------------
 
-template<xla::ffi::DataType dtype>
-auto tensor_view_input( auto &&shape, const auto &memory_space, xla::ffi::Buffer<dtype> buf, PI8 tensor_type_index = 1 ) {
-    using TF = SdotTypeFor<dtype>::type;
-    auto strides = contiguous_strides<TF>( shape );
+template<class Shape,xla::ffi::DataType dtype>
+auto tensor_view_input( CtType<Shape>, const auto &memory_space, xla::ffi::Buffer<dtype> buf, PI8 tensor_type ) {
+    using MemorySpace = DECAYED_TYPE_OF( memory_space );
+    using TF = DECAYED_TYPE_OF( *buf.typed_data() );
 
-    // invalid
-    if ( tensor_type_index == 0 )
-        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
+    // shape (there's a particular case for TENSOR_TYPE_ZERO)
+    Shape shape( Function(), [&]( auto index ) {
+        const PI offset = ( tensor_type == TENSOR_TYPE_ZERO );
+        return buf.dimensions()[ index + offset ];
+    } );
 
-    // surely-null: shape in buf.dimensions()[1:], zero strides, data points to a static TF(0)
-    if ( tensor_type_index == 2 ) {
-        auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
-            return Shape( Values(), PI( buf.dimensions()[ Is + 1 ] )... );
-        }( std::make_index_sequence<Shape::ct_rank>{} );
-        auto strides = zero_strides<Shape>();
-        using Strides = DECAYED_TYPE_OF( strides );
-        static const TF _zero{};
-        return TensorView<TF, Shape, Strides>( const_cast<TF *>( &_zero ), shape, strides );
-    }
-
-    auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
-        return Shape( Values(), PI( buf.dimensions()[ Is ] )... );
-    }( std::make_index_sequence<Shape::ct_rank>{} );
-
+    // strides
     auto strides = contiguous_strides<TF>( shape );
     using Strides = DECAYED_TYPE_OF( strides );
 
-    if ( ! tensor_type_index )
-        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
+    // return type
+    using RT = TensorView<TF,Shape,Strides,MemorySpace>;
 
-    return TensorView<TF,Shape,Strides>( const_cast<TF *>( buf.typed_data() ), shape, strides );
+    // symbolic zero -> clear strides
+    if ( tensor_type == TENSOR_TYPE_ZERO ) {
+        PI nb_zeros = 0;
+        strides.for_each_item( [&]( auto &value ) {
+            if constexpr ( requires { DECAYED_TYPE_OF( value )::value; } ) {
+                nb_zeros += DECAYED_TYPE_OF( value )::value == 0;
+            } else {
+                ++nb_zeros;
+                value = 0;
+            }
+        } );
+        if ( nb_zeros == 0 )
+            ERROR( "symbolic zero tensors are possible if stride can be modified" );
+
+        return RT( zero_for<TF>( memory_space ), shape, strides, memory_space );
+    }
+
+    // invalid
+    if ( tensor_type == TENSOR_TYPE_INVALID )
+        return RT::make_invalid( shape, strides, memory_space );
+
+    // standard
+    if ( tensor_type == TENSOR_TYPE_STD )
+        return RT( const_cast<TF *>( buf.typed_data() ), shape, strides, memory_space );
+
+    ERROR( "unknown tensor_type" );
+    return RT( const_cast<TF *>( buf.typed_data() ), shape, strides, memory_space );
 }
 
 
 // ------------------- tensor_view_output -------------------
 
 template<class Shape, xla::ffi::DataType dtype>
-auto tensor_view_output( CtType<Shape>, xla::ffi::ResultBuffer<dtype> buf, bool valid = true ) {
-    using TF = SdotTypeFor<dtype>::type;
-
-    auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
-        return Shape( Values(), PI( buf->dimensions()[ Is ] )... );
-    }( std::make_index_sequence<Shape::ct_rank>{} );
-
-    auto strides = contiguous_strides<TF>( shape );
-    using Strides = DECAYED_TYPE_OF( strides );
-
-    if ( ! valid )
-        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
-
-    return TensorView<TF,Shape,Strides>( buf->typed_data(), shape, strides );
+auto tensor_view_output( CtType<Shape> cs, const auto &memory_space, xla::ffi::ResultBuffer<dtype> buf, PI8 tensor_type ) {
+    return tensor_view_input( cs, memory_space, *buf, tensor_type );
 }
-
 
 // ------------------- tensor_view_mutable -------------------
 
 template<class Shape, xla::ffi::DataType dtype>
-auto tensor_view_mutable( CtType<Shape> cd, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, bool valid = true ) {
-    if ( ! valid )
-        return tensor_view_output( cd, buf_out, false );
+auto tensor_view_mutable( CtType<Shape> cs, const auto &memory_space, xla::ffi::ResultBuffer<dtype> buf_out, xla::ffi::Buffer<dtype> buf_inp, PI8 tensor_type_out, PI8 tensor_type_inp ) {
+    auto out = tensor_view_output( cs, memory_space, buf_out, tensor_type_out );
 
-    auto out = tensor_view_output( cd, buf_out, true );
-    auto inp = tensor_view_input ( cd, buf_inp, true );
-    out.get_data_from( inp );
+    if ( tensor_type_out != TENSOR_TYPE_INVALID && tensor_type_inp != TENSOR_TYPE_INVALID ) {
+        auto inp = tensor_view_input( cs, memory_space, buf_inp, tensor_type_inp );
+        out.copy_elements_from( inp );
+    }
+
     return out;
 }
-
 
 // ------------------- dynamic_axis -------------------
 
 template<class Shape, xla::ffi::DataType dtype>
-auto dynamic_axis_input( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf, bool valid ) {
-    return DynamicAxis( num_dynamic_axis, capacity, tensor_view_input( cd, buf, valid ) );
+auto dynamic_axis_input( CtType<Shape> cs, const auto &memory_space, xla::ffi::Buffer<dtype> buf, PI8 tensor_type, PI num_dynamic_axis, PI capacity ) {
+    return DynamicAxis( num_dynamic_axis, capacity, tensor_view_input( cs, memory_space, buf, tensor_type ) );
 }
 
-template<class Shape, xla::ffi::DataType dtype, class Arch>
-auto dynamic_axis_output( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::ResultBuffer<dtype> buf, bool valid, const Arch &arch ) {
-    using TF = typename SdotTypeFor<dtype>::type;
-    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf, valid ) );
-    if ( valid )
-        arch.zero_fill( buf->typed_data(), buf->element_count(), sizeof( TF ) );
+template<class Shape, xla::ffi::DataType dtype>
+auto dynamic_axis_output( CtType<Shape> cs, const auto &memory_space, xla::ffi::ResultBuffer<dtype> buf, PI8 tensor_type, PI num_dynamic_axis, PI capacity ) {
+    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cs, memory_space, buf, tensor_type ) );
+    if ( tensor_type != TENSOR_TYPE_INVALID )
+        res.sizes.fill_with( 0 );
     return res;
 }
 
 template<class Shape, xla::ffi::DataType dtype>
-auto dynamic_axis_mutable( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, xla::ffi::Buffer<dtype> buf_inp, bool valid_inp, xla::ffi::ResultBuffer<dtype> buf_out, bool /* valid_out */ ) {
-    auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_output( cd, buf_out ) );
-    if ( valid_inp ) {
-        auto inp = tensor_view_input( cd, buf_inp );
-        res.sizes.get_data_from( inp );
+auto dynamic_axis_mutable( CtType<Shape> cs, const auto &memory_space, xla::ffi::Buffer<dtype> buf_inp, PI8 tensor_type_inp, xla::ffi::ResultBuffer<dtype> buf_out, PI8 tensor_type_out, PI num_dynamic_axis, PI capacity ) {
+    auto res = dynamic_axis_output( cs, memory_space, buf_out, tensor_type_out );
+    if ( tensor_type_inp != TENSOR_TYPE_INVALID ) {
+        auto inp = tensor_view_input( cs, memory_space, buf_inp, tensor_type_inp );
+        res.sizes.copy_elements_from( inp );
     }
     return res;
 }
@@ -145,7 +121,7 @@ auto dynamic_axis_mutable( CtType<Shape> cd, PI num_dynamic_axis, PI capacity, x
 
 // ------------------- first_positive -------------------
 
-SI first_positive( const std::string &name ) { return 0; }
+SI first_positive( const std::string &/* name */ ) { return 0; }
 SI first_positive( const std::string &name, SI head, auto...tail ) { return head >= 0 ? head : first_positive( name, tail... ); }
 
 } // namespace sdot

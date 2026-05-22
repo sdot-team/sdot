@@ -2,8 +2,8 @@
 
 #ifdef __CUDACC__
 
-#include "ExecutionSpace_Cuda.h"
-#include "ExecutionSpace_Cpu.h"
+#include "ExecutionContext_Cuda.h"
+#include "ExecutionContext_Cpu.h"
 #include "accessible_from.h"
 #include "MemorySpace.h"
 #include "../Ct.h"
@@ -18,8 +18,8 @@ constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_PinnedCpuRam ) 
 constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_CpuRam       ) { return Ct<bool,true>(); }
 constexpr auto operator==( MemorySpace_CpuRam      , MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
 
-auto accessible_from( ExecutionSpace_Cuda, MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
-auto accessible_from( ExecutionSpace_Cpu , MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
+auto accessible_from( ExecutionContext_Cuda, MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
+auto accessible_from( ExecutionContext_Cpu , MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
 
 } // namespace sdot
 

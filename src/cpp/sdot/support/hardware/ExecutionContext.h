@@ -13,7 +13,7 @@ namespace sdot {
 // {}-constructible. When omitted, run_*() infers the space from where the
 // arguments' data reside.
 // ---------------------------------------------------------------------------
-struct ExecutionSpace {
+struct ExecutionContext {
 };
 
 } // namespace sdot

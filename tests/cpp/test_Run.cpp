@@ -72,10 +72,10 @@ struct Range {
 // }
 
 // TEST_CASE( "execution space relations", "" ) {
-//     static_assert( accessible_from_v<CpuExecutionSpace, CpuRam> );
-//     static_assert( accessible_from_v<CpuExecutionSpace, PinnedCpuRam> );
-//     static_assert( !accessible_from_v<CpuExecutionSpace, CudaGlobalRam> );
-//     CHECK( same_memory_space( CpuExecutionSpace{}, CpuExecutionSpace{} ) );
+//     static_assert( accessible_from_v<CpuExecutionContext, CpuRam> );
+//     static_assert( accessible_from_v<CpuExecutionContext, PinnedCpuRam> );
+//     static_assert( !accessible_from_v<CpuExecutionContext, CudaGlobalRam> );
+//     CHECK( same_memory_space( CpuExecutionContext{}, CpuExecutionContext{} ) );
 // }
 
 // TEST_CASE( "space inference from args", "" ) {
@@ -89,7 +89,7 @@ struct Range {
 // }
 
 // TEST_CASE( "host launch config", "" ) {
-//     LaunchConfig lc = compute_launch( 1000, CpuExecutionSpace{}, KtPlain{} );
+//     LaunchConfig lc = compute_launch( 1000, CpuExecutionContext{}, KtPlain{} );
 //     CHECK( lc.grid == 1000 );
 //     CHECK( lc.block == 1 );
 // }
@@ -106,7 +106,7 @@ struct Range {
 
 //     SECTION( "run_sequential: explicit host space" ) {
 //         int total = 0;
-//         run_sequential( CpuExecutionSpace{}, Range{ 5 }, Sum{ {}, &total }, buf, 0 );
+//         run_sequential( CpuExecutionContext{}, Range{ 5 }, Sum{ {}, &total }, buf, 0 );
 //         CHECK( total == 15 );
 //     }
 

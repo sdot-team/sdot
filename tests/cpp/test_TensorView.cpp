@@ -7,7 +7,7 @@
 #ifdef __CUDACC__
 #include "../../src/cpp/sdot/support/hardware/MemorySpace_GlobalCudaRam.h"
 // standalone test: no bindings to set it, so default to the CUDA default stream (0)
-cudaStream_t sdot::ExecutionSpace_Cuda::default_stream = 0;
+cudaStream_t sdot::ExecutionContext_Cuda::default_stream = 0;
 #endif
 
 using namespace sdot;
@@ -35,7 +35,7 @@ using namespace sdot;
 //     // CpuRam is accessible from the CPU execution space -> func gets the very same view,
 //     // no allocation/copy (the transfer branch is elided at compile time).
 //     int calls = 0;
-//     t.make_accessible( ExecutionSpace_Cpu{}, [&]( auto a ) {
+//     t.make_accessible( ExecutionContext_Cpu{}, [&]( auto a ) {
 //         ++calls;
 //         CHECK( a.data() == data ); // same buffer => no transfer happened
 //         CHECK( a.nb_items() == 4 );
@@ -104,11 +104,11 @@ using namespace sdot;
 //     double host[ 4 ] = { 1, 2, 3, 4 };
 //     double back[ 4 ] = { 0, 0, 0, 0 };
 
-//     ExecutionSpace_Cuda es;
+//     ExecutionContext_Cuda es;
 //     MemorySpace_GlobalCudaRam{}.with_reservation<double>( 4, [&]( Ptr<double,MemorySpace_GlobalCudaRam> dev ) {
 //         copy( es, dev, Ptr<double,MemorySpace_CpuRam>( host ), 4 );                    // H2D (on es.stream)
 //         cudaStreamSynchronize( es.stream );
-//         copy( ExecutionSpace_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );  // D2H (syncs)
+//         copy( ExecutionContext_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );  // D2H (syncs)
 //     } );
 
 //     for ( int i = 0; i < 4; ++i )
@@ -123,7 +123,7 @@ using namespace sdot;
 //     TensorView<double,Shape,Strides,MemorySpace_CpuRam> t( data, Shape( Values(), 4 ), Strides( Values(), sizeof( double ) ) );
 
 //     int calls = 0;
-//     t.make_accessible( ExecutionSpace_Cuda{}, [&]( auto g ) {
+//     t.make_accessible( ExecutionContext_Cuda{}, [&]( auto g ) {
 //         ++calls;
 //         CHECK( (void *)g.data() != (void *)data );  // a real device copy was made
 //         cudaMemcpy( back, g.data(), 4 * sizeof( double ), cudaMemcpyDeviceToHost );
@@ -143,15 +143,15 @@ using namespace sdot;
 //     auto  strides = contiguous_strides<double>( shape );
 
 //     MemorySpace_GlobalCudaRam{}.with_reservation<double>( 4, [&]( auto dev ) {
-//         copy( ExecutionSpace_Cuda{}, dev, Ptr<double,MemorySpace_CpuRam>( host ), 4 );
-//         cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+//         copy( ExecutionContext_Cuda{}, dev, Ptr<double,MemorySpace_CpuRam>( host ), 4 );
+//         cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
 //         TensorView<double,Shape,DECAYED_TYPE_OF( strides ),MemorySpace_GlobalCudaRam>
 //             dt( dev.raw, shape, strides, dev.memory_space );
 //         run_parallel( shape.all_indices(), Doubler{}, dt ); // GlobalCudaRam -> dispatch picks CUDA
-//         cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+//         cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
-//         copy( ExecutionSpace_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );
+//         copy( ExecutionContext_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );
 //     } );
 
 //     for ( int i = 0; i < 4; ++i )
@@ -168,16 +168,16 @@ using namespace sdot;
 
 //     MemorySpace_GlobalCudaRam{}.with_reservation<double>( 4, [&]( auto da ) {
 //     MemorySpace_GlobalCudaRam{}.with_reservation<double>( 4, [&]( auto db ) {
-//         copy( ExecutionSpace_Cuda{}, db, Ptr<double,MemorySpace_CpuRam>( hb ), 4 );
-//         copy( ExecutionSpace_Cuda{}, da, Ptr<double,MemorySpace_CpuRam>( ha ), 4 );
-//         cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+//         copy( ExecutionContext_Cuda{}, db, Ptr<double,MemorySpace_CpuRam>( hb ), 4 );
+//         copy( ExecutionContext_Cuda{}, da, Ptr<double,MemorySpace_CpuRam>( ha ), 4 );
+//         cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
 //         DT a( da.raw, shape, strides, da.memory_space );
 //         DT b( db.raw, shape, strides, db.memory_space );
 //         run_parallel( shape.all_indices(), CopyElem{}, a, b ); // device tensors -> CUDA
-//         cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+//         cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
-//         copy( ExecutionSpace_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), da, 4 );
+//         copy( ExecutionContext_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), da, 4 );
 //     } ); } );
 
 //     for ( int i = 0; i < 4; ++i )
@@ -205,13 +205,13 @@ TEST_CASE( "GPU tensor", "" ) {
     MemorySpace_GlobalCudaRam gpu_ram;
     gpu_ram.with_reservation<double>( 4, [&]( auto dev ) {
         copy( dev, Ptr<double,MemorySpace_CpuRam>( data ), 4 );
-        cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+        cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
         TensorView dt( dev.raw, tuple( 4 ), tuple( sizeof( double ) ), dev.memory_space );
         // run_parallel( shape.all_indices(), Doubler{}, dt ); // GlobalCudaRam -> dispatch picks CUDA
-        // cudaStreamSynchronize( ExecutionSpace_Cuda{}.stream );
+        // cudaStreamSynchronize( ExecutionContext_Cuda{}.stream );
 
-        // copy( ExecutionSpace_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );
+        // copy( ExecutionContext_Cpu{}, Ptr<double,MemorySpace_CpuRam>( back ), dev, 4 );
         info( dt[ 0 ].value() );
     } );
 
