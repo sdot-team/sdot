@@ -12,13 +12,13 @@ struct DynamicSizeException {
 
 
 //
-template<class TI,class Shape,class Strides>
+template<class TI,class Shape,class Strides,class MemorySpace>
 class DynamicAxis {
 public:
-    using           Sizes          = TensorView<TI,Shape,Strides>;
+    using           Sizes          = TensorView<TI,Shape,Strides,MemorySpace>;
 
     // slicing/subparts
-    HD auto         operator()     ( auto...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,typename TT::Shape,typename TT::Strides>( num_dynamic_axis, capacity, new_sizes ); }
+    HD auto         operator()     ( auto...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,typename TT::Shape,typename TT::Strides,MemorySpace>( num_dynamic_axis, capacity, new_sizes ); }
     HD auto         row            ( auto index ) const { return operator()( index ); }
 
     // info

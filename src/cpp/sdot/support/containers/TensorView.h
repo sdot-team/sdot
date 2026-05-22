@@ -35,26 +35,31 @@ public:
     // static ctors
     static HD auto   make_invalid         ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
-    // info
-    MemorySpace      memory_space         () const { return _memory_space; }
-    HD PI            nb_items             () const;
-    void             display              ( std::ostream &os ) const;
-
-    HD Strides       strides              () const;
-    HD SI            stride               ( auto d ) const;
-
-    HD auto          shape                ( auto d ) const { return _shape[ d ]; }
-    HD Shape         shape                () const { return _shape; }
-    HD auto          empty                () const;
-    HD auto          size                 () const;
-
+    // generic info
     HD bool          not_surely_null      () const { return ! surely_null(); }
     HD bool          surely_null          () const; ///< is_invalid() || Zero tensor
     HD bool          is_invalid           () const; ///<
     HD bool          is_valid             () const; ///<
 
+    // generic info
+    MemorySpace      memory_space         () const { return _memory_space; }
+    void             display              ( std::ostream &os ) const;
     HD auto          rank                 () const;
 
+    //
+    HD Strides       strides              () const;
+    HD SI            stride               ( auto d ) const;
+
+    // shape
+    HD void          for_each_index       ( auto &&func ) const;
+    HD auto          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
+    HD auto          nb_items             () const;
+    HD auto          shape                ( auto d ) const { return _shape[ d ]; }
+    HD Shape         shape                () const { return _shape; }
+    HD auto          empty                () const;
+    HD auto          size                 () const;
+
+    // content
     HD auto          data                 () const;
 
     HD auto          begin                () const;
@@ -75,38 +80,15 @@ public:
     void             operator=            ( const TensorView &that ) { copy_elements_from( that ); }
     HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
-    //     SDOT_DATA_ACCESSOR( void operator=( TF value ), { static_assert( ct_rank == 0 ); *data() = value; } )
-    //     SDOT_DATA_ACCESSOR( void operator+=( TF value ), { static_assert( ct_rank == 0 ); *data() += value; } )
-    //     SDOT_DATA_ACCESSOR( void operator-=( TF value ), { static_assert( ct_rank == 0 ); *data() -= value; } )
-    // #ifdef __CUDACC__
-    //     __host__   void  operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
-    //     __device__ void  operator=( const auto &that ) requires ( device_accessible_v<MemorySpace> && requires { that.shape(); } ) { copy_elements_from( that ); }
-    // #else
-    //     void             operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
-    // #endif
-
     // data copy / transfer — arch-unaware (HD, valid in device code)
+    void             with_same_shape      ( const auto &arch, auto &&func ) const;
     void             make_accessible      ( auto execution_space, auto &&func ) const;
     HD void          fill_with            ( TF value );
 
-    // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
-    void             fill_with            ( const auto &arch, TF value );
-
-    // cross-arch copy: dst and src may live on different devices
-
-    // shape
-
-    HD void          for_each_index       ( auto &&func ) const;
-
-    HD bool          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
-
-    // T_U auto      sum_along_axis_1() const -> Tensor<U,1,Arch>;
-    void             apply_cpu_version    ( auto &&func ) const;
+    //
     HD auto          unsqueeze            ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
     HD auto          squeeze              ( auto axis, PI index = 0 ) const;
     HD auto          row                  ( PI index ) const;
-
-    void             with_same_shape      ( const auto &arch, auto &&func ) const;
 
 private:
     static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }

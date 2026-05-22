@@ -50,6 +50,17 @@ UTP HD auto DTP::operator[]( auto &&index ) const {
     }
 }
 
+UTP HD auto DTP::operator==( const auto &that ) const {
+    return apply_values( [&]( const auto &...a ) {
+        return that.apply_values( [&]( const auto &...b ) {
+            if constexpr ( sizeof...( a ) == sizeof...( b ) )
+                return ( ( a == b ) && ... && Ct<bool,true>() );
+            else
+                return Ct<bool,false>();
+        } );
+    } );
+}
+
 UTP HD auto DTP::size() const {
     return Ct<int,1 + sizeof...( Tail )>();
 }
@@ -102,6 +113,10 @@ UTP HD auto DTP::apply_values( auto &&cb ) const {
 
 UTP HD Void DTP::operator[]( auto ) const {
     return {};
+}
+
+UTP HD auto DTP::operator==( const auto &that ) const {
+    return that.size() == 0_c;
 }
 
 UTP HD auto DTP::with_appended_value( auto &&new_value ) const {

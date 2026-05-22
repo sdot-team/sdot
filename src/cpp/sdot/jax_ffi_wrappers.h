@@ -10,12 +10,9 @@
 /// Axes with a compile-time known size use StaticAxisValue in the AxisValues:
 ///   auto tv = tensor_view_input( CtType<AxisValues<PI,2,StaticAxisValue<PI,1,3>>>(), buf );
 
-#include "support/DynamicAxis.h"
+#include "support/containers/DynamicAxis.h"
 #include <xla/ffi/api/ffi.h>
 #include <utility>
-
-#include "support/CudaGpu.h" // IWYU pragma: export
-#include "support/Cpu.h" // IWYU pragma: export
 
 namespace sdot {
 
@@ -51,12 +48,17 @@ auto zero_strides() {
 
 // ------------------- tensor_view_input -------------------
 
-template<class Shape, xla::ffi::DataType dtype>
-auto tensor_view_input( CtType<Shape>, xla::ffi::Buffer<dtype> buf, PI8 tensor_type_index = 1 ) {
+template<xla::ffi::DataType dtype>
+auto tensor_view_input( auto &&shape, const auto &memory_space, xla::ffi::Buffer<dtype> buf, PI8 tensor_type_index = 1 ) {
     using TF = SdotTypeFor<dtype>::type;
+    auto strides = contiguous_strides<TF>( shape );
 
+    // invalid
+    if ( tensor_type_index == 0 )
+        return TensorView<TF,Shape,Strides>::make_invalid( shape, strides );
+
+    // surely-null: shape in buf.dimensions()[1:], zero strides, data points to a static TF(0)
     if ( tensor_type_index == 2 ) {
-        // surely-null: shape in buf.dimensions()[1:], zero strides, data points to a static TF(0)
         auto shape = [&]<std::size_t... Is>( std::index_sequence<Is...> ) {
             return Shape( Values(), PI( buf.dimensions()[ Is + 1 ] )... );
         }( std::make_index_sequence<Shape::ct_rank>{} );

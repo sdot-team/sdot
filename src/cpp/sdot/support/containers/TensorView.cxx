@@ -7,7 +7,9 @@
 #include "../hardware/Run.h"
 // #include "contiguous_strides.h"
 // #include "IndexRange.h"
+#include "CartesianProduct.h"
 #include "TensorView.h"
+#include "Range.h"
 
 // #include "../ASSERT.h"
 // #include "TODO.h"
@@ -98,12 +100,38 @@ UTP void DTP::display( std::ostream &os ) const {
     }
 }
 
+UTP HD auto DTP::nb_items() const {
+    return product( _shape );
+}
+
 UTP void DTP::copy_elements_from( const auto &that ) const {
     if ( _strides == that._strides && is_contiguous() ) {
         copy( data(), that.data(), nb_items() );
-    } else {
-        CartesianProduct{ map( _shape, Iota ) }.for_each_item()
+    } else  {
+        TODO; // run( ... ) ?
+        // auto ec = current_execution_context();
+        // make_accessible( ec, [&]( auto &&a ) {
+        //     make_accessible( ec, [&]( auto &&b ) {
+
+        //     } );
+        // } );
+        // auto av = accessible_from( , memory_space() );
+        // auto bv = accessible_from( current_execution_context(), that.memory_space() );
+        // if constexpr ( DECAYED_TYPE_OF( av && bv )::value ) {
+        //     for_each_index( [&]( auto &&index ) {
+        //         operator[]( index ).ref() == that[ index ].value();
+        //     } );
+        // } else {
+        // }
     }
+}
+
+UTP HD auto DTP::is_contiguous() const {
+    return _strides == contiguous_strides<TF>( _shape );
+}
+
+UTP HD void DTP::for_each_index( auto &&func ) const {
+    cartesian_product( map( _shape, range<PI> ) ).for_each_item( FORWARD( func ) );
 }
 
 // namespace details::TensorView {
@@ -287,16 +315,6 @@ UTP void DTP::copy_elements_from( const auto &that ) const {
 //     TODO;
 // }
 
-// UTP HD bool DTP::is_contiguous() const {
-//     // Check that strides match the standard row-major (C-order) contiguous layout.
-//     SI expected = sizeof( TF );
-//     for ( int i = int( rank() ) - 1; i >= 0; --i ) {
-//         if ( _strides[ i ] != expected )
-//             return false;
-//         expected *= SI( _shape[ i ] );
-//     }
-//     return true;
-// }
 
 // UTP HD void DTP::for_each_index( auto &&func ) const {
 //     IndexRange<Shape>{ _shape }.for_each_item( FORWARD( func ) );

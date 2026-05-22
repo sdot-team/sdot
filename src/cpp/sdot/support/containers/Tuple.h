@@ -28,6 +28,7 @@ public:
     HD void      for_each_item      ( auto &&cb_func ) const;
     HD auto      apply_values       ( auto &&cb_func ) const;
     HD auto      operator[]         ( auto &&index ) const;
+    HD auto      operator==         ( const auto &that ) const;
     HD auto      size               () const;
 
     HD auto      with_appended_value( auto &&new_value ) const;
@@ -52,6 +53,7 @@ public:
     HD void      for_each_item      ( auto &&/* cb */ ) const;
     HD auto      apply_values       ( auto &&cb ) const;
     HD Void      operator[]         ( auto ) const;
+    HD auto      operator==         ( const auto &that ) const;
     HD auto      size               () const;
 
     HD auto      with_appended_value( auto &&new_value ) const;
