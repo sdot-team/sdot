@@ -82,6 +82,30 @@ UTP TF& DTP::ref() const {
     return *data();
 }
 
+UTP void DTP::display( std::ostream &os ) const {
+    if constexpr ( ! DECAYED_TYPE_OF( accessible_from( ExecutionSpace_Cpu{}, _memory_space ) )::value ) {
+        make_accessible( ExecutionSpace_Cpu{}, [&]( auto &&tensor ) {
+            tensor.display( os );
+        } );
+    } else if constexpr ( ct_rank == 0 ) {
+        os << value();
+    } else if constexpr ( ct_rank == 1 ) {
+        for( TI i = 0; i < shape( 0_c ); ++i )
+            sdot::display( os << ( i ? ", " : "" ), operator[]( i ) );
+    } else {
+        for( std::size_t i = 0; i < shape( 0_c ); ++i )
+            sdot::display( os << "\n  ", operator[]( i ) );
+    }
+}
+
+UTP void DTP::copy_elements_from( const auto &that ) const {
+    if ( _strides == that._strides && is_contiguous() ) {
+        copy( data(), that.data(), nb_items() );
+    } else {
+        CartesianProduct{ map( _shape, Iota ) }.for_each_item()
+    }
+}
+
 // namespace details::TensorView {
 //     // Namespace-scope functors for arch-aware element-wise ops.
 //     // Lambda bodies inside HD/GD template methods from .cxx files cause issues with

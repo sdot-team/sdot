@@ -32,58 +32,17 @@ public:
     HD               TensorView           ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
     HD               TensorView           ( const TensorView & ) = default; ///< Eigen-like view semantics: copy-construction shares the data (shallow), while operator= copies the elements (deep). The defaulted copy-ctor also silences -Wdeprecated-copy.
 
+    // static ctors
     static HD auto   make_invalid         ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
+    // info
     MemorySpace      memory_space         () const { return _memory_space; }
+    HD PI            nb_items             () const;
+    void             display              ( std::ostream &os ) const;
 
-    // operator() and operator[] produce a new tensor
-    HD auto          operator()           ( const auto &index, auto ...rem ) const;
-    HD auto          operator[]           ( const auto &index ) const { return operator()( index ); }
-    HD auto          operator()           () const { return *this; }
-
-    // scalar value/reference for a rank 1 tensor
-    HD TF            value                () const;
-    HD TF&           ref                  () const;
-
-    //     // scalar value/reference for a rank 0 tensor
-    //     SDOT_DATA_ACCESSOR( operator TF() const, { static_assert( ct_rank == 0 ); return *data(); } )
-
-    //     // element-wise copy into this view, so a( ... ) = b( ... ) works on host AND inside GPU kernels
-    //     // (serial over the indices; meant for small tensors — use get_data_from for bulk). Several
-    //     // operator= overloads so a same-type RHS still deep-copies (suppresses the implicit shallow copy).
-    //     SDOT_DATA_ACCESSOR( void copy_elements_from( const auto &that ) const, { _shape.all_indices().for_each_item( [&]( auto idx ) { ( *this )[ idx ] = that[ idx ]; } ); } )
-    //     SDOT_DATA_ACCESSOR( void operator=( const TensorView &that ), { copy_elements_from( that ); } )
-    //     SDOT_DATA_ACCESSOR( void operator=( TF value ), { static_assert( ct_rank == 0 ); *data() = value; } )
-    //     SDOT_DATA_ACCESSOR( void operator+=( TF value ), { static_assert( ct_rank == 0 ); *data() += value; } )
-    //     SDOT_DATA_ACCESSOR( void operator-=( TF value ), { static_assert( ct_rank == 0 ); *data() -= value; } )
-    // #ifdef __CUDACC__
-    //     __host__   void  operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
-    //     __device__ void  operator=( const auto &that ) requires ( device_accessible_v<MemorySpace> && requires { that.shape(); } ) { copy_elements_from( that ); }
-    // #else
-    //     void             operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
-    // #endif
-
-    //     SDOT_DATA_ACCESSOR( TF& item() const, { static_assert( ct_rank == 0 ); return *data(); } )
-
-    // data copy / transfer — arch-unaware (HD, valid in device code)
-    void             make_accessible      ( auto execution_space, auto &&func ) const;
-    CPU_ONLY void    get_data_from        ( const auto &that );
-    HD void          fill_with            ( TF value );
-
-    // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
-    void             fill_with            ( const auto &arch, TF value );
-
-    // cross-arch copy: dst and src may live on different devices
-    void             get_data_from        ( const auto &dst_arch, const auto &src_arch, const auto &that ) requires requires { arch_copy( dst_arch, (void*)nullptr, src_arch, (const void*)nullptr, PI{} ); };
-
-    HD void          spill_to             ( TensorView &that ); ///< copie data of this to that, and use data from that
-
-    // strides
     HD Strides       strides              () const;
     HD SI            stride               ( auto d ) const;
 
-    // shape
-    HD PI            nb_items             () const;
     HD auto          shape                ( auto d ) const { return _shape[ d ]; }
     HD Shape         shape                () const { return _shape; }
     HD auto          empty                () const;
@@ -101,6 +60,42 @@ public:
     HD auto          begin                () const;
     HD auto          end                  () const;
 
+    // operator() and operator[] produce a new tensor
+    HD auto          operator()           ( const auto &index, auto ...rem ) const;
+    HD auto          operator[]           ( const auto &index ) const { return operator()( index ); }
+    HD auto          operator()           () const { return *this; }
+
+    // scalar value/reference for a rank 1 tensor
+    HD               operator TF          () const { return value(); }
+    HD TF            value                () const;
+    HD TF&           ref                  () const;
+
+    // reassign
+    void             copy_elements_from   ( const auto &that ) const;
+    void             operator=            ( const TensorView &that ) { copy_elements_from( that ); }
+    HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
+
+    //     SDOT_DATA_ACCESSOR( void operator=( TF value ), { static_assert( ct_rank == 0 ); *data() = value; } )
+    //     SDOT_DATA_ACCESSOR( void operator+=( TF value ), { static_assert( ct_rank == 0 ); *data() += value; } )
+    //     SDOT_DATA_ACCESSOR( void operator-=( TF value ), { static_assert( ct_rank == 0 ); *data() -= value; } )
+    // #ifdef __CUDACC__
+    //     __host__   void  operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
+    //     __device__ void  operator=( const auto &that ) requires ( device_accessible_v<MemorySpace> && requires { that.shape(); } ) { copy_elements_from( that ); }
+    // #else
+    //     void             operator=( const auto &that ) requires ( host_accessible_v<MemorySpace>   && requires { that.shape(); } ) { copy_elements_from( that ); }
+    // #endif
+
+    // data copy / transfer — arch-unaware (HD, valid in device code)
+    void             make_accessible      ( auto execution_space, auto &&func ) const;
+    HD void          fill_with            ( TF value );
+
+    // data copy / transfer — arch-aware (host only, dispatches to GPU when arch=CudaGpu)
+    void             fill_with            ( const auto &arch, TF value );
+
+    // cross-arch copy: dst and src may live on different devices
+
+    // shape
+
     HD void          for_each_index       ( auto &&func ) const;
 
     HD bool          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
@@ -114,7 +109,6 @@ public:
     void             with_same_shape      ( const auto &arch, auto &&func ) const;
 
 private:
-    HD void          _check_execution_space            () const;
     static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }
 
     MemorySpace      _memory_space;       ///<

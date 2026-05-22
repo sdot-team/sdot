@@ -188,11 +188,15 @@ using namespace sdot;
 
 TEST_CASE( "TensorView::make_accessible — CPU pass-through", "" ) {
     double data[ 4 ] = { 1, 2, 3, 4 };
-    TensorView t( data, tuple( 4 ), tuple( sizeof( double ) ), MemorySpace_CpuRam{} );
+    auto shape = tuple( 2, 2 );
+    TensorView t( data, shape, contiguous_strides<double>( shape ), MemorySpace_CpuRam{} );
     info( t );
 
-    info( contiguous_strides<double>( tuple( 3, 4 ) ) );
-    info( contiguous_strides<double>( tuple( 3, 4_c ) ) );
+    t( 0 ) = t( 1 );
+    info( t );
+
+    // info( contiguous_strides<double>( tuple( 3, 4 ) ) );
+    // info( contiguous_strides<double>( tuple( 3, 4_c ) ) );
 }
 
 #ifdef __CUDACC__

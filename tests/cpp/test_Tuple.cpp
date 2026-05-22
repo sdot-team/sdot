@@ -1,3 +1,5 @@
+#include "../../src/cpp/sdot/support/containers/CartesianProduct.h"
+#include "../../src/cpp/sdot/support/containers/Range.h"
 #include "../../src/cpp/sdot/support/containers/Tuple.h"
 #include "catch_main.h"
 #include <array>
@@ -38,5 +40,6 @@ TEST_CASE( "AxisValues", "" ) {
 
     SECTION( "map" ) {
         CHECK_REPR( map( c, []( auto v ) { return 2_c * v; } ), tuple( 2, 4_c, 6u ) );
+        info( cartesian_product( map( c, range<PI> ) ) );
     }
 }
