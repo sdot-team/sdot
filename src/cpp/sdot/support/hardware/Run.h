@@ -24,11 +24,13 @@ namespace sdot {
 // GPU: a single device thread).
 // ---------------------------------------------------------------------------
 
-/// call func for each list item, parallel way
-CPU_ONLY void run_parallel( auto &&list, auto &&func, auto &&...args );
+/// call func for each list item, parallel way.
+/// HD: callable from device code too — there it means "already inside a kernel", so it runs
+/// inline (sequential on the current thread), the device counterpart of the CPU inline path.
+HD void run_parallel( auto &&list, auto &&func, auto &&...args );
 
 /// call func for each list item, one by one
-CPU_ONLY void run_sequential( auto &&list, auto &&func, auto &&...args );
+HD void run_sequential( auto &&list, auto &&func, auto &&...args );
 
 } // namespace sdot
 

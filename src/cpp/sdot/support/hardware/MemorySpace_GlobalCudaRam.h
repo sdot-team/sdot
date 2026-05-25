@@ -24,6 +24,7 @@ struct MemorySpace_GlobalCudaRam : MemorySpace {
         func( Ptr<T,MemorySpace_GlobalCudaRam>( p, *this ) );
         cudaFree( p );
     }
+    void         display( auto &os ) const { os << "GlobalCudaRam"; }
 };
 
 constexpr auto operator==( MemorySpace_GlobalCudaRam, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }

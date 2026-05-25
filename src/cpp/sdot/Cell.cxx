@@ -229,7 +229,7 @@ UTP bool DTP::vertex_inf( PI num_vertex ) const {
 }
 
 UTP typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
-    return std::span( &cut_planes( num_cut, 0 ), dim );
+    return cut_planes( num_cut, 0 );
 }
 
 UTP TF DTP::cut_dot( PI num_cut ) const {
@@ -248,7 +248,7 @@ UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_ve
 }
 
 /// Fan triangulation — recursive core.
-UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,Arch,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
+UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
     // register the new vertex
     simplex[ simplex_size++ ] = num_vertex;
 
@@ -276,14 +276,14 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,Arch,d> &cut_indices,
     }
 }
 
-UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map, auto &&func ) {
+UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map, auto &&func ) {
     constexpr int ct_simplex = dim + 1;
     if ( nb_vertices == 0 )
         return;
 
     //
     if ( dim == 2 ) {
-        Vector<TI,Arch,ct_simplex> simplex;
+        Vector<TI,ct_simplex> simplex;
         simplex[ 0 ] = 0;
         for( TI num_vertex = 3; num_vertex <= nb_vertices; ++num_vertex ) {
             simplex[ 1 ] = num_vertex - 2;
@@ -294,10 +294,10 @@ UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_valu
     }
 
     // make a list
-    Vector<TI,Arch,ct_simplex> simplex;
+    Vector<TI,ct_simplex> simplex;
     item_map.reserve( nb_vertices );
     for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        Vector<TI,Arch,dim> cut_indices( vertex_indices( num_vertex ) );
+        Vector<TI,dim> cut_indices( vertex_indices( num_vertex ) );
         for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
     }
 }
@@ -322,7 +322,7 @@ UTP void DTP::for_each_face( auto &&func ) {
     if ( dim == 2 ) {
         std::vector<PI> indices( nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
-        func( indices, Vector<TI,Arch,0>( Values() ) );
+        func( indices, Vector<TI,0>( Values() ) );
         return;
     }
 
@@ -392,7 +392,7 @@ UTP void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch> &item_map ) {
+UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map ) {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
@@ -424,7 +424,7 @@ UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,Arch
     return sum / factorial( dim );
 }
 
-UTP T_d auto DTP::simplex_from_indices( const Vector<TI,Arch,d> &indices ) const {
+UTP T_d auto DTP::simplex_from_indices( const Vector<TI,d> &indices ) const {
     Simplex<dim,d,TF> res;
     for( PI i = 0; i < d; ++i )
         res.pts[ i ] = vertex_position( indices[ i ] );
@@ -940,7 +940,7 @@ UTP void DTP::check_consistency() {
     }
 }
 
-template<class Value,int ct_dim_value,class Arch,class TF,class TI>
+template<class Value,class TF,class TI,class MemorySpace,int ct_dim_value>
 struct Integral<Value,DTP> {
     static auto integral( const Value &value, DTP &cw ) {
         // infinite cell

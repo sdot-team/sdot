@@ -58,17 +58,17 @@ namespace RunDetails {
     };
 } // namespace RunDetails
 
-CPU_ONLY void run_parallel( auto &&list, auto &&func, auto &&...args ) {
+HD void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     // statically chosen from the args' memory spaces (single type -> only this branch compiles)
     auto execution_space = execution_space_for( args... );
 
     // make every arg accessible from that space (pass-through or transfer), then run
-    RunDetails::_get_args_on( execution_space, Ct<int,1+sizeof...( args )>(), FORWARD( list ), FORWARD( args )..., [&]( auto &&list, auto &&...args ) {
+    RunDetails::_get_args_on( execution_space, Ct<int,1+sizeof...( args )>(), FORWARD( list ), FORWARD( args )..., [&] HD ( auto &&list, auto &&...args ) {
         execution_space.run_parallel( FORWARD( list ), FORWARD( func ), FORWARD( args )... );
     } );
 }
 
-CPU_ONLY void run_sequential( auto &&list, auto &&func, auto &&...args ) {
+HD void run_sequential( auto &&list, auto &&func, auto &&...args ) {
     run_parallel( FORWARD( list ), RunDetails::RunSequentialWrapper<DECAYED_TYPE_OF(func)>{ FORWARD( func ) }, FORWARD( args )... );
 }
 

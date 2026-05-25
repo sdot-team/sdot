@@ -43,12 +43,24 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     #endif
 
     HD void run_parallel( const auto &list, auto &&func, auto &&...args ) {
+    #ifdef __CUDA_ARCH__
+        // Called from device code: we are already inside a kernel, so there is no nested launch
+        // (that would need dynamic parallelism). Run inline on the current thread — the device
+        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch.
+        CudaThreadInfo thread_info;
+        RunTraits::per_thread( func, thread_info, list, [&] HD ( auto &&...args ) {
+            for_each_item( list, [&] HD ( auto &&item ) {
+                func( item, FORWARD( args )... );
+            } );
+        }, FORWARD( args )... );
+    #else
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
         const int threads_per_block = 256;
         const int nb_threads        = int( list.nb_items() );
         const int nb_blocks         = ( nb_threads + threads_per_block - 1 ) / threads_per_block;
         _execution_space_cuda_run_parallel<<< nb_blocks, threads_per_block, 0, stream >>>( list, func, FORWARD( args )... );
+    #endif
     }
 
 };

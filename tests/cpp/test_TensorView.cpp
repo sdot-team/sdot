@@ -3,6 +3,7 @@
 #include "../../src/cpp/sdot/support/containers/TensorView.h"
 // #include "../../src/cpp/sdot/support/hardware/Run.h"
 #include "catch_main.h"
+#include "sdot_test_matrix.h"
 
 #ifdef __CUDACC__
 #include "../../src/cpp/sdot/support/hardware/MemorySpace_GlobalCudaRam.h"
@@ -197,6 +198,47 @@ TEST_CASE( "TensorView::make_accessible — CPU pass-through", "" ) {
 
     // info( contiguous_strides<double>( tuple( 3, 4 ) ) );
     // info( contiguous_strides<double>( tuple( 3, 4_c ) ) );
+}
+
+// Inner body of the nested run_parallel: writes one element of a row.
+struct WriteElem {
+    void operator()( auto j, auto row, double s ) const { row.row( j ) = s; }
+};
+
+// Outer body: for each row, spawn a *nested* run_parallel over that row's columns.
+// `a` arrives tagged has_already_been_parallelized (added on the pool path), and the
+// tag propagates through a.row(i) (squeeze transform), so the nested run_parallel runs
+// inline on the current worker — no pool round-trip, hence no self-wait deadlock.
+struct FillRows {
+    void operator()( auto i, auto a, double s ) const {
+        auto r = a.row( i );
+        static_assert( DECAYED_TYPE_OF( r )::template has_tag<container_tags::has_already_been_parallelized> );
+        run_parallel( range( r.size() ), WriteElem{}, r, s + double( i ) );
+    }
+};
+
+// Element-wise `a += b` over the full matrix: operand-A memory space × operand-B
+// memory space × shape × execution context. Exercises cross-space transfer
+// (make_accessible) and the nested/inline dispatch, all checked against a + b.
+TEST_CASE( "operator+= — element-wise, matrix over memory spaces and contexts", "" ) {
+    sdot_test::check_binary_op_matrix(
+        []  HD ( auto a, auto b ) { a += b; },
+        [] ( double a, double b ) { return a + b; } );
+}
+
+TEST_CASE( "run_parallel — nested run_parallel runs inline (no deadlock)", "" ) {
+    double da[ 4 ] = { 0, 0, 0, 0 };
+    auto shape = tuple( 2, 2 );
+    TensorView a( da, shape, contiguous_strides<double>( shape ), MemorySpace_CpuRam{} );
+
+    // top-level operand a is not tagged -> pool path (and it gets tagged for the body)
+    static_assert( ! DECAYED_TYPE_OF( a )::template has_tag<container_tags::has_already_been_parallelized> );
+    run_parallel( range( shape[ 0_c ] ), FillRows{}, a, 100.0 );
+
+    CHECK( da[ 0 ] == 100 ); // row 0 -> 100 + 0
+    CHECK( da[ 1 ] == 100 );
+    CHECK( da[ 2 ] == 101 ); // row 1 -> 100 + 1
+    CHECK( da[ 3 ] == 101 );
 }
 
 #ifdef __CUDACC__

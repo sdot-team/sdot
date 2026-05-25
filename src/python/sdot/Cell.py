@@ -65,7 +65,7 @@ class Cell:
             diag  = eye * diff[ :, None, : ]                       # (batch_size, dim, dim)
             frame = driver.concatenate( [ min_coords[ :, None, : ] ] + [ diag[ :, r:r+1, : ] for r in range( dim ) ], axis = 1 )
 
-            cut_id = driver.array( cut_id )
+            cut_id = driver.array( cut_id, dtype = int )
             if cut_id.ndim == 0:
                 cut_id = driver.repeat( cut_id, ( batch_size ) )
 
@@ -98,14 +98,14 @@ class Cell:
     @classmethod
     def hypercube( cls, frame, cut_id : any = BOUNDARY ):
         batch_sizes = [ frame.shape[ 0 ] ] if hasattr( cls, 'BatchItemVersion' ) else []
-        cut_id = driver.array( cut_id )
+        cut_id = driver.array( cut_id, dtype = int )
         frame = driver.array( frame )
         assert frame is not None
         dim = frame.shape[ -1 ]
 
         return cast( cls, driver.call(
-            """ arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
-            """ arch.run_parallel( p.cell.batch_sizes(), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
+            """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
+            """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
             frame = frame,
@@ -130,7 +130,7 @@ class Cell:
         max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, max_nb_cuts )
         max_nb_threads = driver.nb_threads()
 
-        # info( self.vertex_positions[ :, 1, 0 ] )
+        # info( self.vertex_positions[ :, 1, 0 ] ).
 
         return driver.call(
             """

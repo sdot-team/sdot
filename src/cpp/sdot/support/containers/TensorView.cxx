@@ -17,10 +17,17 @@
 // #include <algorithm>
 // #include <cstring>
 
-#define UTP template<class TF,class MemorySpace,class Shape,class Strides>
-#define DTP TensorView<TF,MemorySpace,Shape,Strides>
+#define UTP template<class TF,class MemorySpace,class Shape,class Strides,class... Tags>
+#define DTP TensorView<TF,MemorySpace,Shape,Strides,Tags...>
 
 namespace sdot {
+
+namespace details::TensorView {
+    /// bind the leading TensorView params and expand a TagList into the trailing tag pack
+    template<class TF,class MemorySpace,class Shape,class Strides,class List> struct with_tag_list;
+    template<class TF,class MemorySpace,class Shape,class Strides,class... Tags>
+    struct with_tag_list<TF,MemorySpace,Shape,Strides,sdot::TagList<Tags...>> { using type = sdot::TensorView<TF,MemorySpace,Shape,Strides,Tags...>; };
+} // namespace details::TensorView
 
 UTP HD DTP DTP::make_invalid( Shape shape, Strides strides, MemorySpace memory_space ) {
     return TensorView( _sentinel().template as<TF>(), shape, strides, memory_space );
@@ -39,8 +46,63 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
         return row( index )( rem... );
 }
 
+UTP HD void DTP::operator-=( const auto &that ) {
+    TODO;
+}
+
+// `index` is a full multi-index, so a[index] / b[index] are rank-0 views.
+struct AddTensorItemElementwise {              ///< same-shape operand: a[i] += b[i]
+    HD void operator()( auto index, auto a, auto b ) const { a[ index ] += b[ index ]; }
+};
+struct AddTensorItemBroadcast {                ///< scalar / rank-0 operand: a[i] += b
+    HD void operator()( auto index, auto a, auto b ) const { a[ index ] += b; }
+};
+
+/// true iff `B` is a tensor operand with the same rank as the destination (-> element-wise);
+/// anything else (a scalar, or a lower-rank view) is broadcast.
+template<class B,int dst_rank>
+HD constexpr bool add_is_elementwise() {
+    if constexpr ( requires { B::ct_rank; } )
+        return int( B::ct_rank ) == dst_rank;
+    else
+        return false;
+}
+
+UTP HD void DTP::operator+=( const auto &that ) {
+    if constexpr ( ct_rank == 0 ) {
+        // base case: accumulate in place (also what stops the per-item recursion above)
+        auto ec = current_execution_context();
+        if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value ) {
+            *data() += TF( that );
+        } else {
+            TF cur = value();
+            cur += TF( that );
+            operator=( cur );
+        }
+    } else if constexpr ( add_is_elementwise<DECAYED_TYPE_OF( that ),ct_rank>() ) {
+        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemElementwise(), *this, that );
+    } else {
+        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemBroadcast(), *this, that );
+    }
+}
+
+UTP HD void DTP::operator*=( const auto &that ) {
+    TODO;
+}
+
+UTP HD void DTP::operator/=( const auto &that ) {
+    TODO;
+}
+
+
+UTP HD void DTP::operator=( const TensorView &that ) {
+    copy_elements_from( that );
+}
+
 UTP HD void DTP::operator=( const auto &that ) {
-    if constexpr ( requires { that.shape(); } || requires { that.size(); } )
+    if constexpr ( requires { that.shape(); } )
+        copy_elements_from( that );
+    else if constexpr ( requires { that.size(); } )
         copy_elements_from( that );
     else {
         static_assert( ct_rank == 0 );
@@ -64,11 +126,26 @@ UTP HD auto DTP::squeeze( auto axis, PI index ) const {
 
     auto ptr = ( _raw_ptr + _strides[ axis ] * index ).template as<TF>();
 
-    return TensorView<TF,NewShape,NewStrides,MemorySpace>( ptr, new_shape, new_strides, _memory_space );
+    // tags are rewritten through the squeeze derivation (identity by default)
+    using Op = container_ops::squeeze<DECAYED_TYPE_OF( axis )>;
+    using Result = typename details::TensorView::with_tag_list<TF,MemorySpace,NewShape,NewStrides,tags_after<Op,Tags...>>::type;
+    return Result( ptr, new_shape, new_strides, _memory_space );
 }
 
 UTP HD auto DTP::row( PI index ) const {
     return squeeze( Ct<int,0>(), index );
+}
+
+UTP template<class... ExtraTags> HD auto DTP::with_tags() const {
+    // same data, tag pack extended with ExtraTags... (appended verbatim, no axis transform)
+    return TensorView<TF,MemorySpace,Shape,Strides,Tags...,ExtraTags...>( data().raw, _shape, _strides, _memory_space );
+}
+
+UTP HD auto DTP::as_already_parallelized() const {
+    if constexpr ( has_tag<container_tags::has_already_been_parallelized> )
+        return *this; // already tagged -> keep the type stable (no growth on repeated nesting)
+    else
+        return with_tags<container_tags::has_already_been_parallelized>();
 }
 
 UTP HD auto DTP::data() const {
@@ -113,8 +190,8 @@ UTP HD auto DTP::nb_items() const {
     return product( _shape );
 }
 
-UTP HD void DTP::copy_elements_from( const auto &that ) const {
-    if ( _strides == that._strides && is_contiguous() ) {
+UTP HD void DTP::copy_elements_from( const auto &that ) {
+    if ( _strides == that.strides() && is_contiguous() ) {
         copy( data(), that.data(), nb_items() );
     } else  {
         TODO; // run( ... ) ?
@@ -156,50 +233,56 @@ UTP HD auto DTP::empty() const {
     } );
 }
 
-// namespace details::TensorView {
-//     // Namespace-scope functors for arch-aware element-wise ops.
-//     // Lambda bodies inside HD/GD template methods from .cxx files cause issues with
-//     // some nvcc versions when the lambda references class-level template params (TF).
-//     // Using concrete struct operator() avoids the problem.
-//     template<class DstTV, class SrcTV, class BI>
-//     struct TensorCopyFunctor {
-//         DstTV dst;
-//         SrcTV src;
-//         GD void operator()( BI bi ) const {
-//             dst( bi ).item() = src( bi ).item();
-//         }
-//     };
+namespace details::TensorView {
+    // Namespace-scope functors for arch-aware element-wise ops.
+    // Lambda bodies inside HD/GD template methods from .cxx files cause issues with
+    // some nvcc versions when the lambda references class-level template params (TF).
+    // Using concrete struct operator() avoids the problem.
+    template<class DstTV, class SrcTV, class BI>
+    struct TensorCopyFunctor {
+        DstTV dst;
+        SrcTV src;
+        GD void operator()( BI bi ) const {
+            dst( bi ).item() = src( bi ).item();
+        }
+    };
 
-//     template<class DstTV, class ValT, class BI>
-//     struct TensorFillFunctor {
-//         DstTV dst;
-//         ValT value;
-//         GD void operator()( BI bi ) const {
-//             dst( bi ).item() = value;
-//         }
-//     };
-// } // namespace details::TensorView
+    struct TensorFillFunctor {
+        GD void operator()( auto index, auto dst, auto value ) const {
+            dst( index ) = value;
+        }
+    };
+} // namespace details::TensorView
+
+UTP HD auto DTP::all_indices() const {
+    return cartesian_product_ranges( _shape );
+}
+
+UTP void DTP::fill_with( TF value ) {
+    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), *this, value );
+}
 
 
-// UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {
-//     if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value ) {
-//         // data already reachable from this execution space → no transfer
-//         func( *this );
-//     } else {
-//         // materialize a contiguous copy in the execution space's native memory space, bring
-//         // the data in (transfer driven by execution_space's stream), run, then release.
-//         // NB: assumes a contiguous source; strided cross-space transfer is a TODO.
-//         auto dst_ms = native_memory_space( execution_space );
-//         using DstMS = DECAYED_TYPE_OF( dst_ms );
-//         dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
-//             auto strides = contiguous_strides<TF>( _shape );
-//             TensorView<TF,Shape,DECAYED_TYPE_OF( strides ),DstMS> dst( buf.raw, _shape, strides, dst_ms );
-//             copy( execution_space, buf, Ptr<TF,MemorySpace>( data(), _memory_space ), nb_items() );
-//             func( dst );
-//             // TODO in/out: copy dst → *this back after func, depending on the argument category
-//         } );
-//     }
-// }
+UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {
+    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value ) {
+        // data already reachable from this execution space → no transfer
+        func( *this );
+    } else {
+        // materialize a contiguous copy in the execution space's native memory space, bring
+        // the data in (transfer driven by execution_space's stream), run, then release.
+        // NB: assumes a contiguous source; strided cross-space transfer is a TODO.
+        // auto dst_ms = native_memory_space( execution_space );
+        // using DstMS = DECAYED_TYPE_OF( dst_ms );
+        // dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
+        //     auto strides = contiguous_strides<TF>( _shape );
+        //     TensorView<TF,Shape,DECAYED_TYPE_OF( strides ),DstMS> dst( buf.raw, _shape, strides, dst_ms );
+        //     copy( execution_space, buf, Ptr<TF,MemorySpace>( data(), _memory_space ), nb_items() );
+        //     func( dst );
+        //     // TODO in/out: copy dst → *this back after func, depending on the argument category
+        // } );
+        TODO;
+    }
+}
 
 // UTP CPU_ONLY void DTP::get_data_from( const auto &that ) {
 //     // contiguous -> copy works for all the cases
@@ -215,9 +298,6 @@ UTP HD auto DTP::empty() const {
 //     TODO;
 // }
 
-// UTP void DTP::fill_with( TF value ) {
-//     run_parallel( _shape.all_indices(), details::TensorView::TensorFillFunctor{ *this, value } );
-// }
 
 // UTP void DTP::with_same_shape( const auto &arch, auto &&func ) const {
 //     arch.template with_reservation<TF>( nb_items(), [&]( auto buf ) {
@@ -235,15 +315,13 @@ UTP HD auto DTP::empty() const {
 // }
 
 
-// // operator[] and item() are single-context inline accessors in TensorView.h (SDOT_DATA_ACCESSOR)
+UTP HD Strides DTP::strides() const {
+    return _strides;
+}
 
-// UTP HD Strides DTP::strides() const {
-//     return _strides;
-// }
-
-// UTP HD SI DTP::stride( auto d ) const {
-//     return _strides[ d ];
-// }
+UTP HD auto DTP::stride( auto d ) const {
+    return _strides[ d ];
+}
 
 // UTP HD PI DTP::nb_items() const {
 //     PI res = 1;
@@ -253,48 +331,49 @@ UTP HD auto DTP::empty() const {
 // }
 
 
-// UTP HD bool DTP::surely_null() const {
-//     if ( is_invalid() )
-//         return true;
+UTP HD bool DTP::surely_null() const {
+    TODO;
+    // if ( is_invalid() )
+    //     return true;
 
-//     /* Version using lambdas and Ct<> (causes nvcc to crash in some cases)
-//     // empty tensor (any dimension == 0)
-//     if ( _shape.has_value( []( auto size ) -> bool { return size < Ct<int,1>(); } ) )
-//         return true;
-//     // all strides zero (rank > 0) → surely-null by construction: all elements alias data()[0] == 0
-//     if ( rank() > 0 && ! _strides.has_value( []( auto size ) -> bool { return size != Ct<int,0>(); } ) )
-//         return true;
-//     // single scalar: check value
-//     if ( ! _shape.has_value( []( auto size ) -> bool { return size > Ct<int,1>(); } ) )
-//         return *data() == 0;
-//     */
+    // /* Version using lambdas and Ct<> (causes nvcc to crash in some cases)
+    // // empty tensor (any dimension == 0)
+    // if ( _shape.has_value( []( auto size ) -> bool { return size < Ct<int,1>(); } ) )
+    //     return true;
+    // // all strides zero (rank > 0) → surely-null by construction: all elements alias data()[0] == 0
+    // if ( rank() > 0 && ! _strides.has_value( []( auto size ) -> bool { return size != Ct<int,0>(); } ) )
+    //     return true;
+    // // single scalar: check value
+    // if ( ! _shape.has_value( []( auto size ) -> bool { return size > Ct<int,1>(); } ) )
+    //     return *data() == 0;
+    // */
 
-//     // empty tensor (any dimension == 0)
-//     for ( PI i = 0; i < ct_rank; ++i )
-//         if ( _shape[ i ] == 0 )
-//             return true;
+    // // empty tensor (any dimension == 0)
+    // for ( PI i = 0; i < ct_rank; ++i )
+    //     if ( _shape[ i ] == 0 )
+    //         return true;
 
-//     // all strides zero (rank > 0) → surely-null if *data()
-//     bool all_strides_zero = true;
-//     for ( PI i = 0; i < ct_rank; ++i ) {
-//         if ( _strides[ i ] && _shape[ i ] > 1 ) {
-//             all_strides_zero = false;
-//             break;
-//         }
-//     }
-//     if ( all_strides_zero )
-//         return *data() == 0;
+    // // all strides zero (rank > 0) → surely-null if *data()
+    // bool all_strides_zero = true;
+    // for ( PI i = 0; i < ct_rank; ++i ) {
+    //     if ( _strides[ i ] && _shape[ i ] > 1 ) {
+    //         all_strides_zero = false;
+    //         break;
+    //     }
+    // }
+    // if ( all_strides_zero )
+    //     return *data() == 0;
 
-//     return false;
-// }
+    // return false;
+}
 
-// UTP HD bool DTP::is_invalid() const {
-//     return _raw_ptr == sentinel();
-// }
+UTP HD bool DTP::is_invalid() const {
+    return _raw_ptr == _sentinel();
+}
 
-// UTP HD bool DTP::is_valid() const {
-//     return _raw_ptr != sentinel();
-// }
+UTP HD bool DTP::is_valid() const {
+    return _raw_ptr != _sentinel();
+}
 
 // UTP HD auto DTP::rank() const {
 //     return Ct<int,ct_rank>();

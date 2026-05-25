@@ -255,7 +255,15 @@ def test_gpu_basic():
     info( sdot.driver.device )
     #info( sdot.driver.call( "arch.run_single( [p] HD () { p.output.item() = double( p.input[ 0 ] + p.input[ 1 ] ); } );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
     # info( sdot.driver.call( "cudaMemcpyAsync( p.output.data(), p.input.data(), sizeof( FP64 ), cudaMemcpyDeviceToDevice, stream );", output = sdot.Return( sdot.Tensor() ), input = sdot.driver.array( [ 3., 4. ] ) ) )
-    info( sdot.driver.call( "using P = DECAYED_TYPE_OF( p ); run_sequential( Range( 1 ), [] HD ( int, P p ) mutable { p.output[ 0 ] = p.input[ 1 ]; }, p );", output = sdot.Return( sdot.Tensor( "dim", ct_variables = [ "dim" ] ), dim = 2 ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    # info( sdot.driver.call( "using P = DECAYED_TYPE_OF( p ); run_sequential( Range( 1 ), [] HD ( int, P p ) mutable { p.output[ 0 ] = p.input[ 1 ]; }, p );", output = sdot.Return( sdot.Tensor( "dim", ct_variables = [ "dim" ] ), dim = 2 ), input = sdot.driver.array( [ 3., 4. ] ) ) )
+    info( sdot.driver.call( """
+        using P = DECAYED_TYPE_OF( p );
+        run_sequential( Range( 1 ), [] HD ( int, P p ) mutable {
+            info( p.input );
+            p.output[ 0 ] = 10;
+            p.output[ 0 ] += p.input[ 1 ];
+        }, p );
+    """, output = sdot.Return( sdot.Tensor( "dim", ct_variables = [ "dim" ] ), dim = 2 ), input = sdot.driver.array( [ 3., 4. ] ) ) )
 
 # import jax
 

@@ -6,12 +6,22 @@
 #include "ExecutionContext_Cpu.h"
 #include "accessible_from.h"
 #include "MemorySpace.h"
+#include "Ptr.h"
 #include "../Ct.h"
 
 namespace sdot {
 
 /// page-locked host memory: zero-copy reachable from both host and device
 struct MemorySpace_PinnedCpuRam : MemorySpace {
+    /// allocate `n` page-locked items of T, expose them (as an informed Ptr) to `func`, then release.
+    /// cudaMallocHost/cudaFreeHost are host APIs -> __host__ only.
+    T_T __host__ void with_reservation( PI n, auto &&func ) const {
+        T *p = nullptr;
+        cudaMallocHost( reinterpret_cast<void **>( &p ), n * sizeof( T ) );
+        func( Ptr<T,MemorySpace_PinnedCpuRam>( p, *this ) );
+        cudaFreeHost( p );
+    }
+    void         display( auto &os ) const { os << "PinnedCpuRam"; }
 };
 
 constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }

@@ -6,7 +6,7 @@
 
 namespace sdot {
 
-template<int dim,int npt,class TF,class Arch>
+template<int dim,int npt,class TF>
 struct Simplex {
     using Pt = Vector<TF,dim>;
 

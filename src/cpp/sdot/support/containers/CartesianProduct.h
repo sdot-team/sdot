@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Tuple.h"
+#include "Range.h"
 
 namespace sdot {
 
@@ -39,9 +40,19 @@ struct CartesianProducts<> {
     }
 };
 
+auto cartesian_product_args( auto &&...lists ) {
+    return CartesianProducts<DECAYED_TYPE_OF( lists )...>{ FORWARD( lists )... };
+}
+
 auto cartesian_product( auto &&tuple_of_lists ) {
     return tuple_of_lists.apply_values( [&]( auto &&...lists ) {
-        return CartesianProducts<DECAYED_TYPE_OF( lists )...>{ FORWARD( lists )... };
+        return cartesian_product_args( FORWARD( lists )... );
+    } );
+}
+
+auto cartesian_product_ranges( auto &&tuple_of_lists ) {
+    return tuple_of_lists.apply_values( [&]( auto &&...lists ) {
+        return cartesian_product_args( range( FORWARD( lists ) )... );
     } );
 }
 

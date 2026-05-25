@@ -299,7 +299,7 @@ class CallArg_Aggregate( CallArg ):
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
 
             assert len( batch_axes )
-            lines.append( f"    HD auto operator()( AxisTuple<TI,Arch,{ len( batch_axes ) }> bi ) const {{" )
+            lines.append( f"    HD auto operator()( Tuple<{ ','.join( [ 'TI' ] * len( batch_axes ) ) }> bi ) const {{" )
             lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
             for ct_axis_name in ct_variables:
                 lines.append( f"            .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )

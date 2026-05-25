@@ -6,6 +6,7 @@
 #include "../hardware/Ptr.h"
 
 #include "contiguous_strides.h" // IWYU pragma: export
+#include "container_tags.h" // IWYU pragma: export
 #include "Vector.h" // IWYU pragma: export
 #include "Tuple.h" // IWYU pragma: export
 
@@ -15,7 +16,8 @@ namespace sdot {
 /// view on strided data (strides in bytes, handles non-contiguous arrays)
 ///   MemorySpace = where the data lives (drives the informed pointer Ptr<...,MemorySpace>).
 ///   The shape no longer carries any arch/memory tag; it is a parameter of the view.
-template<class _TF,class _MemorySpace,class _Shape,class _Strides = DECAYED_TYPE_OF( contiguous_strides<_TF>( Shape() ) )>
+///   Tags...      = compile-time facts about the view (see container_tags.h).
+template<class _TF,class _MemorySpace,class _Shape,class _Strides = DECAYED_TYPE_OF( contiguous_strides<_TF>( _Shape{} ) ),class... _Tags>
 class TensorView {
 public:
     using            MemorySpace          = _MemorySpace;
@@ -23,6 +25,9 @@ public:
     using            Shape                = _Shape;
     using            TF                   = _TF;
     using            TI                   = SI;
+
+    /// is `Tag` part of this view's compile-time tag set ?
+    template<class Tag> static constexpr bool has_tag = contains_tag<Tag,_Tags...>;
 
     using            value_type           = TF;
     SCInt            ct_rank              = Shape::ct_size;
@@ -48,11 +53,12 @@ public:
 
     //
     HD Strides       strides              () const;
-    HD SI            stride               ( auto d ) const;
+    HD auto          stride               ( auto d ) const;
 
     // shape
     HD void          for_each_index       ( auto &&func ) const;
     HD auto          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
+    HD auto          all_indices          () const;
     HD auto          nb_items             () const;
     HD auto          shape                ( auto d ) const { return _shape[ d ]; }
     HD Shape         shape                () const { return _shape; }
@@ -76,9 +82,13 @@ public:
     HD TF&           ref                  () const;
 
     // reassign
-    HD void          copy_elements_from   ( const auto &that ) const;
-    HD void          operator=            ( const TensorView &that ) { copy_elements_from( that ); }
+    HD void          copy_elements_from   ( const auto &that );
+    HD void          operator-=           ( const auto &that );
+    HD void          operator+=           ( const auto &that );
+    HD void          operator*=           ( const auto &that );
+    HD void          operator/=           ( const auto &that );
     HD void          operator=            ( const auto &that );
+    HD void          operator=            ( const TensorView &that );
     HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
@@ -90,6 +100,11 @@ public:
     HD auto          unsqueeze            ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
     HD auto          squeeze              ( auto axis, PI index = 0 ) const;
     HD auto          row                  ( PI index ) const;
+
+    // compile-time tags (see container_tags.h)
+    template<class... ExtraTags>
+    HD auto          with_tags            () const; ///< same view, with ExtraTags... added to the tag set (no-op for tags already present)
+    HD auto          as_already_parallelized() const; ///< == with_tags<container_tags::has_already_been_parallelized>()
 
 private:
     static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }
