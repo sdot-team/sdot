@@ -12,7 +12,7 @@ namespace sdot {
 
 // host execution
 struct ExecutionContext_Cpu : ExecutionContext {
-    void run_parallel( const auto &list, auto &&func, auto &&...args ) {
+    void run_parallel( const auto &list, auto &&func, auto &&...args ) const {
         // Are we already inside a parallel region? (statically known: at least one operand
         // carries the has_already_been_parallelized tag.) If so, run inline on the current
         // thread: dispatching to the pool here would deadlock (a worker would wait on itself).

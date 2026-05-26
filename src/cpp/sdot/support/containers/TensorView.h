@@ -93,7 +93,9 @@ public:
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
     void             with_same_shape      ( const auto &arch, auto &&func ) const;
-    HD void          make_accessible      ( auto execution_space, auto &&func ) const;
+    HD void          make_accessible      ( auto execution_space, auto &&func ) const; ///< read-only:  transfer in, no copy back
+    HD void          make_accessible_out  ( auto execution_space, auto &&func ) const; ///< write-only: no copy in, copy back
+    HD void          make_accessible_inout( auto execution_space, auto &&func ) const; ///< read-write: copy in, copy back
     HD void          fill_with            ( TF value );
 
     //
@@ -108,6 +110,7 @@ public:
 
 private:
     static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }
+    CPU_ONLY void    transfer_through     ( auto execution_space, bool copy_in, bool copy_back, auto &&func ) const; ///< host-only transfer path: materialize in the exec space, optionally copy in, run, optionally copy back
 
     MemorySpace      _memory_space;       ///<
     RawPtr           _raw_ptr;            ///<

@@ -26,6 +26,16 @@ __global__ void _execution_space_cuda_run_parallel( List list, Func func, Args..
     }, args... );
 }
 
+// Kernel launch must live in a pure __host__ function: a <<<>>> launch reached from a
+// __host__ __device__ function can leave the kernel instantiation as an "invalid device
+// function" at runtime. run_parallel (HD, for device nesting) forwards its host branch here.
+CPU_ONLY void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
+    const int threads_per_block = 256;
+    const int nb_threads        = int( list.nb_items() );
+    const int nb_blocks         = ( nb_threads + threads_per_block - 1 ) / threads_per_block;
+    _execution_space_cuda_run_parallel<<< nb_blocks, threads_per_block, 0, stream >>>( list, FORWARD( func ), FORWARD( args )... );
+}
+
 // CUDA device execution + stream — {}-constructible (uses the global default_stream; the
 // bindings set default_stream). A specific stream can be passed explicitly; mind that
 // using non-default streams requires care w.r.t. ordering/synchronization.
@@ -42,24 +52,18 @@ struct ExecutionContext_Cuda : public ExecutionContext {
         HD ExecutionContext_Cuda() : stream( default_stream ) {}
     #endif
 
-    HD void run_parallel( const auto &list, auto &&func, auto &&...args ) {
+    HD void run_parallel( const auto &list, auto &&func, auto &&...args ) const {
     #ifdef __CUDA_ARCH__
         // Called from device code: we are already inside a kernel, so there is no nested launch
         // (that would need dynamic parallelism). Run inline on the current thread — the device
-        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch.
-        CudaThreadInfo thread_info;
-        RunTraits::per_thread( func, thread_info, list, [&] HD ( auto &&...args ) {
-            for_each_item( list, [&] HD ( auto &&item ) {
-                func( item, FORWARD( args )... );
-            } );
-        }, FORWARD( args )... );
+        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Functor
+        // (not lambda) item application, since nvcc rejects generic extended HD lambdas.
+        // TODO: honor RunTraits::per_thread here if a device functor ever needs per-thread setup.
+        for_each_item( list, RunTraits::apply_to_item( func, FORWARD( args )... ) );
     #else
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
-        const int threads_per_block = 256;
-        const int nb_threads        = int( list.nb_items() );
-        const int nb_blocks         = ( nb_threads + threads_per_block - 1 ) / threads_per_block;
-        _execution_space_cuda_run_parallel<<< nb_blocks, threads_per_block, 0, stream >>>( list, func, FORWARD( args )... );
+        launch_cuda_run_parallel( stream, list, FORWARD( func ), FORWARD( args )... );
     #endif
     }
 

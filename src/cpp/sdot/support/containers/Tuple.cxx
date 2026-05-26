@@ -6,6 +6,27 @@
 
 namespace sdot {
 
+namespace TupleDetail {
+    // Functor replacements for the pack-capturing generic lambdas used by Tuple's methods.
+    // nvcc forbids generic / by-reference extended __host__ __device__ lambdas, so these have
+    // to be functors for the methods to be callable from device code.
+
+    /// calls cb( head, tail... ) — prepends `head` when unwinding apply_values
+    template<class CB,class Head>
+    struct PrependApply {
+        CB   cb;
+        Head head;
+        HD auto operator()( auto &&...tail ) const { return cb( head, FORWARD( tail )... ); }
+    };
+
+    /// calls tuple( values..., extra ) — used by with_appended_value
+    template<class Extra>
+    struct AppendValue {
+        Extra extra;
+        HD auto operator()( auto &&...values ) const { return tuple( FORWARD( values )..., extra ); }
+    };
+}
+
 // ---- runtime front value -----------------------------------------------------------
 #define UTP template<class Head,class... Tail>
 #define DTP Tuple<Head,Tail...>
@@ -33,9 +54,7 @@ UTP HD void DTP::for_each_item( auto &&cb ) {
 }
 
 UTP HD auto DTP::apply_values( auto &&cb ) const {
-    return tail.apply_values( [&]( auto ...tail ) {
-        return cb( head, tail... );
-    } );
+    return tail.apply_values( TupleDetail::PrependApply<DECAYED_TYPE_OF( cb ),Head>{ FORWARD( cb ), head } );
 }
 
 UTP HD auto DTP::operator[]( auto &&index ) const {
@@ -71,9 +90,7 @@ UTP HD auto DTP::size() {
 }
 
 UTP HD auto DTP::with_appended_value( auto &&new_value ) const {
-    return apply_values( [&]( auto ...values ) {
-        return tuple( values..., new_value );
-    } );
+    return apply_values( TupleDetail::AppendValue<DECAYED_TYPE_OF( new_value )>{ FORWARD( new_value ) } );
 }
 
 UTP HD auto DTP::without_index( auto index ) const {

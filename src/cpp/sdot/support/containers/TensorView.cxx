@@ -4,6 +4,7 @@
 // #include "StrideIterator.h"
 // #include "CrossArchCopy.h"
 #include "../hardware/current_execution_context.h"
+#include "../hardware/access_mode.h"
 #include "../hardware/Run.h"
 // #include "contiguous_strides.h"
 // #include "IndexRange.h"
@@ -80,9 +81,9 @@ UTP HD void DTP::operator+=( const auto &that ) {
             operator=( cur );
         }
     } else if constexpr ( add_is_elementwise<DECAYED_TYPE_OF( that ),ct_rank>() ) {
-        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemElementwise(), *this, that );
+        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemElementwise(), inout( *this ), that );
     } else {
-        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemBroadcast(), *this, that );
+        run_parallel( cartesian_product_ranges( _shape ), AddTensorItemBroadcast(), inout( *this ), that );
     }
 }
 
@@ -259,29 +260,48 @@ UTP HD auto DTP::all_indices() const {
 }
 
 UTP void DTP::fill_with( TF value ) {
-    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), *this, value );
+    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), out( *this ), value );
 }
 
 
-UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {
-    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value ) {
-        // data already reachable from this execution space → no transfer
+// pass-through when reachable, else transfer with the access-mode's copy policy
+UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {       // read-only
+    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
         func( *this );
-    } else {
-        // materialize a contiguous copy in the execution space's native memory space, bring
-        // the data in (transfer driven by execution_space's stream), run, then release.
-        // NB: assumes a contiguous source; strided cross-space transfer is a TODO.
-        // auto dst_ms = native_memory_space( execution_space );
-        // using DstMS = DECAYED_TYPE_OF( dst_ms );
-        // dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
-        //     auto strides = contiguous_strides<TF>( _shape );
-        //     TensorView<TF,Shape,DECAYED_TYPE_OF( strides ),DstMS> dst( buf.raw, _shape, strides, dst_ms );
-        //     copy( execution_space, buf, Ptr<TF,MemorySpace>( data(), _memory_space ), nb_items() );
-        //     func( dst );
-        //     // TODO in/out: copy dst → *this back after func, depending on the argument category
-        // } );
-        TODO;
-    }
+    else
+        transfer_through( execution_space, /*copy_in*/ true, /*copy_back*/ false, FORWARD( func ) );
+}
+UTP void DTP::make_accessible_out( auto execution_space, auto &&func ) const {   // write-only
+    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
+        func( *this );
+    else
+        transfer_through( execution_space, /*copy_in*/ false, /*copy_back*/ true, FORWARD( func ) );
+}
+UTP void DTP::make_accessible_inout( auto execution_space, auto &&func ) const { // read-write
+    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
+        func( *this );
+    else
+        transfer_through( execution_space, /*copy_in*/ true, /*copy_back*/ true, FORWARD( func ) );
+}
+
+UTP void DTP::transfer_through( auto execution_space, bool copy_in, bool copy_back, auto &&func ) const {
+    // Materialize a contiguous copy in the execution space's native memory space, optionally bring
+    // the data in, run, then optionally bring the result back (transfers driven by the exec space's
+    // stream). NB: assumes a contiguous source; strided cross-space transfer is a TODO. Host-only
+    // (allocation + cudaMemcpy); never reached on device (operands are accessible there).
+    auto dst_ms      = native_memory_space( execution_space );
+    auto new_strides = contiguous_strides<TF>( _shape );
+    using DstMS      = DECAYED_TYPE_OF( dst_ms );
+    using NewStrides = DECAYED_TYPE_OF( new_strides );
+
+    dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
+        TensorView<TF,DstMS,Shape,NewStrides> dst( buf.raw, _shape, new_strides, dst_ms );
+        if ( copy_in )
+            copy( buf, Ptr<TF,MemorySpace>( data().raw, _memory_space ), nb_items(), execution_space );
+        func( dst );
+        if ( copy_back )
+            copy( Ptr<TF,MemorySpace>( data().raw, _memory_space ), buf, nb_items(), execution_space );
+    } );
 }
 
 // UTP CPU_ONLY void DTP::get_data_from( const auto &that ) {

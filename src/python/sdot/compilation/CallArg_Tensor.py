@@ -18,7 +18,7 @@ class CallArg_Tensor( CallArg ):
     """ input or mutable
     """
 
-    ct_variables         : dict
+    ct_variables              : dict
 
     represents_a_dynamic_axis : str
     comes_from_basic_array    : bool
@@ -151,31 +151,34 @@ class CallArg_Tensor( CallArg ):
         return res
 
     def get_axis_variable( self, name, is_a_dyn_size ):
-        # Return( ..., dim = 2 )
         call_arg = self
         while True:
+            # in ctor_kwargs ? (as in `Return( ..., dim = 2 )`)
             if ck := getattr( call_arg, "ctor_kwargs", None ):
                 if name in ck:
                     return int( ck[ name ] )
-            if call_arg.parent is None:
-                break
-            call_arg = call_arg.parent()
 
-        # orig_parent takes priority for ct_axes lookup (e.g. gradient tensors whose
-        # parent is the backward aggregate, not the original one that holds the values)
-        for lookup_parent in [ self.orig_parent, self.parent ]:
-            if not lookup_parent:
+            # computation using a generated method
+            if call_arg.python_value is not None:
+                if res := getattr( call_arg.python_value, name, None ):
+                    return res
+
+            # explicit attribute (happens with dynamic_axes)
+            if hasattr( call_arg, "sub_dict" ) and name in call_arg.sub_dict:
+                python_value = call_arg.sub_dict[ name ].python_value
+                if python_value is not None:
+                    return python_value.item()
+
+            # else,go to parent
+            if hasattr( call_arg, "orig_parent" ) and call_arg.orig_parent is not None:
+                call_arg = call_arg.orig_parent()
                 continue
+            if call_arg.parent is not None:
+                call_arg = call_arg.parent()
+                continue
+            break
 
-            # tensor
-            if is_a_dyn_size and name in lookup_parent().sub_dict:
-                return lookup_parent().sub_dict[ name ].python_value.item()
-
-            #
-            if enclosing := lookup_parent().python_value:
-                return getattr( enclosing, name )
-
-        raise RuntimeError( f"Unable to find '{ name }' in tensor '{ self.name_in_parent }', or in ctor args" )
+        raise RuntimeError( f"Unable to find '{ name }' from parents of tensor '{ self.name_in_parent }', or in ctor args" )
 
     def shape_values( self, use_dyn_size = False ):
         res = []

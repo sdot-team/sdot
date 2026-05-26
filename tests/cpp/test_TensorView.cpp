@@ -217,12 +217,18 @@ struct FillRows {
     }
 };
 
+// Operation under test. A functor (not a generic lambda): nvcc forbids generic
+// extended __host__ __device__ lambdas, and the matrix runs this on the device too.
+struct PlusEq {
+    HD void operator()( auto a, auto b ) const { a += b; }
+};
+
 // Element-wise `a += b` over the full matrix: operand-A memory space × operand-B
 // memory space × shape × execution context. Exercises cross-space transfer
 // (make_accessible) and the nested/inline dispatch, all checked against a + b.
 TEST_CASE( "operator+= — element-wise, matrix over memory spaces and contexts", "" ) {
     sdot_test::check_binary_op_matrix(
-        []  HD ( auto a, auto b ) { a += b; },
+        PlusEq{},
         [] ( double a, double b ) { return a + b; } );
 }
 

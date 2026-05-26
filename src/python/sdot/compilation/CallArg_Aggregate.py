@@ -1,4 +1,3 @@
-# from sdot.compilation.CallArgsAnalysis import CallArgsAnalysis
 from ..util.get_all_annotations import get_all_annotations
 
 from .IoCategory import IoCategory

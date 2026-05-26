@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../containers/Tuple.h"
 #include "../common_macros.h"
 #include "../Ct.h"
 #include <thread>
@@ -49,6 +50,34 @@ HD int max_gpu_threads( auto &&func, auto &&...args ) {
     else
         // simple default to start; TODO: derive from nb_gpu_register_per_thread / local_gpu_memory_size
         return 1 << 20;
+}
+
+// ----------------- lambda-free item iteration (device-safe) -----------------
+// nvcc forbids generic / by-reference extended __host__ __device__ lambdas, so the
+// per-item application is expressed with functors (usable on host and device).
+
+/// calls func( leading, vals... ) — used to prepend the current item to the stored args
+template<class Func,class Leading>
+struct CallWithLeading {
+    Func    func;     ///< reference type (T&)
+    Leading leading;
+    HD void operator()( auto &&...vals ) const { func( leading, FORWARD( vals )... ); }
+};
+
+/// for_each_item callback applying func( item, args... ), args carried in a Tuple
+template<class Func,class Args>
+struct ApplyToItem {
+    Func func;        ///< reference type (T&)
+    Args args;        ///< Tuple of the trailing args
+    HD void operator()( auto &&item ) const {
+        args.apply_values( CallWithLeading<Func,DECAYED_TYPE_OF( item )>{ func, FORWARD( item ) } );
+    }
+};
+
+/// build an ApplyToItem holding a reference to `func` and a copy of `args...`
+HD auto apply_to_item( auto &func, auto &&...args ) {
+    auto a = tuple( FORWARD( args )... );
+    return ApplyToItem<DECAYED_TYPE_OF( func )&,DECAYED_TYPE_OF( a )>{ func, a };
 }
 
 // ----------------- util -----------------
