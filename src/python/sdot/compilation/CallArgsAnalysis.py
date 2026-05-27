@@ -30,9 +30,10 @@ class CallArgsAnalysis:
     index_dynamic_size_exception : int
     dynamix_axes : list
 
-    def __init__( self, args : dict, parameter_class: str ):
+    def __init__( self, args : dict, parameter_class: str = "Parameters" ):
         # add tensors for output dynamic shapes
         nargs = args.copy()
+
         dynamic_shapes = {}
         source_kwargs  = {}
         for arg in nargs.values():
@@ -74,6 +75,10 @@ class CallArgsAnalysis:
 
         # make a CallArg_Aggregate
         self.arguments = CallArg_Aggregate.factory( self, None, "p", klass, ainst, IoCategory( want_return = False, want_output = False, has_input = True, ), [], {} )
+
+    def check_axis_consistency( self ):
+        """Raise if tensors of a same aggregate disagree on a shared axis variable."""
+        self.arguments.check_axis_consistency()
 
     @property
     def differentiable_ffi_inputs( self ):
@@ -152,7 +157,7 @@ class CallArgsAnalysis:
         self.u8_input_values.extend( u8_values )
         return res
 
-    def tensor_conversions( self, lines ):
+    def get_code_for_tensor_conversions( self, lines ):
         # regular tensors
         for tensor in self.non_differentiable_tensor_inputs + self.differentiable_tensor_inputs + self.tensor_outputs:
             if not tensor.represents_a_dynamic_axis:
@@ -163,7 +168,7 @@ class CallArgsAnalysis:
             if tensor.represents_a_dynamic_axis:
                 lines.append( f"    auto t_{ tensor.ffi_name() } = { tensor.ffi_conversion_code() };" )
 
-    def make_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
+    def get_code_for_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
         self.arguments.struct_decl( struct_name, includes, lines )
 
     def arg_decl( self ) -> str:

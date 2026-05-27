@@ -199,69 +199,69 @@ def _setup_distribution_class( cls ):
             setattr( cls, axis_name, property( get_axis_size ) )
 
     # --- batch_version -----------
-    if hasattr( cls, "BatchVersion" ) and "batch_version" not in vars( cls ):
-        def batch_version( self, batch_size ):
-            # make ctor args
-            kw = {}
-            for name, field in fields:
-                if isinstance( field, TensorField ):
-                    v = getattr( self, name ) # .__dict__.get( name )
-                    if v is not None:
-                        rpt = [ batch_size ] + [ 1 ] * v.ndim
-                        kw[ name ] = driver.repeat( v[ None, ... ], rpt )
-                elif isinstance( field, ListOfTensorFields ):
-                    v = getattr( self, name ) # .__dict__.get( name )
-                    if v is not None:
-                        # rpt = [ batch_size ] + [ 1 ] * v.ndim
-                        # kw[ name ] = driver.repeat( v[ None, ... ], rpt )
-                        raise NotImplementedError
-                else:
-                    kw[ name ] = self.__dict__.get( name )
-            # make the new instance
-            return cls.BatchVersion( **kw )
-        setattr( cls, 'batch_version', batch_version )
+    # if hasattr( cls, "BatchVersion" ) and "batch_version" not in vars( cls ):
+    #     def batch_version( self, batch_size ):
+    #         # make ctor args
+    #         kw = {}
+    #         for name, field in fields:
+    #             if isinstance( field, TensorField ):
+    #                 v = getattr( self, name ) # .__dict__.get( name )
+    #                 if v is not None:
+    #                     rpt = [ batch_size ] + [ 1 ] * v.ndim
+    #                     kw[ name ] = driver.repeat( v[ None, ... ], rpt )
+    #             elif isinstance( field, ListOfTensorFields ):
+    #                 v = getattr( self, name ) # .__dict__.get( name )
+    #                 if v is not None:
+    #                     # rpt = [ batch_size ] + [ 1 ] * v.ndim
+    #                     # kw[ name ] = driver.repeat( v[ None, ... ], rpt )
+    #                     raise NotImplementedError
+    #             else:
+    #                 kw[ name ] = self.__dict__.get( name )
+    #         # make the new instance
+    #         return cls.BatchVersion( **kw )
+    #     setattr( cls, 'batch_version', batch_version )
 
     # --- batch_item -----------
-    if hasattr( cls, "BatchItemVersion" ) and "batch_item" not in vars( cls ):
-        def batch_item( self, batch_index ):
-            # make ctor args
-            kw = {}
-            for name, field in fields:
-                if isinstance( field, TensorField ):
-                    v = getattr( self, name )
-                    if v is not None:
-                        kw[ name ] = v[ batch_index, ... ]
-                elif isinstance( field, ListOfTensorFields ):
-                    lst = getattr( self, name )
-                    if lst is not None:
-                        kw[ name ] = [ v[ batch_index, ... ] for v in lst ]
-                else:
-                    kw[ name ] = self.__dict__.get( name )
-            # make the new instance
-            return cls.BatchItemVersion( **kw )
-        setattr( cls, 'batch_item', batch_item )
+    # if hasattr( cls, "BatchItemVersion" ) and "batch_item" not in vars( cls ):
+    #     def batch_item( self, batch_index ):
+    #         # make ctor args
+    #         kw = {}
+    #         for name, field in fields:
+    #             if isinstance( field, TensorField ):
+    #                 v = getattr( self, name )
+    #                 if v is not None:
+    #                     kw[ name ] = v[ batch_index, ... ]
+    #             elif isinstance( field, ListOfTensorFields ):
+    #                 lst = getattr( self, name )
+    #                 if lst is not None:
+    #                     kw[ name ] = [ v[ batch_index, ... ] for v in lst ]
+    #             else:
+    #                 kw[ name ] = self.__dict__.get( name )
+    #         # make the new instance
+    #         return cls.BatchItemVersion( **kw )
+    #     setattr( cls, 'batch_item', batch_item )
 
     # --- multidimensional_version -----------
-    if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):
-        def multidimensional_version( self ):
-            # make ctor args
-            kw = {}
-            for name, field in fields:
-                if isinstance( field, TensorField ):
-                    v = getattr( self, name ) # .__dict__.get( name )
-                    if v is not None:
-                        for n in field.removed_dim_axes:
-                            v = driver.expand_dims( v, n )
-                        if field.comes_from_a_dim_list:
-                            v = [ v ] # raise NotImplementedError
-                        kw[ name ] = v
-                elif isinstance( field, ListOfTensorFields ):
-                    raise NotImplementedError
-                else:
-                    kw[ name ] = self.__dict__.get( name )
-            # make the new instance
-            return cls.MultidimensionalVersion( **kw )
-        setattr( cls, 'multidimensional_version', multidimensional_version )
+    # if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):
+    #     def multidimensional_version( self ):
+    #         # make ctor args
+    #         kw = {}
+    #         for name, field in fields:
+    #             if isinstance( field, TensorField ):
+    #                 v = getattr( self, name ) # .__dict__.get( name )
+    #                 if v is not None:
+    #                     for n in field.removed_dim_axes:
+    #                         v = driver.expand_dims( v, n )
+    #                     if field.comes_from_a_dim_list:
+    #                         v = [ v ] # raise NotImplementedError
+    #                     kw[ name ] = v
+    #             elif isinstance( field, ListOfTensorFields ):
+    #                 raise NotImplementedError
+    #             else:
+    #                 kw[ name ] = self.__dict__.get( name )
+    #         # make the new instance
+    #         return cls.MultidimensionalVersion( **kw )
+    #     setattr( cls, 'multidimensional_version', multidimensional_version )
 
     return cls
 
@@ -269,77 +269,72 @@ def _setup_distribution_class( cls ):
 # Helpers used by @generate_distribution_methods
 # ---------------------------------------------------------------------------
 
-def _axis_names_of( cls ) -> set[ str ]:
-    res = set()
-    for _, attr in get_all_annotations( cls ).items():
-        if getattr( attr, "get_axis_names", None ):
-            attr.get_axis_names( res )
+def _axis_names_of( cls ) -> list[ str ]:
+    res = []
+    for attr in get_all_annotations( cls ).values():
+        if getattr( attr, "get_axis_variable_names", None ):
+            attr.get_axis_variable_names( res )
     return res
+
+def _axis_sources_of( distribution, fields_to_avoid ):
+    """AxisTensorSource list for an @aggregate instance (same view the CallArg side uses)."""
+    from .AxisVariableSystem import AxisTensorSource
+
+    sources = []
+    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
+        if tensor_field in fields_to_avoid or not isinstance( tensor_field, Tensor ):
+            continue
+        sources.append( AxisTensorSource(
+            shape        = tensor_field.shape,
+            ct_variables = tensor_field.ct_variables,
+            numpy_value  = getattr( distribution, tensor_name, None )
+        ) )
+    return sources
+
 
 def _axis_count( distribution, axis_name, fields_to_avoid = None ):
     if fields_to_avoid is None:
         fields_to_avoid = []
 
+    # simple linear case: first tensor shape that pins the axis. Conflicting pins are
+    # an error, caught by AxisVariableSystem.check_consistency, not arbitrated here.
+    from .AxisVariableSystem import AxisVariableSystem
+    value = AxisVariableSystem( _axis_sources_of( distribution, fields_to_avoid ) ).local_value_of( axis_name )
+    if value is not None:
+        return value
+
+    # axes driven by an expansion `name( ... )` are not part of the linear system
     for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
-        if tensor_field in fields_to_avoid:
+        if tensor_field in fields_to_avoid or not isinstance( tensor_field, Tensor ):
+            continue
+        array = getattr( distribution, tensor_name, None )
+        if array is None:
             continue
 
-        if isinstance( tensor_field, Tensor ):
-            array = getattr( distribution, tensor_name, None )
-            if array is None:
-                continue
+        n = 0
+        for expr in tensor_field.shape:
+            # expansion of `axis_name( ... )` spanning several numpy axes -> list of sizes
+            if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name and expr.terms[ 0 ].variable.arguments:
+                ndim = 1
+                for argument in expr.terms[ 0 ].variable.arguments:
+                    name, offset, coeff = argument.as_single_name()
+                    ac = None if name is None else _axis_count( distribution, name )
+                    if ac is None:
+                        ndim = 0
+                        break
+                    ndim *= offset + coeff * ac
+                if ndim:
+                    return [ ( array.shape[ n + i ] - expr.offset ) // expr.terms[ 0 ].coeff for i in range( ndim ) ]
 
-            n = 0
-            for expr in tensor_field.shape:
-                # using shape
-                if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name:
-                    # if arguments
-                    variable = expr.terms[ 0 ].variable
-                    if variable.arguments:
-                        ndim = 1
-                        for argument in variable.arguments:
-                            name, offset, coeff = argument.as_single_name()
-                            if name is None:
-                                ndim = 0
-                                continue
-                            ac = _axis_count( distribution, name )
-                            if ac is None:
-                                ndim = 0
-                                continue
-                            ndim *= offset + coeff * ac
-                        if ndim == 0:
-                            continue
+            # an argument variable (e.g. `dim` in `nb_knots( dim )`) recovered from the rank
+            all_the_arguments = [ a for term in expr.terms if term.variable.arguments for a in term.variable.arguments ]
+            if len( all_the_arguments ) == 1:
+                arg_name, arg_offset, arg_coeff = all_the_arguments[ 0 ].as_single_name()
+                if arg_name == axis_name:
+                    nb_with_argument = sum( 1 for e in tensor_field.shape if e.has_argument() )
+                    if nb_with_argument == 1:
+                        return ( array.ndim - ( len( tensor_field.shape ) - nb_with_argument ) - arg_offset ) // arg_coeff
 
-                        res = []
-                        for i in range( ndim ):
-                            res.append( ( array.shape[ n + i ] - expr.offset ) // expr.terms[ 0 ].coeff )
-                        return res
-
-                    # no arguments
-                    return ( array.shape[ n ] - expr.offset ) // expr.terms[ 0 ].coeff
-
-                # using ndim
-                all_the_arguments = [] # e.g. dim in shape( dim )
-                for term in expr.terms:
-                    if term.variable.arguments:
-                        for argument in term.variable.arguments:
-                            all_the_arguments.append( argument )
-                if len( all_the_arguments ) == 1:
-                    argument = all_the_arguments[ 0 ]
-                    arg_name, arg_offset, arg_coeff = argument.as_single_name()
-                    if arg_name == axis_name:
-                        nb_without_argument = 0
-                        nb_with_argument = 0
-                        for rpxe in tensor_field.shape:
-                            has_argument = rpxe.has_argument()
-                            if has_argument:
-                                nb_with_argument += 1
-                            else:
-                                nb_without_argument += 1
-
-                        if nb_with_argument == 1:
-                            return ( array.ndim - nb_without_argument - arg_offset ) // arg_coeff
-
-                n += expr.ndim( lambda n, _: getattr( distribution, n ) )
+            n += expr.ndim( lambda n, _: getattr( distribution, n ) )
 
     return None

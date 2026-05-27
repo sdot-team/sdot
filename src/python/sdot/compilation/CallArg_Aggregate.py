@@ -1,36 +1,42 @@
 from ..util.get_all_annotations import get_all_annotations
 
+from .TemplateArgs import TemplateArgs
 from .IoCategory import IoCategory
 from .CallArg import CallArg
 
-from typing import TYPE_CHECKING
+from typing import Optional
 from weakref import ref
 
 class CallArg_Aggregate( CallArg ):
-    """ input or mutable
+    """
     """
 
-    if TYPE_CHECKING:
-        sub_dict : dict[ str, CallArg ] #
+    def __init__(
+        self,
+        name_in_parent : Optional[ str ],
+        parent         : Optional[ ref ],
+        python_class   : any,
+        python_value   : Optional[ any ],
+        io_category    : IoCategory,
+        ctor_args      : Optional[ list ] = None,
+        ctor_kwargs    : Optional[ dict ] = None
+    ):
+        super().__init__( name_in_parent, parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
+        self.sub_dict = {}
 
     @staticmethod
     def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
-        res = CallArg_Aggregate()
-
-        # CallArg attributes
-        res.name_in_parent = name_in_parent
-        res.parent = ref( parent ) if parent is not None else None
-
-        res.python_class = python_class
-        res.python_value = python_value
-
-        res.io_category = io_category
-
-        res.ctor_kwargs = ctor_kwargs
-        res.ctor_args = ctor_args
+        res = CallArg_Aggregate(
+            name_in_parent = name_in_parent,
+            parent         = parent,
+            python_class   = python_class,
+            python_value   = python_value,
+            io_category    = io_category,
+            ctor_args      = ctor_args,
+            ctor_kwargs    = ctor_kwargs
+        )
 
         # sub_dict
-        res.sub_dict = {}
         for name, annotation in get_all_annotations( python_class ).items():
             value = None
             if python_value is not None:
@@ -47,10 +53,6 @@ class CallArg_Aggregate( CallArg ):
         for name, attr in self.sub_dict.items():
             lst.append( f"{ name }_{ attr.signature() }" )
         return "__".join( lst )
-
-    def get_template_args( self, template_args, names ):
-        for name, attr in self.sub_dict.items():
-            attr.get_template_args( template_args, names + [ name ] )
 
     def cpp_type_name( self, names ):
         from .TemplateArgs import TemplateArgs
@@ -92,7 +94,7 @@ class CallArg_Aggregate( CallArg ):
 
         if bv:
             io = IoCategory( want_output = False, want_return = False, has_input = False )
-            unbatch_call_arg = CallArg_Aggregate.factory( call_args = None, parent = None, name_in_parent = "", python_class = bv, python_value = None, io_category = io, ctor_args = self.ctor_args if self.ctor_args is not None else [], ctor_kwargs = self.ctor_kwargs if self.ctor_kwargs is not None else {} )
+            unbatch_call_arg = CallArg_Aggregate.factory( call_args = None, parent = self, name_in_parent = "unbatch", python_class = bv, python_value = None, io_category = io, ctor_args = self.ctor_args if self.ctor_args is not None else [], ctor_kwargs = self.ctor_kwargs if self.ctor_kwargs is not None else {} )
             unbatch_call_arg.generate_structures( already_visited )
 
         body_lines, includes, template_args = self.struct_body( self.base_cpp_name(), unbatch_version = bv )
@@ -142,125 +144,39 @@ class CallArg_Aggregate( CallArg ):
         for argument in self.sub_dict.values():
             argument.generate_structures( already_visited )
 
-    def get_all_the_ways_to_get( self, axis_names, attributes, use_attributes, tensor_names, tensor_axes, matrix, vector ):
-        pass
+    def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
+        # a nested aggregate is a distinct axis variable scope; only contribute its
+        # tensors to the parent system when explicitly resolving recursively.
+        if not recursive:
+            return
+        for name, argument in self.sub_dict.items():
+            argument.add_axis_tensor_sources( sources, attributes + [ name ], use_attributes, recursive )
+
+    def axis_system( self, use_attributes: bool = False, recursive: bool = True ):
+        """
+        Build the `AxisVariableSystem` for this aggregate, gathering one source per tensor.
+
+        `recursive`      include tensors of nested aggregates (used for C++ assembly where
+                         every tensor is in scope as a flat FFI variable); when False, only
+                         the directly contained tensors are considered.
+        `use_attributes` reference tensors by attribute path instead of flat FFI name.
+        """
+        from ..aggregate.AxisVariableSystem import AxisVariableSystem
+
+        sources = []
+        for name, argument in self.sub_dict.items():
+            argument.add_axis_tensor_sources( sources, [ name ], use_attributes, recursive )
+        return AxisVariableSystem( sources )
+
+    def check_axis_consistency( self ):
+        # the tensors directly contained in this aggregate must agree on shared axes
+        self.axis_system( recursive = False ).check_consistency()
+        for argument in self.sub_dict.values():
+            argument.check_axis_consistency()
 
     def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
         for argument in self.sub_dict.values():
             argument.get_arg_decl( non_differentiable_inputs, differentiable_inputs, parameters, outputs )
-
-    def get_variable_value( self, axis_name: str ) -> int:
-        """
-        Return the concrete integer value of an axis variable (e.g. `dim`, `nb_points`)
-        by reading it from ctor_kwargs (compile-time known) or by back-computing it
-        from the shapes of the tensors currently in `sub_dict`.
-
-        Raises RuntimeError if the variable cannot be resolved.
-        """
-        from ..util.index import index
-
-        # in argument ctor_kwargs ?
-        if ka := getattr( self, "ctor_kwargs", None ):
-            if axis_name in ka:
-                return int( ka[ axis_name ] )
-
-        # in argument ctor_kwargs ?
-        for argument in self.sub_dict.values():
-            if ka := getattr( argument, "ctor_kwargs", None ):
-                if axis_name in ka:
-                    return int( ka[ axis_name ] )
-
-        # in argument properties ?
-        axes, ct_variables = {}, {}
-        for argument in self.sub_dict.values():
-            python_value = getattr( argument, "python_value", None )
-            if python_value is not None:
-                value = getattr( python_value, axis_name, None )
-                if value is not None:
-                    return int( value )
-
-        # in self properties ?
-        python_value = getattr( self, "python_value", None )
-        if python_value is not None:
-            value = getattr( python_value, axis_name, None )
-            if value is not None:
-                return int( value )
-
-        # else, make the system using python_value.shape
-        axes, ct_variables = {}, {}
-        for argument in self.sub_dict.values():
-            argument.get_axes( axes, ct_variables )
-
-        tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, True )
-
-        num_axis = index( list( axes.keys() ), axis_name )
-        for num_case in range( len( tensor_names ) ):
-            coeff = matrix[ num_case ][ num_axis ]
-            if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
-                continue
-            if tensor_names[ num_case ] in self.sub_dict:
-                val = self.sub_dict[ tensor_names[ num_case ] ].python_value
-                if val is not None:
-                    res = val.shape[ tensor_axes[ num_case ] ]
-                    return ( res - int( vector[ num_case ] ) ) // int( coeff )
-
-        raise RuntimeError( f"Unable to find axis variable value for '{ axis_name }' in '{ self.name_in_parent }'" )
-
-    def axis_variable_equation( self, axes: dict, use_attributes: bool ):
-        """
-        Build the linear system that relates tensor shapes to axis variable values.
-
-        Each equation i says:  shape[ tensor_axes[i] ] of tensor_names[i]
-                                == matrix[i] · axis_values + vector[i]
-
-        Returns ( tensor_names, tensor_axes, matrix, vector ).
-        """
-        import numpy
-
-        tensor_names, tensor_axes, matrix, vector = [], [], [], []
-        for name, argument in self.sub_dict.items():
-            argument.get_all_the_ways_to_get(
-                list( axes.keys() ), [ name ], use_attributes,
-                tensor_names, tensor_axes, matrix, vector
-            )
-
-        return tensor_names, tensor_axes, numpy.array( matrix ), numpy.array( vector )
-
-    def get_axis_variable( self, axes: dict, axis_name: str, axis_selection, tensor_names, tensor_axes, matrix, vector ) -> str:
-        """
-        Return C++ expression that evaluates to the value of `axis_name` at runtime,
-        by picking the first tensor whose single non-zero coefficient matches this axis.
-
-        `axis_selection` is None for plain axes and a list for dynamic (max_of_*) axes.
-        Returns a call to `first_positive(...)` over all candidate tensors.
-        """
-        from ..util.index import index
-
-        cases = []
-
-        # using ct_variables
-        for field in self.sub_dict.values():
-            if ct_variables := getattr( field, "ct_variables", None ):
-                if axis_name in ct_variables:
-                    cases.append( f"ct_{ axis_name }" )
-
-        # using shapes
-        num_axis = index( list( axes.keys() ), axis_name )
-        for num_case in range( len( tensor_names ) ):
-            coeff = matrix[ num_case ][ num_axis ]
-            if coeff == 0 or sum( matrix[ num_case ] != 0 ) != 1:
-                continue
-            op = f"{ tensor_names[ num_case ] }.shape( { tensor_axes[ num_case ] } )"
-            if vector[ num_case ]:
-                if coeff != 1:
-                    op = f"( { op } - { vector[ num_case ] } ) / { coeff }"
-                else:
-                    op = f"{ op } - { vector[ num_case ] }"
-            elif coeff != 1:
-                op = f"{ op } / { coeff }"
-            cases.append( f"{ tensor_names[ num_case ] }.is_valid() ? { op } : -1" )
-
-        return f"first_positive( \"{ axis_name }\", { ', '.join( cases ) } )"
 
     def struct_body( self, base_cpp_name: str, unbatch_version = None ):
         """
@@ -271,25 +187,22 @@ class CallArg_Aggregate( CallArg ):
         them into a full struct declaration (struct_decl) or write them to an include
         file for embedding inside a hand-written struct.
         """
-        from .TemplateArgs import TemplateArgs
 
+        ct_axis_variable_names : list[ str ] = []
+        axis_variable_names: list[ str ] = []
         template_args = TemplateArgs()
         includes = set()
-        ct_variables : dict[ str, int ] = {}
-        axes : dict = {}
-
         for name, argument in self.sub_dict.items():
+            argument.get_ct_axis_variable_names( ct_axis_variable_names, [ name ] )
+            argument.get_axis_variable_names( axis_variable_names )
             argument.get_template_args( template_args, [ name ] )
             argument.get_includes( includes )
-            argument.get_axes( axes, ct_variables )
-
-        for ct_axis_name in ct_variables:
-            template_args.add( f"ct_{ ct_axis_name }_value", "int", 4 )
 
         lines = []
 
         # batch_sizes() + slice()
         batch_axes = getattr( self.python_class, 'batch_axes', [] )
+        lines.append(  "    /* batch methods */" )
         lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
         lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
 
@@ -298,27 +211,31 @@ class CallArg_Aggregate( CallArg ):
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
 
             assert len( batch_axes )
-            lines.append( f"    HD auto operator()( Tuple<{ ','.join( [ 'TI' ] * len( batch_axes ) ) }> bi ) const {{" )
+            lines.append( f"    HD auto operator()( Tuple<{ ','.join( [ 'TI' ] * len( batch_axes ) ) }> batch_index ) const {{" )
             lines.append( f"        return { unbatch_version.__name__ }<PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>{{" )
-            for ct_axis_name in ct_variables:
-                lines.append( f"            .ct_{ ct_axis_name } = Ct<TI,ct_{ ct_axis_name }_value>()," )
+            # axes
+            for axis_variable_name in axis_variable_names:
+                if axis_variable_name not in batch_axes:
+                    lines.append( f"            .{ axis_variable_name } = { axis_variable_name }," )
+            # attributes
             for name, argument in self.sub_dict.items():
-                lines.append( f"            .{ name } = { name }( bi )," )
+                lines.append( f"            .{ name } = { name }( batch_index )," )
             lines.append(  "        };" )
             lines.append(  "    }" )
+
+
             # lines.append(  "    auto operator()( auto bi ) const { return slice( PI( bi[ Ct<int,0>() ] ) ).slice( bi.without_index( Ct<int,0>() ) ); }" )
 
-        # axis accessor methods
-        if axes:
-            # tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, True )
-            for axis_name, axis_selection in axes.items():
-                complete_axis_name = f"max_of_{ axis_name }" if axis_selection is not None else axis_name
+        lines.append(  "" )
 
-                if axis_name in ct_variables and ct_variables[ axis_name ] is None: # always a ct_axis -> make a constexpr
-                    lines.append( f"    static constexpr SI { complete_axis_name } = ct_{ axis_name }_value;" )
+        # axis variable values
+        if axis_variable_names:
+            lines.append(  "    /* axis values */" )
+            for axis_variable_name in axis_variable_names:
+                if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
+                    lines.append( f"    Ct<TI,ct_{ axis_variable_name }> { axis_variable_name };" )
                 else: # else, attribute to be filled during construction
-                    lines.append( f"    SI { complete_axis_name };" )
-
+                    lines.append( f"    SI { axis_variable_name };" )
             lines.append( "" )
 
         # with_same_shape
@@ -337,11 +254,8 @@ class CallArg_Aggregate( CallArg ):
         #     s = argument.end_with_same_shape( name, s, lines )
         # lines.append( "    }" )
 
-        # compile-time axis members
-        for ct_axis_name in ct_variables:
-            lines.append( f"    Ct<TI,ct_{ ct_axis_name }_value> ct_{ ct_axis_name };" )
-
         # data members
+        lines.append(  f"    /* attributes */" )
         for name, argument in self.sub_dict.items():
             lines.append( f"    { argument.cpp_type_name( [ name ] ) } { name };" )
 
@@ -368,50 +282,52 @@ class CallArg_Aggregate( CallArg ):
         Subclasses that implement the `CallArg` interface override this with a one-argument
         version that supplies `struct_name` automatically (e.g. from `base_cpp_name()`).
         """
+
+        # get info
+        ct_axis_variable_names : list[ str ] = []
+        axis_variable_names: list[ str ] = []
+        template_args = TemplateArgs()
+        for name, argument in self.sub_dict.items():
+            argument.get_ct_axis_variable_names( ct_axis_variable_names, [ name ] )
+            argument.get_axis_variable_names( axis_variable_names )
+            argument.get_template_args( template_args, [ name ] )
+
+        # struct_name
         if struct_name is None:
             struct_name = self.base_cpp_name()
-
-        from .TemplateArgs import TemplateArgs
-        template_args = TemplateArgs()
-        self.get_template_args( template_args, [] )
         if template_args:
-            struct_name += f"<{ ','.join( t.value for n, t in template_args ) }>"
+            struct_name += f"<{ ','.join( t.value for _, t in template_args ) }>"
 
+        # decl
         lines = [ struct_name + "{" ]
 
+        # axes
+        system = self.axis_system( use_attributes = False, recursive = True )
+        for axis_variable_name in axis_variable_names:
+            if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
+                lines.append( f"{ beg_line }    .{ axis_variable_name } = Ct<TI,{ self.value_of_axis_variable( axis_variable_name ) }>()," )
+            else: # else, attribute to be filled during construction
+                lines.append( f"{ beg_line }    .{ axis_variable_name } = { system.cpp_runtime_expr( axis_variable_name ) }," )
 
-        ct_variables : dict[ str, int ] = {}
-        axes : dict = {}
-        for argument in self.sub_dict.values():
-            argument.get_axes( axes, ct_variables )
-
-        # dynamic axes
-        tensor_names, tensor_axes, matrix, vector = self.axis_variable_equation( axes, use_attributes = False )
-        for axis_name, axis_selection in axes.items():
-            complete_axis_name = f"max_of_{ axis_name }" if axis_selection is not None else axis_name
-            dv = self.get_axis_variable( axes, axis_name, axis_selection, tensor_names, tensor_axes, matrix, vector )
-            ct_code = ""
-            if axis_name in ct_variables:
-                if ct_variables[ axis_name ] is None:
-                    continue
-                ct_code = f"ct_{ complete_axis_name } >= 0 ? { complete_axis_name } : "
-            lines.append( f"{ beg_line }    .{ complete_axis_name } = { ct_code }{ dv }," )
-
-        # ct axes
-        for ct_variable in ct_variables:
-            lines.append( f"{ beg_line }    .ct_{ ct_variable } = Ct<TI,{ self.get_variable_value( ct_variable ) }>()," )
-
+        # attributes
         for name, argument in self.sub_dict.items():
             lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + '    ' ) }," )
 
         lines.append( beg_line + "}" )
+
         return "\n".join( lines )
 
-    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
-        res = CallArg_Aggregate()
-        self.init_CallArgs_backward_version( res, parent )
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs = None ):
+        res = CallArg_Aggregate(
+            name_in_parent = self.name_in_parent,
+            parent         = parent,
+            python_class   = self.python_class,
+            python_value   = self.python_value,
+            io_category    = IoCategory.pure_input(),
+            ctor_args      = self.ctor_args,
+            ctor_kwargs    = self.ctor_kwargs
+        )
 
-        res.sub_dict = {}
         for name, attr in self.sub_dict.items():
             res.sub_dict[ name ] = attr.backward_version( call_args, driver, outputs, grads_of_the_outputs, res, differentiable_inputs )
 

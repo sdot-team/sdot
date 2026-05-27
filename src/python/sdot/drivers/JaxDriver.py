@@ -9,9 +9,11 @@ import jax.numpy as jnp
 from ..compilation.CallArgsAnalysis import CallArgsAnalysis
 
 from .JaxFramework import JaxFramework
+from .FfiCode import FfiCode
 from .Device import Device
 from .Dtype import Dtype
 
+from textwrap import dedent, indent
 import importlib
 import numpy
 import jax
@@ -317,7 +319,7 @@ class JaxDriver:
                 return False
         return not jax.numpy.issubdtype( dtype, jax.numpy.integer )
 
-    def call( self, code: str, grad_code: str = "", includes: Optional[ list[ str ] ] = None, grad = True, mlir = True, **args ):
+    def call( self, code: str | FfiCode, mlir = True, **args ):
         """Call a C++ function via JAX XLA FFI.
 
         Args may be:
@@ -327,15 +329,18 @@ class JaxDriver:
           - int / float / str / ...    — scalar XLA attribute
         """
 
-        if includes is None:
-            includes = []
+        if isinstance( code, str ):
+            code = FfiCode( code )
 
         # argument analysis (get a jax compatible set of arg lists, ...)
         fai = CallArgsAnalysis( args, "Parameters" )
 
+        # fail early if the provided tensor shapes disagree on a shared axis variable
+        fai.check_axis_consistency()
+
         # check ffi function is registered
-        module_name = self._module_name_for( code, grad_code, includes, fai )
-        self._register_ffi_target( module_name, code, grad_code, includes, fai )
+        module_name = self._module_name_for( code, fai )
+        self._register_ffi_target( module_name, code, fai )
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
@@ -388,7 +393,7 @@ class JaxDriver:
                 return ret
             return tuple( ret )
 
-        if mlir and grad_code:
+        if mlir and code.has_grad_code:
             from .JaxMlirPrimitive import get_or_create
 
             def _call_prim( differentiable_inputs ):
@@ -595,9 +600,9 @@ class JaxDriver:
 
         return ret
 
-    def _module_name_for( self, code: str, grad_code: str, includes: list[ str ], main_list: CallArgsAnalysis ):
+    def _module_name_for( self, code: FfiCode, main_list: CallArgsAnalysis ):
         # get signature — include device type to avoid CPU/GPU cache collision
-        base_signature = [ code, grad_code, main_list.arguments.signature(), self.device.signature ] + includes
+        base_signature = [ code.signature(), main_list.arguments.signature(), self.device.signature ]
 
         # module name
         from sdot.util.encode_base_62 import encode_base_62
@@ -611,7 +616,7 @@ class JaxDriver:
 
     _registered_ffi_targets = set()
 
-    def _register_ffi_target( self, module_name: str, code: str, grad_code: str, includes: list[ str ], args: CallArgsAnalysis ):
+    def _register_ffi_target( self, module_name: str, code: FfiCode, args: CallArgsAnalysis ):
         # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
@@ -621,17 +626,16 @@ class JaxDriver:
         from ..compilation.force_build import force_build
         if not force_build():
             try:
-                self._try_to_import_and_register_ffi_target( module_name, code, bool( grad_code ) )
+                self._try_to_import_and_register_ffi_target( module_name, code, bool( code.bwd ) )
                 return
             except ( ImportError, SystemError ):
                 pass
 
         # else, make the dylib
-        includes_set = set( includes )
-        self._make_dylib( code, grad_code, includes_set, args, module_name )
+        self._make_dylib( code, args, module_name )
 
         # and try again to import it
-        self._try_to_import_and_register_ffi_target( module_name, code, bool( grad_code ) )
+        self._try_to_import_and_register_ffi_target( module_name, code, bool( code.bwd ) )
 
 
     def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
@@ -642,12 +646,13 @@ class JaxDriver:
             jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, module_name + "_backward" )(), platform = platform )
 
 
-    def _make_dylib( self, code: str, grad_code: str, includes: set, fai: CallArgsAnalysis, module_name: str ):
+    def _make_dylib( self, code: FfiCode, fai: CallArgsAnalysis, module_name: str ):
         # generate structs
         already_visited = set()
         fai.arguments.generate_structures( already_visited )
 
         # include list
+        includes = set( code.includes )
         includes.add( "sdot/jax_ffi_wrappers.h" )
         includes.add( "nanobind/nanobind.h" )
 
@@ -658,17 +663,20 @@ class JaxDriver:
         lines.append( "using namespace sdot;" )
         lines.append( "" )
 
+        if code.header:
+            lines.append( dedent( code.header ) )
+
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
         # --- forward handler ---
-        self._handler_source( includes, lines, code, fai, module_name, "Parameters" )
+        self._handler_source( includes, lines, code.fwd, fai, module_name, "Parameters" )
         lines.append( "" )
 
         # --- backward handler ---
-        if grad_code:
+        if code.bwd:
             gfai = fai.backward_version( self, [], [], "GradParameters" )
-            self._handler_source( includes, lines, grad_code, gfai, module_name, "GradParameters", "_backward" )
+            self._handler_source( includes, lines, code.bwd, gfai, module_name, "GradParameters", "_backward" )
             lines.append( "" )
 
         lines.append( "" )
@@ -680,7 +688,7 @@ class JaxDriver:
         lines.append( "" )
         lines.append( f"NB_MODULE( { module_name }, m ) {{" )
         lines.append( f"  m.def( \"{ module_name }\", []() {{ return EncapsulateFfiCall( binding_{ module_name } ); }} );" )
-        if grad_code:
+        if code.bwd:
             lines.append( f"  m.def( \"{ module_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ module_name }_backward ); }} );" )
         lines.append( "}" )
 
@@ -693,7 +701,7 @@ class JaxDriver:
     def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
         is_gpu = self.device.is_cuda_gpu
 
-        fai.make_parameters_struct( includes, lines, struct_name )
+        fai.get_code_for_parameters_struct( includes, lines, struct_name )
         lines.append( "" )
 
         # handler signature — append stream for GPU (PlatformStream<T> decodes to T directly)
@@ -735,7 +743,7 @@ class JaxDriver:
                 lines.append( "    std::memset( u64_output, 0, u64_output_buffer->element_count() * sizeof( PI64 ) );" )
 
         # conversions
-        fai.tensor_conversions( lines )
+        fai.get_code_for_tensor_conversions( lines )
 
         # beg try block
         lines.append( "    try {" )
@@ -743,7 +751,7 @@ class JaxDriver:
         # call the function
         lines.append( f"        auto p = { fai.arguments.assembled_code( '        ' ) };" )
         lines.append( "" )
-        lines.append( f"        { code }" )
+        lines.append( indent( dedent( code ), '        ' ) )
 
         # end try block
         lines.append( '    } catch ( DynamicSizeException de ) {' )

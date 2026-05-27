@@ -148,4 +148,3 @@ TEST_CASE( "per-thread variable", "" ) {
     run_sequential( Range{ 5 }, PerThreadProbe{}, 10, 20 );
     run_parallel( Range{ 5 }, PerThreadProbe{}, 10, 20 );
 }
-

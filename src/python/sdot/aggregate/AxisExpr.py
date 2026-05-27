@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..util import append_if_unique, index
 from .AxisVariable import AxisVariable
 from dataclasses import dataclass
 import ast
@@ -57,30 +58,47 @@ class AxisExpr:
             res.terms.append( nterm )
         return res
 
-    def ndim( self, get_axis_variable ) -> int:
+    def ndim( self, value_of_axis_variable ) -> int:
         res = 1
         for term in self.terms:
             if term.variable.arguments:
                 for argument in term.variable.arguments:
-                    res *= argument.value( get_axis_variable, False )
+                    res *= argument.value( value_of_axis_variable, False )
         return res
 
-    def value( self, get_axis_variable, use_dyn_size ):
+    def value( self, value_of_axis_variable, use_dyn_size ):
         res = self.offset
         for term in self.terms:
-            res += term.coeff * term.variable.value( get_axis_variable, use_dyn_size )
+            res += term.coeff * term.variable.value( value_of_axis_variable, use_dyn_size )
         return res
 
-    def get_axis_names( self, axis_names: set[ str ] ):
+    def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         for term in self.terms:
-            name = term.variable.name
-            if term.variable.selection is not None:
-                name = "max_of_" + name
-            axis_names.add( name )
+            append_if_unique( axis_variable_names, self._term_name( term ) )
 
-    def get_axes( self, axes: dict ):
+    @staticmethod
+    def _term_name( term ) -> str:
+        """Name under which a term's variable is exposed (dynamic selection -> max_of_*)."""
+        if term.variable.selection is not None:
+            return "max_of_" + term.variable.name
+        return term.variable.name
+
+    def as_equation_row( self, names: list[ str ] ):
+        """
+        Express this axis as a single linear equation over `names`:
+
+            axis_size == offset + sum( coeff * value_of( name ) )
+
+        Returns ( row, offset ) where `row[ i ]` is the coefficient of `names[ i ]`,
+        or None when the axis cannot be written as one such row (e.g. an expansion
+        `( ... )` that spans several axes).
+        """
+        if self.has_argument():
+            return None
+        row = [ 0 ] * len( names )
         for term in self.terms:
-            axes[ term.variable.name ] = term.variable.selection
+            row[ index( names, self._term_name( term ) ) ] = term.coeff
+        return row, self.offset
 
     def has_argument( self ):
         for term in self.terms:

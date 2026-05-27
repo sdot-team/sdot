@@ -22,4 +22,4 @@ class Mutable:
             want_output = True,
             has_input = True
         )
-        return CallArg.factory( call_args, parent, name_in_parent, type( self.value ), self.value, io_category = new_io_category, ctor_args = self.type_args, ctor_kwargs = self.type_kwargs )
+        return CallArg.factory( call_args, parent, name_in_parent, type( self.value ), self.value, io_category = new_io_category, ctor_args = [], ctor_kwargs = self.dyn_axis_capacities )

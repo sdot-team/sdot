@@ -1,6 +1,6 @@
 from .aggregate import aggregate, Workspace, Tensor, Return
 from typing import TYPE_CHECKING, Self, cast
-from .drivers.driver import driver
+from .drivers.driver import driver, FfiCode
 import numpy
 
 # constant
@@ -104,8 +104,10 @@ class Cell:
         dim = frame.shape[ -1 ]
 
         return cast( cls, driver.call(
-            """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
-            """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
+            FfiCode(
+                fwd = """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
+                bwd = """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
+            ),
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
             frame = frame,
@@ -133,18 +135,25 @@ class Cell:
         # info( self.vertex_positions[ :, 1, 0 ] ).
 
         return driver.call(
-            """
-            auto pr = arch.parallel_runner( p.cell.batch_sizes(), p.max_nb_threads );
-            pr.for_each_thread( [p] GD ( auto ti, auto &&for_each_bi ) mutable {
-                // auto nb_map_items = p.nb_map_items( ti.global_id() );
-                // nb_map_items = 0;
-                // RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
-
-                for_each_bi( [&] GD ( auto bi ) mutable {
-                    p.output( bi ) = p.cell( bi ).vertex_positions( 1, 0 ); // measure( item_map );
-                } );
-            } );
-            """,
+            FfiCode(
+                header =  """
+                    struct MeasureFunctor {
+                        GD void per_thread( const auto &thread_info, const auto &/* batch_indices */, auto &&cont, auto &&outputs, PI max_nb_cuts, auto &&batch_of_cells ) const {
+                            // auto nb_map_items = p.nb_map_items( ti.global_id() );
+                            // nb_map_items = 0;
+                            // RecursiveMapOfUniqueSortedIndices<p.cell.dim - 1,TI,Arch> item_map( p.map_items( ti.global_id() ), nb_map_items, p.cell.dim - 1, p.max_nb_cuts );
+                            cont( FORWARD( outputs ), FORWARD( batch_of_cells ) );
+                        }
+                        GD void operator()( auto &&batch_index, auto &&outputs, auto &&batch_of_cells ) const {
+                            auto cell = batch_of_cells( batch_index );
+                            outputs( batch_index ) = cell.vertex_positions( 1, 0 ); // measure( item_map );
+                        }
+                    };
+                """,
+                fwd = """
+                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.output, p.max_nb_cuts, p.batch_of_cells );
+                """
+            ),
             map_items = Workspace(
                 Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
                 max_of_nb_map_items = max_of_nb_map_items,
@@ -152,7 +161,7 @@ class Cell:
             ),
             output = Return( Tensor( *self.batch_axes ), **self.batch_axes_dict ),
             max_nb_cuts = max_nb_cuts,
-            cell = self
+            batch_of_cells = self
         )
 
     @staticmethod

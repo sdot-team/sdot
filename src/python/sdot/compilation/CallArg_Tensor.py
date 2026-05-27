@@ -1,7 +1,7 @@
+from ..util import append_if_unique
 from ..aggregate.AxisExpr import AxisExpr
 from ..drivers.driver import driver
 from ..drivers.Dtype import Dtype
-from ..util import index, find
 
 from .IoCategory import IoCategory
 from .CallArg import CallArg
@@ -18,7 +18,7 @@ class CallArg_Tensor( CallArg ):
     """ input or mutable
     """
 
-    ct_variables              : dict
+    ct_variables              : list[ str ]
 
     represents_a_dynamic_axis : str
     comes_from_basic_array    : bool
@@ -32,6 +32,41 @@ class CallArg_Tensor( CallArg ):
     num_in_input_sub_list     : int
     num_in_dynamic_axes       : int
     num_in_outputs            : int
+
+    orig_parent               : Optional[ ref ]
+
+    def __init__(
+        self,
+        name_in_parent            : Optional[ str ],
+        parent                    : Optional[ ref ],
+        python_class              : any,
+        python_value              : Optional[ any ],
+        io_category               : IoCategory,
+        ctor_args                 : Optional[ list ],
+        ctor_kwargs               : Optional[ dict ],
+        shape                     : list[ AxisExpr ],
+        dtype                     : Dtype,
+        ct_variables              : list[ str ],
+        represents_a_dynamic_axis : str = "",
+        comes_from_basic_array    : bool = False
+    ):
+        super().__init__( name_in_parent, parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
+
+        self.represents_a_dynamic_axis = represents_a_dynamic_axis
+        self.comes_from_basic_array    = comes_from_basic_array
+        self.is_differentiable         = dtype.floating_point
+        self.shape                     = shape
+        self.dtype                     = dtype
+        self.ct_variables              = ct_variables
+
+        self.validity_output_index     = -1
+        self.tensor_type_input_index   = -1
+
+        self.num_in_input_sub_list     = -1
+        self.num_in_outputs            = -1
+        self.num_in_dynamic_axes       = -1
+
+        self.orig_parent               = None
 
     @staticmethod
     def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs, shape: Optional[ list[ AxisExpr ] ] = None, dtype = None, ct_variables = None, represents_a_dynamic_axis = "", comes_from_basic_array = False ):
@@ -50,39 +85,24 @@ class CallArg_Tensor( CallArg ):
             dtype = Dtype.factory( python_value.dtype )
         assert isinstance( dtype, Dtype )
 
-        res = CallArg_Tensor()
+        res = CallArg_Tensor(
+            name_in_parent            = name_in_parent,
+            parent                    = parent,
+            python_class              = python_class,
+            python_value              = python_value,
+            io_category               = io_category,
+            ctor_args                 = ctor_args,
+            ctor_kwargs               = ctor_kwargs,
+            shape                     = shape,
+            dtype                     = dtype,
+            ct_variables              = ct_variables,
+            represents_a_dynamic_axis = represents_a_dynamic_axis,
+            comes_from_basic_array    = comes_from_basic_array
+        )
 
-        # CallArg attributes
-        res.name_in_parent = name_in_parent
-        res.parent = ref( parent ) if parent is not None else None
-
-        res.python_class = python_class
-        res.python_value = python_value
-
-        res.io_category = io_category
-
-        res.ctor_kwargs = ctor_kwargs
-        res.ctor_args = ctor_args
-
-        # Tensor attributes
-        res.represents_a_dynamic_axis = represents_a_dynamic_axis
-        res.comes_from_basic_array = comes_from_basic_array
-        res.is_differentiable = dtype.floating_point
-        res.shape = shape
-        res.dtype = dtype
-
-        res.validity_output_index = -1
-        res.tensor_type_input_index = -1
-
-        res.num_in_input_sub_list = -1
-        res.num_in_outputs = -1
-
-        res.num_in_dynamic_axes = -1
         if call_args and represents_a_dynamic_axis:
             res.num_in_dynamic_axes = len( call_args.dynamix_axes )
             call_args.dynamix_axes.append( res )
-
-        res.orig_parent = None
 
         # input or mutable -> need an input tensor
         if io_category.has_input:
@@ -93,13 +113,6 @@ class CallArg_Tensor( CallArg ):
         if io_category.want_output:
             res.validity_output_index = call_args.get_u8_input( [ TENSOR_TYPE_STD ] )
             res.num_in_outputs = call_args.add_tensor_output( res )
-
-        #
-        res.ct_variables = {}
-        if ct_variables is not None:
-            for name in ct_variables:
-                assert isinstance( name, str )
-                res.ct_variables[ name ] = None
 
         return res
 
@@ -126,83 +139,46 @@ class CallArg_Tensor( CallArg ):
         if res is None:
             return res
 
-        # if in Worspace, return None
+        # if in Workspace, return None
         if not self.io_category.want_return:
             return None
 
-        # if we have a dynamic size, make a slice
-        # When inside a JAX JIT trace the size is a traced value (not concrete),
-        # so we fall back to returning the full buffer without slicing.
+        # Trim each axis to its resolved (possibly dynamic) size. When the size cannot
+        # be resolved (e.g. a traced value inside a JAX JIT), keep the full buffer.
         slices = []
         for expr in self.shape:
-            axes = {}
-            expr.get_axes( axes )
-            da = find( axes.values(), lambda x: x is not None )
-            if da is not None and len( da ) == 0:
-                try:
-                    slices.append( slice( 0, int( expr.value( self.get_axis_variable, True ) ) ) )
-                except Exception:
-                    slices.append( slice( None ) )
-            else:
+            try:
+                slices.append( slice( 0, int( expr.value( self.value_of_axis_variable, True ) ) ) )
+            except Exception:
                 slices.append( slice( None ) )
 
-        res = res[ tuple( slices ) ]
+        return res[ tuple( slices ) ]
 
-        return res
 
-    def get_axis_variable( self, name, is_a_dyn_size ):
-        call_arg = self
-        while True:
-            # in ctor_kwargs ? (as in `Return( ..., dim = 2 )`)
-            if ck := getattr( call_arg, "ctor_kwargs", None ):
-                if name in ck:
-                    return int( ck[ name ] )
-
-            # computation using a generated method
-            if call_arg.python_value is not None:
-                if res := getattr( call_arg.python_value, name, None ):
-                    return res
-
-            # explicit attribute (happens with dynamic_axes)
-            if hasattr( call_arg, "sub_dict" ) and name in call_arg.sub_dict:
-                python_value = call_arg.sub_dict[ name ].python_value
-                if python_value is not None:
-                    return python_value.item()
-
-            # else,go to parent
-            if hasattr( call_arg, "orig_parent" ) and call_arg.orig_parent is not None:
-                call_arg = call_arg.orig_parent()
-                continue
-            if call_arg.parent is not None:
-                call_arg = call_arg.parent()
-                continue
-            break
-
-        raise RuntimeError( f"Unable to find '{ name }' from parents of tensor '{ self.name_in_parent }', or in ctor args" )
 
     def shape_values( self, use_dyn_size = False ):
         res = []
         for expr in self.shape:
-            res.append( expr.value( self.get_axis_variable, use_dyn_size ) )
+            res.append( expr.value( self.value_of_axis_variable, use_dyn_size ) )
         return res
 
     @property
     def ndim( self ) -> int:
         res = 0
         for s in self.shape:
-            res += s.ndim( self.get_axis_variable )
+            res += s.ndim( self.value_of_axis_variable )
         return res
 
     def signature( self ) -> str:
         ct_values = []
-        for ct_variable in self.ct_variables.keys():
-            ct_values.append( f"{ ct_variable }_{ self.get_axis_variable( ct_variable, False ) }" )
+        for ct_variable in self.ct_variables:
+            ct_values.append( f"{ ct_variable }_{ self.value_of_axis_variable( ct_variable, False ) }" )
         return f"T{ self.ndim }{ Dtype.factory( self.dtype ).cpp_name }{ '-'.join( ct_values ) }"
 
     def get_template_args( self, template_args, names ):
-        for name in self.ct_variables.keys():
+        for name in self.ct_variables:
             lst = names[ : -1 ] + [ name ]
-            template_args.add( f"ct_{ '_'.join( lst ) }_value", "TI", 4, str( self.get_axis_variable( name, False ) ) )
+            template_args.add( f"ct_{ '_'.join( lst ) }", "TI", 4, str( self.value_of_axis_variable( name, False ) ) )
 
         if self.dtype.floating_point and self.dtype.size is None:
             template_args.add( "TF", "typename", 0, "TF" )
@@ -244,7 +220,7 @@ class CallArg_Tensor( CallArg ):
         if not expr.terms:
             return expr.offset
         try:
-            return int( expr.value( self.get_axis_variable, False ) )
+            return int( expr.value( self.value_of_axis_variable, False ) )
         except ( KeyError, RuntimeError, AttributeError, TypeError ):
             return None
 
@@ -280,38 +256,31 @@ class CallArg_Tensor( CallArg ):
             return f"DynamicAxis<TI,MemorySpace,{ shape_t }>"
         return f"TensorView<{ self.dtype.cpp_name },MemorySpace,{ shape_t }>"
 
-    def get_axes( self, axes: dict, ct_variables: dict[ str, int ] ):
+    def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ str ], name_list_so_far: list[ str ] ):
+        for name in self.ct_variables:
+            complete_name = "_".join( name_list_so_far[ : -1 ] + [ name ] )
+            append_if_unique( ct_axis_variable_names, complete_name )
+
+    def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         for s in self.shape:
-            s.get_axes( axes )
+            s.get_axis_variable_names( axis_variable_names )
 
-        for name, limit in self.ct_variables.items():
-            ct_variables[ name ] = limit
+    def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
+        from ..aggregate.AxisVariableSystem import AxisTensorSource
 
-    def get_all_the_ways_to_get( self, axis_names, attributes, use_attributes, tensor_names, tensor_axes, matrix, vector ):
-        for n, s in enumerate( self.shape ):
-            if len( s.terms ) == 0:
-                continue
-
-            if use_attributes:
-                name = ".".join( attributes )
-            else:
-                name = "t_" + self.ffi_name()
-
-            tensor_names.append( name )
-            tensor_axes.append( n )
-
-            row = [ 0 ] * len( axis_names )
-            for term in s.terms:
-                row[ index( axis_names, term.variable.name ) ] = term.coeff
-
-            vector.append( s.offset )
-            matrix.append( row )
+        cpp_ref = ".".join( attributes ) if use_attributes else "t_" + self.ffi_name()
+        sources.append( AxisTensorSource(
+            shape        = self.shape,
+            ct_variables = self.ct_variables,
+            numpy_value  = self.python_value,
+            cpp_ref      = cpp_ref
+        ) )
 
     def ffi_output_name( self ):
-        return f"o{ self.num_in_outputs }"
+        return f"out{ self.num_in_outputs }"
 
     def ffi_input_name( self ):
-        bn = "di" if self.is_differentiable else "ni"
+        bn = "din" if self.is_differentiable else "nin"
         return f"{ bn }{ self.num_in_input_sub_list }"
 
     def ffi_name( self ):
@@ -325,34 +294,25 @@ class CallArg_Tensor( CallArg ):
         ct_shape  = f"CtType<{ self.shape_type( True ) }>()"
 
         if self.represents_a_dynamic_axis:
-            p = self.parent()
-
-            axes = {}
-            ct_variables = {}
-            for argument in p.sub_dict.values():
-                argument.get_axes( axes, ct_variables )
-
-            tensor_names, tensor_axes, matrix, vector = p.axis_variable_equation( axes, False )
-            axis_selection = axes[ self.represents_a_dynamic_axis ]
-
-            capa = p.get_axis_variable( axes, self.represents_a_dynamic_axis, axis_selection, tensor_names, tensor_axes, matrix, vector )
+            # the capacity is the maximum size the consuming tensors give to this axis
+            assert self.parent
+            capa = self.parent().axis_system().cpp_capacity_expr( "max_of_" + self.represents_a_dynamic_axis )
             extr = f", { self.num_in_dynamic_axes }, { capa }"
             base = "dynamic_axis"
 
         # mutable
         if self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_mutable( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
+            return f"{ base }_mut( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_output( { ct_shape }, memory_space, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
+            return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
 
         # pure input
         if self.io_category.has_input and not self.io_category.want_output:
-            return f"{ base }_input( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ]{ extr } )"
+            return f"{ base }_inp( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ]{ extr } )"
 
         raise NotImplementedError
-
 
     def get_output_arg_decl( self, declarations: list ):
         declarations.append( f"{ driver.ffi_tensor_output_arg_code( self.ndim, self.dtype ) } { self.ffi_output_name() }" )
@@ -369,30 +329,7 @@ class CallArg_Tensor( CallArg ):
     def assembled_code( self, beg_line ):
         return f"t_{ self.ffi_name() }"
 
-    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
-        res = CallArg_Tensor()
-        self.init_CallArgs_backward_version( res, parent )
-
-        res.orig_parent = self.parent
-        res.ct_variables = self.ct_variables
-
-        res.represents_a_dynamic_axis = self.represents_a_dynamic_axis
-        res.comes_from_basic_array = self.comes_from_basic_array
-        res.is_differentiable = self.is_differentiable
-        res.shape = self.shape
-        res.dtype = self.dtype
-
-        res.validity_output_index = -1
-        res.tensor_type_input_index = -1
-
-        res.num_in_input_sub_list = -1
-        res.num_in_outputs = -1
-
-        res.num_in_dynamic_axes = -1
-        if call_args and res.represents_a_dynamic_axis:
-            res.num_in_dynamic_axes = len( call_args.dynamix_axes )
-            call_args.dynamix_axes.append( res )
-
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs = None ):
         # something that was an output -> make an input
         python_value = self.python_value
         if self.io_category.want_output and self.num_in_outputs < len( outputs ):
@@ -400,7 +337,27 @@ class CallArg_Tensor( CallArg ):
         elif self.is_differentiable and differentiable_inputs is not None and 0 <= self.num_in_input_sub_list < len( differentiable_inputs ):
             python_value = differentiable_inputs[ self.num_in_input_sub_list ]
 
-        res.python_value = python_value
+        res = CallArg_Tensor(
+            name_in_parent            = self.name_in_parent,
+            parent                    = parent,
+            python_class              = self.python_class,
+            python_value              = python_value,
+            io_category               = IoCategory.pure_input(),
+            ctor_args                 = self.ctor_args,
+            ctor_kwargs               = self.ctor_kwargs,
+            shape                     = self.shape,
+            dtype                     = self.dtype,
+            ct_variables              = self.ct_variables,
+            represents_a_dynamic_axis = self.represents_a_dynamic_axis,
+            comes_from_basic_array    = self.comes_from_basic_array
+        )
+
+        res.orig_parent = self.parent
+
+        if call_args and res.represents_a_dynamic_axis:
+            res.num_in_dynamic_axes = len( call_args.dynamix_axes )
+            call_args.dynamix_axes.append( res )
+
         res.tensor_type_input_index = call_args.get_u8_input( [ CallArg_Tensor.tensor_type_index( python_value ) ] )
         res.num_in_input_sub_list = call_args.add_tensor_input( res )
 

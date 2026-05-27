@@ -3,6 +3,8 @@ from ..drivers.driver import driver
 from .IoCategory import IoCategory
 from .CallArg import CallArg
 
+from typing import Optional
+
 
 class CallArg_Parameter( CallArg ):
     """
@@ -11,27 +13,27 @@ class CallArg_Parameter( CallArg ):
     num_in_parameters : int
     name : str
 
+    def __init__(
+        self,
+        name         : str,
+        python_value : Optional[ any ]
+    ):
+        super().__init__(
+            name_in_parent = None,
+            parent         = None,
+            python_class   = None,
+            python_value   = python_value,
+            io_category    = IoCategory( want_return = False, want_output = False, has_input = True ),
+            ctor_args      = None,
+            ctor_kwargs    = None
+        )
+        self.name = name
+        self.num_in_parameters = -1
+
     @staticmethod
     def factory( call_args, name, python_value ):
-        """  """
-        res = CallArg_Parameter()
-
-        # CallArg attributes
-        res.name_in_parent = None
-        res.parent = None
-
-        res.python_class = None
-        res.python_value = python_value
-
-        res.io_category = IoCategory( want_return = False, want_output = False, has_input = True )
-
-        res.ctor_kwargs = None
-        res.ctor_args = None
-
-        # Parameter attributes
+        res = CallArg_Parameter( name, python_value )
         res.num_in_parameters = call_args.add_parameter( res )
-        res.name = name
-
         return res
 
     def signature( self ) -> str:
@@ -42,9 +44,6 @@ class CallArg_Parameter( CallArg ):
 
     def cpp_type_name( self, main_list = None ):
         return driver.normalized_type_for( type( self.python_value ) )
-
-    def get_axes( self, axes: dict, ct_variables: dict[ int ] ):
-        pass
 
     def get_input_arg_decl( self, declarations: list ):
         declarations.append( f"{ self.cpp_type_name() } p{ self.num_in_parameters }" )
@@ -58,21 +57,11 @@ class CallArg_Parameter( CallArg ):
     def assembled_code( self, beg_line ):
         return self.ffi_name()
 
-    def get_all_the_ways_to_get( self, *arg, **kwargs ):
-        pass
-
     def beg_with_same_shape( self, name, s, lines ):
         return s
 
     def end_with_same_shape( self, name, s, lines ):
         return s
 
-    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs=None ):
-        res = CallArg_Parameter()
-
-        self.init_CallArgs_backward_version( res, parent )
-
-        res.num_in_parameters = call_args.add_parameter( res )
-        res.name = self.name
-
-        return res
+    def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs = None ):
+        return CallArg_Parameter.factory( call_args, self.name, self.python_value )

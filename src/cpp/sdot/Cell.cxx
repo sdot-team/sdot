@@ -74,7 +74,7 @@ UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     nb_cuts = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
-    Matrix<TF,dim> FT = Matrix<TF,dim>::with_func( [=] GD ( PI r, PI c ) {
+    Matrix<TF,ct_dim> FT = Matrix<TF,ct_dim>::with_func( [=] GD ( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
 
@@ -119,7 +119,7 @@ UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = Vector<TF,dim>::with_func( [d] GD ( PI i ) {
+        auto e_d = Vector<TF,ct_dim>::with_func( [d] GD ( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -151,8 +151,8 @@ UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
     // where G_dot_d = gC(r1,dim) - gC(r0,dim),
     //       tGR[d,c] = gC(r1,c) - gC(r0,c) + G_dot_d * frame(0,c).
 
-    using Mat = Matrix<TF,dim>;
-    using Vec = Vector<TF,dim>;
+    using Mat = Matrix<TF,ct_dim>;
+    using Vec = Vector<TF,ct_dim>;
 
     auto gV = p.input_grad_for_cell_vertex_positions( batch_index );
     auto gC = p.input_grad_for_cell_cut_planes( batch_index );
@@ -215,7 +215,7 @@ UTP typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
 }
 
 UTP typename DTP::Ci DTP::vertex_cuts( PI num_vertex ) const {
-    if constexpr ( ct_dim == 2 )
+    if constexpr ( dim == 2 )
         return { Values(), ( num_vertex + nb_vertices - 1 ) % nb_vertices, num_vertex };
     return vertex_indices.row( num_vertex );
 }
@@ -276,7 +276,7 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
     }
 }
 
-UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map, auto &&func ) {
+UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map, auto &&func ) {
     constexpr int ct_simplex = dim + 1;
     if ( nb_vertices == 0 )
         return;
@@ -392,7 +392,7 @@ UTP void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map ) {
+UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map ) {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
@@ -940,7 +940,7 @@ UTP void DTP::check_consistency() {
     }
 }
 
-template<class Value,class TF,class TI,class MemorySpace,int ct_dim_value>
+template<class Value,class TF,class TI,class MemorySpace,int ct_dim>
 struct Integral<Value,DTP> {
     static auto integral( const Value &value, DTP &cw ) {
         // infinite cell
@@ -950,7 +950,7 @@ struct Integral<Value,DTP> {
         // simplex
         TF sum = 0;
         cw.for_each_simplex( [&]( const auto &simplex_indices ) {
-            Simplex<ct_dim_value,ct_dim_value+1,TF> simplex;
+            Simplex<ct_dim,ct_dim+1,TF> simplex;
             for( TI d = 0; d < cw.dim + 1; ++d )
                 simplex.pts[ d ] = cw.vertex_positions.row( simplex_indices[ d ] );
             sum += sdot::integral( value, simplex );

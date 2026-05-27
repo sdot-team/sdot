@@ -98,10 +98,9 @@ class Tensor:
 
         return res
 
-
     def call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
         return CallArg_Tensor.factory( call_args, parent, name_in_parent, self, python_value, io_category, ctor_args, ctor_kwargs, self.shape, self.dtype, self.ct_variables, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
-    def get_axis_names( self, axis_names: set[ str ] ):
+    def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         for s in self.shape:
-            s.get_axis_names( axis_names )
+            s.get_axis_variable_names( axis_variable_names )

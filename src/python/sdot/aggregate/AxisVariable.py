@@ -15,13 +15,13 @@ class AxisVariable:
     selection: list | None  # list[ AxisExpr ] [ dim, nb_points ] — dynamic tensor index
     name: str = ''
 
-    def value( self, get_axis_variable, use_dyn_size ):
+    def value( self, value_of_axis_variable, use_dyn_size ):
         name = self.name
         if self.selection is not None:
             if use_dyn_size:
-                return get_axis_variable( name, True )
+                return value_of_axis_variable( name, True )
             name = "max_of_" + name
-        return get_axis_variable( name, False )
+        return value_of_axis_variable( name, False )
 
     def unidimensional_version( self ):
         arguments = None

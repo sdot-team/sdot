@@ -10,8 +10,8 @@ struct Cell {
     // static constexpr int ct_dim = ct_dim_value;
     ATTRIBUTES_OF_Cell
 
-    using       Pt                     = Vector<TF,ct_dim_value>; ///< point
-    using       Ci                     = Vector<TI,ct_dim_value>; ///< cut indices
+    using       Pt                     = Vector<TF,ct_dim>; ///< point
+    using       Ci                     = Vector<TI,ct_dim>; ///< cut indices
 
     //
     HD void     init_as_aligned_simplex( TI cut_id );
@@ -32,7 +32,7 @@ struct Cell {
     Pt          solve_position         ( PI num_vertex ) const;
 
     // info, computations --------------------------------------------------------------------
-    HD void     for_each_simplex       ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map, auto &&func ); ///<
+    HD void     for_each_simplex       ( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map, auto &&func ); ///<
     HD void     for_each_facet         ( auto &&func ); ///< func( facet_repr, cut_id )
     HD void     for_each_face          ( auto &&func ); ///< func( num_vertices, cut_indices_for_this_face )
 
@@ -40,7 +40,7 @@ struct Cell {
     void        disp_cell              ();
     bool        contains               ( const Pt &p ) const;
     Pt          centroid               ();
-    HD TF       measure                ( RecursiveMapOfUniqueSortedIndices<ct_dim_value-1,TI,MemorySpace> &item_map );
+    HD TF       measure                ( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map );
 
     T_d auto    simplex_from_indices   ( const Vector<TI,d> &indices ) const;
 
