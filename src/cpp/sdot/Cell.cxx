@@ -276,7 +276,7 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
     }
 }
 
-UTP HD void DTP::for_each_simplex( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map, auto &&func ) {
+UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     constexpr int ct_simplex = dim + 1;
     if ( nb_vertices == 0 )
         return;
@@ -392,7 +392,7 @@ UTP void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD TF DTP::measure( RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace> &item_map ) {
+UTP HD TF DTP::measure( auto &item_map ) {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell

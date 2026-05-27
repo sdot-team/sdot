@@ -18,13 +18,15 @@ struct IntWithOffset {
 };
 
 ///
-template<int ct_dim,class TI,class MemorySpace>
+template<int ct_dim,class TV>
 struct MapOfUniqueSortedIndices;
 
 // Od
-template<class TI,class MemorySpace>
-struct MapOfUniqueSortedIndices<0,TI,MemorySpace> {
-    HD MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, int /* dim */, TI /* max_inp_value */ ) {
+template<class TV>
+struct MapOfUniqueSortedIndices<0,TV> {
+    using TI = TV::value_type;
+
+    HD MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, TI /* max_inp_value */ ) {
     }
 
     HD void reserve_full_capacity() {
@@ -51,11 +53,11 @@ struct MapOfUniqueSortedIndices<0,TI,MemorySpace> {
 };
 
 // 1d
-template<class TI,class MemorySpace>
-struct MapOfUniqueSortedIndices<1,TI,MemorySpace> {
-    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
+template<class TV>
+struct MapOfUniqueSortedIndices<1,TV> {
+    using TI = TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value );
         next_offset = 1;
         offset = 0;
@@ -95,11 +97,11 @@ struct MapOfUniqueSortedIndices<1,TI,MemorySpace> {
 };
 
 // 2d. TODO: hash table ?
-template<class TI,class MemorySpace>
-struct MapOfUniqueSortedIndices<2,TI,MemorySpace> {
-    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
+template<class TV>
+struct MapOfUniqueSortedIndices<2,TV> {
+    using TI = TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int /* dim */, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
         offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
         next_offset = 1;
         offset = 0;

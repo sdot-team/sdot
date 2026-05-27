@@ -28,11 +28,11 @@ public:
     HD auto         size           ( auto ind ) const { return sizes.size( ind ); }
 
     // assuming rank == 0
-    HD PI           post_increment ( PI value ) { PI res = sizes.item(); operator=( res + value ); return res; }
-    HD PI           operator++     () { PI res = sizes.item() + 1; operator=( res ); return res; }
-    HD PI           operator++     ( int ) { PI res = sizes.item(); operator=( res + 1 ); return res; }
-    HD PI           operator--     () { PI res = sizes.item() - 1; operator=( res ); return res; }
-    HD PI           operator--     ( int ) { PI res = sizes.item(); operator=( res - 1 ); return res; }
+    HD PI           post_increment ( PI value ) { PI res = sizes.value(); operator=( res + value ); return res; }
+    HD PI           operator++     () { PI res = sizes.value() + 1; operator=( res ); return res; }
+    HD PI           operator++     ( int ) { PI res = sizes.value(); operator=( res + 1 ); return res; }
+    HD PI           operator--     () { PI res = sizes.value() - 1; operator=( res ); return res; }
+    HD PI           operator--     ( int ) { PI res = sizes.value(); operator=( res - 1 ); return res; }
     HD DynamicAxis& operator=      ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes = new_size; return *this; }
     HD operator     PI             () const { return sizes.value(); }
 

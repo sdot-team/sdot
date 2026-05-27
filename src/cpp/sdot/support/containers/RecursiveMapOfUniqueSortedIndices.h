@@ -7,16 +7,16 @@ namespace sdot {
 
 /** version for known ct_dim
 */
-template<int ct_dim,class TI,class MemorySpace>
+template<int ct_dim,class TV>
 class RecursiveMapOfUniqueSortedIndices {
 public:
-    using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TI,MemorySpace>;
-    using Curr = MapOfUniqueSortedIndices<ct_dim,TI,MemorySpace>;
-    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
+    using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TV>;
+    using Curr = MapOfUniqueSortedIndices<ct_dim,TV>;
+    using TI = TV::value_type;
 
-    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) :
-        curr( map_items, ( nb_map_items = 0 ), dim, max_inp_value ),
-        next( map_items, nb_map_items, dim, max_inp_value ) {
+    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) :
+        curr( map_items, ( nb_map_items = 0 ), max_inp_value ),
+        next( map_items, nb_map_items, max_inp_value ) {
     }
 
     HD void reserve_full_capacity() {
@@ -43,13 +43,13 @@ public:
 
 /** version for ct_dim == 0
 */
-template<class TI,class MemorySpace>
-class RecursiveMapOfUniqueSortedIndices<0,TI,MemorySpace> {
+template<class TV>
+class RecursiveMapOfUniqueSortedIndices<0,TV> {
 public:
-    using Curr = MapOfUniqueSortedIndices<0,TI,MemorySpace>;
-    using TV = TensorView<TI,MemorySpace,Tuple<TI>>;
+    using Curr = MapOfUniqueSortedIndices<0,TV>;
+    using TI = TV::value_type;
 
-    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, int dim, TI max_inp_value ) : curr( map_items, nb_map_items, dim, max_inp_value ) {
+    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : curr( map_items, nb_map_items, max_inp_value ) {
     }
 
     HD void reserve_full_capacity() {
@@ -67,22 +67,10 @@ public:
     Curr curr;
 };
 
-// /** version for unknown ct dim
-// */
-// template<class InputInt,class MemorySpace>
-// class RecursiveMapOfUniqueSortedIndices<InputInt,-1,MemorySpace> {
-// public:
-//     /**/   RecursiveMapOfUniqueSortedIndices( PI dim ) : map_vec( dim ) {}
-
-//     void   prepare_for                      ( InputInt max_input_value, PI max_output_value ) { for( auto &m : map_vec ) m.prepare_for( max_input_value, max_output_value );  }
-
-//     auto   operator[]                       ( const auto &key ) { return map_vec[ key.size() ][ key ]; }
-
-// private:
-//     using  MapVec                           = std::vector<MapOfUniqueSortedIndices<InputInt,-1,MemorySpace>>;
-
-//     MapVec map_vec;                         ///<
-// };
+template<class T,T dim>
+HD auto recursive_map_of_unique_sorted_indices( Ct<T,dim>, auto &&map_items, auto &&nb_map_items, PI max_inp_value ) {
+    return RecursiveMapOfUniqueSortedIndices<dim,DECAYED_TYPE_OF( map_items )>( map_items, nb_map_items, max_inp_value );
+}
 
 
 } // namespace sdot
