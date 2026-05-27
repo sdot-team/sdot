@@ -1,7 +1,7 @@
 #pragma once
 
-#include "support/containers/RecursiveMapOfUniqueSortedIndices.h"
 #include <sdot/generated_includes/Cell.h>
+#include "Cell/Simplex.h"
 
 namespace sdot {
 
@@ -32,7 +32,7 @@ struct Cell {
     Pt          solve_position         ( PI num_vertex ) const;
 
     // info, computations --------------------------------------------------------------------
-    HD void     for_each_simplex       ( auto &item_map, auto &&func ); ///< RecursiveMapOfUniqueSortedIndices<ct_dim-1,...>
+    GD void     for_each_simplex       ( auto &item_map, auto &&func ); ///< RecursiveMapOfUniqueSortedIndices<ct_dim-1,...>
     HD void     for_each_facet         ( auto &&func ); ///< func( facet_repr, cut_id )
     HD void     for_each_face          ( auto &&func ); ///< func( num_vertices, cut_indices_for_this_face )
 
@@ -64,7 +64,7 @@ struct Cell {
     void        swap_and_pop           ( auto &nb, auto &&move_row ); ///< generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
     void        cut_2d                 ( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out );
 
-    T_d HD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
+    T_d GD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
     bool        already_in_simplex     ( auto &simplex, PI simplex_size, PI next_num_vertex );
 };
 

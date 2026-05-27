@@ -1,11 +1,11 @@
 #pragma once
 
+#include "support/containers/RecursiveMapOfUniqueSortedIndices.h"
 #include "support/containers/Matrix.h"
 #include "support/util/index.h"
 
 #include "Cell/CellBoundary.h"
 #include "Cell/integral.h"
-#include "Cell/Simplex.h"
 #include "Cell.h"
 
 #include <numeric>
@@ -248,7 +248,7 @@ UTP bool DTP::already_in_simplex( auto &simplex, PI simplex_size, PI next_num_ve
 }
 
 /// Fan triangulation — recursive core.
-UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
+UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func ) {
     // register the new vertex
     simplex[ simplex_size++ ] = num_vertex;
 
@@ -276,13 +276,13 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
     }
 }
 
-UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
+UTP GD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     constexpr int ct_simplex = dim + 1;
     if ( nb_vertices == 0 )
         return;
 
     //
-    if ( dim == 2 ) {
+    if constexpr ( ct_dim == 2 ) {
         Vector<TI,ct_simplex> simplex;
         simplex[ 0 ] = 0;
         for( TI num_vertex = 3; num_vertex <= nb_vertices; ++num_vertex ) {
@@ -290,15 +290,14 @@ UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
             simplex[ 2 ] = num_vertex - 1;
             func( simplex );
         }
-        return;
-    }
-
-    // make a list
-    Vector<TI,ct_simplex> simplex;
-    item_map.reserve( nb_vertices );
-    for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
-        Vector<TI,dim> cut_indices( vertex_indices( num_vertex ) );
-        for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
+    } else {
+        // make a list
+        Vector<TI,ct_simplex> simplex;
+        item_map.reserve( nb_vertices );
+        for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
+            Vector<TI,ct_dim> cut_indices( vertex_indices( num_vertex ) );
+            for_each_simplex_rec( cut_indices, simplex, 0, num_vertex, item_map, func );
+        }
     }
 }
 
@@ -306,7 +305,7 @@ UTP void DTP::for_each_facet( auto &&func ) {
     const PI nb_vertices = this->nb_vertices;
 
     if ( dim == 2 ) {
-        Simplex<dim,dim,TF> simplex;
+        Simplex<ct_dim,ct_dim,TF> simplex;
         for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
             simplex.pts[ 0 ] = vertex_position( num_vertex );
             simplex.pts[ 1 ] = vertex_position( ( num_vertex + 1 ) % nb_vertices );
@@ -413,10 +412,12 @@ UTP HD TF DTP::measure( auto &item_map ) {
     // nD: fan triangulation
     TF sum = 0;
     TF *p_sum = &sum; // captured by value in GD lambda (same device thread → valid pointer)
-    for_each_simplex( item_map, [=,this] GD ( const auto &simplex ) {
+    auto v = vertex_positions;
+    using S = Simplex<ct_dim,ct_dim+1,TF>;
+    for_each_simplex( item_map, [=] GD ( const S &simplex ) {
         const TI v0 = simplex[ 0 ];
-        auto M = Matrix<TF,dim>::with_func( [=,this] GD ( TI row, TI col ) {
-            return vertex_positions( simplex[ col + 1 ], row ) - vertex_positions( v0, row );
+        auto M = Matrix<TF,ct_dim>::with_func( [=] GD ( TI row, TI col ) {
+            return v( simplex[ col + 1 ], row ) - v( v0, row );
         } );
         *p_sum += std::abs( M.determinant() );
     } );
@@ -425,7 +426,7 @@ UTP HD TF DTP::measure( auto &item_map ) {
 }
 
 UTP T_d auto DTP::simplex_from_indices( const Vector<TI,d> &indices ) const {
-    Simplex<dim,d,TF> res;
+    Simplex<ct_dim,d,TF> res;
     for( PI i = 0; i < d; ++i )
         res.pts[ i ] = vertex_position( indices[ i ] );
     return res;
@@ -849,11 +850,11 @@ UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id )
 UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
-    auto M  = Matrix<TF,dim>::with_func( [&]( PI r, PI c ) {
+    auto M  = Matrix<TF,ct_dim>::with_func( [&]( PI r, PI c ) {
         return cut_planes( ci[ r ], c );
     } );
 
-    auto V = Vector<TF,dim>::with_func( [&]( PI i ) {
+    auto V = Vector<TF,ct_dim>::with_func( [&]( PI i ) {
         return cut_planes( ci[ i ], dim ) + add_func( ci[ i ] );
     } );
 
@@ -910,8 +911,8 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
 UTP void DTP::disp_cell() {
     info( nb_vertices() );
     for( PI i = 0; i < nb_vertices(); ++i ) {
-        auto pos = Vector<TF,dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
-        auto cut = Vector<TF,dim+1>::with_func( [&]( PI d ) { return cut_planes( i, d ); } );
+        auto pos = Vector<TF,ct_dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
+        auto cut = Vector<TF,ct_dim+1>::with_func( [&]( PI d ) { return cut_planes( i, d ); } );
         info( pos, cut );
     }
 }
@@ -931,8 +932,8 @@ UTP void DTP::check_consistency() {
         PI ci[ dim ];
         get_cut_inds( v, ci );
 
-        auto M = Matrix<TF,dim>::with_func( [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
-        auto V = Vector<TF,dim>::with_func( [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
+        auto M = Matrix<TF,ct_dim>::with_func( [&]( PI r, PI c ) { return cut_planes( ci[ r ], c ); } );
+        auto V = Vector<TF,ct_dim>::with_func( [&]( PI i ) { return cut_planes( ci[ i ], dim ); } );
         const auto pos = M.solve_ge( V );
 
         for ( PI d = 0; d < dim; ++d )

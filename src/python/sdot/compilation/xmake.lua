@@ -56,7 +56,7 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
         add_cuflags("-diag-suppress 940", {force = true})
         add_cuflags("-diag-suppress 1160", {force = true})
         add_cuflags("-diag-suppress 2473", {force = true})
-        add_cuflags("--expt-relaxed-constexpr", "--use_fast_math", "--extended-lambda", "-extended-lambda")
+        add_cuflags("--expt-relaxed-constexpr", "--use_fast_math", "--extended-lambda", "-extended-lambda", {force = true})
         -- add_cuflags("-Wnan-infinity-disabled")
     else
         add_cxxflags("-fdiagnostics-absolute-paths")

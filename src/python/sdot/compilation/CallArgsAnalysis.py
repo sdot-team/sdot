@@ -74,7 +74,7 @@ class CallArgsAnalysis:
             setattr( ainst, name, argument )
 
         # make a CallArg_Aggregate
-        self.arguments = CallArg_Aggregate.factory( self, None, "p", klass, ainst, IoCategory( want_return = False, want_output = False, has_input = True, ), [], {} )
+        self.arguments = CallArg_Aggregate( self, None, "p", klass, ainst, IoCategory( want_return = False, want_output = False, has_input = True, ), [], {} )
 
     def check_axis_consistency( self ):
         """Raise if tensors of a same aggregate disagree on a shared axis variable."""
@@ -240,7 +240,7 @@ class CallArgsAnalysis:
         for i, ct in enumerate( self.differentiable_tensor_inputs ):
             name = "output_grad_for_" + ct.fully_qualified_name()
             needed = perturbed_flags is None or ( i < len( perturbed_flags ) and perturbed_flags[ i ] )
-            grad_tensor = CallArg_Tensor.factory(
+            grad_tensor = CallArg_Tensor(
                 call_args = res,
                 parent = res.arguments,
                 name_in_parent = name,
@@ -265,7 +265,7 @@ class CallArgsAnalysis:
             python_value = None
             if ct.num_in_outputs < len( grads_of_the_outputs ):
                 python_value = grads_of_the_outputs[ ct.num_in_outputs ]
-            res.arguments.sub_dict[ name ] = CallArg_Tensor.factory(
+            res.arguments.sub_dict[ name ] = CallArg_Tensor(
                 call_args = res,
                 parent = res.arguments,
                 name_in_parent = name,

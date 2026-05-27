@@ -9,52 +9,54 @@ from weakref import ref
 
 class CallArg_Aggregate( CallArg ):
     """
+    A struct-like argument: a python object whose annotated attributes are recursively
+    analysed into a `sub_dict` of child CallArgs. It is the scope that owns axis variables
+    (C++ exposes them here, as struct members), and the unit emitted as a C++ struct.
     """
+
+    sub_dict : dict[ str, 'CallArg' ]
 
     def __init__(
         self,
-        name_in_parent : Optional[ str ],
+        call_args      : any,
         parent         : Optional[ ref ],
+        name_in_parent : Optional[ str ],
         python_class   : any,
         python_value   : Optional[ any ],
         io_category    : IoCategory,
         ctor_args      : Optional[ list ] = None,
-        ctor_kwargs    : Optional[ dict ] = None
+        ctor_kwargs    : Optional[ dict ] = None,
+        build_sub_dict : bool = True
     ):
         super().__init__( name_in_parent, parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
         self.sub_dict = {}
 
-    @staticmethod
-    def factory( call_args, parent, name_in_parent, python_class, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
-        res = CallArg_Aggregate(
-            name_in_parent = name_in_parent,
-            parent         = parent,
-            python_class   = python_class,
-            python_value   = python_value,
-            io_category    = io_category,
-            ctor_args      = ctor_args,
-            ctor_kwargs    = ctor_kwargs
-        )
+        # analysis: recursively analyse each annotated attribute into a sub-CallArg.
+        # (skipped by backward_version, which fills sub_dict with transformed children itself.)
+        if build_sub_dict:
+            for name, annotation in get_all_annotations( python_class ).items():
+                value = None
+                if python_value is not None:
+                    try:
+                        value = getattr( python_value, name )
+                    except AttributeError:
+                        raise RuntimeError( f"Unable to find attribute { name } in { python_value }" )
+                self.sub_dict[ name ] = CallArg.factory( call_args, self, name, annotation, value, io_category, ctor_args, ctor_kwargs )
 
-        # sub_dict
-        for name, annotation in get_all_annotations( python_class ).items():
-            value = None
-            if python_value is not None:
-                try:
-                    value = getattr( python_value, name )
-                except AttributeError:
-                    raise RuntimeError( f"Unable to find attribute { name } in { python_value }" )
-            res.sub_dict[ name ] = CallArg.factory( call_args, res, name, annotation, value, io_category, ctor_args, ctor_kwargs )
-
-        return res
+    @property
+    def children( self ) -> dict[ str, 'CallArg' ]:
+        """Override: an aggregate's sub-arguments are its analysed attributes."""
+        return self.sub_dict
 
     def signature( self ):
+        """(analysis, override) Per-binding signature: the concatenated signatures of the children."""
         lst = []
         for name, attr in self.sub_dict.items():
             lst.append( f"{ name }_{ attr.signature() }" )
         return "__".join( lst )
 
     def cpp_type_name( self, names ):
+        """(code generation, override) C++ type of the struct, with its template arguments."""
         from .TemplateArgs import TemplateArgs
 
         template_args = TemplateArgs()
@@ -71,18 +73,22 @@ class CallArg_Aggregate( CallArg ):
         return res
 
     def base_cpp_name( self ) -> str:
+        """(code generation) Name of the C++ struct (the unbatched python class name)."""
         return self.python_class.__name__
 
     def assemble_return( self ):
+        """(value management, override) Rebuild the python object from the children's returns."""
         ctor_args = {}
         for name, call_arg in self.sub_dict.items():
             ctor_args[ name ] = call_arg.assemble_return()
         return self.python_class( **ctor_args )
 
     def get_includes( self, includes: set ):
+        """(code generation, override) The struct needs its own generated header."""
         includes.add( f"sdot/{ self.base_cpp_name() }.h" )
 
     def generate_structure( self, already_visited ):
+        """(code generation) Write the generated C++ header (macros) for this struct's class."""
         if self.python_class in already_visited:
             return
         already_visited.add( self.python_class )
@@ -94,7 +100,7 @@ class CallArg_Aggregate( CallArg ):
 
         if bv:
             io = IoCategory( want_output = False, want_return = False, has_input = False )
-            unbatch_call_arg = CallArg_Aggregate.factory( call_args = None, parent = self, name_in_parent = "unbatch", python_class = bv, python_value = None, io_category = io, ctor_args = self.ctor_args if self.ctor_args is not None else [], ctor_kwargs = self.ctor_kwargs if self.ctor_kwargs is not None else {} )
+            unbatch_call_arg = CallArg_Aggregate( call_args = None, parent = self, name_in_parent = "unbatch", python_class = bv, python_value = None, io_category = io, ctor_args = self.ctor_args if self.ctor_args is not None else [], ctor_kwargs = self.ctor_kwargs if self.ctor_kwargs is not None else {} )
             unbatch_call_arg.generate_structures( already_visited )
 
         body_lines, includes, template_args = self.struct_body( self.base_cpp_name(), unbatch_version = bv )
@@ -139,14 +145,19 @@ class CallArg_Aggregate( CallArg ):
             path.write_text( code )
 
     def generate_structures( self, already_visited ):
+        """(code generation, override) Write this struct's header, then those of its children."""
         self.generate_structure( already_visited )
 
         for argument in self.sub_dict.values():
             argument.generate_structures( already_visited )
 
     def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
-        # a nested aggregate is a distinct axis variable scope; only contribute its
-        # tensors to the parent system when explicitly resolving recursively.
+        """(analysis, override) Contribute the children's tensors to an AxisVariableSystem.
+
+        A nested aggregate is a distinct axis variable scope, so its tensors are only
+        added when `recursive` is set (i.e. for C++ assembly, where every tensor is in
+        scope as a flat FFI variable).
+        """
         if not recursive:
             return
         for name, argument in self.sub_dict.items():
@@ -154,7 +165,7 @@ class CallArg_Aggregate( CallArg ):
 
     def axis_system( self, use_attributes: bool = False, recursive: bool = True ):
         """
-        Build the `AxisVariableSystem` for this aggregate, gathering one source per tensor.
+        (analysis) Build the `AxisVariableSystem` for this aggregate, one source per tensor.
 
         `recursive`      include tensors of nested aggregates (used for C++ assembly where
                          every tensor is in scope as a flat FFI variable); when False, only
@@ -169,18 +180,19 @@ class CallArg_Aggregate( CallArg ):
         return AxisVariableSystem( sources )
 
     def check_axis_consistency( self ):
-        # the tensors directly contained in this aggregate must agree on shared axes
+        """(analysis, override) Check this scope's tensors agree, then recurse into children."""
         self.axis_system( recursive = False ).check_consistency()
         for argument in self.sub_dict.values():
             argument.check_axis_consistency()
 
     def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
+        """(code generation, override) Gather the children's handler argument declarations."""
         for argument in self.sub_dict.values():
             argument.get_arg_decl( non_differentiable_inputs, differentiable_inputs, parameters, outputs )
 
     def struct_body( self, base_cpp_name: str, unbatch_version = None ):
         """
-        Generate the content of a C++ struct: methods and data members, without the
+        (code generation) Generate the content of a C++ struct: methods and data members, without the
         `template<...> struct Name {` / `};` wrapper.
 
         Returns ( body_lines, includes, template_args ) so the caller can either wrap
@@ -263,7 +275,7 @@ class CallArg_Aggregate( CallArg ):
 
     def struct_decl( self, base_cpp_name: str, includes: set, lines: list[ str ], unbatch_version = None ) -> None:
         """
-        Append a full C++ template struct declaration to `lines` and update `includes`.
+        (code generation) Append a full C++ template struct declaration to `lines` and update `includes`.
         Used when embedding a struct inside a larger generated source file (e.g. FFI handler).
         """
         body_lines, body_includes, template_args = self.struct_body( base_cpp_name, unbatch_version )
@@ -276,7 +288,7 @@ class CallArg_Aggregate( CallArg ):
 
     def assembled_code( self, beg_line: str, struct_name = None ) -> str:
         """
-        Generate the C++ initializer for this container as a `struct_name{ .field = ..., }` literal.
+        (code generation, override) Generate the C++ initializer for this container as a `struct_name{ .field = ..., }` literal.
 
         `beg_line` is the indentation prefix for nested lines.
         Subclasses that implement the `CallArg` interface override this with a one-argument
@@ -318,14 +330,17 @@ class CallArg_Aggregate( CallArg ):
         return "\n".join( lines )
 
     def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs = None ):
+        """(analysis, override) Mirror this struct for the backward call, transforming each child."""
         res = CallArg_Aggregate(
-            name_in_parent = self.name_in_parent,
+            call_args      = call_args,
             parent         = parent,
+            name_in_parent = self.name_in_parent,
             python_class   = self.python_class,
             python_value   = self.python_value,
             io_category    = IoCategory.pure_input(),
             ctor_args      = self.ctor_args,
-            ctor_kwargs    = self.ctor_kwargs
+            ctor_kwargs    = self.ctor_kwargs,
+            build_sub_dict = False
         )
 
         for name, attr in self.sub_dict.items():
