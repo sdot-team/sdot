@@ -64,7 +64,7 @@ struct Cell {
     void        swap_and_pop           ( auto &nb, auto &&move_row ); ///< generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
     void        cut_2d                 ( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out );
 
-    T_d HD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI simplex_size, PI num_vertex, auto &item_map, auto &&func );
+    T_d HD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, int nb_assignations_of_this_vertex, auto &&func );
     bool        already_in_simplex     ( auto &simplex, PI simplex_size, PI next_num_vertex );
 };
 

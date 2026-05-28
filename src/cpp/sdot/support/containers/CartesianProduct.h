@@ -43,15 +43,6 @@ struct CartesianProducts<Head,Tail...> {
     }
 
     // call func( multi_index ) for each combination; `acc` accumulates the indices chosen so far
-    // HD void for_each_item_split( auto &&func, PI rel, PI mod, auto acc ) const {
-    //     sdot::for_each_item( head, CartesianProductDetail::ForEachStep<Next,DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( acc )>{ next, func, acc } );
-    // }
-
-    // HD void for_each_item_split( auto &&func, PI rel, PI mod ) const {
-    //     for_each_item_split( FORWARD( func ), tuple() );
-    // }
-
-    // call func( multi_index ) for each combination; `acc` accumulates the indices chosen so far
     HD void for_each_item( auto &&func, auto acc ) const {
         sdot::for_each_item( head, CartesianProductDetail::ForEachStep<Next,DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( acc )>{ next, func, acc } );
     }
@@ -59,6 +50,23 @@ struct CartesianProducts<Head,Tail...> {
     HD void for_each_item( auto &&func ) const {
         for_each_item( FORWARD( func ), tuple() );
     }
+
+    // strided distribution over the flattened index space, in the same row-major order as
+    // for_each_item (head = most significant axis): thread `rel` of `mod` visits the linear indices
+    // rel, rel+mod, ..., decoding each into its multi-index. O( nb_items / mod ) per thread — no full
+    // scan, unlike the generic fallback in for_each_item_split.h. Requires each axis to provide item_at().
+    HD void for_each_item_split( PI rel, PI mod, auto &&func ) const {
+        const PI n = PI( nb_items() );
+        for ( PI k = rel; k < n; k += mod )
+            func( item_at( k ) );
+    }
+
+    // multi-index (Tuple) of the k-th item in flattened order; head is the most significant axis.
+    HD auto item_at( PI k, auto acc ) const {
+        const PI nn = PI( next.nb_items() );
+        return next.item_at( k % nn, acc.with_appended_value( head.item_at( k / nn ) ) );
+    }
+    HD auto item_at( PI k ) const { return item_at( k, tuple() ); }
 
     constexpr auto nb_items() const {
         return head.nb_items() * next.nb_items();
@@ -77,6 +85,14 @@ struct CartesianProducts<> {
     HD void for_each_item( auto &&func ) const {
         for_each_item( FORWARD( func ), tuple() );
     }
+
+    // a single (empty) combination: only thread rel == 0 runs it
+    HD void for_each_item_split( PI rel, PI /*mod*/, auto &&func ) const {
+        if ( rel == 0 )
+            func( tuple() );
+    }
+
+    HD auto item_at( PI /*k*/, auto acc ) const { return acc; }
 
     constexpr auto nb_items() const {
         return 1;

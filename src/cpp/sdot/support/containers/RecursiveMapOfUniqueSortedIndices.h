@@ -15,7 +15,7 @@ public:
     using TI = TV::value_type;
 
     HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) :
-        curr( map_items, ( nb_map_items = 0 ), max_inp_value ),
+        curr( map_items, nb_map_items, max_inp_value ),
         next( map_items, nb_map_items, max_inp_value ) {
     }
 
@@ -50,6 +50,7 @@ public:
     using TI = TV::value_type;
 
     HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : curr( map_items, nb_map_items, max_inp_value ) {
+        nb_map_items = 0;
     }
 
     HD void reserve_full_capacity() {

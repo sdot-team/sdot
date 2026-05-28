@@ -140,7 +140,7 @@ class Cell:
         max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, max_nb_cuts )
         max_nb_threads = driver.nb_threads()
 
-        # info( self.vertex_positions[ :, 1, 0 ] ).
+        info( max_of_nb_map_items )
 
         return driver.call(
             FfiCode( fwd = """

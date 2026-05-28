@@ -38,6 +38,7 @@ public:
 
     // exception
     HD void         overflow       ( PI needed_size ) {
+        info( needed_size, capacity );
         #ifndef __CUDACC__
         throw DynamicSizeException( num_dynamic_axis, needed_size );
         #endif

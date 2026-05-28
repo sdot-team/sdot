@@ -16,7 +16,8 @@ UTPH DTP::Vector( const auto &values ) requires( requires { values.size(); } ) {
     ASSERT( values.size() == size() );
     PI i = 0;
     sdot::for_each_item( values, [&]( const auto &item ) {
-        new ( data() + i++ ) T( item );
+        if ( i < ct_size )
+            new ( data() + i++ ) T( item );
     } );
     // auto iter = values.begin();
     // for( PI i = 0; i < size(); ++i )
@@ -157,7 +158,7 @@ UTPH T DTP::max() const {
     T res = operator[]( 0 );
     for( PI i = 1; i < size(); ++i )
         if ( res < operator[]( i ) )
-            res = i;
+            res = operator[]( i );
     return res;
 }
 
