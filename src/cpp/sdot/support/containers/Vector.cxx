@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "for_each_item.h"
 #include "Vector.h"
 
 namespace sdot {
@@ -13,9 +14,13 @@ namespace sdot {
 
 UTPH DTP::Vector( const auto &values ) requires( requires { values.size(); } ) {
     ASSERT( values.size() == size() );
-    auto iter = values.begin();
-    for( PI i = 0; i < size(); ++i )
-        new ( data() + i ) T( *( iter++ ) );
+    PI i = 0;
+    sdot::for_each_item( values, [&]( const auto &item ) {
+        new ( data() + i++ ) T( item );
+    } );
+    // auto iter = values.begin();
+    // for( PI i = 0; i < size(); ++i )
+    //     new ( data() + i ) T( *( iter++ ) );
 }
 
 UTPH DTP::Vector( FillWith, auto &&...ctor_args ) {

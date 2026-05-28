@@ -57,6 +57,17 @@ T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam
     #endif
 }
 
+// host<->device transfers may be initiated from a non-CUDA context too — e.g. when the host pulls
+// device results back to read/display them, the run that produced them is already finished and the
+// "current" context is the CPU. The copy direction stays fixed by the Ptr memory spaces; only the
+// driving stream is unspecified, so fall back to the process default stream.
+T_T HD void copy( Ptr<T,MemorySpace_GlobalCudaRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items, ExecutionContext_Cpu ) {
+    copy( dst, src, nb_items, ExecutionContext_Cuda{} );
+}
+T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_GlobalCudaRam> src, PI nb_items, ExecutionContext_Cpu ) {
+    copy( dst, src, nb_items, ExecutionContext_Cuda{} );
+}
+
 // device -> device: feasible from both sides -> HD, and this is where __CUDA_ARCH__ legitimately
 // picks an *implementation* (both branches are valid): in a kernel, an internal element copy; from
 // the host, cudaMemcpy. (TODO: peer copy for different devices.)

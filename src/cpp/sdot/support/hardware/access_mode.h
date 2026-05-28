@@ -23,7 +23,7 @@ namespace sdot {
 
 // memory_space() is forwarded (via the generic sdot::memory_space) so the wrapped operand still
 // "pulls" toward its native execution space in execution_space_for(), which runs before unwrapping.
-template<class T> struct AccessIn {
+template<class T> struct AccessInp {
     T value;
     HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
     HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible( execution_space, FORWARD( func ) ); }
@@ -33,14 +33,14 @@ template<class T> struct AccessOut {
     HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
     HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible_out( execution_space, FORWARD( func ) ); }
 };
-template<class T> struct AccessInOut {
+template<class T> struct AccessMut {
     T value;
     HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
     HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible_inout( execution_space, FORWARD( func ) ); }
 };
 
-HD auto in   ( auto &&value ) { return AccessIn   <DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
-HD auto out  ( auto &&value ) { return AccessOut  <DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
-HD auto inout( auto &&value ) { return AccessInOut<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
+HD auto inp( auto &&value ) { return AccessInp<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
+HD auto out( auto &&value ) { return AccessOut<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
+HD auto mut( auto &&value ) { return AccessMut<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
 
 } // namespace sdot

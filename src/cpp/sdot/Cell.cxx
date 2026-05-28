@@ -277,7 +277,7 @@ UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
 }
 
 UTP GD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
-    constexpr int ct_simplex = dim + 1;
+    constexpr int ct_simplex = ct_dim + 1;
     if ( nb_vertices == 0 )
         return;
 
@@ -411,18 +411,18 @@ UTP HD TF DTP::measure( auto &item_map ) {
 
     // nD: fan triangulation
     TF sum = 0;
-    TF *p_sum = &sum; // captured by value in GD lambda (same device thread → valid pointer)
+    TF *p_sum = &sum;
     auto v = vertex_positions;
-    using S = Simplex<ct_dim,ct_dim+1,TF>;
-    for_each_simplex( item_map, [=] GD ( const S &simplex ) {
-        const TI v0 = simplex[ 0 ];
-        auto M = Matrix<TF,ct_dim>::with_func( [=] GD ( TI row, TI col ) {
-            return v( simplex[ col + 1 ], row ) - v( v0, row );
-        } );
-        *p_sum += std::abs( M.determinant() );
+    for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
+        const TI v0 = simplex_indices[ 0 ];
+        Matrix<TF,ct_dim> M;
+        for( TI row = 0; row < ct_dim; ++row )
+            for( TI col = 0; col < ct_dim; ++col )
+                M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
+        *p_sum += 5; // std::abs( M.determinant() );
     } );
 
-    return sum / factorial( dim );
+    return sum / factorial( ct_dim );
 }
 
 UTP T_d auto DTP::simplex_from_indices( const Vector<TI,d> &indices ) const {

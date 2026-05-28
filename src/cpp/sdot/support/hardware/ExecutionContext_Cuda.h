@@ -11,6 +11,19 @@
 
 namespace sdot {
 
+// Continuation for the device-inline (nested) branch of run_parallel: once RunTraits::per_thread
+// has produced its per-thread args, walk the items and apply func( item, args... ). Expressed as a
+// functor (not a lambda) because nvcc rejects generic extended __host__ __device__ lambdas and this
+// lives inside the HD run_parallel. Mirrors the cont the launched kernel uses.
+template<class Func,class List>
+struct DeviceInlineForEach {
+    Func func; ///< reference type (T&)
+    List list; ///< reference type (const T&)
+    GD void operator()( auto &&...args ) const {
+        for_each_item( list, RunTraits::apply_to_item( func, FORWARD( args )... ) );
+    }
+};
+
 // Device kernel mirroring ExecutionContext_Cpu's per-thread body: each device thread runs
 // the optional per_thread() setup, then walks its share of the items (split by global id
 // over the whole grid) and calls func( item, args... ) on each.
@@ -19,16 +32,27 @@ __global__ void _execution_space_cuda_run_parallel( List list, Func func, Args..
     CudaThreadInfo thread_info;
     const int nth = thread_info.nb_threads();
     const int gid = thread_info.global_id();
+    // Block rounding launches nb_blocks*threads_per_block threads, usually more than there are
+    // items. Excess threads (gid >= nb_items) get no item from the round-robin split below, so
+    // they must skip per_thread() too: that per-thread setup indexes scratch by global_id(), which
+    // is only sized for the participating threads — running it here reads/writes out of bounds (and
+    // has hung the kernel). This mirrors the CPU path, which dispatches min(nb_items, threads).
+    if ( gid >= int( list.nb_items() ) )
+        return;
     RunTraits::per_thread( func, thread_info, list, [&]( auto &&...args ) {
         for_each_item_split( list, gid, nth, [&]( auto &&item ) {
             func( item, FORWARD( args )... );
         } );
-    }, args... );
+    }, FORWARD( args )... );
 }
 
 // Kernel launch must live in a pure __host__ function: a <<<>>> launch reached from a
 // __host__ __device__ function can leave the kernel instantiation as an "invalid device
 // function" at runtime. run_parallel (HD, for device nesting) forwards its host branch here.
+// NB: this is necessary but NOT sufficient — because run_parallel is HD, nvcc still instantiates
+// the whole launch chain for the device pass, where it takes the __CUDA_ARCH__ branch (never the
+// launch), so the kernel's *device* code is never emitted and the launch fails at runtime. The
+// device branch of run_parallel therefore anchors the kernel explicitly (see below).
 CPU_ONLY void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
     const int threads_per_block = 256;
     const int nb_threads        = int( list.nb_items() );
@@ -56,10 +80,22 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     #ifdef __CUDA_ARCH__
         // Called from device code: we are already inside a kernel, so there is no nested launch
         // (that would need dynamic parallelism). Run inline on the current thread — the device
-        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Functor
-        // (not lambda) item application, since nvcc rejects generic extended HD lambdas.
-        // TODO: honor RunTraits::per_thread here if a device functor ever needs per-thread setup.
-        for_each_item( list, RunTraits::apply_to_item( func, FORWARD( args )... ) );
+        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Run the
+        // optional per_thread() setup first (like the launched kernel and the CPU path do), then
+        // walk the items. Functor (not lambda) continuation, since nvcc rejects generic extended
+        // HD lambdas.
+        CudaThreadInfo thread_info;
+        RunTraits::per_thread( func, thread_info, list,
+            DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
+            FORWARD( args )... );
+
+        // Anchor the kernel the HOST branch launches. nvcc emits a launched kernel's device code
+        // only if device-compiled code references it; the HD launch chain alone does not, so a
+        // top-level host launch would fail at runtime with cudaErrorInvalidDeviceFunction. This
+        // never-executed address-of, compiled in the device pass, forces that device-side
+        // instantiation. The template arguments mirror launch_cuda_run_parallel's by-value
+        // (decayed) deduction so the anchored and launched instantiations are the same kernel.
+        (void) &_execution_space_cuda_run_parallel<DECAYED_TYPE_OF( list ),DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( args )...>;
     #else
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.

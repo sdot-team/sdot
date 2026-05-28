@@ -105,8 +105,16 @@ class Cell:
 
         return cast( cls, driver.call(
             FfiCode(
-                fwd = """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) ); } ); """,
-                bwd = """run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable { p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices ); } ); """,
+                fwd = """
+                    execution_context.run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] GD ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) mutable {
+                        cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
+                    }, p.cell, p.frame, p.cut_id );
+                """,
+                bwd = """
+                    execution_context.run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable {
+                        p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
+                    } );
+                """,
             ),
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
             cut_id = cut_id,
@@ -137,7 +145,7 @@ class Cell:
         return driver.call(
             FfiCode( fwd = """
                 using MeasureFunctor = DECAYED_TYPE_OF( p.batch_of_cells )::MeasureFunctor;
-                run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
+                execution_context.run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
             """ ),
             map_items = Workspace(
                 Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),

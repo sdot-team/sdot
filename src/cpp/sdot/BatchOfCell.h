@@ -19,9 +19,8 @@ struct BatchOfCell {
             cont( outputs, batch_of_cells, item_map );
         }
 
-        GD void operator()( auto &&batch_index, auto &outputs, auto &batch_of_cells, auto &item_map ) const {
-            auto cell = batch_of_cells( batch_index );
-            outputs( batch_index ) = cell.vertex_positions( 1, 0 ); // measure( item_map );
+        GD void operator()( const auto &batch_index, auto outputs, auto batch_of_cells, auto item_map ) const {
+            outputs( batch_index ) = batch_of_cells( batch_index ).measure( item_map );
         }
     };
 

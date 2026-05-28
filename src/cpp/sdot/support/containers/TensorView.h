@@ -57,6 +57,7 @@ public:
 
     // shape
     HD void          for_each_index       ( auto &&func ) const;
+    HD void          for_each_item        ( auto &&func ) const;
     HD auto          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
     HD auto          all_indices          () const;
     HD auto          nb_items             () const;

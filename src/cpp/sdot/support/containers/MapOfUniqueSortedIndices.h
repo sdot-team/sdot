@@ -80,7 +80,7 @@ struct MapOfUniqueSortedIndices<1,TV> {
     }
 
     HD IntWithOffset<TI> operator[]( const Vector<TI,1> &key ) {
-        return { offset, values[ key[ 0 ] - offset_in_map_items ] };
+        return { offset, values[ key[ 0 ] - offset_in_map_items ].ref() };
     }
 
     HD void for_each_item( auto &&func ) const {
@@ -124,7 +124,7 @@ struct MapOfUniqueSortedIndices<2,TV> {
     }
 
     HD IntWithOffset<TI> operator[]( const Vector<TI,2> &key ) {
-        return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ] };
+        return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ].ref() };
     }
 
     HD void for_each_item( auto &&func ) const {

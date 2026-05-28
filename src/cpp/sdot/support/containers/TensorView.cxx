@@ -221,6 +221,12 @@ UTP HD void DTP::for_each_index( auto &&func ) const {
     cartesian_product( map( _shape, range<PI> ) ).for_each_item( FORWARD( func ) );
 }
 
+UTP HD void DTP::for_each_item( auto &&func ) const {
+    for_each_index( [&]( auto &index ) {
+        func( operator()( index ) );
+    } );
+}
+
 UTP HD auto DTP::size() const {
     static_assert( ct_rank == 1, "..." );
     return shape( Ct<int,0>() );

@@ -93,7 +93,7 @@ def test_cell_2D_batch():
     #     sdot.driver.device = "gpu"
 
     def f( s ):
-        c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
+        c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0 ], [ 0, 0 ] ], [ [ s, 1 ], [ 2 * s, 1 ] ] )
         info( c.measure )
         return c.vertex_positions[ 0, 1, 0 ]
 

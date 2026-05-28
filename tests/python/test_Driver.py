@@ -259,7 +259,6 @@ def test_gpu_basic():
     info( sdot.driver.call( """
         using P = DECAYED_TYPE_OF( p );
         run_sequential( Range( 1 ), [] HD ( int, P p ) mutable {
-            info( p.input );
             p.output[ 0 ] = 10;
             p.output[ 0 ] += p.input[ 1 ];
         }, p );
