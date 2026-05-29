@@ -47,6 +47,22 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
         return row( index )( rem... );
 }
 
+UTP HD auto DTP::offset( const auto &index, auto ...rem ) const {
+    TensorView res = *this;
+    if constexpr ( requires { DECAYED_TYPE_OF( index.size() )::value; } ) {
+        if constexpr ( DECAYED_TYPE_OF( index.size() )::value )
+            return offset( index[ Ct<int,0>() ], index.without_index( Ct<int,0>() ), rem... );
+        else
+            return offset( rem... );
+    } else {
+        res._shape.set( 0_c, res._shape[ 0_c ] - index );
+        res._raw_ptr.raw += _strides[ 0_c ] * index;
+        return res.offset( rem... );
+    }
+}
+
+
+
 UTP HD void DTP::operator-=( const auto &that ) {
     TODO;
 }
@@ -95,27 +111,12 @@ UTP HD void DTP::operator/=( const auto &that ) {
     TODO;
 }
 
-
 UTP HD void DTP::operator=( const TensorView &that ) {
     copy_elements_from( that );
 }
 
 UTP HD void DTP::operator=( const auto &that ) {
-    if constexpr ( requires { that.shape(); } )
-        copy_elements_from( that );
-    else if constexpr ( requires { that.size(); } )
-        copy_elements_from( that );
-    else {
-        static_assert( ct_rank == 0 );
-        auto ec = current_execution_context();
-        if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value ) {
-            *data() = that;
-        } else {
-            TF that_tf = that;
-            auto ms = native_memory_space( ec );
-            copy( data(), Ptr( &that_tf, ms ), 1 );
-        }
-    }
+    copy_elements_from( that );
 }
 
 UTP HD auto DTP::squeeze( auto axis, PI index ) const {
@@ -124,6 +125,8 @@ UTP HD auto DTP::squeeze( auto axis, PI index ) const {
 
     using NewStrides = DECAYED_TYPE_OF( new_strides );
     using NewShape = DECAYED_TYPE_OF( new_shape );
+
+    ASSERT( index < _shape[ axis ] );
 
     auto ptr = ( _raw_ptr + _strides[ axis ] * index ).template as<TF>();
 
@@ -155,15 +158,7 @@ UTP HD auto DTP::data() const {
 
 UTP HD TF DTP::value() const {
     static_assert( ct_rank == 0 );
-    auto ec = current_execution_context();
-    if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value )
-        return *data();
-    else {
-        TF res;
-        auto ms = native_memory_space( ec );
-        copy( Ptr( &res, ms ), data(), 1 );
-        return res;
-    }
+    return data().value();
 }
 
 UTP TF& DTP::ref() const {
@@ -173,7 +168,7 @@ UTP TF& DTP::ref() const {
 
 UTP void DTP::display( std::ostream &os ) const {
     if constexpr ( ! DECAYED_TYPE_OF( accessible_from( ExecutionContext_Cpu{}, _memory_space ) )::value ) {
-        make_accessible( ExecutionContext_Cpu{}, [&]( auto &&tensor ) {
+        make_accessible_inp( ExecutionContext_Cpu{}, [&]( auto &&tensor ) {
             tensor.display( os );
         } );
     } else if constexpr ( ct_rank == 0 ) {
@@ -195,21 +190,9 @@ UTP HD void DTP::copy_elements_from( const auto &that ) {
     if ( _strides == that.strides() && is_contiguous() ) {
         copy( data(), that.data(), nb_items() );
     } else  {
-        TODO; // run( ... ) ?
-        // auto ec = current_execution_context();
-        // make_accessible( ec, [&]( auto &&a ) {
-        //     make_accessible( ec, [&]( auto &&b ) {
-
-        //     } );
-        // } );
-        // auto av = accessible_from( , memory_space() );
-        // auto bv = accessible_from( current_execution_context(), that.memory_space() );
-        // if constexpr ( DECAYED_TYPE_OF( av && bv )::value ) {
-        //     for_each_index( [&]( auto &&index ) {
-        //         operator[]( index ).ref() == that[ index ].value();
-        //     } );
-        // } else {
-        // }
+        run_sequential( cartesian_product_ranges( _shape ), [&]( auto indices, auto &&a, auto &&b ) {
+            a[ indices ] = b[ indices ];
+        }, out( *this ), that );
     }
 }
 
@@ -265,25 +248,35 @@ UTP HD auto DTP::all_indices() const {
     return cartesian_product_ranges( _shape );
 }
 
-UTP void DTP::fill_with( TF value ) {
+UTP HD void DTP::fill_with( TF value ) {
     run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), out( *this ), value );
 }
 
+// transfer_cost for TensorView: accessible without transfer → cost 0, else 1
+UTP HD auto DTP::transfer_cost( const auto &ec ) const {
+    return sdot::transfer_cost_per_byte( ec, _memory_space );
+}
 
-// pass-through when reachable, else transfer with the access-mode's copy policy
-UTP void DTP::make_accessible( auto execution_space, auto &&func ) const {       // read-only
+
+// pass-through when reachable, else transfer with the access-mode's copy policy.
+// HD: the else branch calls transfer_through (host-only), but if constexpr ensures it is never
+// compiled in the device pass when the data is accessible there — which is always the case for
+// device code (operands must already live in device-accessible memory before a kernel is launched).
+UTP HD void DTP::make_accessible_inp( auto execution_space, auto &&func ) const { // read-only
     if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
         func( *this );
     else
         transfer_through( execution_space, /*copy_in*/ true, /*copy_back*/ false, FORWARD( func ) );
 }
-UTP void DTP::make_accessible_out( auto execution_space, auto &&func ) const {   // write-only
+
+UTP HD void DTP::make_accessible_out( auto execution_space, auto &&func ) const { // write-only
     if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
         func( *this );
     else
         transfer_through( execution_space, /*copy_in*/ false, /*copy_back*/ true, FORWARD( func ) );
 }
-UTP void DTP::make_accessible_inout( auto execution_space, auto &&func ) const { // read-write
+
+UTP HD void DTP::make_accessible_mut( auto execution_space, auto &&func ) const { // read-write
     if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
         func( *this );
     else

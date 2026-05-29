@@ -24,12 +24,12 @@ struct MemorySpace_PinnedCpuRam : MemorySpace {
     void         display( auto &os ) const { os << "PinnedCpuRam"; }
 };
 
-constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
-constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_CpuRam       ) { return Ct<bool,true>(); }
-constexpr auto operator==( MemorySpace_CpuRam      , MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_PinnedCpuRam ) { return 0_c; }
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cpu , MemorySpace_PinnedCpuRam ) { return 0_c; }
 
-auto accessible_from( ExecutionContext_Cuda, MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
-auto accessible_from( ExecutionContext_Cpu , MemorySpace_PinnedCpuRam ) { return Ct<bool,true>(); }
+constexpr auto operator==( MemorySpace_PinnedCpuRam, MemorySpace_PinnedCpuRam ) { return Ct<bool,true >(); }
+constexpr auto operator==( MemorySpace_PinnedCpuRam, auto                     ) { return Ct<bool,false>(); }
+constexpr auto operator==( auto                    , MemorySpace_PinnedCpuRam ) { return Ct<bool,false>(); }
 
 } // namespace sdot
 

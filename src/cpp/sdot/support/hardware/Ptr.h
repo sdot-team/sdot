@@ -1,7 +1,7 @@
 #pragma once
 
 #include "current_execution_context.h"
-#include "accessible_from.h"
+#include "MemorySpace_CpuRam.h"
 
 namespace sdot {
 
@@ -36,7 +36,15 @@ struct Ptr {
     HD bool          operator!=   ( const Ptr &o ) const { return ! operator==( o ); }
 
     //
-    HD T&            operator*    () const { static_assert( DECAYED_TYPE_OF( accessible_from( current_execution_context(), memory_space ) )::value ); return *raw; }
+    HD T&            operator*    () const { static_assert( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value ); return *raw; }
+    HD T             value        () const {
+        if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value ) {
+            T res;
+            copy( Ptr<T,DECAYED_TYPE_OF( current_execution_context() )>( &res ), *this, 1 );
+            return 1;
+        } else
+            return *raw;
+    }
 
 
     MemorySpace      memory_space; ///< void structure by default

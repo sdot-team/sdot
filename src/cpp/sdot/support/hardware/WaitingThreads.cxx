@@ -55,7 +55,9 @@ inline void WaitingThreads::worker( int num_thread ) {
         auto *f = func_to_execute;
         lock.unlock();
 
+        is_pool_worker_thread = true;
         ( *f )( num_thread, job_nb_threads );
+        is_pool_worker_thread = false;
 
         lock.lock();
         if ( --nb_busy == 0 )
@@ -67,5 +69,7 @@ inline WaitingThreads &waiting_threads() {
     static WaitingThreads res;
     return res;
 }
+
+inline thread_local bool is_pool_worker_thread = false;
 
 } // namespace sdot

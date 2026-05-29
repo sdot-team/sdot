@@ -57,8 +57,8 @@ template<class TV>
 struct MapOfUniqueSortedIndices<1,TV> {
     using TI = TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
-        offset_in_map_items = nb_map_items.post_increment( max_inp_value );
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value ) ) ) {
+        // values.fill_with( 0 );
         next_offset = 1;
         offset = 0;
     }
@@ -67,29 +67,28 @@ struct MapOfUniqueSortedIndices<1,TV> {
         next_offset = 1;
         offset = 1;
         for( TI i = 0; i < max_inp_value; ++i )
-            values[ offset_in_map_items + i ] = 0;
+            values[ i ] = 0;
     }
 
     HD void reserve( TI reservation ) {
         if ( next_offset == 1 )
             for( TI i = 0; i < max_inp_value; ++i )
-                values[ offset_in_map_items + i ] = 0;
+                values[ i ] = 0;
 
         offset = next_offset;
         next_offset += reservation;
     }
 
     HD IntWithOffset<TI> operator[]( const Vector<TI,1> &key ) {
-        return { offset, values[ key[ 0 ] - offset_in_map_items ].ref() };
+        return { offset, values[ key[ 0 ] ].ref() };
     }
 
     HD void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
-            if ( values[ offset_in_map_items + i ] >= offset )
-                func( Vector<TI,1>( Values(), i ), values[ offset_in_map_items + i ] - offset );
+            if ( values[ i ] >= offset )
+                func( Vector<TI,1>( Values(), i ), values[ i ] - offset );
     }
 
-    TI offset_in_map_items; ///<
     TI max_inp_value; ///<
     TI next_offset; ///<
     TI offset; ///<
@@ -101,9 +100,8 @@ template<class TV>
 struct MapOfUniqueSortedIndices<2,TV> {
     using TI = TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items ) {
-        offset_in_map_items = nb_map_items.post_increment( max_inp_value * max_inp_value );
-        info( offset_in_map_items, nb_map_items );
+    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value * max_inp_value ) ) ) {
+        // values.fill_with( 0 );
         next_offset = 1;
         offset = 0;
     }
@@ -112,33 +110,32 @@ struct MapOfUniqueSortedIndices<2,TV> {
         next_offset = 1;
         offset = 1;
         for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
-            values[ offset_in_map_items + i ] = 0;
+            values[ i ] = 0;
     }
 
     HD void reserve( TI reservation ) {
         if ( next_offset == 1 )
             for( TI i = 0; i < max_inp_value * max_inp_value; ++i )
-                values[ offset_in_map_items + i ] = 0;
+                values[ i ] = 0;
 
         offset = next_offset;
         next_offset += reservation;
     }
 
     HD IntWithOffset<TI> operator[]( const Vector<TI,2> &key ) {
-        return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] - offset_in_map_items ].ref() };
+        return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] ].ref() };
     }
 
     HD void for_each_item( auto &&func ) const {
         for( PI i = 0; i < values.size(); ++i ) {
             for( PI j = 0; j < values.size(); ++j ) {
-                PI k = offset_in_map_items + i * max_inp_value + j;
+                PI k = i * max_inp_value + j;
                 if ( values[ k ] >= offset )
                     func( Vector<TI,2>( Values(), i, j ), values[ k ] - offset );
             }
         }
     }
 
-    TI offset_in_map_items; ///<
     TI max_inp_value; ///<
     TI next_offset; ///<
     TI offset; ///<

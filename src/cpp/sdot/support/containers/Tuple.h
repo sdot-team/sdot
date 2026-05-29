@@ -31,6 +31,7 @@ public:
     HD auto        operator[]         ( auto &&index ) const;
     HD auto        operator==         ( const auto &that ) const;
     static HD auto size               ();
+    HD void        set                ( auto &&index, auto &&value );
 
     HD auto        with_appended_value( auto &&new_value ) const;
     HD auto        without_index      ( auto index ) const;
@@ -56,6 +57,7 @@ public:
     HD Void        operator[]         ( auto ) const;
     HD auto        operator==         ( const auto &that ) const;
     static HD auto size               ();
+    HD void        set                ( auto &&index, auto &&value );
 
     HD auto        with_appended_value( auto &&new_value ) const;
 };

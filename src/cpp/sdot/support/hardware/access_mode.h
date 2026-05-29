@@ -1,7 +1,6 @@
 #pragma once
 
-#include "MemorySpace.h" // IWYU pragma: keep  (generic sdot::memory_space)
-#include "../common_macros.h"
+#include "MemorySpace_CpuRam.h" // IWYU pragma: keep  (generic sdot::memory_space)
 
 namespace sdot {
 
@@ -21,23 +20,23 @@ namespace sdot {
 // wrapped value, so the generic free make_accessible() handles markers unchanged.
 // ---------------------------------------------------------------------------
 
-// memory_space() is forwarded (via the generic sdot::memory_space) so the wrapped operand still
-// "pulls" toward its native execution space in execution_space_for(), which runs before unwrapping.
 template<class T> struct AccessInp {
     T value;
-    HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
     HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible( execution_space, FORWARD( func ) ); }
 };
 template<class T> struct AccessOut {
     T value;
-    HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
     HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible_out( execution_space, FORWARD( func ) ); }
 };
 template<class T> struct AccessMut {
     T value;
-    HD auto memory_space() const requires ( requires { sdot::memory_space( value ); } ) { return sdot::memory_space( value ); }
-    HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible_inout( execution_space, FORWARD( func ) ); }
+    HD void make_accessible( const auto &execution_space, auto &&func ) const { value.make_accessible_mut( execution_space, FORWARD( func ) ); }
 };
+
+// transfer_cost for AccessMode wrappers: delegate to the wrapped value
+template<class T> HD auto transfer_cost( const auto &ec, const AccessInp<T> &a ) { return sdot::transfer_cost( ec, a.value ); }
+template<class T> HD auto transfer_cost( const auto &ec, const AccessOut<T> &a ) { return sdot::transfer_cost( ec, a.value ); }
+template<class T> HD auto transfer_cost( const auto &ec, const AccessMut<T> &a ) { return sdot::transfer_cost( ec, a.value ); }
 
 HD auto inp( auto &&value ) { return AccessInp<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }
 HD auto out( auto &&value ) { return AccessOut<DECAYED_TYPE_OF( value )>{ FORWARD( value ) }; }

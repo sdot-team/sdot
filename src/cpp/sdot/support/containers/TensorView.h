@@ -77,6 +77,9 @@ public:
     HD auto          operator[]           ( const auto &index ) const { return operator()( index ); }
     HD auto          operator()           () const { return *this; }
 
+    HD auto          offset               ( const auto &index, auto ...rem ) const;
+    HD auto          offset               () const { return *this; }
+
     // scalar value/reference for a rank 1 tensor
     HD               operator TF          () const { return value(); }
     HD TF            value                () const;
@@ -93,16 +96,18 @@ public:
     HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    void             with_same_shape      ( const auto &arch, auto &&func ) const;
-    HD void          make_accessible      ( auto execution_space, auto &&func ) const; ///< read-only:  transfer in, no copy back
-    HD void          make_accessible_out  ( auto execution_space, auto &&func ) const; ///< write-only: no copy in, copy back
-    HD void          make_accessible_inout( auto execution_space, auto &&func ) const; ///< read-write: copy in, copy back
-    HD void          fill_with            ( TF value );
+    HD void          make_accessible_mut        ( auto execution_space, auto &&func ) const; ///< read-write: copy in, copy back
+    HD void          make_accessible_out        ( auto execution_space, auto &&func ) const; ///< write-only: no copy in, copy back
+    HD void          make_accessible_inp        ( auto execution_space, auto &&func ) const; ///< read-only:  transfer in, no copy back
+    auto             transfer_cost              ( const auto &execution_context ) const;
+
+    void             with_same_shape            ( const auto &arch, auto &&func ) const;
+    HD void          fill_with                  ( TF value );
 
     //
-    HD auto          unsqueeze            ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
-    HD auto          squeeze              ( auto axis, PI index = 0 ) const;
-    HD auto          row                  ( PI index ) const;
+    HD auto          unsqueeze                  ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
+    HD auto          squeeze                    ( auto axis, PI index = 0 ) const;
+    HD auto          row                        ( PI index ) const;
 
     // compile-time tags (see container_tags.h)
     template<class... ExtraTags>

@@ -38,6 +38,10 @@ class Device:
         raise NotImplementedError
 
     @property
+    def mem_type( self ) -> str:
+        raise NotImplementedError
+
+    @property
     def signature( self ) -> str:
         raise NotImplementedError
 

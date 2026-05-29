@@ -74,6 +74,22 @@ UTP HD auto DTP::operator[]( auto &&index ) const {
     }
 }
 
+UTP HD void DTP::set( auto &&index, auto &&value ) {
+    if constexpr ( requires { DECAYED_TYPE_OF( index )::value; } ) {
+        if constexpr ( DECAYED_TYPE_OF( index )::value )
+            tail[ index - Ct<int,1>() ].set( FORWARD( value ) );
+        else
+            head = FORWARD( value );
+    } else {
+        if constexpr ( sizeof...( Tail ) == 0 )
+            head = FORWARD( value );
+        else if ( index == 0 )
+            head = FORWARD( value );
+        else
+            tail[ index - 1_c ].set( value );
+    }
+}
+
 UTP HD auto DTP::operator==( const auto &that ) const {
     return apply_values( [&]( const auto &...a ) {
         return that.apply_values( [&]( const auto &...b ) {
@@ -135,6 +151,9 @@ UTP HD auto DTP::apply_values( auto &&cb ) const {
 
 UTP HD Void DTP::operator[]( auto ) const {
     return {};
+}
+
+UTP HD void DTP::set( auto &&/* index */, auto &&/* value */ ) {
 }
 
 UTP HD auto DTP::operator==( const auto &that ) const {

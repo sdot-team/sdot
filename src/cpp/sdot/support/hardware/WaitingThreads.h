@@ -49,6 +49,10 @@ private:
 /// Global pool, shared by the whole process (created on first call).
 WaitingThreads &waiting_threads();
 
+/// true on any thread that is currently executing inside waiting_threads().run().
+/// Used by ExecutionContext_Cpu to detect nested run_parallel and stay inline.
+extern thread_local bool is_pool_worker_thread;
+
 } // namespace sdot
 
 #include "WaitingThreads.cxx" // IWYU pragma: export

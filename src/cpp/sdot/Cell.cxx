@@ -248,36 +248,30 @@ UTP bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex ) {
 }
 
 /// Fan triangulation — recursive core.
-UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, int nb_assignations_of_this_vertex, auto &&func ) {
+UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, auto &&func ) {
     // register the new vertex
     simplex[ d ] = num_vertex;
 
     if constexpr ( d == 0 ) {
-        if ( nb_assignations_of_this_vertex <= 1 ) {
-            info( simplex );
-            func( simplex );
-        }
+        func( simplex );
     } else {
         for( PI ind_to_remove = 0; ind_to_remove < d; ++ind_to_remove ) {
             // first time we see this item -> use vertex `num_vertex`as reference for this item
             auto new_cut_indices = cut_indices.without_index( ind_to_remove );
             auto ic = item_map[ new_cut_indices ];
             if ( ! ic ) {
-                ++nb_assignations_of_this_vertex;
                 ic = num_vertex;
-                if ( nb_assignations_of_this_vertex >= 2 )
-                    break;
                 continue;
             }
 
 
             // else, try to make a new simplex
             const PI next_num_vertex = ic;
-            if( already_in_simplex( simplex, d + 1, next_num_vertex ) )
+            if( already_in_simplex( simplex, d, next_num_vertex ) )
                 continue;
 
             // and continue the recursion
-            for_each_simplex_rec( new_cut_indices, simplex, next_num_vertex, item_map, nb_assignations_of_this_vertex, func );
+            for_each_simplex_rec( new_cut_indices, simplex, next_num_vertex, item_map, func );
         }
     }
 }
@@ -302,7 +296,7 @@ UTP GD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
         item_map.reserve( nb_vertices );
         for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
             Vector<TI,ct_dim> cut_indices( vertex_indices( num_vertex ) );
-            for_each_simplex_rec( cut_indices, simplex, num_vertex, item_map, 0, func );
+            for_each_simplex_rec( cut_indices, simplex, num_vertex, item_map, func );
         }
     }
 }
@@ -418,15 +412,15 @@ UTP HD TF DTP::measure( auto &item_map ) {
     // nD: fan triangulation
     TF sum = 0;
     TF *p_sum = &sum;
-    auto v = vertex_positions;
-    for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
-        // const TI v0 = simplex_indices[ 0 ];
-        // Matrix<TF,ct_dim> M;
-        // for( TI row = 0; row < ct_dim; ++row )
-        //     for( TI col = 0; col < ct_dim; ++col )
-        //         M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
-        // *p_sum += std::abs( M.determinant() );
-    } );
+    // auto v = vertex_positions;
+    // for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
+    //     // const TI v0 = simplex_indices[ 0 ];
+    //     // Matrix<TF,ct_dim> M;
+    //     // for( TI row = 0; row < ct_dim; ++row )
+    //     //     for( TI col = 0; col < ct_dim; ++col )
+    //     //         M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
+    //     *p_sum += 32; // std::abs( M.determinant() );
+    // } );
 
     return sum / factorial( ct_dim );
 }

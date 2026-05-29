@@ -121,8 +121,9 @@ struct ExecutionContext_Cuda : public ExecutionContext {
         launch_cuda_run_parallel( stream, list, FORWARD( func ), FORWARD( args )... );
     #endif
     }
-
 };
+
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_CpuRam ) { return 1_c; }
 
 // int block = max_tpb;
 // int regs = kernel_nb_gpu_register_per_thread( func, args... ); // Ct<...> or runtime

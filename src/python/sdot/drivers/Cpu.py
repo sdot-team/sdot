@@ -12,6 +12,10 @@ class Cpu( Device ):
         return "ExecutionContext_Cpu"
 
     @property
+    def mem_type( self ):
+        return "MemorySpace_CpuRam"
+
+    @property
     def signature( self ):
         return "cpu"
 

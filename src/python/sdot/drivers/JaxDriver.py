@@ -570,7 +570,7 @@ class JaxDriver:
             # Eager mode: retry loop until capacity is sufficient.
             while True:
                 prim = get_or_create( module_name, fai.ffi_outputs, fai.ffi_attributes )
-                ret  = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
+                ret = jax.jit( lambda *args: prim.bind( *args ) )( *fai.ffi_inputs )
 
                 if isinstance( ret, jax.Array ):
                     ret = ( ret, )
@@ -721,7 +721,7 @@ class JaxDriver:
         if is_gpu:
             lines.append( f"    { self.device.cpp_type }::default_stream = stream;" )
         lines.append( f"    { self.device.cpp_type } execution_context;" )
-        lines.append( "    auto memory_space = native_memory_space( execution_context );" )
+        lines.append( f"    { self.device.mem_type } memory_space;" )
 
         # u8_...
         if len( fai.u8_input_values ):
@@ -765,6 +765,9 @@ class JaxDriver:
         lines.append( '    }' )
 
         # end impl
+        if is_gpu:
+            lines.append( '    if ( cudaError_t e = cudaGetLastError(); e != cudaSuccess )' )
+            lines.append( '        fprintf( stderr, "[sdot] CUDA kernel error: %s\\n", cudaGetErrorString( e ) );' )
         lines.append( "    return xla::ffi::Error::Success();" )
         lines.append( "}" )
 

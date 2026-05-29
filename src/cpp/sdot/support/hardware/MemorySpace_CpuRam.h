@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ExecutionContext_Cpu.h"
-#include "accessible_from.h" // IWYU pragma: export
 #include "MemorySpace.h"
 #include "Ptr.h"
 
@@ -16,17 +15,11 @@ struct MemorySpace_CpuRam : MemorySpace {
     void         display( auto &os ) const { os << "CpuRam"; }
 };
 
-constexpr auto operator==( MemorySpace_CpuRam, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
+// functions
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cpu, MemorySpace_CpuRam ) { return 0_c; }
+constexpr auto operator==            ( MemorySpace_CpuRam, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
+T_T T*         zero_for              ( MemorySpace_CpuRam /* memory_space */ ) { static T res = 0; return &res; }
+T_T HD void    copy                  ( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items ) { std::memcpy( dst.raw, src.raw, nb_items * sizeof( T ) ); }
 
-constexpr auto accessible_from( ExecutionContext_Cpu, MemorySpace_CpuRam ) { return Ct<bool,true>(); }
-
-/// memory space a CPU execution space allocates into when it must materialize data
-constexpr auto native_memory_space( ExecutionContext_Cpu ) {return MemorySpace_CpuRam{}; }
-
-T_T HD void copy( Ptr<T,MemorySpace_CpuRam> dst, Ptr<T,MemorySpace_CpuRam> src, PI nb_items ) { std::memcpy( dst.raw, src.raw, nb_items * sizeof( T ) ); }
-
-auto memory_space( const auto &value ) requires ( ! requires { value.memory_space(); } ) { return MemorySpace_CpuRam(); }
-
-T_T T *zero_for( MemorySpace_CpuRam /* memory_space */ ) { static T res = 0; return &res; }
 
 } // namespace sdot

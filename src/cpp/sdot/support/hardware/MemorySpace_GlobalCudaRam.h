@@ -27,14 +27,14 @@ struct MemorySpace_GlobalCudaRam : MemorySpace {
     void         display( auto &os ) const { os << "GlobalCudaRam"; }
 };
 
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_GlobalCudaRam ) { return 0_c; }
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cpu , MemorySpace_GlobalCudaRam ) { return 1_c; }
+
+
 constexpr auto operator==( MemorySpace_GlobalCudaRam, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
 constexpr auto operator==( MemorySpace_GlobalCudaRam, auto                      ) { return Ct<bool,false>(); }
 constexpr auto operator==( auto                     , MemorySpace_GlobalCudaRam ) { return Ct<bool,false>(); }
 
-HD auto accessible_from( ExecutionContext_Cuda, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }
-
-/// memory space a CUDA execution space allocates into when it must materialize data
-HD auto native_memory_space( ExecutionContext_Cuda ) { return MemorySpace_GlobalCudaRam{}; }
 
 // Transfer primitive copy( dst_ptr, src_ptr, nb_items[, es] ): the (dst,src) memory-space types
 // select the direction; the execution space carries the stream.

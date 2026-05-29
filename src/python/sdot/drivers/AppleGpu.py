@@ -15,6 +15,10 @@ class AppleGpu( Device ):
         return "AppleGpu"
 
     @property
+    def mem_type( self ):
+        return "AppleGpu"
+
+    @property
     def is_apple_gpu( self ):
         return True
 

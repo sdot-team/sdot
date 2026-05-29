@@ -27,6 +27,10 @@ class CudaGpu( Device ):
         return "ExecutionContext_Cuda"
 
     @property
+    def mem_type( self ):
+        return "MemorySpace_GlobalCudaRam"
+
+    @property
     def is_cuda_gpu( self ):
         return True
 
