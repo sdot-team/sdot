@@ -1,11 +1,11 @@
 #pragma once
 
 #include "ExecutionContext_Cpu.h"
-#include "transfer_cost.h" // IWYU pragma: keep
-#include "access_mode.h"                 // IWYU pragma: keep  (transfer_cost overloads for AccessInp/Out/Mut)
 #ifdef __CUDACC__
 #include "ExecutionContext_Cuda.h"
 #endif
+
+#include "transfer_cost.h" // IWYU pragma: keep
 
 namespace sdot {
 

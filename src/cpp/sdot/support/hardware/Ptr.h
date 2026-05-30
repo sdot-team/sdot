@@ -36,7 +36,7 @@ struct Ptr {
     HD bool          operator!=   ( const Ptr &o ) const { return ! operator==( o ); }
 
     //
-    HD T&            operator*    () const { static_assert( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value ); return *raw; }
+    HD T&            operator*    () const { static_assert( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value == 0 ); return *raw; }
     HD T             value        () const {
         if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value ) {
             T res;

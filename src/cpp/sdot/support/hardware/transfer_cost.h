@@ -29,14 +29,23 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 
 // zero data-args: identity
-HD auto transfer_cost( const auto &/*ec*/ ) { return Ct<int,0>{}; }
+HD auto transfer_cost( const auto &/*ec*/ ) { return 0_c; }
 
-// single data-arg default: scalars and plain value types carry no heap data
+HD auto transfer_cost( const auto &/*ec*/, Inp ) { return 0_c; }
+HD auto transfer_cost( const auto &/*ec*/, Out ) { return 0_c; }
+HD auto transfer_cost( const auto &/*ec*/, Mut ) { return 0_c; }
+
+// single data-arg: delegate to the arg's transfer_cost method (required — static_assert if absent)
 HD auto transfer_cost( const auto &ec, const auto &arg ) {
-    if ( requires { arg.transfer_cost( ec ); } )
+    if constexpr ( requires { arg.transfer_cost( ec ); } )
+        return arg.transfer_cost( ec );
+    else if constexpr ( std::is_pod<DECAYED_TYPE_OF( arg )>::value )
         return 0_c;
-    else
-        static_assert( "don't know how to make transfer_cost" );
+    else {
+        arg.no_transfer_cost();
+        return 0_c;
+        // static_assert( sizeof( arg ) == 0, "don't know how to make transfer_cost: arg must provide transfer_cost( ec )" );
+    }
 }
 
 // multi data-args: recursive sum — requires at least 2 to avoid ambiguity with single-arg default

@@ -96,9 +96,6 @@ public:
     HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    HD void          make_accessible_mut        ( auto execution_space, auto &&func ) const; ///< read-write: copy in, copy back
-    HD void          make_accessible_out        ( auto execution_space, auto &&func ) const; ///< write-only: no copy in, copy back
-    HD void          make_accessible_inp        ( auto execution_space, auto &&func ) const; ///< read-only:  transfer in, no copy back
     auto             transfer_cost              ( const auto &execution_context ) const;
 
     void             with_same_shape            ( const auto &arch, auto &&func ) const;
@@ -116,13 +113,13 @@ public:
 
 private:
     static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }
-    CPU_ONLY void    transfer_through     ( auto execution_space, bool copy_in, bool copy_back, auto &&func ) const; ///< host-only transfer path: materialize in the exec space, optionally copy in, run, optionally copy back
 
     MemorySpace      _memory_space;       ///<
     RawPtr           _raw_ptr;            ///<
     Strides          _strides;            ///< byte strides
     Shape            _shape;              ///<
 };
+
 
 #undef SDOT_DATA_ACCESSOR
 

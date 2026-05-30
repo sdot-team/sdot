@@ -29,6 +29,7 @@ struct MemorySpace_GlobalCudaRam : MemorySpace {
 
 constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_GlobalCudaRam ) { return 0_c; }
 constexpr auto transfer_cost_per_byte( ExecutionContext_Cpu , MemorySpace_GlobalCudaRam ) { return 1_c; }
+constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_CpuRam        ) { return 1_c; }
 
 
 constexpr auto operator==( MemorySpace_GlobalCudaRam, MemorySpace_GlobalCudaRam ) { return Ct<bool,true>(); }

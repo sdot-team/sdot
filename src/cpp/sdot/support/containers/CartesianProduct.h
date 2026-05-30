@@ -34,14 +34,6 @@ template<class Head,class... Tail>
 struct CartesianProducts<Head,Tail...> {
     using Next = CartesianProducts<Tail...>;
 
-    HD CartesianProducts( const CartesianProducts & ) = default;
-    HD CartesianProducts( CartesianProducts && ) = default;
-
-    // forwarding ctor — constrained so it does not hijack copy/move construction
-    template<class H,class... T> requires ( ! std::is_same_v<std::decay_t<H>,CartesianProducts> )
-    HD CartesianProducts( H &&head, T &&...tail ) : head( FORWARD( head ) ), next( FORWARD( tail )... ) {
-    }
-
     // call func( multi_index ) for each combination; `acc` accumulates the indices chosen so far
     HD void for_each_item( auto &&func, auto acc ) const {
         sdot::for_each_item( head, CartesianProductDetail::ForEachStep<Next,DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( acc )>{ next, func, acc } );
@@ -99,8 +91,14 @@ struct CartesianProducts<> {
     }
 };
 
-HD auto cartesian_product_args( auto &&...lists ) {
-    return CartesianProducts<DECAYED_TYPE_OF( lists )...>{ FORWARD( lists )... };
+HD auto cartesian_product_args() {
+    return CartesianProducts<>{};
+}
+
+HD auto cartesian_product_args( auto &&head, auto &&...tail ) {
+    return CartesianProducts<DECAYED_TYPE_OF( head ),DECAYED_TYPE_OF( tail )...>{
+        FORWARD( head ), cartesian_product_args( FORWARD( tail )... )
+    };
 }
 
 HD auto cartesian_product( auto &&tuple_of_lists ) {

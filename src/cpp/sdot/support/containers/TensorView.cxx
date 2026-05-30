@@ -1,27 +1,19 @@
 #pragma once
 
-// #include "StrideIterator.h"
-// #include "StrideIterator.h"
-// #include "CrossArchCopy.h"
 #include "../hardware/current_execution_context.h"
-#include "../hardware/access_mode.h"
 #include "../hardware/Run.h"
-// #include "contiguous_strides.h"
-// #include "IndexRange.h"
+
 #include "CartesianProduct.h"
 #include "TensorView.h"
 #include "Range.h"
-
-// #include "../ASSERT.h"
-// #include "TODO.h"
-
-// #include <algorithm>
-// #include <cstring>
 
 #define UTP template<class TF,class MemorySpace,class Shape,class Strides,class... Tags>
 #define DTP TensorView<TF,MemorySpace,Shape,Strides,Tags...>
 
 namespace sdot {
+
+template <typename T> struct Is_TensorView : std::false_type {};
+UTP struct Is_TensorView<DTP> : std::true_type {};
 
 namespace details::TensorView {
     /// bind the leading TensorView params and expand a TagList into the trailing tag pack
@@ -167,8 +159,8 @@ UTP TF& DTP::ref() const {
 }
 
 UTP void DTP::display( std::ostream &os ) const {
-    if constexpr ( ! DECAYED_TYPE_OF( accessible_from( ExecutionContext_Cpu{}, _memory_space ) )::value ) {
-        make_accessible_inp( ExecutionContext_Cpu{}, [&]( auto &&tensor ) {
+    if constexpr ( DECAYED_TYPE_OF( transfer_cost( ExecutionContext_Cpu{} ) )::value ) {
+        make_accessible( ExecutionContext_Cpu{}, *this, 1_b, 0_b, [&]( auto &&tensor ) {
             tensor.display( os );
         } );
     } else if constexpr ( ct_rank == 0 ) {
@@ -187,12 +179,19 @@ UTP HD auto DTP::nb_items() const {
 }
 
 UTP HD void DTP::copy_elements_from( const auto &that ) {
-    if ( _strides == that.strides() && is_contiguous() ) {
-        copy( data(), that.data(), nb_items() );
-    } else  {
-        run_sequential( cartesian_product_ranges( _shape ), [&]( auto indices, auto &&a, auto &&b ) {
-            a[ indices ] = b[ indices ];
-        }, out( *this ), that );
+    if constexpr ( ct_rank == 0 ) {
+        if constexpr( requires { that.shape(); } )
+            ref() = that.value();
+        else
+            ref() = that;
+    } else {
+        if ( std::is_same_v<TF,typename DECAYED_TYPE_OF(that)::TF> && _strides == that.strides() && is_contiguous() ) {
+            copy( data(), that.data(), nb_items() );
+        } else  {
+            run_sequential( cartesian_product_ranges( _shape ), [&]( auto indices, auto &&a, auto &&b ) {
+                a[ indices ] = b[ indices ];
+            }, out( *this ), that );
+        }
     }
 }
 
@@ -241,6 +240,9 @@ namespace details::TensorView {
         GD void operator()( auto index, auto dst, auto value ) const {
             dst( index ) = value;
         }
+        GD void operator()( auto ...args ) const {
+            info( args... );
+        }
     };
 } // namespace details::TensorView
 
@@ -249,58 +251,12 @@ UTP HD auto DTP::all_indices() const {
 }
 
 UTP HD void DTP::fill_with( TF value ) {
-    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), out( *this ), value );
+    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), Out(), *this, Inp(), value );
 }
 
 // transfer_cost for TensorView: accessible without transfer → cost 0, else 1
 UTP HD auto DTP::transfer_cost( const auto &ec ) const {
     return sdot::transfer_cost_per_byte( ec, _memory_space );
-}
-
-
-// pass-through when reachable, else transfer with the access-mode's copy policy.
-// HD: the else branch calls transfer_through (host-only), but if constexpr ensures it is never
-// compiled in the device pass when the data is accessible there — which is always the case for
-// device code (operands must already live in device-accessible memory before a kernel is launched).
-UTP HD void DTP::make_accessible_inp( auto execution_space, auto &&func ) const { // read-only
-    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
-        func( *this );
-    else
-        transfer_through( execution_space, /*copy_in*/ true, /*copy_back*/ false, FORWARD( func ) );
-}
-
-UTP HD void DTP::make_accessible_out( auto execution_space, auto &&func ) const { // write-only
-    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
-        func( *this );
-    else
-        transfer_through( execution_space, /*copy_in*/ false, /*copy_back*/ true, FORWARD( func ) );
-}
-
-UTP HD void DTP::make_accessible_mut( auto execution_space, auto &&func ) const { // read-write
-    if constexpr ( DECAYED_TYPE_OF( accessible_from( execution_space, _memory_space ) )::value )
-        func( *this );
-    else
-        transfer_through( execution_space, /*copy_in*/ true, /*copy_back*/ true, FORWARD( func ) );
-}
-
-UTP void DTP::transfer_through( auto execution_space, bool copy_in, bool copy_back, auto &&func ) const {
-    // Materialize a contiguous copy in the execution space's native memory space, optionally bring
-    // the data in, run, then optionally bring the result back (transfers driven by the exec space's
-    // stream). NB: assumes a contiguous source; strided cross-space transfer is a TODO. Host-only
-    // (allocation + cudaMemcpy); never reached on device (operands are accessible there).
-    auto dst_ms      = native_memory_space( execution_space );
-    auto new_strides = contiguous_strides<TF>( _shape );
-    using DstMS      = DECAYED_TYPE_OF( dst_ms );
-    using NewStrides = DECAYED_TYPE_OF( new_strides );
-
-    dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
-        TensorView<TF,DstMS,Shape,NewStrides> dst( buf.raw, _shape, new_strides, dst_ms );
-        if ( copy_in )
-            copy( buf, Ptr<TF,MemorySpace>( data().raw, _memory_space ), nb_items(), execution_space );
-        func( dst );
-        if ( copy_back )
-            copy( Ptr<TF,MemorySpace>( data().raw, _memory_space ), buf, nb_items(), execution_space );
-    } );
 }
 
 // UTP CPU_ONLY void DTP::get_data_from( const auto &that ) {
@@ -450,6 +406,33 @@ UTP HD bool DTP::is_valid() const {
 // //     sdot::PI ext[ ct_rank ];
 // //     sdot::SI str[ ct_rank ];
 // // };
+
+
+HD void make_accessible( auto execution_space, auto &&value, auto inp, auto out, auto &&func ) requires Is_TensorView<DECAYED_TYPE_OF(value)>::value {
+    if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( execution_space, value.memory_space() ) )::value == 0 ) {
+        func( FORWARD( value ) );
+    } else {
+        // Materialize a contiguous copy in the execution space's native memory space, optionally bring
+        // the data in, run, then optionally bring the result back (transfers driven by the exec space's
+        // stream). NB: assumes a contiguous source; strided cross-space transfer is a TODO. Host-only
+        // (allocation + cudaMemcpy); never reached on device (operands are accessible there).
+        // auto dst_ms      = native_memory_space( execution_space );
+        // auto new_strides = contiguous_strides<TF>( t.shape() );
+        // using DstMS      = DECAYED_TYPE_OF( dst_ms );
+        // using NewStrides = DECAYED_TYPE_OF( new_strides );
+
+        // dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
+        //     TensorView<TF,DstMS,Shape,NewStrides> dst( buf.raw, _shape, new_strides, dst_ms );
+        //     if ( inp )
+        //         copy( buf, Ptr<TF,MemorySpace>( data().raw, _memory_space ), nb_items(), execution_space );
+        //     func( dst );
+        //     if ( out )
+        //         copy( Ptr<TF,MemorySpace>( data().raw, _memory_space ), buf, nb_items(), execution_space );
+        // } );
+        static_assert( inp || out, "if not one the same space, value must be preceded by Inp(), Out() or Mut()" );
+        TODO;
+    }
+}
 
 #undef UTP
 #undef DTP

@@ -106,10 +106,9 @@ class Cell:
         return cast( cls, driver.call(
             FfiCode(
                 fwd = """
-                info("pouet");
-                    //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] GD ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) mutable {
-                    //    cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
-                    //}, p.cell, p.frame, p.cut_id );
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] GD ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) mutable {
+                        cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
+                    }, p.cell, p.frame, p.cut_id );
                 """,
                 bwd = """
                     //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable {

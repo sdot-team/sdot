@@ -34,6 +34,9 @@ struct Values {};
 struct Shape {};
 struct Rank {};
 struct Size {};
+struct Out {};
+struct Inp {};
+struct Mut {};
 
 template<class TF> HD TF factorial( TF n ) {
     TF res = 1;

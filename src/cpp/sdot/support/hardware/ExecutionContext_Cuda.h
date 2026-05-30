@@ -86,13 +86,13 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     static cudaStream_t default_stream; ///< process-wide default, set by the bindings
     cudaStream_t        stream;         ///< stream this execution space enqueues onto
 
-    explicit HD ExecutionContext_Cuda( cudaStream_t s ) : stream( s ) {}
+    explicit HD constexpr ExecutionContext_Cuda( cudaStream_t s ) : stream( s ) {}
     // default_stream is a host symbol; in device code (where the context is only used as a
     // compile-time tag for accessible_from) the stream value is irrelevant, so use 0 there.
     #ifdef __CUDA_ARCH__
-        HD ExecutionContext_Cuda() : stream( 0 ) {}
+        HD constexpr ExecutionContext_Cuda() : stream( 0 ) {}
     #else
-        HD ExecutionContext_Cuda() : stream( default_stream ) {}
+        HD constexpr ExecutionContext_Cuda() : stream( default_stream ) {}
     #endif
 
     HD void run_parallel( const auto &list, auto &&func, auto &&...args ) const {
@@ -123,8 +123,6 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     }
 };
 
-constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_CpuRam ) { return 1_c; }
-
 // int block = max_tpb;
 // int regs = kernel_nb_gpu_register_per_thread( func, args... ); // Ct<...> or runtime
 // if ( regs > 0 && regs_per_block / regs < block )
@@ -141,4 +139,4 @@ constexpr auto transfer_cost_per_byte( ExecutionContext_Cuda, MemorySpace_CpuRam
 
 } // namespace sdot
 
-#endif
+#endif // __CUDACC__
