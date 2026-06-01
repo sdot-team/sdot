@@ -15,7 +15,7 @@ namespace sdot {
 #define UTP PARAMETERS_DECLARATION_OF_Cell
 #define DTP Cell<PARAMETER_NAMES_OF_Cell>
 
-UTP GD void DTP::init_as_aligned_simplex( TI cut_id ) {
+UTP HD void DTP::init_as_aligned_simplex( TI cut_id ) {
     is_fully_closed = cut_id != CellBoundary::INFINITE;
     nb_vertices = dim + 1;
     nb_edges = ( dim + 1 ) * dim / 2;
@@ -67,14 +67,14 @@ UTP GD void DTP::init_as_aligned_simplex( TI cut_id ) {
         cut_ids( num_cut ) = cut_id;
 }
 
-UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
+UTP HD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     is_fully_closed = cut_id != CellBoundary::INFINITE;
     nb_vertices = PI( 1 ) << dim;
     nb_edges = dim * ( PI( 1 ) << ( dim - 1 ) );
     nb_cuts = 2 * dim;
 
     // shared: F^T[r][c] = axis_c[r], used to compute rows of F^{-1} via solve_ge
-    Matrix<TF,ct_dim> FT = Matrix<TF,ct_dim>::with_func( [=] GD ( PI r, PI c ) {
+    Matrix<TF,ct_dim> FT = Matrix<TF,ct_dim>::with_func( [&] ( PI r, PI c ) {
         return TF( frame( 1 + c, r ) );
     } );
 
@@ -119,7 +119,7 @@ UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     // cut planes: row d of F^{-1} via shared FT
     const PI cut_ordering_2D[] = { 3, 1, 0, 2 };
     for ( PI d = 0; d < dim; ++d ) {
-        auto e_d = Vector<TF,ct_dim>::with_func( [d] GD ( PI i ) {
+        auto e_d = Vector<TF,ct_dim>::with_func( [&] ( PI i ) {
             return i == d ? TF( 1 ) : TF( 0 );
         } );
         const auto row = FT.solve_ge( e_d );
@@ -142,7 +142,7 @@ UTP GD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     }
 }
 
-UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
+UTP HD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
     // Fwd: F[r][c] = frame(1+r,c),  A = F^{-1},  row_d = A[d,:] via F^T * row_d = e_d.
     //
     // grad_frame(0,c)   = Σ_l gV(l,c)  +  Σ_d G_dot_d * A[d,c]
@@ -179,7 +179,7 @@ UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
 
     // cut planes: gF(0,c) += G_dot_d * A[d,c];  gF(1+b,c) -= (A tGR^T A)[b,c]
     if ( ! gC.surely_null() ) {
-        Mat FT  = Mat::with_func( [=] GD ( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
+        Mat FT  = Mat::with_func( [&] ( PI r, PI c ) { return TF( frame( 1 + c, r ) ); } );
         Mat A   = Mat( FillWith(), TF( 0 ) );
         Mat tGR = Mat( FillWith(), TF( 0 ) );
 
@@ -188,7 +188,7 @@ UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
             const PI r1    = ( dim != 2 ? 2 * d + 1 : cut_ordering_2D[ 2 * d + 1 ] );
             const TF G_dot = gC( r1, dim ) - gC( r0, dim );
 
-            const auto row = FT.solve_ge( Vec::with_func( [d] HD ( PI i ) { return i == d ? TF( 1 ) : TF( 0 ); } ) );
+            const auto row = FT.solve_ge( Vec::with_func( [&] ( PI i ) { return i == d ? TF( 1 ) : TF( 0 ); } ) );
             for ( PI c = 0; c < dim; ++c ) {
                 A  ( d, c ) = row[ c ];
                 tGR( d, c ) = gC( r1, c ) - gC( r0, c ) + G_dot * frame( 0, c );
@@ -206,21 +206,21 @@ UTP GD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
     }
 }
 
-UTP GD void DTP::init_as_unbounded() {
+UTP HD void DTP::init_as_unbounded() {
     init_as_aligned_simplex( CellBoundary::INFINITE );
 }
 
-UTP typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
+UTP HD typename DTP::Pt DTP::vertex_position( PI num_vertex ) const {
     return vertex_positions.row( num_vertex );
 }
 
-UTP typename DTP::Ci DTP::vertex_cuts( PI num_vertex ) const {
+UTP HD typename DTP::Ci DTP::vertex_cuts( PI num_vertex ) const {
     if constexpr ( dim == 2 )
         return { Values(), ( num_vertex + nb_vertices - 1 ) % nb_vertices, num_vertex };
     return vertex_indices.row( num_vertex );
 }
 
-UTP bool DTP::vertex_inf( PI num_vertex ) const {
+UTP HD bool DTP::vertex_inf( PI num_vertex ) const {
     Ci ci = vertex_indices( num_vertex );
     for ( PI d = 0; d < dim; ++d )
         if ( cut_ids( ci[ d ] ) == CellBoundary::INFINITE )
@@ -228,15 +228,15 @@ UTP bool DTP::vertex_inf( PI num_vertex ) const {
     return false;
 }
 
-UTP typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
+UTP HD typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
     return cut_planes( num_cut, 0 );
 }
 
-UTP TF DTP::cut_dot( PI num_cut ) const {
+UTP HD TF DTP::cut_dot( PI num_cut ) const {
     return cut_planes( num_cut, dim );
 }
 
-UTP TI DTP::cut_id( PI num_cut ) const {
+UTP HD TI DTP::cut_id( PI num_cut ) const {
     return cut_ids( num_cut );
 }
 
@@ -275,7 +275,7 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
     }
 }
 
-UTP GD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
+UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     constexpr int ct_simplex = ct_dim + 1;
     if ( nb_vertices == 0 )
         return;
@@ -300,7 +300,7 @@ UTP GD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     }
 }
 
-UTP void DTP::for_each_facet( auto &&func ) {
+UTP HD void DTP::for_each_facet( auto &&func ) {
     const PI nb_vertices = this->nb_vertices;
 
     if ( dim == 2 ) {
@@ -316,7 +316,7 @@ UTP void DTP::for_each_facet( auto &&func ) {
     TODO;
 }
 
-UTP void DTP::for_each_face( auto &&func ) {
+UTP HD void DTP::for_each_face( auto &&func ) {
     if ( dim == 2 ) {
         std::vector<PI> indices( nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
@@ -421,21 +421,21 @@ UTP HD TF DTP::measure( auto &item_map ) {
     return sum / factorial( ct_dim );
 }
 
-UTP T_d auto DTP::simplex_from_indices( const Vector<TI,d> &indices ) const {
+UTP T_d HD auto DTP::simplex_from_indices( const Vector<TI,d> &indices ) const {
     Simplex<ct_dim,d,TF> res;
     for( PI i = 0; i < d; ++i )
         res.pts[ i ] = vertex_position( indices[ i ] );
     return res;
 }
 
-UTP bool DTP::contains( const Pt &p ) const {
+UTP HD bool DTP::contains( const Pt &p ) const {
     for( PI num_cut = 0; num_cut < nb_cuts; ++num_cut )
         if ( dot( cut_dir( num_cut ), p ) - cut_dot( num_cut ) > 0 )
             return false;
     return true;
 }
 
-UTP DTP::Pt DTP::centroid() {
+UTP HD DTP::Pt DTP::centroid() {
     Pt res( Size(), dim, 0 );
     TF mea = 0;
     for_each_simplex( [&]( const auto &indices ) {
@@ -447,14 +447,14 @@ UTP DTP::Pt DTP::centroid() {
     return res / mea;
 }
 
-UTP void DTP::check_if_fully_closed() {
+UTP HD void DTP::check_if_fully_closed() {
     for( TI num_cut = 0; num_cut < nb_cuts; ++num_cut )
         if ( cut_ids[ num_cut ] == CellBoundary::INFINITE )
             return;
     is_fully_closed() = true;
 }
 
-UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
+UTP HD void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
     // check to grow enough so that all the vertices stay on the same side even if we grow more
     if ( ! is_fully_closed() )
         grow_infinite_cuts( cut_dir, cut_dot );
@@ -492,7 +492,7 @@ UTP void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         check_if_fully_closed();
 }
 
-UTP PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
+UTP HD PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
     PI nb_out = 0;
     for ( PI v = 0; v < nb_vertices; ++v ) {
         TF sp = vertex_positions( v, 0 ) * cut_dir[ 0 ];
@@ -506,7 +506,7 @@ UTP PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
 }
 
 // generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
-UTP void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
+UTP HD void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
     TODO;
     // const PI nb_initial = PI( nb );
     // ws.reservation = nb_initial;
@@ -529,7 +529,7 @@ UTP void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
     // }
 }
 
-UTP void DTP::process_edges( PI nc ) {
+UTP HD void DTP::process_edges( PI nc ) {
     // MapOfUniqueSortedIndices<dim-2,TI,Arch> face_map( map_items, nb_map_items, dim - 2, nc );
     // face_map.reserve( nb_vertices() + nb_edges );
 
@@ -594,7 +594,7 @@ UTP void DTP::process_edges( PI nc ) {
     // //
 }
 
-UTP void DTP::remove_unused_vertices( PI nb_vertices_orig ) {
+UTP HD void DTP::remove_unused_vertices( PI nb_vertices_orig ) {
     TODO;
     // nb_indices_to_remove = 0;
     // for ( PI n = 0; n < nb_vertices_orig; ++n )
@@ -610,7 +610,7 @@ UTP void DTP::remove_unused_vertices( PI nb_vertices_orig ) {
     // } );
 }
 
-UTP void DTP::apply_vertex_corr() {
+UTP HD void DTP::apply_vertex_corr() {
     TODO;
     // // update edge vertex references
     // for ( PI e = 0; e < nb_edges; ++e ) {
@@ -619,7 +619,7 @@ UTP void DTP::apply_vertex_corr() {
     // }
 }
 
-UTP void DTP::remove_unused_cuts() {
+UTP HD void DTP::remove_unused_cuts() {
     TODO;
     // const PI dim = cell.dim;
 
@@ -642,7 +642,7 @@ UTP void DTP::remove_unused_cuts() {
     // } );
 }
 
-UTP void DTP::apply_cut_corr() {
+UTP HD void DTP::apply_cut_corr() {
     TODO;
     // for ( PI v = 0; v < nb_vertices(); ++v )
     //     for ( PI d = 0; d < dim; ++d )
@@ -653,7 +653,7 @@ UTP void DTP::apply_cut_corr() {
     //         cell.edge_indices( e, 2 + d ) = ws.corr[ cell.edge_indices( e, 2 + d ) ];
 }
 
-UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) {
+UTP HD void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) {
     // const SI old_nb_vertices = nb_vertices;
 
     // // helper to copy vertex_positions and cut_planes/cut_ids together
@@ -810,7 +810,7 @@ UTP void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) 
     // }
 }
 
-UTP void DTP::get_data_from( const auto &src_cell ) {
+UTP HD void DTP::get_data_from( const auto &src_cell ) {
     TODO;
     // vertex_positions.get_data_from( src_vertex_positions, { Values(), src_nb_vertices, dim } );
     // if ( dim != 2 ) {
@@ -827,14 +827,14 @@ UTP void DTP::get_data_from( const auto &src_cell ) {
     // nb_cuts = TI( src_nb_cuts() );
 }
 
-UTP void DTP::clear_cell() {
-    is_fully_closed() = 1;
+UTP HD void DTP::clear_cell() {
+    is_fully_closed = 1;
     nb_vertices = 0;
     nb_edges = 0;
     nb_cuts = 0;
 }
 
-UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
+UTP HD PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
     PI res = nb_cuts++;
     for ( PI d = 0; d < dim; ++d )
         cut_planes( res, d ) = cut_dir[ d ];
@@ -843,7 +843,7 @@ UTP PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id )
     return res;
 }
 
-UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
+UTP HD DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
     auto M  = Matrix<TF,ct_dim>::with_func( [&]( PI r, PI c ) {
@@ -857,7 +857,7 @@ UTP DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     return M.solve_ge( V );
 }
 
-UTP DTP::Pt DTP::solve_position( PI num_vertex ) const {
+UTP HD DTP::Pt DTP::solve_position( PI num_vertex ) const {
     return solve_position( num_vertex, []( auto ) { return 0; } );
 }
 
@@ -865,7 +865,7 @@ UTP DTP::Pt DTP::solve_position( PI num_vertex ) const {
 // added to its offset (uniform spatial growth). sp(s) = cut_dir · v(s) - cut_dot is linear in s;
 // evaluate at s=0 and s=1 via SimpleSquareMatrix::solve_ge. For each vertex with sp(0)<0 and
 // sp(1)>0 the crossing is at s* = -sp(0)/(sp(1)-sp(0)). Apply s_grow = max(s*) to all INFINITE cuts.
-UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
+UTP HD void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
     // check to grow enough so that all the vertices stay on the same side
     TF s_grow = 0; // std::numeric_limits<TF>::max();
     bool need_to_grow = false;
@@ -904,7 +904,7 @@ UTP void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
     }
 }
 
-UTP void DTP::disp_cell() {
+UTP HD void DTP::disp_cell() {
     info( nb_vertices() );
     for( PI i = 0; i < nb_vertices(); ++i ) {
         auto pos = Vector<TF,ct_dim>::with_func( 2, [&]( PI d ) { return vertex_positions( i, d ); } );
@@ -913,7 +913,7 @@ UTP void DTP::disp_cell() {
     }
 }
 
-UTP void DTP::check_consistency() {
+UTP HD void DTP::check_consistency() {
     auto get_cut_inds = [&]( PI v, PI *out ) {
         if ( dim == 2 ) {
             out[ 0 ] = ( v + nb_vertices - 1 ) % nb_vertices;
@@ -939,7 +939,7 @@ UTP void DTP::check_consistency() {
 
 template<class Value,class TF,class TI,class MemorySpace,int ct_dim>
 struct Integral<Value,DTP> {
-    static auto integral( const Value &value, DTP &cw ) {
+    static HD auto integral( const Value &value, DTP &cw ) {
         // infinite cell
         if ( ! cw.cell.is_fully_closed() )
             return std::numeric_limits<TF>::max();

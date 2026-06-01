@@ -106,12 +106,12 @@ class Cell:
         return cast( cls, driver.call(
             FfiCode(
                 fwd = """
-                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] GD ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) mutable {
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [&] ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) {
                         cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
                     }, p.cell, p.frame, p.cut_id );
                 """,
                 bwd = """
-                    //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [p] GD ( auto batch_indices ) mutable {
+                    //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [&] ( auto batch_indices ) mutable {
                     //    p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
                     //} );
                 """,
@@ -138,14 +138,34 @@ class Cell:
         max_nb_cuts = self.nb_cuts.max()
 
         max_of_nb_map_items = Cell._max_of_nb_map_items( self.dim, max_nb_cuts )
-        # max_nb_threads = min( driver.nb_threads(), self.batch_size_Cell )
-        max_nb_threads = driver.nb_threads()
+        max_nb_threads = min( driver.nb_threads(), self.batch_size_Cell )
 
         return driver.call(
-            FfiCode( fwd = """
-                using MeasureFunctor = DECAYED_TYPE_OF( p.batch_of_cells )::MeasureFunctor;
-                run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
-            """ ),
+            FfiCode(
+                name = "measure",
+                header = """
+                    struct MeasureFunctor {
+                        HD auto max_gpu_threads( auto &&map_items, auto &&.../* nb_map_items, outputs, max_nb_cuts, batch_of_cells */ ) const {
+                            return PI( map_items.shape( Ct<int,0>() ) );
+                        }
+
+                        HD void per_thread( const auto &thread_info, const auto &/* batch_indices */, auto &&cont, auto &&map_items, auto &&nb_map_items, auto &&outputs, PI max_nb_cuts, auto &&batch_of_cells ) const {
+                            auto item_map = recursive_map_of_unique_sorted_indices( Ct<int,decltype(batch_of_cells.dim)::value-1>(), map_items( thread_info.global_id() ), nb_map_items( thread_info.global_id() ), max_nb_cuts );
+                            cont( outputs, batch_of_cells, item_map );
+                        }
+
+                        HD void operator()( const auto &batch_index, auto outputs, auto batch_of_cells, auto item_map ) const {
+                            outputs( batch_index ) = batch_of_cells( batch_index ).measure( item_map );
+                        }
+                    };
+                """,
+                fwd = """
+                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
+                """,
+                bwd = """
+                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
+                """,
+            ),
             map_items = Workspace(
                 Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
                 max_of_nb_map_items = max_of_nb_map_items,

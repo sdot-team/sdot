@@ -55,7 +55,8 @@ __global__ void _execution_space_cuda_run_parallel( int nb_workers, List list, F
 // the whole launch chain for the device pass, where it takes the __CUDA_ARCH__ branch (never the
 // launch), so the kernel's *device* code is never emitted and the launch fails at runtime. The
 // device branch of run_parallel therefore anchors the kernel explicitly (see below).
-CPU_ONLY void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
+HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
+    #ifndef __CUDA_ARCH__
     const int threads_per_block = 256;
     // bound the grid by the functor's max_gpu_threads (its per-thread scratch capacity): launching
     // one thread per item would over-subscribe scratch for large lists. Threads then grid-stride.
@@ -76,6 +77,7 @@ CPU_ONLY void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, a
             fprintf( stderr, "[sdot] CUDA launch error: %s\n", cudaGetErrorString( e ) );
         if ( cudaError_t e = cudaStreamSynchronize( stream ); e != cudaSuccess )
             fprintf( stderr, "[sdot] CUDA kernel error: %s\n", cudaGetErrorString( e ) );
+    #endif
     #endif
 }
 
@@ -107,14 +109,6 @@ struct ExecutionContext_Cuda : public ExecutionContext {
         RunTraits::per_thread( func, thread_info, list,
             DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
             FORWARD( args )... );
-
-        // Anchor the kernel the HOST branch launches. nvcc emits a launched kernel's device code
-        // only if device-compiled code references it; the HD launch chain alone does not, so a
-        // top-level host launch would fail at runtime with cudaErrorInvalidDeviceFunction. This
-        // never-executed address-of, compiled in the device pass, forces that device-side
-        // instantiation. The template arguments mirror launch_cuda_run_parallel's by-value
-        // (decayed) deduction so the anchored and launched instantiations are the same kernel.
-        (void) &_execution_space_cuda_run_parallel<DECAYED_TYPE_OF( list ),DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( args )...>;
     #else
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
