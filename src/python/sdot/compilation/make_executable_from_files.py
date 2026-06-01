@@ -50,7 +50,10 @@ def make_executable_from_files( exe_name: str, src_paths: list, device: Device, 
         "SDOT_XMAKE_OUTPUT_DIR": str( output_dir ),
         "SDOT_XMAKE_NEEDS_CUDA": str( int( device.is_cuda_gpu ) ),
         "SDOT_XMAKE_REQUIRES"  : ",".join( requires ),
-        "SDOT_XMAKE_INCLUDES"  : str( project_root / "src" / "cpp" ),
+        "SDOT_XMAKE_INCLUDES"  : str.join( ",", map( str, [
+                                      project_root / "src" / "cpp",
+                                      compilation_directories.additional_includes_dir()
+                                  ] ) ),
         "SDOT_XMAKE_CXXFLAGS"  : "-fno-strict-aliasing",
         "SDOT_XMAKE_SOURCES"   : ",".join( map( str, sources ) ),
         "SDOT_XMAKE_DEFINES"   : "",
@@ -65,6 +68,6 @@ def make_executable_from_files( exe_name: str, src_paths: list, device: Device, 
             raise RuntimeError( f"xmake failed: { ' '.join( map( str, cmd ) ) }" )
 
     run( [ xmake_bin, "f", "-P", str( sdot_dir ), "-y", "--require=yes", "-m", mode ] )
-    run( [ xmake_bin, "-P", str( sdot_dir ) ] )
+    run( [ xmake_bin, "-P", str( sdot_dir ), "-v" ] )
 
     return output_dir / exe_name

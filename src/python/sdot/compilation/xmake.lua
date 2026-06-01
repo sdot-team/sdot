@@ -60,6 +60,8 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
         -- add_cuflags("-Wnan-infinity-disabled")
     else
         add_cxxflags("-fdiagnostics-absolute-paths")
+        add_cxxflags("-ftemplate-backtrace-limit=0")
+        add_cxxflags("-ferror-limit=0")
     end
 
     -- MacOS specificities (undefined symbols resolved at load time — only for the python module)

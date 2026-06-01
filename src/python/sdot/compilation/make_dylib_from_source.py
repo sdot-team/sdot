@@ -101,4 +101,4 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device: Device ):
 
     run( [ "pwd" ] )
     run( [ *xmake_cmd, "f", "-P", str( sdot_dir ), "-y", "--require=yes", "-m", xmake_mode ] )
-    run( [ *xmake_cmd, "-P", str( sdot_dir ) ] )
+    run( [ *xmake_cmd, "-P", str( sdot_dir ), "-v" ] )

@@ -15,6 +15,8 @@ namespace sdot {
 template <typename T> struct Is_TensorView : std::false_type {};
 UTP struct Is_TensorView<DTP> : std::true_type {};
 
+template <typename T> concept TensorView_c = Is_TensorView<T>::value;
+
 namespace details::TensorView {
     /// bind the leading TensorView params and expand a TagList into the trailing tag pack
     template<class TF,class MemorySpace,class Shape,class Strides,class List> struct with_tag_list;
@@ -27,6 +29,9 @@ UTP HD DTP DTP::make_invalid( Shape shape, Strides strides, MemorySpace memory_s
 }
 
 UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides, MemorySpace memory_space ) : _memory_space( memory_space ), _raw_ptr( reinterpret_cast<RawByte *>( data ) ), _strides( strides ), _shape( shape ) {
+}
+
+UTP HD DTP::TensorView() : _raw_ptr( nullptr ) {
 }
 
 UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
@@ -408,7 +413,7 @@ UTP HD bool DTP::is_valid() const {
 // // };
 
 
-HD void make_accessible( auto execution_space, auto &&value, auto inp, auto out, auto &&func ) requires Is_TensorView<DECAYED_TYPE_OF(value)>::value {
+HD void make_accessible( auto execution_space, TensorView_c auto &&value, auto inp, auto out, auto &&func ) {
     if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( execution_space, value.memory_space() ) )::value == 0 ) {
         func( FORWARD( value ) );
     } else {

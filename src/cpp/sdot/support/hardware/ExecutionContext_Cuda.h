@@ -92,7 +92,7 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     #ifdef __CUDA_ARCH__
         HD constexpr ExecutionContext_Cuda() : stream( 0 ) {}
     #else
-        HD constexpr ExecutionContext_Cuda() : stream( default_stream ) {}
+        HD ExecutionContext_Cuda() : stream( default_stream ) {}
     #endif
 
     HD void run_parallel( const auto &list, auto &&func, auto &&...args ) const {

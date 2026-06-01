@@ -144,7 +144,6 @@ class Cell:
         return driver.call(
             FfiCode( fwd = """
                 using MeasureFunctor = DECAYED_TYPE_OF( p.batch_of_cells )::MeasureFunctor;
-                info( execution_context );
                 run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
             """ ),
             map_items = Workspace(

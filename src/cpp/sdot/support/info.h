@@ -44,7 +44,7 @@ GD void __display_device( const auto &value ) {
     } else if constexpr ( std::is_integral_v<V> ) {
         printf( "%lld", (long long)( value ) );
     } else if constexpr ( requires { V::value; } ) { // compile-time constant, e.g. Ct<T,v>
-        __display_device( V::value );
+        __display_device( ( decltype( V::value ) )V::value );
     } else if constexpr ( requires { DECAYED_TYPE_OF( value.shape().size() )::value; } ) { // TensorView: rank-aware
         constexpr int rank = DECAYED_TYPE_OF( value.shape().size() )::value;
         if constexpr ( rank == 0 ) {

@@ -412,15 +412,15 @@ UTP HD TF DTP::measure( auto &item_map ) {
     // nD: fan triangulation
     TF sum = 0;
     TF *p_sum = &sum;
-    // auto v = vertex_positions;
-    // for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
-    //     // const TI v0 = simplex_indices[ 0 ];
-    //     // Matrix<TF,ct_dim> M;
-    //     // for( TI row = 0; row < ct_dim; ++row )
-    //     //     for( TI col = 0; col < ct_dim; ++col )
-    //     //         M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
-    //     *p_sum += 32; // std::abs( M.determinant() );
-    // } );
+    auto v = vertex_positions;
+    for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
+        // const TI v0 = simplex_indices[ 0 ];
+        // Matrix<TF,ct_dim> M;
+        // for( TI row = 0; row < ct_dim; ++row )
+        //     for( TI col = 0; col < ct_dim; ++col )
+        //         M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
+        *p_sum += 32; // std::abs( M.determinant() );
+    } );
 
     return sum / factorial( ct_dim );
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../common_macros.h"
+#include "apply_values.h"
 #include "../Ct.h"
 
 namespace sdot {
@@ -35,16 +36,24 @@ HD auto transfer_cost( const auto &/*ec*/, Inp ) { return 0_c; }
 HD auto transfer_cost( const auto &/*ec*/, Out ) { return 0_c; }
 HD auto transfer_cost( const auto &/*ec*/, Mut ) { return 0_c; }
 
+struct AnyFunctor {
+    HD void operator()( auto &&... ) const {}
+};
+
 // single data-arg: delegate to the arg's transfer_cost method (required — static_assert if absent)
 HD auto transfer_cost( const auto &ec, const auto &arg ) {
     if constexpr ( requires { arg.transfer_cost( ec ); } )
         return arg.transfer_cost( ec );
-    else if constexpr ( std::is_pod<DECAYED_TYPE_OF( arg )>::value )
+    else if constexpr ( std::is_trivial<DECAYED_TYPE_OF( arg )>::value )
         return 0_c;
+    else if constexpr ( requires { apply_values( arg, AnyFunctor{} ); } )
+        return apply_values( arg, [&]( auto &&...values ) { return ( transfer_cost( ec, values ) + ... + 0_c ); } );
+    // else if constexpr ( requires { arg.apply_values( [&]( auto&&...) {} ); } )
+    //     return arg.apply_values( [&]( auto &&...values ) { return ( transfer_cost( ec, values ) + ... + 0_c ); } );
     else {
+        // static_assert( sizeof( arg ) == 0, "don't know how to make transfer_cost: arg must provide transfer_cost( ec )" );
         arg.no_transfer_cost();
         return 0_c;
-        // static_assert( sizeof( arg ) == 0, "don't know how to make transfer_cost: arg must provide transfer_cost( ec )" );
     }
 }
 

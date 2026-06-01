@@ -218,13 +218,9 @@ class CallArg_Aggregate( CallArg ):
         lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
         lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
 
-        # memory_space(): lets run_*()'s execution_space_for() pull this aggregate toward the
-        # execution space native to its data (device when the views live on GlobalCudaRam). Emitted
-        # only when the aggregate carries device-aware data, i.e. a MemorySpace template parameter
-        # was added by one of the tensor children. Without it the aggregate looks host-resident and
-        # the run wrongly dispatches on the CPU, dereferencing device pointers.
-        if any( name == "MemorySpace" for name, _ in template_args ):
-            lines.append(  "    HD auto memory_space() const { return MemorySpace(); }" )
+        # apply_values
+        lines.append(  f"    HD auto apply_values( auto &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
+        lines.append(  f"    HD auto apply_values( auto &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
 
         # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:

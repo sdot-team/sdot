@@ -4,7 +4,6 @@
 
 #include "ExecutionContext_Cuda.h"
 #include "ExecutionContext_Cpu.h"
-#include "accessible_from.h"
 #include "MemorySpace.h"
 #include "Ptr.h"
 #include "../Ct.h"

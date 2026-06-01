@@ -29,90 +29,91 @@ public:
     /// is `Tag` part of this view's compile-time tag set ?
     template<class Tag> static constexpr bool has_tag = contains_tag<Tag,_Tags...>;
 
-    using            value_type           = TF;
-    SCInt            ct_rank              = Shape::ct_size;
-    using            RawByte              = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
-    using            RawPtr               = Ptr<RawByte,MemorySpace>; ///< informed byte pointer (address + memory space)
+    using            value_type             = TF;
+    SCInt            ct_rank                = Shape::ct_size;
+    using            RawByte                = std::conditional_t<std::is_const_v<TF>,const std::byte,std::byte>;
+    using            RawPtr                 = Ptr<RawByte,MemorySpace>; ///< informed byte pointer (address + memory space)
 
-    HD               TensorView           ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
-    HD               TensorView           ( const TensorView & ) = default; ///< Eigen-like view semantics: copy-construction shares the data (shallow), while operator= copies the elements (deep). The defaulted copy-ctor also silences -Wdeprecated-copy.
+    HD               TensorView             ( TF *data, Shape shape, Strides strides, MemorySpace memory_space = {} );
+    HD               TensorView             ( const TensorView & ) = default; ///< Eigen-like view semantics: copy-construction shares the data (shallow), while operator= copies the elements (deep). The defaulted copy-ctor also silences -Wdeprecated-copy.
+    HD               TensorView             ();
 
     // static ctors
-    static HD auto   make_invalid         ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
+    static HD auto   make_invalid           ( Shape shape, Strides strides, MemorySpace memory_space = {} ) -> TensorView; ///< invalid TensorView — is_valid()==false, _ptr==&_sentinel
 
     // generic info
-    HD bool          not_surely_null      () const { return ! surely_null(); }
-    HD bool          surely_null          () const; ///< is_invalid() || Zero tensor
-    HD bool          is_invalid           () const; ///<
-    HD bool          is_valid             () const; ///<
+    HD bool          not_surely_null        () const { return ! surely_null(); }
+    HD bool          surely_null            () const; ///< is_invalid() || Zero tensor
+    HD bool          is_invalid             () const; ///<
+    HD bool          is_valid               () const; ///<
 
     // generic info
-    MemorySpace      memory_space         () const { return _memory_space; }
-    void             display              ( std::ostream &os ) const;
-    HD auto          rank                 () const;
+    MemorySpace      memory_space           () const { return _memory_space; }
+    void             display                ( std::ostream &os ) const;
+    HD auto          rank                   () const;
 
     //
-    HD Strides       strides              () const;
-    HD auto          stride               ( auto d ) const;
+    HD Strides       strides                () const;
+    HD auto          stride                 ( auto d ) const;
 
     // shape
-    HD void          for_each_index       ( auto &&func ) const;
-    HD void          for_each_item        ( auto &&func ) const;
-    HD auto          is_contiguous        () const; ///< true iff strides match row-major contiguous layout
-    HD auto          all_indices          () const;
-    HD auto          nb_items             () const;
-    HD auto          shape                ( auto d ) const { return _shape[ d ]; }
-    HD Shape         shape                () const { return _shape; }
-    HD auto          empty                () const;
-    HD auto          size                 () const;
+    HD void          for_each_index         ( auto &&func ) const;
+    HD void          for_each_item          ( auto &&func ) const;
+    HD auto          is_contiguous          () const; ///< true iff strides match row-major contiguous layout
+    HD auto          all_indices            () const;
+    HD auto          nb_items               () const;
+    HD auto          shape                  ( auto d ) const { return _shape[ d ]; }
+    HD Shape         shape                  () const { return _shape; }
+    HD auto          empty                  () const;
+    HD auto          size                   () const;
 
     // content
-    HD auto          data                 () const;
+    HD auto          data                   () const;
 
-    HD auto          begin                () const;
-    HD auto          end                  () const;
+    HD auto          begin                  () const;
+    HD auto          end                    () const;
 
     // operator() and operator[] produce a new tensor
-    HD auto          operator()           ( const auto &index, auto ...rem ) const;
-    HD auto          operator[]           ( const auto &index ) const { return operator()( index ); }
-    HD auto          operator()           () const { return *this; }
+    HD auto          operator()             ( const auto &index, auto ...rem ) const;
+    HD auto          operator[]             ( const auto &index ) const { return operator()( index ); }
+    HD auto          operator()             () const { return *this; }
 
-    HD auto          offset               ( const auto &index, auto ...rem ) const;
-    HD auto          offset               () const { return *this; }
+    HD auto          offset                 ( const auto &index, auto ...rem ) const;
+    HD auto          offset                 () const { return *this; }
 
     // scalar value/reference for a rank 1 tensor
-    HD               operator TF          () const { return value(); }
-    HD TF            value                () const;
-    HD TF&           ref                  () const;
+    HD               operator TF            () const { return value(); }
+    HD TF            value                  () const;
+    HD TF&           ref                    () const;
 
     // reassign
-    HD void          copy_elements_from   ( const auto &that );
-    HD void          operator-=           ( const auto &that );
-    HD void          operator+=           ( const auto &that );
-    HD void          operator*=           ( const auto &that );
-    HD void          operator/=           ( const auto &that );
-    HD void          operator=            ( const auto &that );
-    HD void          operator=            ( const TensorView &that );
-    HD void          spill_to             ( TensorView &that ); ///< copy data of *this to that, and use data from that
+    HD void          copy_elements_from     ( const auto &that );
+    HD void          operator-=             ( const auto &that );
+    HD void          operator+=             ( const auto &that );
+    HD void          operator*=             ( const auto &that );
+    HD void          operator/=             ( const auto &that );
+    HD void          operator=              ( const auto &that );
+    HD void          operator=              ( const TensorView &that );
+    HD void          spill_to               ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    auto             transfer_cost              ( const auto &execution_context ) const;
+    HD auto          transfer_cost          ( const auto &execution_context ) const;
 
-    void             with_same_shape            ( const auto &arch, auto &&func ) const;
-    HD void          fill_with                  ( TF value );
+    void             with_same_shape        ( const auto &arch, auto &&func ) const;
+    HD void          fill_with              ( TF value );
 
     //
-    HD auto          unsqueeze                  ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
-    HD auto          squeeze                    ( auto axis, PI index = 0 ) const;
-    HD auto          row                        ( PI index ) const;
+    HD auto          unsqueeze              ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
+    HD auto          squeeze                ( auto axis, PI index = 0 ) const;
+    HD auto          row                    ( PI index ) const;
 
     // compile-time tags (see container_tags.h)
     template<class... ExtraTags>
-    HD auto          with_tags            () const; ///< same view, with ExtraTags... added to the tag set (no-op for tags already present)
+    HD auto          with_tags              () const; ///< same view, with ExtraTags... added to the tag set (no-op for tags already present)
     HD auto          as_already_parallelized() const; ///< == with_tags<container_tags::has_already_been_parallelized>()
 
 private:
-    static HD RawPtr _sentinel            () { return RawPtr( nullptr ) + 1; }
+    static HD RawPtr _sentinel              () { return RawPtr( nullptr ) + 1; }
 
     MemorySpace      _memory_space;       ///<
     RawPtr           _raw_ptr;            ///<

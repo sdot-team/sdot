@@ -22,6 +22,7 @@ public:
     HD auto         row            ( auto index ) const { return operator()( index ); }
 
     // info
+    HD auto         transfer_cost  ( const auto &execution_context ) const { return sizes.transfer_cost( execution_context ); }
     HD bool         is_invalid     () const { return sizes.is_invalid(); }
     HD bool         is_valid       () const { return sizes.is_valid(); }
     HD auto         shape          ( auto ind ) const { return sizes.shape( ind ); }
@@ -36,6 +37,7 @@ public:
     HD DynamicAxis& operator=      ( PI new_size ) { if ( new_size > capacity ) overflow( new_size ); sizes = new_size; return *this; }
     HD operator     PI             () const { return sizes.value(); }
 
+
     // exception
     HD void         overflow       ( PI needed_size ) {
         info( needed_size, capacity );
@@ -47,8 +49,8 @@ public:
     // creation
     HD void         with_same_shape( auto &&func ) const { sizes.with_same_shape( [&]( auto &sizes ) { DynamicAxis da( num_dynamic_axis, capacity, sizes ); func( da ); } ); }
 
-    const PI        num_dynamic_axis;
-    const PI        capacity;
+    const PI        num_dynamic_axis = 0;
+    const PI        capacity = 0;
     Sizes           sizes;
 };
 

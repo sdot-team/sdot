@@ -104,10 +104,8 @@ auto dynamic_axis_inp( CtType<Shape> cs, const auto &memory_space, xla::ffi::Buf
 template<class Shape, xla::ffi::DataType dtype>
 auto dynamic_axis_out( CtType<Shape> cs, const auto &memory_space, xla::ffi::ResultBuffer<dtype> buf, PI8 tensor_type, PI num_dynamic_axis, PI capacity ) {
     auto res = DynamicAxis( num_dynamic_axis, capacity, tensor_view_out( cs, memory_space, buf, tensor_type ) );
-    info( __LINE__, memory_space );
     if ( tensor_type != TENSOR_TYPE_INVALID )
         res.sizes.fill_with( 0 );
-    info( __LINE__ );
     return res;
 }
 

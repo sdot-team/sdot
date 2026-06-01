@@ -5,11 +5,11 @@
 using namespace sdot;
 
 // minimal batch_sizes: 1D range supporting the split iteration the runners use
-struct Range {
-    constexpr void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
-    constexpr PI   size               () const { return n; }
-    PI   n;
-};
+// struct Range {
+//     constexpr void for_each_item_split( int tid, int nb, auto &&cb ) const { for ( PI i = tid; i < n; i += nb ) cb( i ); }
+//     constexpr PI   size               () const { return n; }
+//     PI   n;
+// };
 
 // // space-aware data argument (carries a memory kind on its pointer)
 // struct IntBuf {
@@ -132,19 +132,28 @@ struct Range {
 // NB: les classes locales (définies dans une fonction) ne peuvent pas avoir de
 // templates membres. Comme per_thread/operator() sont des templates (auto&&), le
 // functor doit vivre au niveau du namespace, pas dans le corps du TEST_CASE.
-struct PerThreadProbe {
-    // int *nb_calls; // counts per_thread invocations
-    // int *out;      // out[i] = the per-thread value seen by operator()
-    HD void per_thread( const auto &thread_info, const auto &/* list */, auto &&cont, auto &&...args ) const {
-        // ( *nb_calls )++;
-        cont( FORWARD( args )..., thread_info.global_id() + 100 ); // inject one extra per-thread argument
-    }
-    HD void operator()( int range_index, int a, int b, int thread_comp ) const {
-        info( range_index, a, b, thread_comp );
-    }
-};
+// struct PerThreadProbe {
+//     // int *nb_calls; // counts per_thread invocations
+//     // int *out;      // out[i] = the per-thread value seen by operator()
+//     HD void per_thread( const auto &thread_info, const auto &/* list */, auto &&cont, auto &&...args ) const {
+//         // ( *nb_calls )++;
+//         cont( FORWARD( args )..., thread_info.global_id() + 100 ); // inject one extra per-thread argument
+//     }
+//     HD void operator()( int range_index, int a, int b, int thread_comp ) const {
+//         info( range_index, a, b, thread_comp );
+//     }
+// };
 
-TEST_CASE( "per-thread variable", "" ) {
-    run_sequential( Range{ 5 }, PerThreadProbe{}, 10, 20 );
-    run_parallel( Range{ 5 }, PerThreadProbe{}, 10, 20 );
+// TEST_CASE( "per-thread variable", "" ) {
+//     run_sequential( Range{ 5 }, PerThreadProbe{}, 10, 20 );
+//     run_parallel( Range{ 5 }, PerThreadProbe{}, 10, 20 );
+// }
+
+//<typename TF, typename TI, typename MemorySpace, TI ct_dim>
+#include <sdot/BatchOfCell.h>
+TEST_CASE( "Cell", "" ) {
+    BatchOfCell<double,int,MemorySpace_CpuRam,2> b;
+
+    b.apply_values( [&]( auto&& ...values ) { } ); // -> fonctionne
+    info( transfer_cost( ExecutionContext_Cpu(), b ) );
 }

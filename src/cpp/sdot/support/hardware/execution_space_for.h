@@ -30,7 +30,6 @@ HD auto execution_space_for( [[maybe_unused]] const auto &...args ) {
 #elif defined( __CUDACC__ )
     constexpr int cpu_cost  = DECAYED_TYPE_OF( transfer_cost( ExecutionContext_Cpu {}, args... ) )::value;
     constexpr int cuda_cost = DECAYED_TYPE_OF( transfer_cost( ExecutionContext_Cuda{}, args... ) )::value;
-    info( cpu_cost, cuda_cost );
 
     if constexpr ( cuda_cost < cpu_cost )
         return ExecutionContext_Cuda{};
