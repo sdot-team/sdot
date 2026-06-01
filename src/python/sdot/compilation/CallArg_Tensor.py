@@ -9,10 +9,6 @@ from .CallArg import CallArg
 from typing import Optional
 from weakref import ref
 
-TENSOR_TYPE_STD = 0,
-TENSOR_TYPE_ZERO = 1,
-TENSOR_TYPE_INVALID = 2,
-
 
 class CallArg_Tensor( CallArg ):
     """
@@ -20,6 +16,13 @@ class CallArg_Tensor( CallArg ):
     AxisExpr over axis variables) and the dtype, and registers itself in the flat FFI
     input/output lists. A tensor whose `represents_a_dynamic_axis` is set stands for a
     DynamicAxis rather than a plain TensorView.
+
+    Input tensors map to one of three C++ types based on the python_value at call time:
+      - TensorView  : normal array
+      - ZeroTensor  : symbolic zero gradient (driver.is_zero_tensor is True)
+      - NoneTensor  : absent / undefined gradient (python_value is None)
+    The choice is baked into the generated C++ code (static dispatch), so each
+    binding variant has a unique signature that includes the tensor kind prefix.
     """
 
     ct_variables              : list[ str ]
@@ -30,8 +33,7 @@ class CallArg_Tensor( CallArg ):
     shape                     : list[ AxisExpr ]
     dtype                     : Dtype
 
-    tensor_type_input_index   : int
-    validity_output_index     : int
+    validity_output_index     : int  # index into u8_input_values for output-side validity
 
     num_in_input_sub_list     : int
     num_in_dynamic_axes       : int
@@ -75,7 +77,6 @@ class CallArg_Tensor( CallArg ):
         self.ct_variables              = ct_variables
 
         self.validity_output_index     = -1
-        self.tensor_type_input_index   = -1
 
         self.num_in_input_sub_list     = -1
         self.num_in_outputs            = -1
@@ -86,28 +87,39 @@ class CallArg_Tensor( CallArg ):
             self.num_in_dynamic_axes = len( call_args.dynamix_axes )
             call_args.dynamix_axes.append( self )
 
-        if io_category.has_input:    # input or mutable -> needs an input tensor
-            self.tensor_type_input_index = call_args.get_u8_input( [ self.tensor_type_index( python_value ) ] )
-            self.num_in_input_sub_list   = call_args.add_tensor_input( self )
+        # NoneTensor and ZeroTensor pure inputs don't send an FFI buffer — no registration needed.
+        # Mutable tensors (want_output=True) always register since the output buffer is real.
+        if io_category.has_input and not self._is_none and not self._is_zero:
+            self.num_in_input_sub_list = call_args.add_tensor_input( self )
 
         if io_category.want_output:  # mutable, return or workspace -> needs an output tensor
-            self.validity_output_index = call_args.get_u8_input( [ TENSOR_TYPE_STD ] )
+            self.validity_output_index = call_args.get_u8_input( [ 1 ] )
             self.num_in_outputs        = call_args.add_tensor_output( self )
 
-    @staticmethod
-    def tensor_type_index( python_value ):
-        """(value management) Runtime tag telling the kernel if the array is standard, zero or absent."""
-        if driver.is_zero_tensor( python_value ):
-            return TENSOR_TYPE_ZERO
-        if python_value is None:
-            return TENSOR_TYPE_INVALID
-        return TENSOR_TYPE_STD
+    @property
+    def _is_zero( self ) -> bool:
+        """True when this is a pure input whose value is a symbolic zero gradient."""
+        return not self.io_category.want_output and driver.is_zero_tensor( self.python_value )
+
+    @property
+    def _is_none( self ) -> bool:
+        """True when this is a pure input whose value is absent (None)."""
+        return not self.io_category.want_output and self.python_value is None
 
     @property
     def ffi_value( self ):
-        """(value management) The array to send to the FFI call (an empty buffer when absent/zero)."""
-        if self.python_value is None or driver.is_zero_tensor( self.python_value ):
+        """(value management) The array to send to the FFI call.
+
+        Convention for special tensors:
+          ZeroTensor  : prepend a marker dimension of size 0 → shape [0, s0, s1, ...]
+          NoneTensor  : all-zero shape of the same rank → shape [0, 0, ..., 0]
+        The C++ helpers zero_tensor_inp / none_tensor_inp match these conventions.
+        """
+        # _is_zero and _is_none (pure inputs) are never in the input list → ffi_value not called.
+        # Only remaining case needing a dummy buffer: mutable tensor with python_value = None.
+        if self.python_value is None:
             return driver.empty( [ 0 ] * self.ndim, dtype = self.dtype )
+
         return self.python_value
 
     @property
@@ -136,8 +148,6 @@ class CallArg_Tensor( CallArg ):
 
         return res[ tuple( slices ) ]
 
-
-
     def shape_values( self, use_dyn_size = False ):
         """(analysis) Concrete size of each axis, resolved through the axis variables."""
         res = []
@@ -154,25 +164,51 @@ class CallArg_Tensor( CallArg ):
         return res
 
     def signature( self ) -> str:
-        """(analysis, override) Per-binding signature: rank, dtype and compile-time axis values."""
+        """(analysis, override) Per-binding signature: kind prefix, rank, dtype, compile-time axes.
+
+        Kind prefix: T=TensorView, Z=ZeroTensor, N=NoneTensor.
+        """
         ct_values = []
         for ct_variable in self.ct_variables:
             ct_values.append( f"{ ct_variable }_{ self.value_of_axis_variable( ct_variable, False ) }" )
-        return f"T{ self.ndim }{ Dtype.factory( self.dtype ).cpp_name }{ '-'.join( ct_values ) }"
+        if self._is_zero:
+            prefix = "Z"
+        elif self._is_none:
+            prefix = "N"
+        else:
+            prefix = "T"
+        return f"{ prefix }{ self.ndim }{ Dtype.factory( self.dtype ).cpp_name }{ '-'.join( ct_values ) }"
+
+    def _concrete_cpp_type( self ) -> str:
+        """Concrete C++ type for this tensor at the current call site (used as template arg value)."""
+        shape_t = self.shape_type( False )
+        if self._is_zero:
+            return f"ZeroTensor<{ self.dtype.cpp_name },{ shape_t }>"
+        if self._is_none:
+            return f"NoneTensor<{ self.dtype.cpp_name }>"
+        if self.represents_a_dynamic_axis:
+            return f"DynamicAxis<TI,DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
+        return f"TensorView<{ self.dtype.cpp_name },DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
 
     def get_template_args( self, template_args, names ):
-        """(code generation, override) Emit the compile-time axis values, dtype and memory space."""
+        """(code generation, override) Emit the compile-time axis values, dtype, and tensor type parameter.
+
+        Each tensor or DynamicAxis attribute contributes a `T_<path>` typename template parameter
+        whose value at instantiation is the concrete C++ type (TensorView / ZeroTensor / NoneTensor / DynamicAxis).
+        This keeps the generated struct generic across all tensor-kind and forward/backward combinations.
+        """
         for name in self.ct_variables:
             lst = names[ : -1 ] + [ name ]
             template_args.add( f"ct_{ '_'.join( lst ) }", "TI", 4, str( self.value_of_axis_variable( name, False ) ) )
 
-        if self.dtype.floating_point and self.dtype.size is None:
-            template_args.add( "TF", "typename", 0, "TF" )
+        # TI is needed for ct_<name> non-type template parameters (Ct<TI,V> in struct body)
+        template_args.add( "TI", "typename", 1, "TI" )
 
-        template_args.add( "TI", "typename", 1, "TI" ) # always needed
-
-        template_args.add( "MemorySpace", "typename", 2, "DECAYED_TYPE_OF( memory_space )" )
-
+        # Each attribute (tensor or DynamicAxis) becomes a generic type parameter T_<path>.
+        # TF and MemorySpace are NOT added as standalone params: they are not referenced in the
+        # generated struct body. User code can recover them via typename T_<name>::TF etc.
+        param_name = "T_" + "_".join( names )
+        template_args.add( param_name, "typename", 3, self._concrete_cpp_type() )
 
     def _get_kwarg_only( self, name, is_dyn ):
         """Raise if `name` is not statically available from ctor_kwargs."""
@@ -211,37 +247,24 @@ class CallArg_Tensor( CallArg ):
             return None
 
     def shape_type( self, for_a_particular_binding ):
-        """Build AxisTuple C++ type string with KnownAxisSize where axes are CT-known."""
+        """Build AxisTuple C++ type string with Ct<TI,V> where axes are CT-known."""
         types = []
         for n in range( self.ndim ):
             if self._is_ct_axis( n ) and not self.comes_from_basic_array:
                 types.append( f"Ct<TI,{ self._ct_axis_value( n ) }>" )
             else:
                 types.append( "TI" )
-                # if for_a_particular_binding:
-                #     val = self._ct_axis_value( n )
-                #     if val is not None:
-                #         known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
-                # elif self._is_ct_axis( n ):
-                #     expr = self.shape[ n ]
-                #     ops = []
-                #     if expr.offset:
-                #        ops.append( str( expr.offset ) )
-                #     for term in expr.terms:
-                #         if term.coeff == 1:
-                #             ops.append( f'ct_{ term.variable.name }_value' )
-                #         else:
-                #             ops.append( f'{ term.coeff } * ct_{ term.variable.name }_value' )
-                #     val = ' + '.join( ops ) if ops else '0'
-                #     known.append( f"KnownAxisSize<TI,{ n },{ val }>" )
         return f"Tuple<{ ','.join( types ) }>"
 
-    def cpp_type_name( self, main_list ):
-        """(code generation, override) C++ type: a DynamicAxis, or a TensorView with its shape."""
-        shape_t = self.shape_type( False )
-        if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<TI,MemorySpace,{ shape_t }>"
-        return f"TensorView<{ self.dtype.cpp_name },MemorySpace,{ shape_t }>"
+    def cpp_type_name( self, names ):
+        """(code generation, override) C++ member type for use inside a struct body.
+
+        Returns the generic template parameter name T_<path> for all tensor and DynamicAxis
+        attributes. The concrete type (TensorView / ZeroTensor / NoneTensor / DynamicAxis) is
+        stored as the template arg value and resolved at instantiation time. This lets the same
+        struct definition work for both forward (DynamicAxis) and backward (NoneTensor) passes.
+        """
+        return "T_" + "_".join( names )
 
     def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ str ], name_list_so_far: list[ str ] ):
         """(analysis, override) Expose this tensor's compile-time axes, prefixed by the path."""
@@ -258,7 +281,24 @@ class CallArg_Tensor( CallArg ):
         """(analysis, override) Contribute this tensor (shape + value + C++ ref) to an AxisVariableSystem."""
         from ..aggregate.AxisVariableSystem import AxisTensorSource
 
-        cpp_ref = ".".join( attributes ) if use_attributes else "t_" + self.ffi_name()
+        # NoneTensor has no shape to contribute
+        if self._is_none:
+            return
+
+        if self._is_zero:
+            # ZeroTensor has a shape but no FFI variable — use the inline expression as cpp_ref
+            shape_t    = self.shape_type( True )
+            shape_vals = self.shape_values()
+            if not shape_vals:
+                cpp_ref = f"ZeroTensor<{ self.dtype.cpp_name },{ shape_t }>()"
+            else:
+                shape_args = ", ".join( str( int( v ) ) for v in shape_vals )
+                cpp_ref    = f"ZeroTensor<{ self.dtype.cpp_name },{ shape_t }>( { shape_t }( Values(), { shape_args } ) )"
+        elif use_attributes:
+            cpp_ref = ".".join( attributes )
+        else:
+            cpp_ref = "t_" + self.ffi_name()
+
         sources.append( AxisTensorSource(
             shape        = self.shape,
             ct_variables = self.ct_variables,
@@ -284,30 +324,35 @@ class CallArg_Tensor( CallArg ):
     def ffi_conversion_code( self ):
         """(code generation) Build the C++ that wraps the raw FFI buffer(s) into a typed view.
 
-        Emits a tensor_view (or dynamic_axis) builder for the input, output or mutable case.
+        For inputs, the C++ type (TensorView / ZeroTensor / NoneTensor) is selected
+        statically based on the python_value at binding-generation time.
         """
-        base      = "tensor_view"
-        extr      = ""
-        ct_shape  = f"CtType<{ self.shape_type( True ) }>()"
+        ct_shape = f"CtType<{ self.shape_type( True ) }>()"
+        base     = "dynamic_axis" if self.represents_a_dynamic_axis else "tensor_view"
+        extr     = ""
 
         if self.represents_a_dynamic_axis:
-            # the capacity is the maximum size the consuming tensors give to this axis
             assert self.parent
             capa = self.parent().axis_system().cpp_capacity_expr( "max_of_" + self.represents_a_dynamic_axis )
             extr = f", { self.num_in_dynamic_axes }, { capa }"
-            base = "dynamic_axis"
 
-        # mutable
+        # mutable (has both input and output buffers)
         if self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_mut( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ], { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
+            if self._is_none:
+                return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )"
+            return f"{ base }_mut( { ct_shape }, memory_space, { self.ffi_output_name() }, { self.ffi_input_name() }{ extr } )"
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }, u8_input[ { self.validity_output_index } ]{ extr } )"
+            return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )"
 
-        # pure input
+        # pure input — static dispatch on tensor kind
         if self.io_category.has_input and not self.io_category.want_output:
-            return f"{ base }_inp( { ct_shape }, memory_space, { self.ffi_input_name() }, u8_input[ { self.tensor_type_input_index } ]{ extr } )"
+            if self._is_zero:
+                return f"zero_tensor_inp( { ct_shape }, { self.ffi_input_name() } )"
+            if self._is_none:
+                return f"none_tensor_inp<{ self.dtype.cpp_name }>()"
+            return f"{ base }_inp( { ct_shape }, memory_space, { self.ffi_input_name() }{ extr } )"
 
         raise NotImplementedError
 
@@ -328,12 +373,23 @@ class CallArg_Tensor( CallArg ):
         bind_chain.append( driver.ffi_tensor_input_bind_code( self.ndim, self.dtype ) )
 
     def assembled_code( self, beg_line ):
-        """(code generation, override) Use the converted view (t_<name>) built in the handler body."""
+        """(code generation, override) C++ expression for this tensor in a struct initializer.
+
+        NoneTensor and ZeroTensor have no FFI buffer, so the expression is emitted inline.
+        """
+        if self._is_none:
+            return f"none_tensor_inp<{ self.dtype.cpp_name }>()"
+        if self._is_zero:
+            shape_t    = self.shape_type( True )
+            shape_vals = self.shape_values()
+            if not shape_vals:
+                return f"ZeroTensor<{ self.dtype.cpp_name },{ shape_t }>()"
+            shape_args = ", ".join( str( int( v ) ) for v in shape_vals )
+            return f"ZeroTensor<{ self.dtype.cpp_name },{ shape_t }>( { shape_t }( Values(), { shape_args } ) )"
         return f"t_{ self.ffi_name() }"
 
     def backward_version( self, call_args, driver, outputs, grads_of_the_outputs, parent, differentiable_inputs = None ):
         """(analysis, override) Mirror this tensor for the backward call: a former output becomes an input."""
-        # something that was an output -> make an input
         python_value = self.python_value
         if self.io_category.want_output and self.num_in_outputs < len( outputs ):
             python_value = outputs[ self.num_in_outputs ]

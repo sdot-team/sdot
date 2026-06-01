@@ -119,9 +119,11 @@ class CallArg_Aggregate( CallArg ):
         if template_args:
             params = ', '.join( f'{ ta.cpp_type } { n }' for n, ta in template_args )
             names = ', '.join( n for n, _ in template_args )
-            parameters_declaration_macro = f"#define PARAMETERS_DECLARATION_OF_{ cpp_name } template<{ params }>"
+            parameters_template_macro = f"#define TEMPLATE_PARAMETERS_OF_{ cpp_name } template<{ params }>"
+            parameters_declaration_macro = f"#define PARAMETERS_DECLARATION_OF_{ cpp_name } { params }"
             parameter_names_macro = f"#define PARAMETER_NAMES_OF_{ cpp_name } { names }"
         else:
+            parameters_template_macro = f"#define TEMPLATE_PARAMETERS_OF_{ cpp_name }"
             parameters_declaration_macro = f"#define PARAMETERS_DECLARATION_OF_{ cpp_name }"
             parameter_names_macro = f"#define PARAMETER_NAMES_OF_{ cpp_name }"
 
@@ -132,7 +134,7 @@ class CallArg_Aggregate( CallArg ):
         else:
             attributes_macro = f"#define ATTRIBUTES_OF_{ cpp_name }"
 
-        all_lines = [ "#pragma once", "" ] + inc_lines + [ "", parameters_declaration_macro, "", parameter_names_macro, "", attributes_macro ]
+        all_lines = [ "#pragma once", "" ] + inc_lines + [ "", parameters_template_macro, "", parameters_declaration_macro, "", parameter_names_macro, "", attributes_macro ]
         code = "\n".join( all_lines ) + "\n"
 
         from ..generated_files.compilation_directories import generated_includes_dir
@@ -212,15 +214,12 @@ class CallArg_Aggregate( CallArg ):
 
         lines = []
 
-        # batch_sizes() + slice()
+        # apply_values, batch_sizes() + operator()()
         batch_axes = getattr( self.python_class, 'batch_axes', [] )
-        lines.append(  "    /* batch methods */" )
-        lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
-        lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
-
-        # apply_values
         lines.append(  f"    HD auto apply_values( auto &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
         lines.append(  f"    HD auto apply_values( auto &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
+        lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
+        lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
 
         # slice accessor (scalar index: batch → single-row)
         if unbatch_version is not None:

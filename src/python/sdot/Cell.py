@@ -105,23 +105,24 @@ class Cell:
 
         return cast( cls, driver.call(
             FfiCode(
+                name = "init_as_hypercube",
                 header = """
                 struct InitAsHypercube {
-                    HD void operator()( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) const {
-                        cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
+                    HD void operator()( auto batch_indices, auto &&p ) const {
+                        p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) );
+                    }
+                };
+                struct InitAsHypercubeBwd {
+                    HD void operator()( auto batch_indices, auto &&p ) const {
+                        p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
                     }
                 };
                 """,
                 fwd = """
-                    // run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) {
-                    //     cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
-                    // }, p.cell, p.frame, p.cut_id );
-                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercube{}, p.cell, p.frame, p.cut_id );
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercube{}, p );
                 """,
                 bwd = """
-                    //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [&] ( auto batch_indices ) mutable {
-                    //    p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
-                    //} );
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercubeBwd{}, p );
                 """,
             ),
             cell = Return( cls, **cls._return_parameters( dim, batch_sizes ) ),
@@ -157,13 +158,17 @@ class Cell:
                             return PI( map_items.shape( Ct<int,0>() ) );
                         }
 
-                        HD void per_thread( const auto &thread_info, const auto &/* batch_indices */, auto &&cont, auto &&map_items, auto &&nb_map_items, auto &&outputs, PI max_nb_cuts, auto &&batch_of_cells ) const {
+                        HD void per_thread( const auto &thread_info, const auto &/* batch_indices */, auto &&cont, auto &&map_items, auto &&nb_map_items, auto &&outputs, PI max_nb_cuts, auto &&batch_of_cells, auto &&...args ) const {
                             auto item_map = recursive_map_of_unique_sorted_indices( Ct<int,decltype(batch_of_cells.dim)::value-1>(), map_items( thread_info.global_id() ), nb_map_items( thread_info.global_id() ), max_nb_cuts );
-                            cont( outputs, batch_of_cells, item_map );
+                            cont( outputs, batch_of_cells, item_map, args... );
                         }
 
-                        HD void operator()( const auto &batch_index, auto outputs, auto batch_of_cells, auto item_map ) const {
+                        HD void operator()( const auto &batch_index, auto &&outputs, auto &&batch_of_cells, auto &&item_map ) const {
                             outputs( batch_index ) = batch_of_cells( batch_index ).measure( item_map );
+                        }
+
+                        HD void operator()( const auto &batch_index, auto &&outputs, auto &&batch_of_cells, auto &&item_map, auto &&p ) const {
+                            batch_of_cells( batch_index ).measure_bwd( item_map, p );
                         }
                     };
                 """,
@@ -171,7 +176,7 @@ class Cell:
                     run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
                 """,
                 bwd = """
-                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells );
+                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p.map_items, p.nb_map_items, p.output, p.max_nb_cuts, p.batch_of_cells, p );
                 """,
             ),
             map_items = Workspace(
@@ -183,6 +188,10 @@ class Cell:
             max_nb_cuts = max_nb_cuts,
             batch_of_cells = self
         )
+
+    @property
+    def batch_size_Cell( self ):
+        return 1
 
     @staticmethod
     def _max_of_nb_map_items( dim, nb_cuts = None ):
@@ -197,7 +206,6 @@ class Cell:
             for _ in range( 3, dim ):
                 res += nb_cuts * nb_cuts
         return res
-
 
     def cut( self, cut_dir_or_plane, cut_off = None, cut_id = BOUNDARY ):
         cut_plane = driver.t1( cut_dir_or_plane )

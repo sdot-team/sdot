@@ -47,7 +47,7 @@ public:
     }
 
     // creation
-    HD void         with_same_shape( auto &&func ) const { sizes.with_same_shape( [&]( auto &sizes ) { DynamicAxis da( num_dynamic_axis, capacity, sizes ); func( da ); } ); }
+    //HD void       with_same_shape( auto &&func ) const { sizes.with_same_shape( [&]( auto &sizes ) { DynamicAxis da( num_dynamic_axis, capacity, sizes ); func( da ); } ); }
 
     const PI        num_dynamic_axis = 0;
     const PI        capacity = 0;

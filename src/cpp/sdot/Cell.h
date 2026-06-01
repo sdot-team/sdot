@@ -5,20 +5,21 @@
 
 namespace sdot {
 
-PARAMETERS_DECLARATION_OF_Cell // template<int ct_dim,class Arch,class TF,class TI>
+TEMPLATE_PARAMETERS_OF_Cell
 struct Cell {
-    // static constexpr int ct_dim = ct_dim_value;
     ATTRIBUTES_OF_Cell
 
+    using       TF                     = typename T_vertex_positions::TF; ///< float type, recovered from attribute
     using       Pt                     = Vector<TF,ct_dim>; ///< point
     using       Ci                     = Vector<TI,ct_dim>; ///< cut indices
 
     //
     HD void     init_as_aligned_simplex( TI cut_id );
-    HD void     init_as_hypercube      ( const auto &frame, const auto &cut_id );
     HD void     init_as_unbounded      ();
 
     HD void     init_as_hypercube_bwd  ( const auto &frame, auto &p, const auto &batch_index );
+    HD void     init_as_hypercube      ( const auto &frame, const auto &cut_id );
+
 
     // retrieve info in tensors --------------------------------------------------------------
     HD Pt       vertex_position        ( PI num_vertex ) const;
@@ -40,6 +41,8 @@ struct Cell {
     HD void     disp_cell              ();
     HD bool     contains               ( const Pt &p ) const;
     HD Pt       centroid               ();
+
+    HD void     measure_bwd            ( auto &item_map, auto &&p );
     HD TF       measure                ( auto &item_map );
 
     T_d HD auto simplex_from_indices   ( const Vector<TI,d> &indices ) const;

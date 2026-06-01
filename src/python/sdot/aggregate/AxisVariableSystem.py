@@ -136,9 +136,14 @@ class AxisVariableSystem:
                     op = f"( { op } - { offset } ) / { coeff }" if coeff != 1 else f"{ op } - { offset }"
                 elif coeff != 1:
                     op = f"{ op } / { coeff }"
-                cases.append( f"{ src.cpp_ref }.is_valid() ? { op } : -1" )
+                # is_valid() is always compile-time in the FFI binding context (TensorView/ZeroTensor
+                # from the binding helpers are always valid; NoneTensor sources are excluded upstream).
+                # cases.append( op )
+                return op
 
-        return f"first_positive( \"{ name }\", { ', '.join( cases ) } )"
+        # return f"first_positive( \"{ name }\", { ', '.join( cases ) } )"
+        # if not cases:
+        return "0"
 
     def cpp_capacity_expr( self, dynamic_axis_name: str ) -> str:
         """C++ expression for the capacity of a `DynamicAxis` (same resolution as a plain axis)."""

@@ -12,7 +12,7 @@
 
 namespace sdot {
 
-#define UTP PARAMETERS_DECLARATION_OF_Cell
+#define UTP TEMPLATE_PARAMETERS_OF_Cell
 #define DTP Cell<PARAMETER_NAMES_OF_Cell>
 
 UTP HD void DTP::init_as_aligned_simplex( TI cut_id ) {
@@ -232,7 +232,7 @@ UTP HD typename DTP::Pt DTP::cut_dir( PI num_cut ) const {
     return cut_planes( num_cut, 0 );
 }
 
-UTP HD TF DTP::cut_dot( PI num_cut ) const {
+UTP HD auto DTP::cut_dot( PI num_cut ) const -> TF {
     return cut_planes( num_cut, dim );
 }
 
@@ -390,7 +390,39 @@ UTP HD void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD TF DTP::measure( auto &item_map ) {
+UTP HD void DTP::measure_bwd( auto &item_map, auto &&p ) {
+    const TI nb_vertices = this->nb_vertices();
+
+    // infinite cell
+    if ( ! is_fully_closed() )
+        return;
+
+    // 2D: shoelace formula
+    if constexpr ( ct_dim == 2 ) {
+        for ( TI i = 0; i < nb_vertices; ++i ) {
+            const TI j = ( i + 1 ) % nb_vertices;
+            // sum += vertex_positions( i, 0 ) * vertex_positions( j, 1 )
+            //      - vertex_positions( j, 0 ) * vertex_positions( i, 1 );
+            p.output_grad_for_batch_of_cells_vertex_positions( i, 0 ) += p.input_grad_for_output * vertex_positions( j, 1 ) / 2;
+            p.output_grad_for_batch_of_cells_vertex_positions( j, 1 ) += vertex_positions( i, 0 ) * p.input_grad_for_output / 2;
+            p.output_grad_for_batch_of_cells_vertex_positions( j, 0 ) -= p.input_grad_for_output * vertex_positions( i, 1 ) / 2;
+            p.output_grad_for_batch_of_cells_vertex_positions( j, 1 ) -= vertex_positions( j, 0 ) * p.input_grad_for_output / 2;
+            info( p.input_grad_for_output );
+        }
+    } else {
+        // nD: fan triangulation
+        TODO;
+        // for_each_simplex( item_map, [&] ( const auto &simplex_indices ) {
+        //     const TI v0 = simplex_indices[ 0 ];
+        //     Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
+        //         return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
+        //     } );
+        //     sum += std::abs( M.determinant() );
+        // } );
+    }
+}
+
+UTP HD auto DTP::measure( auto &item_map ) -> TF {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
@@ -937,9 +969,10 @@ UTP HD void DTP::check_consistency() {
     }
 }
 
-template<class Value,class TF,class TI,class MemorySpace,int ct_dim>
-struct Integral<Value,DTP> {
+template<class Value,PARAMETERS_DECLARATION_OF_Cell>
+struct Integral<Value,Cell<PARAMETER_NAMES_OF_Cell>> {
     static HD auto integral( const Value &value, DTP &cw ) {
+        using TF = typename DTP::TF;
         // infinite cell
         if ( ! cw.cell.is_fully_closed() )
             return std::numeric_limits<TF>::max();

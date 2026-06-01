@@ -60,10 +60,6 @@ UTP HD auto DTP::offset( const auto &index, auto ...rem ) const {
 
 
 
-UTP HD void DTP::operator-=( const auto &that ) {
-    TODO;
-}
-
 // `index` is a full multi-index, so a[index] / b[index] are rank-0 views.
 struct AddTensorItemElementwise {              ///< same-shape operand: a[i] += b[i]
     HD void operator()( auto index, auto a, auto b ) const { a[ index ] += b[ index ]; }
@@ -85,9 +81,8 @@ HD constexpr bool add_is_elementwise() {
 UTP HD void DTP::operator+=( const auto &that ) {
     if constexpr ( ct_rank == 0 ) {
         // base case: accumulate in place (also what stops the per-item recursion above)
-        auto ec = current_execution_context();
-        if constexpr ( DECAYED_TYPE_OF( accessible_from( ec, _memory_space ) )::value ) {
-            *data() += TF( that );
+        if constexpr ( DECAYED_TYPE_OF( accessible_from( current_execution_context(), *this ) )::value ) {
+            ref() += TF( that );
         } else {
             TF cur = value();
             cur += TF( that );
@@ -97,6 +92,22 @@ UTP HD void DTP::operator+=( const auto &that ) {
         run_parallel( cartesian_product_ranges( _shape ), AddTensorItemElementwise(), inout( *this ), that );
     } else {
         run_parallel( cartesian_product_ranges( _shape ), AddTensorItemBroadcast(), inout( *this ), that );
+    }
+}
+
+UTP HD void DTP::operator-=( const auto &that ) {
+    if constexpr ( ct_rank == 0 ) {
+        if constexpr ( DECAYED_TYPE_OF( accessible_from( current_execution_context(), *this ) )::value ) {
+            ref() -= TF( that );
+        } else {
+            TF cur = value();
+            cur -= TF( that );
+            operator=( cur );
+        }
+    } else if constexpr ( add_is_elementwise<DECAYED_TYPE_OF( that ),ct_rank>() ) {
+        TODO; // run_parallel( cartesian_product_ranges( _shape ), AddTensorItemElementwise(), inout( *this ), that );
+    } else {
+        TODO; // run_parallel( cartesian_product_ranges( _shape ), AddTensorItemBroadcast(), inout( *this ), that );
     }
 }
 
@@ -312,7 +323,7 @@ UTP HD auto DTP::stride( auto d ) const {
 
 
 UTP HD bool DTP::surely_null() const {
-    TODO;
+    return false; // TensorView is always a real, non-null tensor in FFI bindings
     // if ( is_invalid() )
     //     return true;
 

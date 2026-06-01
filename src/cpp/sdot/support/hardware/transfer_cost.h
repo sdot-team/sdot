@@ -48,8 +48,6 @@ HD auto transfer_cost( const auto &ec, const auto &arg ) {
         return 0_c;
     else if constexpr ( requires { apply_values( arg, AnyFunctor{} ); } )
         return apply_values( arg, [&]( auto &&...values ) { return ( transfer_cost( ec, values ) + ... + 0_c ); } );
-    // else if constexpr ( requires { arg.apply_values( [&]( auto&&...) {} ); } )
-    //     return arg.apply_values( [&]( auto &&...values ) { return ( transfer_cost( ec, values ) + ... + 0_c ); } );
     else {
         // static_assert( sizeof( arg ) == 0, "don't know how to make transfer_cost: arg must provide transfer_cost( ec )" );
         arg.no_transfer_cost();
@@ -60,6 +58,10 @@ HD auto transfer_cost( const auto &ec, const auto &arg ) {
 // multi data-args: recursive sum — requires at least 2 to avoid ambiguity with single-arg default
 HD auto transfer_cost( const auto &ec, const auto &head, const auto &...tail ) requires ( sizeof...( tail ) >= 1 ) {
     return transfer_cost( ec, head ) + transfer_cost( ec, tail... );
+}
+
+auto accessible_from( const auto &ec, const auto &...values ) {
+    return transfer_cost( ec, values... ) == 0_c;
 }
 
 } // namespace sdot

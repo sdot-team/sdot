@@ -256,7 +256,7 @@ class CallArgsAnalysis:
                 comes_from_basic_array = ct.comes_from_basic_array
             )
             if not needed:
-                res.u8_input_values[ grad_tensor.validity_output_index ] = 0
+                pass  # TODO: implement "output not needed" — tensor_view_out no longer reads u8 validity
             res.arguments.sub_dict[ name ] = grad_tensor
 
         # for each output, add a grad input

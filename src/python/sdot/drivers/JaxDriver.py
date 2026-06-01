@@ -419,7 +419,8 @@ class JaxDriver:
                 if not isinstance( grads_of_the_outputs, ( tuple, list ) ):
                     grads_of_the_outputs = ( grads_of_the_outputs, )
                 bfai = fai.backward_version( self, outputs, grads_of_the_outputs, "GradParameters", differentiable_inputs, perturbed_flags )
-                func = jax.ffi.ffi_call( module_name + "_backward", bfai.ffi_outputs )
+                bwd_module_name = self._ensure_backward_target( code, bfai, module_name )
+                func = jax.ffi.ffi_call( bwd_module_name, bfai.ffi_outputs )
                 ret = func( *bfai.ffi_inputs, **bfai.ffi_attributes )
                 if isinstance( ret, jax.Array ):
                     ret = ( ret, )
@@ -452,7 +453,8 @@ class JaxDriver:
                     grads_of_the_outputs = ( grads_of_the_outputs, )
 
                 bfai = fai.backward_version( self, outputs, grads_of_the_outputs, "GradParameters", differentiable_inputs, perturbed_flags )
-                func = jax.ffi.ffi_call( module_name + "_backward", bfai.ffi_outputs )
+                bwd_module_name = self._ensure_backward_target( code, bfai, module_name )
+                func = jax.ffi.ffi_call( bwd_module_name, bfai.ffi_outputs )
                 ret = func( *bfai.ffi_inputs, **bfai.ffi_attributes )
                 if isinstance( ret, jax.Array ):
                     ret = ( ret, )
@@ -617,46 +619,64 @@ class JaxDriver:
     _registered_ffi_targets = set()
 
     def _register_ffi_target( self, module_name: str, code: FfiCode, args: CallArgsAnalysis ):
-        # already registered ?
         if module_name in JaxDriver._registered_ffi_targets:
             return
         JaxDriver._registered_ffi_targets.add( module_name )
 
-        # else, try to load it from the disk
         from ..compilation.force_build import force_build
         if not force_build():
             try:
-                self._try_to_import_and_register_ffi_target( module_name, code, bool( code.bwd ) )
+                self._try_to_import_and_register_ffi_target( module_name )
                 return
             except ( ImportError, SystemError ):
                 pass
 
-        # else, make the dylib
         self._make_dylib( code, args, module_name )
+        self._try_to_import_and_register_ffi_target( module_name )
 
-        # and try again to import it
-        self._try_to_import_and_register_ffi_target( module_name, code, bool( code.bwd ) )
-
-
-    def _try_to_import_and_register_ffi_target( self, module_name: str, func_name: str, make_backward_binding: bool ):
+    def _try_to_import_and_register_ffi_target( self, module_name: str ):
         platform = "gpu" if self.device.is_cuda_gpu else "cpu"
         module = importlib.import_module( "sdot.generated_files." + module_name )
         jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = platform )
-        if make_backward_binding:
-            jax.ffi.register_ffi_target( module_name + "_backward", getattr( module, module_name + "_backward" )(), platform = platform )
 
+    def _ensure_backward_target( self, code: FfiCode, bfai: CallArgsAnalysis, fwd_module_name: str ) -> str:
+        """Lazily compile and register the backward FFI target from the actual bfai.
+
+        Called at JAX trace time when the backward is first needed, so bfai correctly
+        reflects which tensors are None/Zero vs real based on the actual cotangents.
+        """
+        from sdot.util.encode_base_62 import encode_base_62
+        raw = f"bwd_{ fwd_module_name }_{ bfai.arguments.signature() }"
+        bwd_module_name = re.sub( r'[^\w]', '_', raw )
+        while "__" in bwd_module_name:
+            bwd_module_name = bwd_module_name.replace( "__", "_" )
+        if len( bwd_module_name ) > 60:
+            bwd_module_name = bwd_module_name[ :50 ] + encode_base_62( bwd_module_name[ 50: ] )
+
+        if bwd_module_name in JaxDriver._registered_ffi_targets:
+            return bwd_module_name
+        JaxDriver._registered_ffi_targets.add( bwd_module_name )
+
+        from ..compilation.force_build import force_build
+        if not force_build():
+            try:
+                self._try_to_import_and_register_ffi_target( bwd_module_name )
+                return bwd_module_name
+            except ( ImportError, SystemError ):
+                pass
+
+        self._make_bwd_dylib( code, bfai, bwd_module_name )
+        self._try_to_import_and_register_ffi_target( bwd_module_name )
+        return bwd_module_name
 
     def _make_dylib( self, code: FfiCode, fai: CallArgsAnalysis, module_name: str ):
-        # generate structs
         already_visited = set()
         fai.arguments.generate_structures( already_visited )
 
-        # include list
         includes = set( code.includes )
         includes.add( "sdot/jax_ffi_wrappers.h" )
         includes.add( "nanobind/nanobind.h" )
 
-        # declaration
         lines = []
         lines.append( "" )
         lines.append( "namespace nb = nanobind;" )
@@ -669,16 +689,49 @@ class JaxDriver:
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        # --- forward handler ---
         self._handler_source( includes, lines, code.fwd, fai, module_name, "Parameters" )
         lines.append( "" )
 
-        # --- backward handler ---
-        if code.bwd:
-            gfai = fai.backward_version( self, [], [], "GradParameters" )
-            self._handler_source( includes, lines, code.bwd, gfai, module_name, "GradParameters", "_backward" )
-            lines.append( "" )
+        self._append_nb_module( lines, module_name )
 
+        include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
+
+        from ..compilation.make_dylib_from_source import make_dylib_from_source
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device )
+
+    def _make_bwd_dylib( self, code: FfiCode, bfai: CallArgsAnalysis, bwd_module_name: str ):
+        """Compile a backward-only binding using the actual bfai (with correct None/Zero/real types)."""
+        already_visited = set()
+        bfai.arguments.generate_structures( already_visited )
+
+        includes = set( code.includes )
+        includes.add( "sdot/jax_ffi_wrappers.h" )
+        includes.add( "nanobind/nanobind.h" )
+
+        lines = []
+        lines.append( "" )
+        lines.append( "namespace nb = nanobind;" )
+        lines.append( "using namespace sdot;" )
+        lines.append( "" )
+
+        if code.header:
+            lines.append( dedent( code.header ) )
+
+        if self.device.is_cuda_gpu:
+            lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
+
+        self._handler_source( includes, lines, code.bwd, bfai, bwd_module_name, "GradParameters" )
+        lines.append( "" )
+
+        self._append_nb_module( lines, bwd_module_name )
+
+        include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
+
+        from ..compilation.make_dylib_from_source import make_dylib_from_source
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), bwd_module_name, [], self.device )
+
+    @staticmethod
+    def _append_nb_module( lines: list, module_name: str ):
         lines.append( "" )
         lines.append( "template<typename T>" )
         lines.append( "nb::capsule EncapsulateFfiCall( T *fn ) {" )
@@ -688,15 +741,7 @@ class JaxDriver:
         lines.append( "" )
         lines.append( f"NB_MODULE( { module_name }, m ) {{" )
         lines.append( f"  m.def( \"{ module_name }\", []() {{ return EncapsulateFfiCall( binding_{ module_name } ); }} );" )
-        if code.bwd:
-            lines.append( f"  m.def( \"{ module_name }_backward\", []() {{ return EncapsulateFfiCall( binding_{ module_name }_backward ); }} );" )
         lines.append( "}" )
-
-        include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
-
-        #
-        from ..compilation.make_dylib_from_source import make_dylib_from_source
-        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device )
 
     def _handler_source( self, includes, lines, code: str, fai: CallArgsAnalysis, module_name: str, struct_name: str, suffix = "" ):
         is_gpu = self.device.is_cuda_gpu
