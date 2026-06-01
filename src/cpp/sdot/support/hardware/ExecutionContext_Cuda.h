@@ -12,6 +12,8 @@
 
 namespace sdot {
 
+struct MemorySpace_GlobalCudaRam;
+
 // Continuation for the device-inline (nested) branch of run_parallel: once RunTraits::per_thread
 // has produced its per-thread args, walk the items and apply func( item, args... ). Expressed as a
 // functor (not a lambda) because nvcc rejects generic extended __host__ __device__ lambdas and this
@@ -54,10 +56,27 @@ __global__ void _execution_space_cuda_run_parallel( int nb_workers, List list, F
 // NB: this is necessary but NOT sufficient — because run_parallel is HD, nvcc still instantiates
 // the whole launch chain for the device pass, where it takes the __CUDA_ARCH__ branch (never the
 // launch), so the kernel's *device* code is never emitted and the launch fails at runtime.
-// Marking this function HD (but empty on device) makes nvcc follow the call-graph during the
-// device pass, ensuring the kernel is anchored and its device code is generated.
+// The dummy launch in the __CUDA_ARCH__ branch (anchored by if(false)) forces this instantiation
+// while allowing nvcc to deduce the kernel's template arguments automatically (including those
+// for local/generic lambdas).
 HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
-#ifndef __CUDA_ARCH__
+#ifdef __CUDA_ARCH__
+    // Called from device code: we are already inside a kernel, so there is no nested launch
+    // (that would need dynamic parallelism). Run inline on the current thread — the device
+    // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Run the
+    // optional per_thread() setup first (like the launched kernel and the CPU path do), then
+    // walk the items. Functor (not lambda) continuation, since nvcc rejects generic extended
+    // HD lambdas.
+    CudaThreadInfo thread_info;
+    RunTraits::per_thread( func, thread_info, list,
+        DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
+        FORWARD( args )... );
+
+    // Anchor the kernel. Labeled as if(false) to avoid requiring CUDA Dynamic Parallelism at
+    // runtime, but the call expression forces nvcc to generate the kernel's device code.
+    if ( false )
+        _execution_space_cuda_run_parallel<<< 0, 0 >>>( 0, list, func, args... );
+#else
     const int threads_per_block = 256;
     // bound the grid by the functor's max_gpu_threads (its per-thread scratch capacity): launching
     // one thread per item would over-subscribe scratch for large lists. Threads then grid-stride.
@@ -86,6 +105,7 @@ HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&
 // bindings set default_stream). A specific stream can be passed explicitly; mind that
 // using non-default streams requires care w.r.t. ordering/synchronization.
 struct ExecutionContext_Cuda : public ExecutionContext {
+    using MemorySpace = MemorySpace_GlobalCudaRam;
     static cudaStream_t default_stream; ///< process-wide default, set by the bindings
     cudaStream_t        stream;         ///< stream this execution space enqueues onto
 
@@ -99,23 +119,7 @@ struct ExecutionContext_Cuda : public ExecutionContext {
     #endif
 
     HD void run_parallel( const auto &list, auto &&func, auto &&...args ) const {
-    #ifdef __CUDA_ARCH__
-        // Called from device code: we are already inside a kernel, so there is no nested launch
-        // (that would need dynamic parallelism). Run inline on the current thread — the device
-        // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Run the
-        // optional per_thread() setup first (like the launched kernel and the CPU path do), then
-        // walk the items. Functor (not lambda) continuation, since nvcc rejects generic extended
-        // HD lambdas.
-        CudaThreadInfo thread_info;
-        RunTraits::per_thread( func, thread_info, list,
-            DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
-            FORWARD( args )... );
-    #endif
-    #ifndef __CUDA_ARCH__
-        // one thread per item for now (round-robin in the kernel tolerates any grid size).
-        // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
         launch_cuda_run_parallel( stream, list, FORWARD( func ), FORWARD( args )... );
-    #endif
     }
 };
 

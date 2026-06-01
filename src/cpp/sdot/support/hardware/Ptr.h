@@ -40,8 +40,9 @@ struct Ptr {
     HD T             value        () const {
         if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( current_execution_context(), memory_space ) )::value ) {
             T res;
-            copy( Ptr<T,DECAYED_TYPE_OF( current_execution_context() )>( &res ), *this, 1 );
-            return 1;
+            using MS = typename DECAYED_TYPE_OF( current_execution_context() )::MemorySpace;
+            copy( Ptr<T, MS>( &res ), *this, 1 );
+            return res;
         } else
             return *raw;
     }

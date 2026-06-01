@@ -10,8 +10,11 @@
 
 namespace sdot {
 
+struct MemorySpace_CpuRam;
+
 // host execution
 struct ExecutionContext_Cpu : ExecutionContext {
+    using MemorySpace = MemorySpace_CpuRam;
     void run_parallel( const auto &list, auto &&func, auto &&...args ) const {
         // Are we already inside a parallel region? (statically known: at least one operand
         // carries the has_already_been_parallelized tag.) If so, run inline on the current
