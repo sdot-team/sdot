@@ -240,7 +240,7 @@ UTP TI DTP::cut_id( PI num_cut ) const {
     return cut_ids( num_cut );
 }
 
-UTP bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex ) {
+UTP HD bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex ) {
     for( PI simplex_ind = beg; simplex_ind < ct_dim + 1; ++simplex_ind )
         if ( next_num_vertex == simplex[ simplex_ind ] )
             return true;
@@ -248,7 +248,7 @@ UTP bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex ) {
 }
 
 /// Fan triangulation — recursive core.
-UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, auto &&func ) {
+UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, auto &&func ) {
     // register the new vertex
     simplex[ d ] = num_vertex;
 
@@ -263,7 +263,6 @@ UTP T_d GD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
                 ic = num_vertex;
                 continue;
             }
-
 
             // else, try to make a new simplex
             const PI next_num_vertex = ic;
@@ -411,15 +410,12 @@ UTP HD TF DTP::measure( auto &item_map ) {
 
     // nD: fan triangulation
     TF sum = 0;
-    TF *p_sum = &sum;
-    auto v = vertex_positions;
-    for_each_simplex( item_map, [=] ( const auto &simplex_indices ) {
-        // const TI v0 = simplex_indices[ 0 ];
-        // Matrix<TF,ct_dim> M;
-        // for( TI row = 0; row < ct_dim; ++row )
-        //     for( TI col = 0; col < ct_dim; ++col )
-        //         M( row, col ) = v( simplex_indices[ col + 1 ], row ) - v( v0, row );
-        *p_sum += 32; // std::abs( M.determinant() );
+    for_each_simplex( item_map, [&] ( const auto &simplex_indices ) {
+        const TI v0 = simplex_indices[ 0 ];
+        Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
+            return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
+        } );
+        sum += std::abs( M.determinant() );
     } );
 
     return sum / factorial( ct_dim );

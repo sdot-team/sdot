@@ -13,16 +13,16 @@ public:
     using                 Content                 = Vector<T,ct_size*ct_size>;
     using                 Vec                     = Vector<T,ct_size>;
 
-    /**/          HD      Matrix                  ( FillWith, T value ) : _content( FillWith(), value ) {}
-    /**/          HD      Matrix                  () {}
+    HD                    Matrix                  ( FillWith, T value ) : _content( FillWith(), value ) {}
+    HD                    Matrix                  () {}
 
-    GD static Matrix      with_func               ( auto &&func );
+    HD static Matrix      with_func               ( auto &&func );
 
     HD const T&           operator()              ( PI r, PI c ) const { return _content[ r * ct_size + c ]; }
     HD T&                 operator()              ( PI r, PI c ) { return _content[ r * ct_size + c ]; }
 
-    auto                  without_row_and_col     ( PI r, PI c ) const -> Matrix<T,ct_size-1>;
-    auto                  with_replaced_col       ( PI c, const Vec &col ) const -> Matrix;
+    HD auto               without_row_and_col     ( PI r, PI c ) const -> Matrix<T,ct_size-1>;
+    HD auto               with_replaced_col       ( PI c, const Vec &col ) const -> Matrix;
     EigenSystem           eigen_system            () const;
     HD T                  determinant             () const;
     Vec                   diagonal                () const;

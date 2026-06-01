@@ -65,7 +65,7 @@ struct Cell {
     void        cut_2d                 ( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out );
 
     T_d HD void for_each_simplex_rec   ( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, auto &&func );
-    bool        already_in_simplex     ( auto &simplex, PI simplex_size, PI next_num_vertex );
+    HD bool     already_in_simplex     ( auto &simplex, PI simplex_size, PI next_num_vertex );
 };
 
 // template<int ct_dim,class Arch,class TF,class TI>

@@ -6,10 +6,9 @@
 namespace sdot {
 
 #define UTP  template<class T,int ct_size>
-#define UTPH template<class T,int ct_size> HD
 #define DTP  Matrix<T,ct_size>
 
-UTP Matrix<T,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
+UTP HD Matrix<T,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
     Matrix<T,ct_size-1> res;
     for( PI r = 0; r < res.nb_rows(); ++r )
         for( PI c = 0; c < res.nb_cols(); ++c )
@@ -17,7 +16,7 @@ UTP Matrix<T,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
     return res;
 }
 
-UTP GD DTP DTP::with_func( auto &&func ) {
+UTP HD DTP DTP::with_func( auto &&func ) {
     Matrix res;
     for( PI r = 0; r < ct_size; ++r )
         for( PI c = 0; c < ct_size; ++c )
@@ -25,21 +24,21 @@ UTP GD DTP DTP::with_func( auto &&func ) {
     return res;
 }
 
-UTP DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
+UTP HD DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
     Matrix res = *this;
     for( PI r = 0; r < nb_rows(); ++r )
         res( r, c ) = col[ r ];
     return res;
 }
 
-UTP DTP::Vec DTP::diagonal() const {
+UTP HD DTP::Vec DTP::diagonal() const {
     Vec res( Size(), nb_rows() );
     for( PI i = 0; i < nb_rows(); ++i )
         res[ i ] = operator()( i, i );
     return res;
 }
 
-UTPH T DTP::determinant() const {
+UTP HD T DTP::determinant() const {
     if constexpr ( ct_size == 1 ) {
         return operator()( 0, 0 );
     } else {
@@ -50,7 +49,7 @@ UTPH T DTP::determinant() const {
     }
 }
 
-UTP DTP DTP::cholesky() const {
+UTP HD DTP DTP::cholesky() const {
     const PI nd = nb_rows();
     Matrix L( nd );
     for ( PI i = 0; i < nd; ++i )
@@ -74,7 +73,7 @@ UTP DTP DTP::cholesky() const {
     return L;
 }
 
-UTP DTP::Vec DTP::solve( const Vec &vec ) const {
+UTP HD DTP::Vec DTP::solve( const Vec &vec ) const {
     T d = determinant();
     T sgn = 1;
     Vec res;
@@ -83,7 +82,7 @@ UTP DTP::Vec DTP::solve( const Vec &vec ) const {
     return res;
 }
 
-UTPH DTP::Vec DTP::solve_ge( Vec b ) const {
+UTP HD DTP::Vec DTP::solve_ge( Vec b ) const {
     const PI n = nb_rows();
     Matrix A = *this;
 
@@ -122,7 +121,7 @@ UTPH DTP::Vec DTP::solve_ge( Vec b ) const {
     return x;
 }
 
-UTP DTP DTP::inverse() const {
+UTP HD DTP DTP::inverse() const {
     const PI n = nb_rows();
     Matrix A = *this;
     Matrix inv = with_func( []( PI r, PI c ) -> T { return r == c ? T(1) : T(0); } );
