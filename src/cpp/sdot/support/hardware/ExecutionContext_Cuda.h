@@ -53,10 +53,11 @@ __global__ void _execution_space_cuda_run_parallel( int nb_workers, List list, F
 // function" at runtime. run_parallel (HD, for device nesting) forwards its host branch here.
 // NB: this is necessary but NOT sufficient — because run_parallel is HD, nvcc still instantiates
 // the whole launch chain for the device pass, where it takes the __CUDA_ARCH__ branch (never the
-// launch), so the kernel's *device* code is never emitted and the launch fails at runtime. The
-// device branch of run_parallel therefore anchors the kernel explicitly (see below).
+// launch), so the kernel's *device* code is never emitted and the launch fails at runtime.
+// Marking this function HD (but empty on device) makes nvcc follow the call-graph during the
+// device pass, ensuring the kernel is anchored and its device code is generated.
 HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
-    #ifndef __CUDA_ARCH__
+#ifndef __CUDA_ARCH__
     const int threads_per_block = 256;
     // bound the grid by the functor's max_gpu_threads (its per-thread scratch capacity): launching
     // one thread per item would over-subscribe scratch for large lists. Threads then grid-stride.
@@ -78,7 +79,7 @@ HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&
         if ( cudaError_t e = cudaStreamSynchronize( stream ); e != cudaSuccess )
             fprintf( stderr, "[sdot] CUDA kernel error: %s\n", cudaGetErrorString( e ) );
     #endif
-    #endif
+#endif
 }
 
 // CUDA device execution + stream — {}-constructible (uses the global default_stream; the
@@ -109,27 +110,14 @@ struct ExecutionContext_Cuda : public ExecutionContext {
         RunTraits::per_thread( func, thread_info, list,
             DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
             FORWARD( args )... );
-    #else
+    #endif
+    #ifndef __CUDA_ARCH__
         // one thread per item for now (round-robin in the kernel tolerates any grid size).
         // TODO: cap with RunTraits::max_gpu_threads once it accounts for registers/shared mem.
         launch_cuda_run_parallel( stream, list, FORWARD( func ), FORWARD( args )... );
     #endif
     }
 };
-
-// int block = max_tpb;
-// int regs = kernel_nb_gpu_register_per_thread( func, args... ); // Ct<...> or runtime
-// if ( regs > 0 && regs_per_block / regs < block )
-//     block = regs_per_block / regs;
-// PI shpt = kernel_local_gpu_memory_size( func, args... );        // Ct<...> or runtime
-// if ( shpt > 0 && PI( shared_per_block ) / shpt < PI( block ) )
-//     block = int( PI( shared_per_block ) / shpt );
-
-// block = ( block / 32 ) * 32;          // warp multiple
-// if ( block < 32 ) block = 32;
-
-// PI grid = ( nb_items + block - 1 ) / block;
-// return { grid, block };
 
 } // namespace sdot
 

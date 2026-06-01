@@ -153,7 +153,8 @@ using namespace sdot;
 #include <sdot/BatchOfCell.h>
 TEST_CASE( "Cell", "" ) {
     BatchOfCell<double,int,MemorySpace_CpuRam,2> b;
+    // b.apply_values( [&]( auto&& ...values ) {
 
-    b.apply_values( [&]( auto&& ...values ) { } ); // -> fonctionne
+    // } );
     info( transfer_cost( ExecutionContext_Cpu(), b ) );
 }

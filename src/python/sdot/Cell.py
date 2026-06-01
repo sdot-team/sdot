@@ -105,10 +105,18 @@ class Cell:
 
         return cast( cls, driver.call(
             FfiCode(
-                fwd = """
-                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [&] ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) {
+                header = """
+                struct InitAsHypercube {
+                    HD void operator()( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) const {
                         cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
-                    }, p.cell, p.frame, p.cut_id );
+                    }
+                };
+                """,
+                fwd = """
+                    // run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [] ( auto batch_indices, auto &&cell, auto &&frame, auto &&cut_id ) {
+                    //     cell( batch_indices ).init_as_hypercube( frame( batch_indices ), cut_id( batch_indices ) );
+                    // }, p.cell, p.frame, p.cut_id );
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercube{}, p.cell, p.frame, p.cut_id );
                 """,
                 bwd = """
                     //run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), [&] ( auto batch_indices ) mutable {
