@@ -168,7 +168,7 @@ class Cell:
                         }
 
                         HD void operator()( const auto &batch_index, auto &&outputs, auto &&batch_of_cells, auto &&item_map, auto &&p ) const {
-                            batch_of_cells( batch_index ).measure_bwd( item_map, p );
+                            batch_of_cells( batch_index ).measure_bwd( item_map, p, batch_index );
                         }
                     };
                 """,

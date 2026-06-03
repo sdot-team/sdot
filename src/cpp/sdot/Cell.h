@@ -42,7 +42,7 @@ struct Cell {
     HD bool     contains               ( const Pt &p ) const;
     HD Pt       centroid               ();
 
-    HD void     measure_bwd            ( auto &item_map, auto &&p );
+    HD void     measure_bwd            ( auto &item_map, auto &&p, auto &&batch_index );
     HD TF       measure                ( auto &item_map );
 
     T_d HD auto simplex_from_indices   ( const Vector<TI,d> &indices ) const;

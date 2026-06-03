@@ -80,13 +80,13 @@ def test_cell_2D_basic():
 
 def test_cell_2D_grad():
     def f( s ):
-        c = sdot.Cell.aligned_hypercube( [ 0, 0 ], [ s, 1 ] )
+        c = sdot.Cell.aligned_hypercube( [ 0, 0 ], [ s, s ] )
         return c.measure
 
     info( f( 2 ) )
 
     import jax
-    info( jax.grad( f )( 2.0 ) )
+    info( jax.grad( f )( 1.5 ) )
 
 def test_cell_2D_batch():
     if sdot.driver.available_gpus:

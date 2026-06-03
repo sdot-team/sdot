@@ -390,7 +390,7 @@ UTP HD void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD void DTP::measure_bwd( auto &item_map, auto &&p ) {
+UTP HD void DTP::measure_bwd( auto &item_map, auto &&p, auto &&batch_index ) {
     const TI nb_vertices = this->nb_vertices();
 
     // infinite cell
@@ -403,11 +403,11 @@ UTP HD void DTP::measure_bwd( auto &item_map, auto &&p ) {
             const TI j = ( i + 1 ) % nb_vertices;
             // sum += vertex_positions( i, 0 ) * vertex_positions( j, 1 )
             //      - vertex_positions( j, 0 ) * vertex_positions( i, 1 );
-            p.output_grad_for_batch_of_cells_vertex_positions( i, 0 ) += p.input_grad_for_output * vertex_positions( j, 1 ) / 2;
-            p.output_grad_for_batch_of_cells_vertex_positions( j, 1 ) += vertex_positions( i, 0 ) * p.input_grad_for_output / 2;
-            p.output_grad_for_batch_of_cells_vertex_positions( j, 0 ) -= p.input_grad_for_output * vertex_positions( i, 1 ) / 2;
-            p.output_grad_for_batch_of_cells_vertex_positions( j, 1 ) -= vertex_positions( j, 0 ) * p.input_grad_for_output / 2;
-            info( p.input_grad_for_output );
+            auto go = p.input_grad_for_output( batch_index ) / 2;
+            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 0 ) += go * vertex_positions( j, 1 );
+            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 1 ) += vertex_positions( i, 0 ) * go;
+            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 0 ) -= go * vertex_positions( i, 1 );
+            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 1 ) -= vertex_positions( j, 0 ) * go;
         }
     } else {
         // nD: fan triangulation
