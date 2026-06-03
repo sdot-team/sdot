@@ -83,7 +83,7 @@ def test_cell_2D_grad():
         c = sdot.Cell.aligned_hypercube( [ 0, 0 ], [ s, s ] )
         return c.measure
 
-    info( f( 2 ) )
+    info( f( 1.5 ) )
 
     import jax
     info( jax.grad( f )( 1.5 ) )

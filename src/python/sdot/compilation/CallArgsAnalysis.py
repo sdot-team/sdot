@@ -90,7 +90,8 @@ class CallArgsAnalysis:
 
         import numpy
         res = [ fi.ffi_value for fi in self.differentiable_tensor_inputs + self.non_differentiable_tensor_inputs ]
-        res.append( driver.array( self.u8_input_values, dtype = numpy.uint8 ) )
+        if len( self.u8_input_values ):
+            res.append( driver.array( self.u8_input_values, dtype = numpy.uint8 ) )
         return res
 
     @property

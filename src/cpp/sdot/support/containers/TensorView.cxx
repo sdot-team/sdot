@@ -256,9 +256,6 @@ namespace details::TensorView {
         GD void operator()( auto index, auto dst, auto value ) const {
             dst( index ) = value;
         }
-        GD void operator()( auto ...args ) const {
-            info( args... );
-        }
     };
 } // namespace details::TensorView
 
@@ -267,7 +264,7 @@ UTP HD auto DTP::all_indices() const {
 }
 
 UTP HD void DTP::fill_with( TF value ) {
-    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), Out(), *this, Inp(), value );
+    run_parallel( all_indices(), details::TensorView::TensorFillFunctor(), Out(), *this, value );
 }
 
 // transfer_cost for TensorView: accessible without transfer → cost 0, else 1

@@ -33,7 +33,7 @@ class CallArg_Tensor( CallArg ):
     shape                     : list[ AxisExpr ]
     dtype                     : Dtype
 
-    validity_output_index     : int  # index into u8_input_values for output-side validity
+    # validity_output_index     : int  # index into u8_input_values for output-side validity
 
     num_in_input_sub_list     : int
     num_in_dynamic_axes       : int
@@ -93,8 +93,8 @@ class CallArg_Tensor( CallArg ):
             self.num_in_input_sub_list = call_args.add_tensor_input( self )
 
         if io_category.want_output:  # mutable, return or workspace -> needs an output tensor
-            self.validity_output_index = call_args.get_u8_input( [ 1 ] )
-            self.num_in_outputs        = call_args.add_tensor_output( self )
+            # self.validity_output_index = call_args.get_u8_input( [ 1 ] )
+            self.num_in_outputs = call_args.add_tensor_output( self )
 
     @property
     def _is_zero( self ) -> bool:

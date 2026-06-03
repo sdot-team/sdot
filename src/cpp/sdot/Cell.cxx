@@ -161,6 +161,7 @@ UTP HD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
     const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
     const PI cut_ordering_2D[]    = { 3, 1, 0, 2 };
 
+    //info( gF.memory_space() );
     gF.fill_with( TF( 0 ) );
 
     // vertex positions: gF(0,c) += Σ_l gV(l,c);  gF(1+b,c) += Σ_{k: bit b} gV(l(k),c)
@@ -300,10 +301,10 @@ UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     }
 }
 
-UTP HD void DTP::for_each_facet( auto &&func ) {
+UTP HD void DTP::for_each_facet( auto &item_map, auto &&func ) {
     const PI nb_vertices = this->nb_vertices;
 
-    if ( dim == 2 ) {
+    if constexpr ( ct_dim == 2 ) {
         Simplex<ct_dim,ct_dim,TF> simplex;
         for( TI num_vertex = 0; num_vertex < nb_vertices; ++num_vertex ) {
             simplex.pts[ 0 ] = vertex_position( num_vertex );
@@ -311,9 +312,9 @@ UTP HD void DTP::for_each_facet( auto &&func ) {
             func( simplex, cut_id( num_vertex ) );
         }
         return;
+    } else {
+        TODO;
     }
-
-    TODO;
 }
 
 UTP HD void DTP::for_each_face( auto &&func ) {
@@ -391,46 +392,42 @@ UTP HD void DTP::for_each_face( auto &&func ) {
 }
 
 UTP HD void DTP::measure_bwd( auto &item_map, auto &&p, auto &&batch_index ) {
-    const TI nb_vertices = this->nb_vertices();
-
     // infinite cell
     if ( ! is_fully_closed() )
         return;
 
-    // 2D: shoelace formula
     if constexpr ( ct_dim == 2 ) {
-        for ( TI i = 0; i < nb_vertices; ++i ) {
-            const TI j = ( i + 1 ) % nb_vertices;
-            // sum += vertex_positions( i, 0 ) * vertex_positions( j, 1 )
-            //      - vertex_positions( j, 0 ) * vertex_positions( i, 1 );
-            auto go = p.input_grad_for_output( batch_index ) / 2;
-            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 0 ) += go * vertex_positions( j, 1 );
-            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 1 ) += vertex_positions( i, 0 ) * go;
-            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 0 ) -= go * vertex_positions( i, 1 );
-            p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 1 ) -= vertex_positions( j, 0 ) * go;
-        }
+        // 2D: shoelace formula
+        const TI nb_vertices = this->nb_vertices();
+        // for ( TI i = 0; i < nb_vertices; ++i ) {
+        //     const TI j = ( i + 1 ) % nb_vertices;
+        //     auto go = p.input_grad_for_output( batch_index ) / 2;
+        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 0 ) += go * vertex_positions( j, 1 );
+        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 1 ) += vertex_positions( i, 0 ) * go;
+        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 0 ) -= go * vertex_positions( i, 1 );
+        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 1 ) -= vertex_positions( j, 0 ) * go;
+        // }
     } else {
         // nD: fan triangulation
-        TODO;
-        // for_each_simplex( item_map, [&] ( const auto &simplex_indices ) {
-        //     const TI v0 = simplex_indices[ 0 ];
-        //     Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
-        //         return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
-        //     } );
-        //     sum += std::abs( M.determinant() );
-        // } );
+        for_each_facet( item_map, [&] ( const auto &facet_indices ) {
+            // const TI v0 = simplex_indices[ 0 ];
+            // Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
+            //     return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
+            // } );
+            // sum += std::abs( M.determinant() );
+            info( facet_indices );
+        } );
     }
 }
 
 UTP HD auto DTP::measure( auto &item_map ) -> TF {
-    const TI nb_vertices = this->nb_vertices();
-
     // infinite cell
     if ( ! is_fully_closed() )
         return std::numeric_limits<TF>::max();
 
     // 2D: shoelace formula
     if ( dim == 2 ) {
+        const TI nb_vertices = this->nb_vertices();
         TF sum = 0;
         for ( TI i = 0; i < nb_vertices; ++i ) {
             const TI j = ( i + 1 ) % nb_vertices;

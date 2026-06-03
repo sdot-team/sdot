@@ -14,18 +14,6 @@ namespace sdot {
 
 struct MemorySpace_GlobalCudaRam;
 
-// Continuation for the device-inline (nested) branch of run_parallel: once RunTraits::per_thread
-// has produced its per-thread args, walk the items and apply func( item, args... ). Expressed as a
-// functor (not a lambda) because nvcc rejects generic extended __host__ __device__ lambdas and this
-// lives inside the HD run_parallel. Mirrors the cont the launched kernel uses.
-template<class Func,class List>
-struct DeviceInlineForEach {
-    Func func; ///< reference type (T&)
-    List list; ///< reference type (const T&)
-    GD void operator()( auto &&...args ) const {
-        for_each_item( list, RunTraits::apply_to_item( func, FORWARD( args )... ) );
-    }
-};
 
 // Device kernel mirroring ExecutionContext_Cpu's per-thread body: each device thread runs
 // the optional per_thread() setup, then walks its share of the items (split by global id
@@ -61,16 +49,14 @@ __global__ void _execution_space_cuda_run_parallel( int nb_workers, List list, F
 // for local/generic lambdas).
 HD void launch_cuda_run_parallel( cudaStream_t stream, const auto &list, auto &&func, auto &&...args ) {
 #ifdef __CUDA_ARCH__
-    // Called from device code: we are already inside a kernel, so there is no nested launch
-    // (that would need dynamic parallelism). Run inline on the current thread — the device
-    // counterpart of ExecutionContext_Cpu's inline (already-parallelized) branch. Run the
-    // optional per_thread() setup first (like the launched kernel and the CPU path do), then
-    // walk the items. Functor (not lambda) continuation, since nvcc rejects generic extended
-    // HD lambdas.
+    // Called from device code: run inline on the current thread (no nested launch).
+    // per_thread() setup first, then walk items — mirrors the launched kernel path.
     CudaThreadInfo thread_info;
-    RunTraits::per_thread( func, thread_info, list,
-        DeviceInlineForEach<DECAYED_TYPE_OF( func )&,const DECAYED_TYPE_OF( list )&>{ func, list },
-        FORWARD( args )... );
+    RunTraits::per_thread( func, thread_info, list, [&]( auto &&...args ) {
+        for_each_item( list, [&]( auto &&item ) {
+            func( item, FORWARD( args )... );
+        } );
+    }, FORWARD( args )... );
 
     // Anchor the kernel. Labeled as if(false) to avoid requiring CUDA Dynamic Parallelism at
     // runtime, but the call expression forces nvcc to generate the kernel's device code.
