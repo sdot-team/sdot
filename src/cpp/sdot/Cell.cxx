@@ -396,27 +396,33 @@ UTP HD void DTP::measure_bwd( auto &item_map, auto &&p, auto &&batch_index ) {
     if ( ! is_fully_closed() )
         return;
 
-    if constexpr ( ct_dim == 2 ) {
-        // 2D: shoelace formula
-        const TI nb_vertices = this->nb_vertices();
-        // for ( TI i = 0; i < nb_vertices; ++i ) {
-        //     const TI j = ( i + 1 ) % nb_vertices;
-        //     auto go = p.input_grad_for_output( batch_index ) / 2;
-        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 0 ) += go * vertex_positions( j, 1 );
-        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 1 ) += vertex_positions( i, 0 ) * go;
-        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 0 ) -= go * vertex_positions( i, 1 );
-        //     p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 1 ) -= vertex_positions( j, 0 ) * go;
-        // }
-    } else {
-        // nD: fan triangulation
-        for_each_facet( item_map, [&] ( const auto &facet_indices ) {
-            // const TI v0 = simplex_indices[ 0 ];
-            // Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
-            //     return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
-            // } );
-            // sum += std::abs( M.determinant() );
-            info( facet_indices );
-        } );
+    if ( ! p.output_grad_for_batch_of_cells_vertex_positions.surely_null() )
+        p.output_grad_for_batch_of_cells_vertex_positions( batch_index ).fill_with( 0 );
+    if ( ! p.output_grad_for_batch_of_cells_cut_planes.surely_null() )
+        p.output_grad_for_batch_of_cells_cut_planes( batch_index ).fill_with( 0 );
+
+    if ( const auto go = p.input_grad_for_output( batch_index ) / 2 ) {
+        if constexpr ( ct_dim == 2 ) {
+            // 2D: shoelace formula
+            const TI nb_vertices = this->nb_vertices();
+            for ( TI i = 0; i < nb_vertices; ++i ) {
+                const TI j = ( i + 1 ) % nb_vertices;
+                p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 0 ) += go * vertex_positions( j, 1 );
+                p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 1 ) += vertex_positions( i, 0 ) * go;
+                p.output_grad_for_batch_of_cells_vertex_positions( batch_index, j, 0 ) -= go * vertex_positions( i, 1 );
+                p.output_grad_for_batch_of_cells_vertex_positions( batch_index, i, 1 ) -= vertex_positions( j, 0 ) * go;
+            }
+        } else {
+            // nD: fan triangulation
+            for_each_facet( item_map, [&] ( const auto &facet_indices ) {
+                // const TI v0 = simplex_indices[ 0 ];
+                // Matrix<TF,ct_dim> M = Matrix<TF,ct_dim>::with_func( [&]( auto row, auto col ) {
+                //     return vertex_positions( simplex_indices[ col + 1 ], row ) - vertex_positions( v0, row );
+                // } );
+                // sum += std::abs( M.determinant() );
+                info( facet_indices );
+            } );
+        }
     }
 }
 

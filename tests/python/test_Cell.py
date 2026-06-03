@@ -83,10 +83,20 @@ def test_cell_2D_grad():
         c = sdot.Cell.aligned_hypercube( [ 0, 0 ], [ s, s ] )
         return c.measure
 
-    info( f( 1.5 ) )
+    assert f( 2.0 ) == 2
 
     import jax
-    info( jax.grad( f )( 1.5 ) )
+    assert jax.grad( f )( 2.0 ) == 2
+
+def test_cell_3D_grad():
+    def f( s ):
+        c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ s, s, 1 ] )
+        return c.measure
+
+    info( f( 2.0 ) )
+
+    import jax
+    info( jax.grad( f )( 2.0 ) )
 
 def test_cell_2D_batch():
     if sdot.driver.available_gpus:
@@ -94,19 +104,20 @@ def test_cell_2D_batch():
     # sdot.driver.device = "cpu"
 
     def f( s ):
-        c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
-        # c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ] ], [ [ s, 1, 1 ] ] )
-        # return c.vertex_positions[ 0, 1, 0 ]
+        # c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
+        c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0 ] ], [ [ s, 1 ] ] )
         return c.measure[ 0 ]
 
-    info( f( 2 ) )
+    assert f( 2.0 ) == 2
 
-    # import jax
-    # info( jax.grad( f )( 2.0 ) )
+    import jax
+    assert jax.grad( f )( 2.0 ) == 1
 
 if __name__ == "__main__":
     # test_cell_2D_basic()
-    test_cell_2D_grad()
+    # test_cell_2D_grad()
+    test_cell_3D_grad()
+    # test_cell_2D_batch()
     # test_cell_2D_batch()
     # test_cell_2D_diff()
     # test_cell_3D()

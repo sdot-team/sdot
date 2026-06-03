@@ -91,6 +91,14 @@ struct CartesianProducts<> {
     }
 };
 
+template<class... Lists>
+HD auto transfer_cost( const auto &ec, const CartesianProducts<Lists...> &arg ) {
+    if constexpr( sizeof...( Lists ) )
+        return transfer_cost( ec, arg.head ) + transfer_cost( ec, arg.next );
+    else
+        return 0_c;
+}
+
 HD auto cartesian_product_args() {
     return CartesianProducts<>{};
 }

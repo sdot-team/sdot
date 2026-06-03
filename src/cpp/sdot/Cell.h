@@ -33,6 +33,7 @@ struct Cell {
     HD Pt       solve_position         ( PI num_vertex ) const;
 
     // info, computations --------------------------------------------------------------------
+    HD void     for_each_facet_simplex ( auto &item_map, auto &&func ); ///< RecursiveMapOfUniqueSortedIndices<ct_dim-1,...>
     HD void     for_each_simplex       ( auto &item_map, auto &&func ); ///< RecursiveMapOfUniqueSortedIndices<ct_dim-1,...>
     HD void     for_each_facet         ( auto &item_map, auto &&func ); ///< func( facet_repr, cut_id )
     HD void     for_each_face          ( auto &&func ); ///< func( num_vertices, cut_indices_for_this_face )
