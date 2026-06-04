@@ -20,6 +20,14 @@ import jax
 import re
 
 
+def _has_tracer( data ) -> bool:
+    if isinstance( data, jax_core.Tracer ):
+        return True
+    if isinstance( data, ( list, tuple ) ):
+        return any( _has_tracer( x ) for x in data )
+    return False
+
+
 class JaxDriver:
     """
     JAX implementation for sdot centralization.
@@ -278,7 +286,10 @@ class JaxDriver:
     def array( self, data, dtype = None ):
         if data is None:
             return None
-        return jnp.asarray( data, dtype = Dtype.factory( dtype or self.ftype ).driver_version, device = self.device.driver_version )
+        dtype_ver = Dtype.factory( dtype or self.ftype ).driver_version
+        if _has_tracer( data ):
+            return jnp.asarray( data, dtype = dtype_ver )
+        return jnp.asarray( data, dtype = dtype_ver, device = self.device.driver_version )
 
     def t3( self, tensor, dtype = None ):
         """ make a rank 3 tensor """
@@ -400,6 +411,12 @@ class JaxDriver:
         # check ffi function is registered
         module_name = self._module_name_for( code, fai )
         self._register_ffi_target( module_name, code, fai )
+
+        # register vmap batching rule (once per module)
+        from .FfiCode import FfiCodeParallel
+        from .JaxMlirPrimitive import _vmap_rules
+        if isinstance( code, FfiCodeParallel ) and module_name not in _vmap_rules:
+            self._register_vmap_rule( module_name, code, args, fai )
 
         # forward helper
         def _call_ffi( differentiable_input_values ):
@@ -661,6 +678,121 @@ class JaxDriver:
 
         return ret
 
+    def _register_vmap_rule( self, module_name: str, code, orig_args: dict, fai: CallArgsAnalysis ):
+        """Register a JAX vmap batching rule for the given FfiCodeParallel primitive.
+
+        Convention: the vmap batch axis is read at C++ runtime from the shape of the
+        first batched input tensor — tensor-level, not aggregate-level.  Output tensors
+        get N prepended via the BatchVersion of any Return type (internal detail; the
+        Python caller still receives the base type with batch-traced tensors).
+        """
+        from jax.interpreters import batching as jax_batching
+        from .JaxMlirPrimitive import _vmap_rules, _cache
+        from ..aggregate.Return import Return
+        from ..compilation.CallArgsAnalysis import CallArgsAnalysis
+
+        # Flat list of all input tensors in FFI order
+        all_inputs = fai.differentiable_tensor_inputs + fai.non_differentiable_tensor_inputs
+
+        # For each flat input, compute its full C++ path in the Parameters struct
+        def _cpp_path( tensor ):
+            parts = []
+            ca = tensor
+            while ca.parent is not None:
+                parts.append( ca.name_in_parent )
+                ca = ca.parent()
+            parts.reverse()
+            return ".".join( parts )
+
+        input_paths = [ _cpp_path( t ) for t in all_inputs ]
+
+        # Map top-level kwarg name → flat input index (only top-level, non-nested)
+        input_kwarg_to_idx = {}
+        for i, t in enumerate( all_inputs ):
+            # top-level kwarg: parent is fai.arguments
+            if t.parent is not None and t.parent() is fai.arguments:
+                input_kwarg_to_idx[ t.name_in_parent ] = i
+
+        # Return recipes: kwarg_name → (BatchVersionCls, batch_axis_name, orig_type_kwargs)
+        return_recipes = {}
+        for kw, arg in orig_args.items():
+            if isinstance( arg, Return ) and hasattr( arg.return_type, 'BatchVersion' ):
+                bv = arg.return_type.BatchVersion
+                bn = bv.batch_axes[ 0 ]
+                return_recipes[ kw ] = ( bv, bn, dict( arg.type_kwargs ) )
+
+        if not return_recipes:
+            return  # no Return arg with a BatchVersion → can't auto-batch
+
+        jax_driver = self
+
+        def batch_rule( flat_args, in_dims ):
+            n_inp = len( all_inputs )
+
+            # Find batch size N and which input tensor provides it
+            N               = None
+            first_batch_idx = None
+            for i in range( n_inp ):
+                dim = in_dims[ i ] if i < len( in_dims ) else None
+                if dim is not None:
+                    N               = flat_args[ i ].shape[ dim ]
+                    first_batch_idx = i
+                    break
+
+            if N is None:
+                return flat_args, [ None ] * len( flat_args )
+
+            # Move batch dims to position 0; expand non-batched inputs to (N, ...)
+            # so the batched C++ kernel can index every input with the batch index.
+            moved = list( flat_args )
+            for i in range( n_inp ):
+                dim = in_dims[ i ] if i < len( in_dims ) else None
+                if dim is not None and dim != 0:
+                    moved[ i ] = jnp.moveaxis( flat_args[ i ], dim, 0 )
+                elif dim is None:
+                    moved[ i ] = jnp.broadcast_to(
+                        jnp.expand_dims( flat_args[ i ], 0 ),
+                        ( N, ) + flat_args[ i ].shape
+                    )
+
+            # C++ expression for vmap batch size: read from the first batched input's shape
+            vmap_axis_expr = f"p.{ input_paths[ first_batch_idx ] }.shape( Ct<int,0>() )"
+            batched_code   = code.with_prepended_batch_axis( vmap_axis_expr )
+
+            # Rebuild orig_args: tensor inputs → moved arrays, Return → BatchVersion(N)
+            new_args = {}
+            for kw, arg in orig_args.items():
+                if kw in return_recipes:
+                    bv_cls, bn, orig_kw = return_recipes[ kw ]
+                    new_args[ kw ] = Return( bv_cls, **{ bn: N, **orig_kw } )
+                elif kw in input_kwarg_to_idx:
+                    new_args[ kw ] = moved[ input_kwarg_to_idx[ kw ] ]
+                else:
+                    new_args[ kw ] = arg
+
+            # Build batched CallArgsAnalysis and compile the batched module
+            batched_fai    = CallArgsAnalysis( new_args, "Parameters" )
+            batched_module = jax_driver._module_name_for( batched_code, batched_fai )
+            jax_driver._register_ffi_target( batched_module, batched_code, batched_fai )
+
+            # Call the batched primitive (jax.jit inside _call_via_primitive escapes the BatchingTrace)
+            outputs = jax_driver._call_via_primitive( batched_fai, batched_module )
+            if isinstance( outputs, jax.Array ):
+                outputs = ( outputs, )
+            else:
+                outputs = tuple( outputs )
+
+            # Tensor outputs have batch_dim=0; the internal u64 buffer is not mapped
+            n_tensor_outs = len( batched_fai.tensor_outputs )
+            out_dims      = [ 0 ] * n_tensor_outs + [ jax_batching.not_mapped ]
+            return outputs, out_dims
+
+        # Store and attach to any already-cached primitive for this module
+        _vmap_rules[ module_name ] = batch_rule
+        for cache_key, prim in _cache.items():
+            if cache_key[ 0 ] == module_name:
+                jax_batching.primitive_batchers[ prim ] = batch_rule
+
     def _module_name_for( self, code: FfiCode, main_list: CallArgsAnalysis ):
         # get signature — include device type to avoid CPU/GPU cache collision
         base_signature = [ code.signature(), main_list.arguments.signature(), self.device.signature ]
@@ -749,7 +881,7 @@ class JaxDriver:
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.fwd_code, fai, module_name, "Parameters" )
+        self._handler_source( includes, lines, code.code_for( "fwd" ), fai, module_name, "Parameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, module_name )
@@ -781,7 +913,7 @@ class JaxDriver:
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.bwd_code, bfai, bwd_module_name, "GradParameters" )
+        self._handler_source( includes, lines, code.code_for( "bwd" ), bfai, bwd_module_name, "GradParameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, bwd_module_name )

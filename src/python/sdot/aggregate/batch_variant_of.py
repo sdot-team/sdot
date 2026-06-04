@@ -38,8 +38,9 @@ def batch_variant_of( base_cls ):
                     new_annotation = make_variant( [ bn ], 0 )
                 cls.__annotations__[ name ] = new_annotation
 
-        cls.BaseVersion = base_cls
-        cls.batch_axes = [ bn ]
+        cls.BaseVersion  = base_cls
+        cls.batch_axes   = [ bn ]
+        base_cls.BatchVersion = cls
 
         _setup_distribution_class( cls )
 

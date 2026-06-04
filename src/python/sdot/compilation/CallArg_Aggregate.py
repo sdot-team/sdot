@@ -225,27 +225,27 @@ class CallArg_Aggregate( CallArg ):
         lines.append(  f"    HD auto apply_values( auto &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
         lines.append(  f"    HD auto apply_values( auto &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
         lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
-        lines.append(  "    HD auto operator()( Tuple<> ) const { return *this; }" )
 
-        # slice accessor (scalar index: batch → single-row)
+        # Generic slice operator: Tuple<> → identity, any other index → slice each field.
+        # Sliced fields are accessed via their own operator(), so the return type is deduced.
+        # When an unbatch_version exists (e.g. BatchOfCells → Cell) it is used as the return type;
+        # otherwise the same struct type is returned (Cell → Cell, for vmap).
+        return_type = unbatch_version.__name__ if unbatch_version is not None else base_cpp_name
         if unbatch_version is not None:
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
-
-            assert len( batch_axes )
-            lines.append( f"    HD auto operator()( Tuple<{ ','.join( [ 'TI' ] * len( batch_axes ) ) }> batch_index ) const {{" )
-            lines.append( f"        return { unbatch_version.__name__ }{{" ) # <PARAMETER_NAMES_OF_{ unbatch_version.__name__ }>
-            # axes
-            for axis_variable_name in axis_variable_names:
-                if axis_variable_name not in batch_axes:
-                    lines.append( f"            .{ axis_variable_name } = { axis_variable_name }," )
-            # attributes
-            for name, argument in self.sub_dict.items():
-                lines.append( f"            .{ name } = { name }( batch_index )," )
-            lines.append(  "        };" )
-            lines.append(  "    }" )
-
-
-            # lines.append(  "    auto operator()( auto bi ) const { return slice( PI( bi[ Ct<int,0>() ] ) ).slice( bi.without_index( Ct<int,0>() ) ); }" )
+        lines.append(  "    HD auto operator()( auto batch_index ) const {" )
+        lines.append(  "        if constexpr ( std::is_same_v<std::decay_t<decltype( batch_index )>, Tuple<>> ) {" )
+        lines.append(  "            return *this;" )
+        lines.append(  "        } else {" )
+        lines.append( f"            return { return_type }{{" )
+        for axis_variable_name in axis_variable_names:
+            if axis_variable_name not in batch_axes:
+                lines.append( f"                .{ axis_variable_name } = { axis_variable_name }," )
+        for name in self.sub_dict.keys():
+            lines.append( f"                .{ name } = { name }( batch_index )," )
+        lines.append(  "            };" )
+        lines.append(  "        }" )
+        lines.append(  "    }" )
 
         lines.append(  "" )
 

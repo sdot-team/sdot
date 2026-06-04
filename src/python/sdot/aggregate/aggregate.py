@@ -44,6 +44,7 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
             fields[ axis_name ] = t
 
     cls.BaseVersion = cls
+    cls.batch_axes  = []
 
     _setup_distribution_class( cls )
 

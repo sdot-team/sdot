@@ -8,6 +8,9 @@ import numpy
 
 _cache: dict = {}
 
+# module_name -> batch_rule callable registered by JaxDriver._register_vmap_rule()
+_vmap_rules: dict = {}
+
 def _make_ir_attr( v ):
     if isinstance( v, ( int, numpy.integer ) ):
         return ir.IntegerAttr.get( ir.IntegerType.get_signless( 64 ), int( v ) )
@@ -49,4 +52,9 @@ def get_or_create( module_name: str, output_specs, attributes: dict = {} ) -> ja
 
     mlir.register_lowering( prim, lower )
     _cache[ cache_key ] = prim
+
+    if module_name in _vmap_rules:
+        from jax.interpreters import batching
+        batching.primitive_batchers[ prim ] = _vmap_rules[ module_name ]
+
     return prim

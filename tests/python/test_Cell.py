@@ -1,4 +1,5 @@
 import faulthandler
+import pytest
 import sdot
 faulthandler.enable()
 
@@ -150,12 +151,13 @@ def test_cell_aligned_hypercube():
     # grad: tensor output — jacobian of vertex_positions wrt s, shape == vertex_positions.shape
     def f_tensor( s ):
         c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ s, 2 * s ] )
-        return c.vertex_positions
+        # return c.vertex_positions
+        return c.measure
 
     g_tensor = sdot.driver.grad( f_tensor, 1.0 )
     print( "grad(vertex_positions) wrt s at s=1:", g_tensor )
     assert g_tensor.shape == f_tensor( 1.0 ).shape, \
-        f"jacobian shape {g_tensor.shape} != vertex_positions shape {f_tensor(1.0).shape}"
+        f"jacobian shape { g_tensor.shape } != vertex_positions shape { f_tensor(1.0).shape }"
 
     # # grad: multiple differentiable args — returns tuple
     # def f_two( a, b ):
@@ -168,5 +170,20 @@ def test_cell_aligned_hypercube():
     # assert abs( float( g_a ) - 2.0 ) < 1e-5, f"expected g_a=2.0, got {g_a}"
     # assert abs( float( g_b ) - 1.0 ) < 1e-5, f"expected g_b=1.0, got {g_b}"
 
+def test_cell_vmap():
+    import jax
+    import jax.numpy as jnp
+
+    def make_and_measure( scale ):
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ scale, scale ] )
+        return c.vertex_positions[ 1, 0 ]
+
+    scales   = jnp.array( [ 1.0, 2.0, 3.0 ] )
+    measures = jax.vmap( make_and_measure )( scales )
+    info( measures )
+    # assert jnp.allclose( measures, scales ** 2 )   # unit square scaled by s → area = s²
+
+
 if __name__ == "__main__":
-    test_cell_aligned_hypercube()
+    # test_cell_aligned_hypercube()
+    test_cell_vmap()

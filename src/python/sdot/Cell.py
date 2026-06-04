@@ -1,5 +1,5 @@
 from .aggregate import aggregate, Workspace, Tensor, Return, Mutable, Conditional
-from .drivers.driver import driver, FfiCode
+from .drivers.driver import driver, FfiCodeCustom, FfiCodeParallel
 from typing import TYPE_CHECKING, cast, overload
 import numpy
 
@@ -111,7 +111,7 @@ class Cell:
             cut_plane = driver.hstack( [ cut_plane, driver.expand_dims( cut_offset, 0 ) ] )
 
         driver.call(
-            FfiCode(
+            FfiCodeCustom(
                 name = "cut",
                 header = """
                     struct CutFunctor {
@@ -172,9 +172,9 @@ class Cell:
 def _make_full_spaces( cls, dim: int, batch_axes: dict[ str, int ] ):
     """  """
     return cast( cls, driver.call(
-        FfiCode.parallel(
+        FfiCodeParallel(
             batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
-            fwd_code = "p.batch_of_cells( batch_index ).init_as_unbounded();",
+            fwd_body = "p.batch_of_cells( batch_index ).init_as_unbounded();",
             name = "make_full_spaces"
         ),
         batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ) )
@@ -185,10 +185,10 @@ def _make_hypercubes( cls, frames, cut_ids, batch_axes: dict ):
     """Shared hypercube constructor used by all Cell variants."""
     dim = frames.shape[ -1 ]
     return cast( cls, driver.call(
-        FfiCode.parallel(
+        FfiCodeParallel(
             batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
-            fwd_code = "p.batch_of_cells( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
-            bwd_code = "p.batch_of_cells( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
+            fwd_body = "p.batch_of_cells( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
+            bwd_body = "p.batch_of_cells( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
             name = "make_full_spaces"
         ),
         batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ),
@@ -251,7 +251,7 @@ def _measures( cell_obj, batch_axes: dict ):
         )
 
     return driver.call(
-        FfiCode(
+        FfiCodeCustom(
             name = "measure",
             header = """
                 struct MeasureFunctor {
