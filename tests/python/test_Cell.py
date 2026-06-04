@@ -141,6 +141,7 @@ if __name__ == "__main__":
     # test_cell_3D()
 
     c = sdot.Cell.make_full_space( 2 )
-    # b = sdot.BatchOfCells.make_full_spaces( 2, 4 )
+    b = sdot.BatchOfCells.make_full_spaces( 2, 1 )
 
     info( c )
+    info( b )

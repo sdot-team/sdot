@@ -150,7 +150,14 @@ class Cell:
 
 def _make_full_spaces( cls, dim: int, batch_axes: dict[ str, int ] ):
     """  """
-    return cast( cls, driver.call( "p.cell.init_as_unbounded();", cell = Return( Cell, **_return_parameters_for( dim, batch_axes ) ) ) )
+    return cast( cls, driver.call(
+        FfiCode.parallel(
+            [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
+            "p.batch_of_cells( batch_index ).init_as_unbounded();",
+            name = "make_full_spaces"
+        ),
+        batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ) )
+    )
 
 def _return_parameters_for( dim: int, batch_axes: dict[ str, int ] ) -> dict:
     """ axes variables to create a new Cell """
@@ -162,6 +169,10 @@ def _return_parameters_for( dim: int, batch_axes: dict[ str, int ] ) -> dict:
     )
     kw.update( batch_axes )
     return kw
+
+
+
+
 
 _HYPERCUBE_FFICODE = FfiCode(
     name = "init_as_hypercube",
