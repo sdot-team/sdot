@@ -1,6 +1,6 @@
 from .aggregate import aggregate, Workspace, Tensor, Return, Mutable, Conditional
 from .drivers.driver import driver, FfiCode
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast, overload
 import numpy
 
 # constant
@@ -38,45 +38,66 @@ class Cell:
 
         dim: int
 
-    # ---------------------------------- ctors ----------------------------------
+    # --------------------------------------- ctor: make_full_space ------------------------------------
     @staticmethod
     def make_full_space( dim: int ):
         return _make_full_spaces( Cell, dim, {} )
 
+    # ---------------------------------- ctor: make_aligned_hypercube ----------------------------------
     @staticmethod
-    def make_aligned_hypercube( cls, min_coords_or_dim = None, max_coords = None, dim = None, cut_id = BOUNDARY ):
-        if isinstance( min_coords_or_dim, int ):
-            assert max_coords is None and dim is None
-            min_coords = driver.zeros( [ min_coords_or_dim ] )
-            dim = min_coords_or_dim
-        elif min_coords_or_dim is None:
-            assert dim is not None
+    @overload
+    def make_aligned_hypercube( dim: int, *, cut_id: int = BOUNDARY ) -> 'Cell':
+        """Unit hypercube [0, 1]^dim."""
+        ...
+
+    @staticmethod
+    @overload
+    def make_aligned_hypercube( max_coords, *, cut_id: int = BOUNDARY ) -> 'Cell':
+        """Axis-aligned hypercube from the origin [0,...,0] to max_coords."""
+        ...
+
+    @staticmethod
+    @overload
+    def make_aligned_hypercube( min_coords, max_coords, *, cut_id: int = BOUNDARY ) -> 'Cell':
+        """Axis-aligned hypercube from min_coords to max_coords."""
+        ...
+
+    @staticmethod
+    def make_aligned_hypercube( *args, **kwargs ) -> 'Cell':
+        cut_id = kwargs.get( 'cut_id', BOUNDARY )
+
+        if len( args ) == 1 and isinstance( args[ 0 ], int ):
+            # make_aligned_hypercube(dim) — unit cube [0,1]^dim
+            dim        = args[ 0 ]
             min_coords = driver.zeros( [ dim ] )
-        else:
-            min_coords = driver.array( min_coords_or_dim )
-            dim = min_coords.shape[ 0 ]
-
-        if max_coords is None:
             max_coords = driver.ones( [ dim ] )
+        elif len( args ) == 1:
+            # make_aligned_hypercube(max_coords) — origin to max_coords
+            max_coords = driver.array( args[ 0 ] )
+            dim        = max_coords.shape[ 0 ]
+            min_coords = driver.zeros( [ dim ] )
+        elif len( args ) == 2:
+            # make_aligned_hypercube(min_coords, max_coords)
+            min_coords = driver.array( args[ 0 ] )
+            max_coords = driver.array( args[ 1 ] )
+            dim        = min_coords.shape[ 0 ]
         else:
-            max_coords = driver.array( max_coords )
-
-        assert max_coords is not None and min_coords is not None and dim is not None
+            raise TypeError( f"make_aligned_hypercube: unexpected arguments {args!r}" )
 
         diff  = max_coords - min_coords
         diag  = cast( numpy.array, driver.array( numpy.eye( dim ) ) ) * diff
         frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
 
-        return cls.make_hypercube( frame, cut_id = cut_id )
+        return Cell.make_hypercube( frame, cut_id = cut_id )
 
-    @classmethod
-    def make_hypercube( cls, frame, cut_id = BOUNDARY ):
+    @staticmethod
+    def make_hypercube( frame, cut_id = BOUNDARY ):
         """
         frame: (dim+1, dim)  — row 0 is origin, rows 1..dim are edge vectors
         """
         frame  = driver.array( frame )
         cut_id = driver.array( cut_id, dtype = int )
-        return _make_hypercubes( cls, frame, cut_id, {} )
+        return _make_hypercubes( Cell, frame, cut_id, {} )
 
     @property
     def measure( self ) -> any:
@@ -99,7 +120,7 @@ class Cell:
                         }
                     };
                 """,
-                fwd = """
+                fwd_code = """
                     run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), CutFunctor{}, p );
                 """,
             ),
@@ -152,12 +173,28 @@ def _make_full_spaces( cls, dim: int, batch_axes: dict[ str, int ] ):
     """  """
     return cast( cls, driver.call(
         FfiCode.parallel(
-            [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
-            "p.batch_of_cells( batch_index ).init_as_unbounded();",
+            batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
+            fwd_code = "p.batch_of_cells( batch_index ).init_as_unbounded();",
             name = "make_full_spaces"
         ),
         batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ) )
     )
+
+
+def _make_hypercubes( cls, frames, cut_ids, batch_axes: dict ):
+    """Shared hypercube constructor used by all Cell variants."""
+    dim = frames.shape[ -1 ]
+    return cast( cls, driver.call(
+        FfiCode.parallel(
+            batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
+            fwd_code = "p.batch_of_cells( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
+            bwd_code = "p.batch_of_cells( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
+            name = "make_full_spaces"
+        ),
+        batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ),
+        cut_ids = cut_ids,
+        frames = frames,
+    ) )
 
 def _return_parameters_for( dim: int, batch_axes: dict[ str, int ] ) -> dict:
     """ axes variables to create a new Cell """
@@ -173,41 +210,6 @@ def _return_parameters_for( dim: int, batch_axes: dict[ str, int ] ) -> dict:
 
 
 
-
-_HYPERCUBE_FFICODE = FfiCode(
-    name = "init_as_hypercube",
-    header = """
-    struct InitAsHypercube {
-        HD void operator()( auto batch_indices, auto &&p ) const {
-            p.cell( batch_indices ).init_as_hypercube( p.frame( batch_indices ), p.cut_id( batch_indices ) );
-        }
-    };
-    struct InitAsHypercubeBwd {
-        HD void operator()( auto batch_indices, auto &&p ) const {
-            p.cell( batch_indices ).init_as_hypercube_bwd( p.frame( batch_indices ), p, batch_indices );
-        }
-    };
-    """,
-    fwd = """
-        run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercube{}, p );
-    """,
-    bwd = """
-        run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), InitAsHypercubeBwd{}, p );
-    """,
-)
-
-
-
-
-def _make_hypercubes( cls, frame, cut_id, batch_axes: dict ):
-    """Shared hypercube constructor used by all Cell variants."""
-    dim = frame.shape[ -1 ]
-    return cast( cls, driver.call(
-        _HYPERCUBE_FFICODE,
-        cell   = Return( cls, **_return_parameters_for( dim, batch_axes ) ),
-        cut_id = cut_id,
-        frame  = frame,
-    ) )
 
 
 def _max_nb_map_items( dim: int, nb_cuts: int = None ) -> int:
@@ -278,10 +280,10 @@ def _measures( cell_obj, batch_axes: dict ):
                     }
                 };
             """,
-            fwd = """
+            fwd_code = """
                 run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p );
             """,
-            bwd = """
+            bwd_code = """
                 run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p, Void{} );
             """,
         ),

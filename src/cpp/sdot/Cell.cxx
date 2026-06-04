@@ -160,9 +160,9 @@ UTP HD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &
     using Mat = Matrix<TF,ct_dim>;
     using Vec = Vector<TF,ct_dim>;
 
-    auto gV = p.input_grad_for_cell_vertex_positions( batch_index );
-    auto gC = p.input_grad_for_cell_cut_planes( batch_index );
-    auto gF = p.output_grad_for_frame( batch_index );
+    auto gV = p.input_grad_for_batch_of_cells_vertex_positions( batch_index );
+    auto gC = p.input_grad_for_batch_of_cells_cut_planes( batch_index );
+    auto gF = p.output_grad_for_frames( batch_index );
 
     const PI vertex_ordering_2D[] = { 0, 1, 3, 2 };
     const PI cut_ordering_2D[]    = { 3, 1, 0, 2 };

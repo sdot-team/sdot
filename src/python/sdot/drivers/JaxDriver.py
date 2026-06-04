@@ -206,6 +206,65 @@ class JaxDriver:
     def is_int_dtype( self, dtype ):
         return jnp.issubdtype( dtype, jnp.integer )
 
+    def grad( self, f, *args ):
+        """
+        Jacobian of f w.r.t. its float scalar/tensor args (sequential backward passes, vmap-free).
+
+        jax.jacobian is intentionally avoided: it uses vmap internally, which is not
+        supported by our ffi_call primitives. Instead, jax.vjp is called once for the
+        forward pass and then once per output element for the backward pass.
+
+        - scalar output → gradient (same shape as each arg)
+        - tensor output, scalar arg → derivative array (same shape as output)
+        - tensor output, tensor arg → full Jacobian (output_shape + arg_shape)
+        - multiple differentiable args → tuple of the above
+        - no differentiable args → empty tuple
+        """
+        def _is_float_arg( a ):
+            if isinstance( a, float ):
+                return True
+            if isinstance( a, ( jax.Array, numpy.ndarray, jax_core.Tracer ) ):
+                return jnp.issubdtype( jnp.result_type( a ), jnp.floating )
+            return False
+
+        diff_indices = tuple( i for i, a in enumerate( args ) if _is_float_arg( a ) )
+        if not diff_indices:
+            return ()
+
+        diff_args = tuple( jnp.asarray( args[ i ] ) for i in diff_indices )
+
+        def _f_of_diff( *d_args ):
+            full_args = list( args )
+            for pos, val in zip( diff_indices, d_args ):
+                full_args[ pos ] = val
+            return f( *full_args )
+
+        # single forward pass + capture vjp closure (no vmap)
+        primals, f_vjp = jax.vjp( _f_of_diff, *diff_args )
+
+        out_shape = primals.shape if hasattr( primals, 'shape' ) else ()
+        out_size  = primals.size  if hasattr( primals, 'size'  ) else 1
+        out_dtype = primals.dtype if hasattr( primals, 'dtype' ) else self.ftype.driver_version
+
+        if out_size == 1:
+            # single backward pass
+            grads = f_vjp( jnp.ones( out_shape, dtype = out_dtype ) )
+        else:
+            # one backward pass per output element — O(out_size) passes, no vmap
+            rows = [
+                f_vjp( jnp.zeros( out_size, dtype = out_dtype ).at[ i ].set( 1.0 ).reshape( out_shape ) )
+                for i in range( out_size )
+            ]
+            # rows[i] is a tuple (one grad per diff arg); rebuild Jacobians
+            grads = tuple(
+                jnp.stack( [ rows[ i ][ j ] for i in range( out_size ) ] ).reshape( out_shape + diff_args[ j ].shape )
+                for j in range( len( diff_indices ) )
+            )
+
+        if len( diff_indices ) == 1:
+            return grads[ 0 ]
+        return grads
+
     def nb_threads( self, **kwargs ):
         return self.device.nb_threads( **kwargs )
 
@@ -673,7 +732,7 @@ class JaxDriver:
         already_visited = set()
         fai.arguments.generate_structures( already_visited )
 
-        includes = set( code.includes )
+        includes = set( code.includes_for( "fwd" ) )
         includes.add( "sdot/jax_ffi_wrappers.h" )
         includes.add( "nanobind/nanobind.h" )
 
@@ -683,13 +742,14 @@ class JaxDriver:
         lines.append( "using namespace sdot;" )
         lines.append( "" )
 
-        if code.header:
-            lines.append( dedent( code.header ) )
+        header = code.header_for( "fwd" )
+        if header:
+            lines.append( dedent( header ) )
 
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.fwd, fai, module_name, "Parameters" )
+        self._handler_source( includes, lines, code.fwd_code, fai, module_name, "Parameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, module_name )
@@ -704,7 +764,7 @@ class JaxDriver:
         already_visited = set()
         bfai.arguments.generate_structures( already_visited )
 
-        includes = set( code.includes )
+        includes = set( code.includes_for( "bwd" ) )
         includes.add( "sdot/jax_ffi_wrappers.h" )
         includes.add( "nanobind/nanobind.h" )
 
@@ -714,13 +774,14 @@ class JaxDriver:
         lines.append( "using namespace sdot;" )
         lines.append( "" )
 
-        if code.header:
-            lines.append( dedent( code.header ) )
+        header = code.header_for( "bwd" )
+        if header:
+            lines.append( dedent( header ) )
 
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.bwd, bfai, bwd_module_name, "GradParameters" )
+        self._handler_source( includes, lines, code.bwd_code, bfai, bwd_module_name, "GradParameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, bwd_module_name )

@@ -42,6 +42,8 @@ class BatchOfCells:
     def make_full_spaces( dim: int, batch_size: int ):
         return Cell._make_full_spaces( BatchOfCells, dim, { "batch_size_Cell": batch_size } )
 
+
+
     @classmethod
     def make_aligned_hypercubes( cls, min_coords, max_coords = None, cut_id = Cell.BOUNDARY ):
         """
