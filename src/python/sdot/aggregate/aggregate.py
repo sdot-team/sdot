@@ -1,6 +1,5 @@
 from ..util.get_all_annotations import get_all_annotations
 from ..drivers.driver import driver
-from .BatchOfAggregate import BatchOfAggregate
 from .Workspace import Workspace
 from .Tensor import Tensor
 
@@ -9,36 +8,25 @@ _T = TypeVar( '_T' )
 
 def aggregate( cls: type[ _T ] ) -> type[ _T ]:
     """
-    Class decorator that auto-generates boilerplate for classes with TensorField or ListOfTensorFields
-    based on their attribute declarations
+    Class decorator that generates boilerplate for classes with Tensor field declarations.
 
-    Fields with a ``default_<name>(self)`` method in the class will use that
-    method when the field value is None.
-
-    Generated method and attributes
-      - def __init__( self, attributes by their order of apparition )
-      - multidimensionnal_version()
-      - batch_version( batch_size )
-      - properties
-        - tensors (summary of all the tensors with name and value)
-        - dim, nb_points, ... (one property per unique axis name across all TensorFields)
+    Generated:
+      - __init__( self, fields in declaration order )
+      - __setattr__ with field coercion
+      - one property per unique axis name (dim, nb_points, ...)
+      - batch_axes = []
+      - BaseVersion = cls
 
     Usage::
 
         @aggregate
-        class MyDist:
-            positions = Tensor( "nb_points", "dim")
+        class MyStruct:
+            positions = Tensor( "nb_points", "dim" )
             weights   = Tensor( "nb_points" )
-
-            def default_weights(self,batch_version):
-                return driver.ones(self.nb_points)
-
     """
-    # base fields
     fields = get_all_annotations( cls )
-    name = cls.__name__
 
-    # add tensors for dynamic shapes
+    # inject Tensor fields for dynamic shape axes (e.g. nb_vertices[], nb_cuts[])
     dynamic_shapes = {}
     for field in fields.values():
         if isinstance( field, Workspace ):
@@ -55,82 +43,22 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
             cls.__annotations__[ axis_name ] = t
             fields[ axis_name ] = t
 
-    # batch axis name
-    bn = f"batch_size_{ name }"
+    cls.BaseVersion = cls
 
-    # make the variants (batch, unidim, ...)
-    clu = _make_variant( cls, fields, f"{ name }1d"       , (                   ), additional_batch_axes = []    , unidimensional_version = 1 )
-    clb = _make_variant( cls, fields, f"BatchOf{ name }"  , ( BatchOfAggregate, ), additional_batch_axes = [ bn ], unidimensional_version = 0 )
-    clt = _make_variant( cls, fields, f"BatchOf{ name }1d", ( BatchOfAggregate, ), additional_batch_axes = [ bn ], unidimensional_version = 1 )
-
-    # batch axes
-    setattr( cls, "batch_axes", []     )
-    setattr( clu, "batch_axes", []     )
-    setattr( clb, "batch_axes", [ bn ] )
-    setattr( clt, "batch_axes", [ bn ] )
-
-    # links beteen variants
-    setattr( cls, "UnidimensionalBatchVersion", clt )
-    setattr( cls, "UnidimensionalVersion", clu )
-    setattr( cls, "BatchVersion", clb )
-    setattr( cls, "BaseVersion", cls )
-
-    setattr( clu, "MultidimensionalVersion", cls )
-    setattr( clu, "BatchVersion", clt )
-    setattr( clu, "BaseVersion", cls )
-
-    setattr( clb, "BatchItemVersion", cls )
-    setattr( clb, "BaseVersion", cls )
-
-    setattr( clt, "MultidimensionalVersion", clb )
-    setattr( clt, "BatchItemVersion", clu )
-    setattr( clt, "BaseVersion", cls )
-
-    # add generated methods and properties for these variants
-    _setup_distribution_class( clu )
-    _setup_distribution_class( clb )
-    _setup_distribution_class( clt )
     _setup_distribution_class( cls )
-
-    # copy methods and properties from base to variants (variants are empty classes, no inheritance)
-    for variant in [ clu, clb, clt ]:
-        for attr_name, val in vars( cls ).items():
-            if attr_name.startswith( '__' ):
-                continue
-            if isinstance( val, ( classmethod, staticmethod, property ) ) or ( callable( val ) and not isinstance( val, type ) ):
-                if attr_name not in vars( variant ):
-                    setattr( variant, attr_name, val )
 
     return cls
 
 
-def variants_of( cls ): # : Type[ _D ] ) -> tuple[ Type[ _D ], Type[ _D ], Type[ _D ] ]:
-    t = cls.UnidimensionalBatchVersion
-    u = cls.UnidimensionalVersion
-    b = cls.BatchVersion
-    return u, b, t
-
-
-def _make_variant( cls, fields: dict, variant_name: str, parents: tuple, additional_batch_axes: [], unidimensional_version: int ):
-    res = type( variant_name, parents, {} )
-    for name, field in fields.items():
-        # make the new field
-        if make_variant := getattr( field, "make_variant", None ):
-            field = make_variant( additional_batch_axes, unidimensional_version )
-
-        # store it
-        res.__annotations__[ name ] = field
-
-    return res
-
+# ---------------------------------------------------------------------------
+# Internal helpers (also used by batch_variant_of)
+# ---------------------------------------------------------------------------
 
 def _setup_distribution_class( cls ):
     fields = get_all_annotations( cls )
 
-    # --- __init__ -----------------------------------------------------------
     if '__aggregate_init__' not in vars( cls ):
         def __aggregate_init__( self, *args, **kwargs ):
-            # make a dict
             values = {}
             for name, value in kwargs.items():
                 values[ name ] = value
@@ -141,12 +69,10 @@ def _setup_distribution_class( cls ):
                     raise RuntimeError( f"argument '{ name }' has already been specified" )
                 values[ name ] = args[ i ]
 
-            # check that all arguments correspond to a field
             for name in values.keys():
                 if name not in fields:
-                    raise RuntimeError( f"'{ name } is no a valid argument for ctor of '{ cls.__name__ }''" )
+                    raise RuntimeError( f"'{ name }' is not a valid argument for ctor of '{ cls.__name__ }'" )
 
-            # set values
             for name, field in fields.items():
                 value = None
                 if name in values:
@@ -161,11 +87,9 @@ def _setup_distribution_class( cls ):
 
         cls.__aggregate_init__ = __aggregate_init__
 
-    # --- __init__ -----------------------------------------------------------
     if '__init__' not in vars( cls ):
         cls.__init__ = cls.__aggregate_init__
 
-    # --- __setattr__ --------------------------------------------------------
     if '__setattr__' not in vars( cls ):
         def __setattr__( self, name, value ):
             annotation = fields.get( name )
@@ -177,7 +101,6 @@ def _setup_distribution_class( cls ):
             object.__setattr__( self, name, value )
         cls.__setattr__ = __setattr__
 
-    # --- batch_axes_dict -----------
     if 'batch_axes_dict' not in vars( cls ):
         def batch_axes_dict( self ):
             res = {}
@@ -186,87 +109,17 @@ def _setup_distribution_class( cls ):
             return res
         cls.batch_axes_dict = property( batch_axes_dict )
 
-    # --- dim -----------
-    if 'dim' not in vars( cls ) and cls.__name__.endswith( "1d" ):
-        cls.dim = property( lambda self: 1 )
-
-    # --- getters for axes (dim, nb_points, ...) --------------------------
-    # for dynamic axes, $name refers to a dynamic tensor. Shape are refered as $( name + "_capacity" )
     for axis_name in _axis_names_of( cls ):
         if axis_name not in vars( cls ):
             def get_axis_size( self, a = axis_name ):
                 return _axis_count( self, a )
             setattr( cls, axis_name, property( get_axis_size ) )
 
-    # --- batch_version -----------
-    # if hasattr( cls, "BatchVersion" ) and "batch_version" not in vars( cls ):
-    #     def batch_version( self, batch_size ):
-    #         # make ctor args
-    #         kw = {}
-    #         for name, field in fields:
-    #             if isinstance( field, TensorField ):
-    #                 v = getattr( self, name ) # .__dict__.get( name )
-    #                 if v is not None:
-    #                     rpt = [ batch_size ] + [ 1 ] * v.ndim
-    #                     kw[ name ] = driver.repeat( v[ None, ... ], rpt )
-    #             elif isinstance( field, ListOfTensorFields ):
-    #                 v = getattr( self, name ) # .__dict__.get( name )
-    #                 if v is not None:
-    #                     # rpt = [ batch_size ] + [ 1 ] * v.ndim
-    #                     # kw[ name ] = driver.repeat( v[ None, ... ], rpt )
-    #                     raise NotImplementedError
-    #             else:
-    #                 kw[ name ] = self.__dict__.get( name )
-    #         # make the new instance
-    #         return cls.BatchVersion( **kw )
-    #     setattr( cls, 'batch_version', batch_version )
-
-    # --- batch_item -----------
-    # if hasattr( cls, "BatchItemVersion" ) and "batch_item" not in vars( cls ):
-    #     def batch_item( self, batch_index ):
-    #         # make ctor args
-    #         kw = {}
-    #         for name, field in fields:
-    #             if isinstance( field, TensorField ):
-    #                 v = getattr( self, name )
-    #                 if v is not None:
-    #                     kw[ name ] = v[ batch_index, ... ]
-    #             elif isinstance( field, ListOfTensorFields ):
-    #                 lst = getattr( self, name )
-    #                 if lst is not None:
-    #                     kw[ name ] = [ v[ batch_index, ... ] for v in lst ]
-    #             else:
-    #                 kw[ name ] = self.__dict__.get( name )
-    #         # make the new instance
-    #         return cls.BatchItemVersion( **kw )
-    #     setattr( cls, 'batch_item', batch_item )
-
-    # --- multidimensional_version -----------
-    # if hasattr( cls, "MultidimensionalVersion" ) and "multidimensional_version" not in vars( cls ):
-    #     def multidimensional_version( self ):
-    #         # make ctor args
-    #         kw = {}
-    #         for name, field in fields:
-    #             if isinstance( field, TensorField ):
-    #                 v = getattr( self, name ) # .__dict__.get( name )
-    #                 if v is not None:
-    #                     for n in field.removed_dim_axes:
-    #                         v = driver.expand_dims( v, n )
-    #                     if field.comes_from_a_dim_list:
-    #                         v = [ v ] # raise NotImplementedError
-    #                     kw[ name ] = v
-    #             elif isinstance( field, ListOfTensorFields ):
-    #                 raise NotImplementedError
-    #             else:
-    #                 kw[ name ] = self.__dict__.get( name )
-    #         # make the new instance
-    #         return cls.MultidimensionalVersion( **kw )
-    #     setattr( cls, 'multidimensional_version', multidimensional_version )
-
     return cls
 
+
 # ---------------------------------------------------------------------------
-# Helpers used by @generate_distribution_methods
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _axis_names_of( cls ) -> list[ str ]:
@@ -296,14 +149,11 @@ def _axis_count( distribution, axis_name, fields_to_avoid = None ):
     if fields_to_avoid is None:
         fields_to_avoid = []
 
-    # simple linear case: first tensor shape that pins the axis. Conflicting pins are
-    # an error, caught by AxisVariableSystem.check_consistency, not arbitrated here.
     from .AxisVariableSystem import AxisVariableSystem
     value = AxisVariableSystem( _axis_sources_of( distribution, fields_to_avoid ) ).local_value_of( axis_name )
     if value is not None:
         return value
 
-    # axes driven by an expansion `name( ... )` are not part of the linear system
     for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
         if tensor_field in fields_to_avoid or not isinstance( tensor_field, Tensor ):
             continue
@@ -313,7 +163,6 @@ def _axis_count( distribution, axis_name, fields_to_avoid = None ):
 
         n = 0
         for expr in tensor_field.shape:
-            # expansion of `axis_name( ... )` spanning several numpy axes -> list of sizes
             if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name and expr.terms[ 0 ].variable.arguments:
                 ndim = 1
                 for argument in expr.terms[ 0 ].variable.arguments:
@@ -326,7 +175,6 @@ def _axis_count( distribution, axis_name, fields_to_avoid = None ):
                 if ndim:
                     return [ ( array.shape[ n + i ] - expr.offset ) // expr.terms[ 0 ].coeff for i in range( ndim ) ]
 
-            # an argument variable (e.g. `dim` in `nb_knots( dim )`) recovered from the rank
             all_the_arguments = [ a for term in expr.terms if term.variable.arguments for a in term.variable.arguments ]
             if len( all_the_arguments ) == 1:
                 arg_name, arg_offset, arg_coeff = all_the_arguments[ 0 ].as_single_name()

@@ -1,5 +1,6 @@
 from sdot.compilation.CallArgsAnalysis import CallArgsAnalysis
 from sdot.aggregate.AxisVariableSystem import AxisVariableSystem, AxisTensorSource
+from sdot.aggregate.Conditional import Conditional
 from sdot.aggregate.AxisExpr import AxisExpr
 from sdot.aggregate.Tensor import Tensor
 from sdot.aggregate import aggregate
@@ -77,10 +78,47 @@ def test_inconsistent_shapes_are_rejected():
         pass
 
 
+def test_conditional_true_includes_field():
+    """A Conditional whose lambda returns True behaves as if the value were given directly."""
+    t = numpy.zeros( 3 )
+    c_true  = CallArgsAnalysis( { "x": Conditional( lambda: True, t ) } )
+    c_plain = CallArgsAnalysis( { "x": t } )
+    assert "x" in c_true.arguments.sub_dict
+    assert c_true.arguments.signature() == c_plain.arguments.signature()
+
+
+def test_conditional_false_removes_field():
+    """A Conditional whose lambda returns False removes the field from sub_dict and the FFI lists."""
+    t = numpy.zeros( 3 )
+    c_false = CallArgsAnalysis( { "x": Conditional( lambda: False, t ) } )
+    assert "x" not in c_false.arguments.sub_dict
+    assert len( c_false.non_differentiable_tensor_inputs ) == 0
+    assert len( c_false.differentiable_tensor_inputs ) == 0
+
+
+def test_conditional_signatures_differ():
+    """True and False states must produce different binding signatures."""
+    t = numpy.zeros( 3 )
+    sig_true  = CallArgsAnalysis( { "x": Conditional( lambda: True , t ) } ).arguments.signature()
+    sig_false = CallArgsAnalysis( { "x": Conditional( lambda: False, t ) } ).arguments.signature()
+    assert sig_true != sig_false
+
+
+def test_conditional_false_absent_token_in_signature():
+    """The absent token 'x_absent' must appear in the False-state signature."""
+    t = numpy.zeros( 3 )
+    sig = CallArgsAnalysis( { "x": Conditional( lambda: False, t ) } ).arguments.signature()
+    assert "x_absent" in sig
+
+
 if __name__ == "__main__":
     test_pin_from_shape()
     test_several_tensors_share_axes()
     test_descend_into_children()
     test_ascend_to_prefixed_kwargs()
     test_inconsistent_shapes_are_rejected()
+    test_conditional_true_includes_field()
+    test_conditional_false_removes_field()
+    test_conditional_signatures_differ()
+    test_conditional_false_absent_token_in_signature()
     print( "ok" )

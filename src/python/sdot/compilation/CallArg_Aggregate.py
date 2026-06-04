@@ -30,6 +30,7 @@ class CallArg_Aggregate( CallArg ):
     ):
         super().__init__( name_in_parent, parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
         self.sub_dict = {}
+        self._additional_signature_items = []
 
         # analysis: recursively analyse each annotated attribute into a sub-CallArg.
         # (skipped by backward_version, which fills sub_dict with transformed children itself.)
@@ -41,7 +42,11 @@ class CallArg_Aggregate( CallArg ):
                         value = getattr( python_value, name )
                     except AttributeError:
                         raise RuntimeError( f"Unable to find attribute { name } in { python_value }" )
-                self.sub_dict[ name ] = CallArg.factory( call_args, self, name, annotation, value, io_category, ctor_args, ctor_kwargs )
+                result = CallArg.factory( call_args, self, name, annotation, value, io_category, ctor_args, ctor_kwargs )
+                if result is None:
+                    self._additional_signature_items.append( f"{ name }_absent" )
+                else:
+                    self.sub_dict[ name ] = result
 
     @property
     def children( self ) -> dict[ str, 'CallArg' ]:
@@ -53,6 +58,7 @@ class CallArg_Aggregate( CallArg ):
         lst = []
         for name, attr in self.sub_dict.items():
             lst.append( f"{ name }_{ attr.signature() }" )
+        lst.extend( self._additional_signature_items )
         return "__".join( lst )
 
     def cpp_type_name( self, names ):
@@ -345,6 +351,8 @@ class CallArg_Aggregate( CallArg ):
             ctor_kwargs    = self.ctor_kwargs,
             build_sub_dict = False
         )
+
+        res._additional_signature_items = list( self._additional_signature_items )
 
         for name, attr in self.sub_dict.items():
             res.sub_dict[ name ] = attr.backward_version( call_args, driver, outputs, grads_of_the_outputs, res, differentiable_inputs )

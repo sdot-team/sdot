@@ -64,9 +64,9 @@ class CallArg:
         if python_value is not None and callable( getattr( python_value, "call_arg_factory", None ) ):
             return python_value.call_arg_factory( call_args, parent, name_in_parent, io_category, ctor_args, ctor_kwargs )
 
-        # class method. Used for instance for Tensor() for which `value` is an array
-        if callable( getattr( python_class, "call_arg_factory", None ) ):
-            return python_class.call_arg_factory( call_args, parent, name_in_parent, python_value, io_category, ctor_args, ctor_kwargs )
+        # type method: python_class is a descriptor instance used as a type annotation (e.g. Tensor()).
+        if callable( getattr( python_class, "type_call_arg_factory", None ) ):
+            return python_class.type_call_arg_factory( call_args, parent, name_in_parent, python_value, io_category, ctor_args, ctor_kwargs )
 
         # arrays
         if driver.is_a_tensor( python_value ):

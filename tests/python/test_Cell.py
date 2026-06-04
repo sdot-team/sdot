@@ -49,7 +49,7 @@ def test_cell_2D_diff():
 #     info( c.measure )
 
 def test_cell_3D_basic():
-    c = sdot.Cell.unbounded( 2 )
+    c = sdot.Cell.make_unbounded( 2 )
 
     # c.cut( [ 1, 0 ], 0.3 )
     info( c.vertex_positions )
@@ -64,7 +64,7 @@ def test_cell_3D_basic():
     # c.plot()
 
 def test_cell_2D_basic():
-    c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ 2, 1, 1 ] )
+    c = sdot.Cell.make_aligned_hypercube( [ 0, 0, 0 ], [ 2, 1, 1 ] )
 
     # c.cut( [ 1, 0 ], 0.3 )
     info( c.vertex_positions )
@@ -80,23 +80,35 @@ def test_cell_2D_basic():
 
 def test_cell_2D_grad():
     def f( s ):
-        c = sdot.Cell.aligned_hypercube( [ 0, 0 ], [ s, s ] )
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ s, s ] )
         return c.measure
 
-    assert f( 2.0 ) == 2
+    assert f( 2.0 ) == 4
 
     import jax
-    assert jax.grad( f )( 2.0 ) == 2
+    assert jax.grad( f )( 2.0 ) == 4
 
 def test_cell_3D_grad():
+    import jax
+
+    # V = s*s*1 = s^2, dV/ds = 2s
     def f( s ):
-        c = sdot.Cell.aligned_hypercube( [ 0, 0, 0 ], [ s, s, 1 ] )
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0, 0 ], [ s, s, 1 ] )
+        infox( c )
         return c.measure
 
-    info( f( 2.0 ) )
+    #info( b )
 
-    import jax
-    info( jax.grad( f )( 2.0 ) )
+    assert f( 2.0 ) == 4.0
+    assert jax.grad( f )( 2.0 ) == 4.0
+
+    # V = a*b*c, dV/da = b*c, dV/db = a*c, dV/dc = a*b
+    def g( s ):
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0, 0 ], [ s, 2 * s, 3 * s ] )
+        return c.measure
+
+    assert abs( g( 1.0 ) - 6.0 ) < 1e-6          # 1*2*3
+    assert abs( jax.grad( g )( 1.0 ) - 18.0 ) < 1e-4  # d(6s^3)/ds = 18s^2 at s=1
 
 def test_cell_2D_batch():
     if sdot.driver.available_gpus:
@@ -105,19 +117,30 @@ def test_cell_2D_batch():
 
     def f( s ):
         # c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0, 0 ], [ 0, 0, 0 ] ], [ [ s, 1, 1 ], [ 2 * s, 1, 1 ] ] )
-        c = sdot.BatchOfCell.aligned_hypercube( [ [ 0, 0 ] ], [ [ s, 1 ] ] )
-        return c.measure[ 0 ]
+        c = sdot.BatchOfCells.make_aligned_hypercubes( [ [ 0, 0 ] ], [ [ s, 1 ] ] )
+        return c.measures[ 0 ]
 
     assert f( 2.0 ) == 2
 
     import jax
     assert jax.grad( f )( 2.0 ) == 1
 
+def test_cell_2D_cut():
+    c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ 1, 1 ] )
+    c.cut( [ 1, 0 ], 0.5 )
+    info( c )
+
 if __name__ == "__main__":
     # test_cell_2D_basic()
     # test_cell_2D_grad()
-    test_cell_3D_grad()
+    # test_cell_3D_grad()
+    # test_cell_2D_cut()
     # test_cell_2D_batch()
     # test_cell_2D_batch()
     # test_cell_2D_diff()
     # test_cell_3D()
+
+    c = sdot.Cell.make_full_space( 2 )
+    # b = sdot.BatchOfCells.make_full_spaces( 2, 4 )
+
+    info( c )

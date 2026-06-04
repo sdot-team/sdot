@@ -124,7 +124,7 @@ class CallArg_Tensor( CallArg ):
 
     @property
     def output_spec( self ):
-        """(analysis) Shape+dtype spec of this tensor as an FFI output."""
+        """(analysis) Shape + dtype spec of this tensor as an FFI output."""
         return driver.ffi_tensor_output_spec( self.shape_values(), self.dtype )
 
     def assemble_return( self ):

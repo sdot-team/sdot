@@ -11,7 +11,7 @@ UTP void make_hypercube( DTP &cell, const auto &frame, SI cut_id ) {
     const PI dim = cell.vertex_positions.size( 1 );
     const PI nb_vertices = PI( 1 ) << dim;
 
-    cell.is_fully_closed() = cut_id != CellBoundary::INFINITE;
+    cell.is_fully_bounded() = cut_id != CellBoundary::INFINITE;
     cell.nb_vertices() = nb_vertices;
     cell.nb_edges() = dim * ( PI( 1 ) << ( dim - 1 ) );
     cell.nb_cuts() = 2 * dim;

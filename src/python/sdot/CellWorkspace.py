@@ -24,4 +24,3 @@ class CellWorkspace:
         max_of_nb_links: int
 
 
-BatchOfCellWorkspace = CellWorkspace.BatchVersion

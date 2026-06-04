@@ -2,9 +2,9 @@ from .aggregate import aggregate, Workspace, Tensor, Return
 from .distributions.Distribution import Distribution
 from .drivers.driver import driver
 
-from .CellWorkspace import BatchOfCellWorkspace
+from .BatchOfCellWorkspace import BatchOfCellWorkspace
 from .MatrixTerms import MatrixTerms
-from .Cell import BatchOfCell
+from .BatchOfCells import BatchOfCells as BatchOfCells
 from .Plotter import Plotter
 from .Norm2 import Norm2
 from .Bsp import Bsp
@@ -54,7 +54,7 @@ class PowerDiagram:
                 max_of_nb_links = 512,
                 batch_size = 1,
             ),
-            cells = Workspace( BatchOfCell,
+            cells = Workspace( BatchOfCells,
                 max_of_nb_vertices = 50,
                 max_of_nb_edges = 50,
                 max_of_nb_cuts = 50,
@@ -80,7 +80,7 @@ class PowerDiagram:
                 batch_size = 1,
                 # dim = self.dim
             ),
-            cells = Workspace( BatchOfCell,
+            cells = Workspace( BatchOfCells,
                 max_of_nb_vertices = 50,
                 max_of_nb_edges = 50,
                 max_of_nb_cuts = 50,
