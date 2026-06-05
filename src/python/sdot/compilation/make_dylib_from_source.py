@@ -41,8 +41,15 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device: Device ):
         try:
             import jax.ffi
             jax_include = [ jax.ffi.include_dir() ]
-        except ImportError:
-            pass
+        except (ImportError, AttributeError):
+            # jax.ffi.include_dir() added in jax 0.4.x; fall back to jaxlib package path
+            try:
+                import jaxlib
+                jaxlib_include = Path( jaxlib.__file__ ).parent / "include"
+                if jaxlib_include.is_dir():
+                    jax_include = [ str( jaxlib_include ) ]
+            except ImportError:
+                pass
 
     extended_path = os.pathsep.join( p for p in [
         str( Path( sys.executable ).parent ),

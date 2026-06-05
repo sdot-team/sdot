@@ -104,8 +104,8 @@ class JaxDriver:
             from .CudaGpu import CudaGpu
             return CudaGpu( 0 )
 
-        # Metal (jax-metal) only supports FP32
-        if "METAL" in platforms and ftype == "FP32":
+        # Metal (jax-metal) — auto-select when available; always uses FP32
+        if "METAL" in platforms and ftype in ( None, "FP32" ):
             from .AppleGpu import AppleGpu
             return AppleGpu()
 
@@ -826,9 +826,20 @@ class JaxDriver:
         self._try_to_import_and_register_ffi_target( module_name )
 
     def _try_to_import_and_register_ffi_target( self, module_name: str ):
-        platform = "gpu" if self.device.is_cuda_gpu else "cpu"
-        module = importlib.import_module( "sdot.generated_files." + module_name )
-        jax.ffi.register_ffi_target( module_name, getattr( module, module_name )(), platform = platform )
+        if self.device.is_cuda_gpu:
+            platform = "gpu"
+        elif self.device.is_apple_gpu:
+            platform = "METAL"
+        else:
+            platform = "cpu"
+        module  = importlib.import_module( "sdot.generated_files." + module_name )
+        capsule = getattr( module, module_name )()
+        try:
+            jax.ffi.register_ffi_target( module_name, capsule, platform = platform )
+        except AttributeError:
+            # jax.ffi not available in older JAX (< 0.4.37) — use xla_extension directly
+            from jaxlib import xla_extension as xe
+            xe.register_custom_call_target( module_name, capsule, platform = platform )
 
     def _ensure_backward_target( self, code: FfiCode, bfai: CallArgsAnalysis, fwd_module_name: str ) -> str:
         """Lazily compile and register the backward FFI target from the actual bfai.
@@ -953,7 +964,7 @@ class JaxDriver:
             lines.append( "ExecutionContext_Cuda::default_stream = stream;" )
 
         lines.append( f"    using TF = { self.ftype.cpp_name };" ) #
-        lines.append( "    using TI = SI64;" ) # TODO: 32 bit systems
+        lines.append( f"    using TI = { self.itype.cpp_name };" )
 
         # arch instance
         if is_gpu:
