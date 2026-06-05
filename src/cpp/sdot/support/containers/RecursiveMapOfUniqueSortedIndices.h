@@ -12,9 +12,9 @@ class RecursiveMapOfUniqueSortedIndices {
 public:
     using Next = RecursiveMapOfUniqueSortedIndices<ct_dim-1,TV>;
     using Curr = MapOfUniqueSortedIndices<ct_dim,TV>;
-    using TI = TV::value_type;
+    using TI = typename TV::value_type;
 
-    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) :
+    T_T HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, T &nb_map_items, TI max_inp_value ) :
         curr( map_items, nb_map_items, max_inp_value ),
         next( map_items, nb_map_items, max_inp_value ) {
     }
@@ -47,9 +47,9 @@ template<class TV>
 class RecursiveMapOfUniqueSortedIndices<0,TV> {
 public:
     using Curr = MapOfUniqueSortedIndices<0,TV>;
-    using TI = TV::value_type;
+    using TI = typename TV::value_type;
 
-    HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : curr( map_items, nb_map_items, max_inp_value ) {
+    T_T HD RecursiveMapOfUniqueSortedIndices( const TV &map_items, T &nb_map_items, TI max_inp_value ) : curr( map_items, nb_map_items, max_inp_value ) {
         nb_map_items = 0;
     }
 
@@ -68,8 +68,8 @@ public:
     Curr curr;
 };
 
-template<class T,T dim>
-HD auto recursive_map_of_unique_sorted_indices( Ct<T,dim>, auto &&map_items, auto &&nb_map_items, PI max_inp_value ) {
+template<class T,T dim,class MI,class NMI>
+HD auto recursive_map_of_unique_sorted_indices( Ct<T,dim>, MI &&map_items, NMI &&nb_map_items, PI max_inp_value ) {
     return RecursiveMapOfUniqueSortedIndices<dim,DECAYED_TYPE_OF( map_items )>( map_items, nb_map_items, max_inp_value );
 }
 

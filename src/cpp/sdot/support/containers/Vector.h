@@ -20,9 +20,10 @@ public:
         char          _storage[ sizeof( T ) * ct_size ];
     #endif
 
-    /**/              HD Vector                   ( const auto &values ) requires( requires { values.size(); } );
-    /**/              HD Vector                   ( FillWith, auto &&...ctor_args );
-    /**/              HD Vector                   ( Values, auto &&...values );
+    template<class U,class=std::enable_if_t<detail::has_size_method<U>::value>>
+    /**/              HD Vector                   ( const U &values );
+    T_VA              HD Vector                   ( FillWith, A &&...ctor_args );
+    T_VA              HD Vector                   ( Values, A &&...values );
     /**/              HD Vector                   ( Reserved ); // do not call new on items
     /**/              HD Vector                   ();
 
@@ -40,7 +41,7 @@ public:
     // bool           operator<                   ( const Vector &that ) const;
 
     HD static Vector  with_value_at               ( PI index, T value ); ///< 0 ... 0 value 0 ... 0. `value` is positionned at `index`
-    HD static Vector  with_func                   ( auto &&func );
+    T_U HD static Vector with_func                ( U &&func );
     HD static Vector  zeros                       ( );
     HD static Vector  ones                        ( );
 
@@ -81,11 +82,11 @@ public:
 
     friend HD void    operator+=                  ( Vector &a, const Vector &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] += b[ i ]; }
     friend HD void    operator-=                  ( Vector &a, const Vector &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] -= b[ i ]; }
-    friend HD void    operator/=                  ( Vector &a, const auto &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] /= b; }
+    T_U friend HD void operator/=                 ( Vector &a, const U &b ) { for( PI i = 0; i < a.size(); ++i ) a[ i ] /= b; }
 
-    friend void       _for_each_in_range         ( const Vector &beg, const Vector &end, Vector &cur, int i, const auto &func ) { if ( i == beg.size() ) { func( cur ); return; } for( T v = beg[ i ]; v < end[ i ]; ++v ) { cur[ i ] = v; _for_each_in_range( beg, end, cur, i + 1, func ); } }
-    friend void       for_each_in_range          ( const Vector &beg, const Vector &end, auto &&func ) { Vector cur = beg; _for_each_in_range( beg, end, cur, 0, func ); }
-    friend void       for_each_in_range          ( const Vector &end, auto &&func ) { Vector beg( Size(), end.size(), 0 ); for_each_in_range( beg, end, func ); }
+    T_U friend void   _for_each_in_range          ( const Vector &beg, const Vector &end, Vector &cur, int i, const U &func ) { if ( i == beg.size() ) { func( cur ); return; } for( T v = beg[ i ]; v < end[ i ]; ++v ) { cur[ i ] = v; _for_each_in_range( beg, end, cur, i + 1, func ); } }
+    T_U friend void   for_each_in_range           ( const Vector &beg, const Vector &end, U &&func ) { Vector cur = beg; _for_each_in_range( beg, end, cur, 0, func ); }
+    T_U friend void   for_each_in_range           ( const Vector &end, U &&func ) { Vector beg( Size(), end.size(), 0 ); for_each_in_range( beg, end, func ); }
 
     #ifdef            USE_ZPP
     using             serialize                  = zpp::bits::members<1>;

@@ -18,15 +18,15 @@ public:
     using           Sizes          = TensorView<TI,MemorySpace,Shape,Strides>;
 
     // slicing/subparts
-    HD auto         operator()     ( auto...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,MemorySpace,typename TT::Shape,typename TT::Strides>( num_dynamic_axis, capacity, new_sizes ); }
-    HD auto         row            ( auto index ) const { return operator()( index ); }
+    T_VA HD auto    operator()     ( A...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,MemorySpace,typename TT::Shape,typename TT::Strides>{ num_dynamic_axis, capacity, new_sizes }; }
+    T_U  HD auto    row            ( U index ) const { return operator()( index ); }
 
     // info
-    HD auto         transfer_cost  ( const auto &execution_context ) const { return sizes.transfer_cost( execution_context ); }
+    T_U  HD auto    transfer_cost  ( const U &execution_context ) const { return sizes.transfer_cost( execution_context ); }
     HD bool         is_invalid     () const { return sizes.is_invalid(); }
     HD bool         is_valid       () const { return sizes.is_valid(); }
-    HD auto         shape          ( auto ind ) const { return sizes.shape( ind ); }
-    HD auto         size           ( auto ind ) const { return sizes.size( ind ); }
+    T_U  HD auto    shape          ( U ind ) const { return sizes.shape( ind ); }
+    T_U  HD auto    size           ( U ind ) const { return sizes.size( ind ); }
 
     // assuming rank == 0
     HD PI           post_increment ( PI value ) { PI res = sizes.value(); operator=( res + value ); return res; }
@@ -42,7 +42,7 @@ public:
     HD void         overflow       ( PI needed_size ) {
         info( needed_size, capacity );
         #ifndef __CUDACC__
-        throw DynamicSizeException( num_dynamic_axis, needed_size );
+        throw DynamicSizeException{ num_dynamic_axis, needed_size };
         #endif
     }
 
@@ -53,5 +53,9 @@ public:
     const PI        capacity = 0;
     Sizes           sizes;
 };
+
+// deduction guide: aggregate CTAD is C++20; this keeps DynamicAxis( n, capa, tensor_view ) working in C++17
+template<class TI,class MemorySpace,class Shape,class Strides>
+DynamicAxis( PI, PI, TensorView<TI,MemorySpace,Shape,Strides> ) -> DynamicAxis<TI,MemorySpace,Shape,Strides>;
 
 } // namespace sdot

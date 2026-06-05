@@ -24,8 +24,8 @@ struct Ptr {
     HD explicit      Ptr          ( T *raw = nullptr, MemorySpace memory_space = {} ) : memory_space( memory_space ), raw( raw ) {}
 
     // byte-offset arithmetic (T is expected to be std::byte / const std::byte for strided views)
-    HD Ptr           operator+    ( auto off ) const { return Ptr( raw + off, memory_space ); }
-    HD Ptr           operator-    ( auto off ) const { return Ptr( raw - off, memory_space ); }
+    T_U HD Ptr       operator+    ( U off ) const { return Ptr( raw + off, memory_space ); }
+    T_U HD Ptr       operator-    ( U off ) const { return Ptr( raw - off, memory_space ); }
 
     // reinterpret to another element type, keeping the same memory kind
     T_U HD U*        as           () const { return reinterpret_cast<U *>( raw ); }

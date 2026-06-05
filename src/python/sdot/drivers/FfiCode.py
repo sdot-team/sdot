@@ -95,7 +95,7 @@ class FfiCodeParallel( FfiCode ):
         if pass_name == "fwd":
             return f"""
                 struct ParallelFwd {{
-                    HD void operator()( auto batch_index, auto &&p ) const {{
+                    template<class BI,class P> HD void operator()( BI batch_index, P &&p ) const {{
                         { self._fwd_body }
                     }}
                 }};
@@ -104,7 +104,7 @@ class FfiCodeParallel( FfiCode ):
         if pass_name == "bwd" and self._bwd_body:
             return f"""
                 struct ParallelBwd {{
-                    HD void operator()( auto batch_index, auto &&p ) const {{
+                    template<class BI,class P> HD void operator()( BI batch_index, P &&p ) const {{
                         { self._bwd_body }
                     }}
                 }};

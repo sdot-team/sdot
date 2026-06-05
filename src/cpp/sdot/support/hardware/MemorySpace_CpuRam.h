@@ -11,8 +11,8 @@ namespace sdot {
 /// pageable host memory
 struct MemorySpace_CpuRam : MemorySpace {
     /// allocate `n` items of T in this memory space, expose them (as an informed Ptr) to `func`, then release
-    T_T CPU_ONLY auto with_reservation( PI n, auto &&func ) const { T *p = new T[ n ]; func( Ptr<T,MemorySpace_CpuRam>( p, *this ) ); delete [] p; }
-    void         display( auto &os ) const { os << "CpuRam"; }
+    T_TA CPU_ONLY auto with_reservation( PI n, A &&func ) const { T *p = new T[ n ]; func( Ptr<T,MemorySpace_CpuRam>( p, *this ) ); delete [] p; }
+    T_T  void         display( T &os ) const { os << "CpuRam"; }
 };
 
 // functions

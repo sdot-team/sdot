@@ -21,16 +21,16 @@ public:
     HD auto is_valid     () const { return 0_b; }
 
     // always accessible — no transfer needed
-    HD auto transfer_cost( const auto & ) const { return 0_c; }
+    T_U HD auto transfer_cost( const U & ) const { return 0_c; }
 
     // shape stubs — only reachable in dead branches (is_valid() == 0_b)
     // but must compile for ternary patterns like `t.is_valid() ? t.shape(d) : -1`
-    HD SI   shape        ( auto ) const { return 0; }
+    T_U HD SI   shape        ( U ) const { return 0; }
     HD SI   nb_items     () const { return 0; }
 
     // indexing — returns *this so that kernel code indexing into absent gradients stays compilable
-    HD const NoneTensor& operator()  ( auto... ) const { return *this; }
-    HD const NoneTensor& operator[]  ( auto )    const { return *this; }
+    T_VA HD const NoneTensor& operator()  ( A... ) const { return *this; }
+    T_U  HD const NoneTensor& operator[]  ( U )    const { return *this; }
 
     // scalar conversion — allows `const TF g = none_tensor(i,j)` in dead branches
     HD operator TF() const { return TF(0); }

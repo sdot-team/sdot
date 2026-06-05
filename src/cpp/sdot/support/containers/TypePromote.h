@@ -10,7 +10,7 @@ struct TypePromote;
 
 template<class A,class B,class ...Tail>
 struct TypePromote<A,B,Tail...> {
-    using type = TypePromote<typename TypePromote<A,B>::type,Tail...>::type;
+    using type = typename TypePromote<typename TypePromote<A,B>::type,Tail...>::type;
 };
 
 template<class A> struct TypePromote<A> { using type = A; };

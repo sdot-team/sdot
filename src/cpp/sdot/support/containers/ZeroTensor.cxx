@@ -15,10 +15,10 @@ UTP HD auto DTP::nb_items() const {
     return product( _shape );
 }
 
-UTP HD auto DTP::operator()( auto index, auto ...rem ) const {
+UTP T_Tv HD auto DTP::operator()( T index, V ...rem ) const {
     if constexpr ( ct_rank == 0 ) {
         return *this;
-    } else if constexpr ( requires { DECAYED_TYPE_OF( index.size() )::value; } ) {
+    } else if constexpr ( HAS_CONSTEXPR_SIZE( index ) ) {
         // tuple/array index: unpack front element and recurse
         if constexpr ( DECAYED_TYPE_OF( index.size() )::value )
             return operator()( index[ Ct<int,0>() ], index.without_index( Ct<int,0>() ), rem... );

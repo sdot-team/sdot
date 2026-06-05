@@ -16,14 +16,7 @@ namespace sdot {
 // All tags live in namespace `container_tags`.
 // ---------------------------------------------------------------------------
 
-namespace container_tags {
-    /// The container is handed to code that already runs inside a parallel region:
-    /// a run_*() launched from an operand carrying this tag runs inline on the
-    /// *current* thread instead of dispatching to the thread pool / a new grid.
-    /// This is what makes a nested `tensor += ...` collapse to a sequential loop
-    /// and avoids the pool deadlock (a worker cannot wait on itself).
-    struct has_already_been_parallelized {};
-}
+
 
 /// true iff `Tag` appears in `Tags...` (empty pack -> false)
 template<class Tag,class... Tags>
@@ -69,26 +62,6 @@ using tags_after = typename detail::cat_tag_lists< typename transform_tag<Op,Tag
 template<template<class...> class View,class List>
 using view_with_tag_list = typename detail::apply_tag_list<View,List>::type;
 
-// --- duck-typed helpers over taggable values -------------------------------
-// They work on anything exposing the small tag protocol (`has_tag<>` /
-// `as_already_parallelized()`), without depending on a concrete container type.
-// Non-taggable values (scalars, ranges, ...) are treated as "no tags / pass-through".
 
-/// does the (decayed) type `T` carry `container_tags::has_already_been_parallelized` ?
-template<class T>
-HD constexpr bool is_already_parallelized() {
-    if constexpr ( requires { T::template has_tag<container_tags::has_already_been_parallelized>; } )
-        return T::template has_tag<container_tags::has_already_been_parallelized>;
-    else
-        return false;
-}
-
-/// return `value` with `has_already_been_parallelized` added if it supports tagging, else unchanged
-HD decltype(auto) as_already_parallelized( auto &&value ) {
-    if constexpr ( requires { value.as_already_parallelized(); } )
-        return value.as_already_parallelized();
-    else
-        return FORWARD( value );
-}
 
 } // namespace sdot

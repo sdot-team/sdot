@@ -9,12 +9,13 @@
     #define ASSERT_IF_DEBUG( COND )
 #endif
 
-auto __asserted( auto &&value, auto file, auto line, auto str ) {
+template<class V>
+V __asserted( V &&value, const char *file, int line, const char *str ) {
     if ( ! value ) {
         std::cerr << file << ":" << line << ": condition not met: " << str << ";";
         assert( 0 );
     }
-    return std::forward<decltype( value )>( value );
+    return std::forward<V>( value );
 }
 
 #define ASSERTED_POSITIVE( VALUE ) ( [&]( auto &&v ) { assert( v >= 0 ); return v; } )( VALUE )

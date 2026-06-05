@@ -16,7 +16,7 @@ UTP HD Matrix<T,ct_size-1> DTP::without_row_and_col( PI wr, PI wc ) const {
     return res;
 }
 
-UTP HD DTP DTP::with_func( auto &&func ) {
+UTP T_U HD DTP DTP::with_func( U &&func ) {
     Matrix res;
     for( PI r = 0; r < ct_size; ++r )
         for( PI c = 0; c < ct_size; ++c )
@@ -31,7 +31,7 @@ UTP HD DTP DTP::with_replaced_col( PI c, const Vec &col ) const {
     return res;
 }
 
-UTP HD DTP::Vec DTP::diagonal() const {
+UTP HD typename DTP::Vec DTP::diagonal() const {
     Vec res( Size(), nb_rows() );
     for( PI i = 0; i < nb_rows(); ++i )
         res[ i ] = operator()( i, i );
@@ -73,7 +73,7 @@ UTP HD DTP DTP::cholesky() const {
     return L;
 }
 
-UTP HD DTP::Vec DTP::solve( const Vec &vec ) const {
+UTP HD typename DTP::Vec DTP::solve( const Vec &vec ) const {
     T d = determinant();
     T sgn = 1;
     Vec res;
@@ -82,7 +82,7 @@ UTP HD DTP::Vec DTP::solve( const Vec &vec ) const {
     return res;
 }
 
-UTP HD DTP::Vec DTP::solve_ge( Vec b ) const {
+UTP HD typename DTP::Vec DTP::solve_ge( Vec b ) const {
     const PI n = nb_rows();
     Matrix A = *this;
 

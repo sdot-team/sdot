@@ -29,7 +29,7 @@ local target_kind = os.getenv("SDOT_XMAKE_KIND") or "shared"
 
 target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     set_targetdir(os.getenv("SDOT_XMAKE_OUTPUT_DIR") or "build")
-    set_languages("cxx20")
+    set_languages("cxx17")
     if target_kind == "binary" then
         set_kind("binary")
     else

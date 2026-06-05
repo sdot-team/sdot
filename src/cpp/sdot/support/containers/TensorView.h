@@ -54,15 +54,15 @@ public:
 
     //
     HD Strides       strides                () const;
-    HD auto          stride                 ( auto d ) const;
+    T_T  HD auto     stride                 ( T d ) const;
 
     // shape
-    HD void          for_each_index         ( auto &&func ) const;
-    HD void          for_each_item          ( auto &&func ) const;
+    T_T  HD void     for_each_index         ( T &&func ) const;
+    T_T  HD void     for_each_item          ( T &&func ) const;
     HD auto          is_contiguous          () const; ///< true iff strides match row-major contiguous layout
     HD auto          all_indices            () const;
     HD auto          nb_items               () const;
-    HD auto          shape                  ( auto d ) const { return _shape[ d ]; }
+    T_T  HD auto     shape                  ( T d ) const { return _shape[ d ]; }
     HD Shape         shape                  () const { return _shape; }
     HD auto          empty                  () const;
     HD auto          size                   () const;
@@ -74,11 +74,11 @@ public:
     HD auto          end                    () const;
 
     // operator() and operator[] produce a new tensor
-    HD auto          operator()             ( const auto &index, auto ...rem ) const;
-    HD auto          operator[]             ( const auto &index ) const { return operator()( index ); }
+    T_Tv HD auto     operator()             ( const T &index, V ...rem ) const;
+    T_T  HD auto     operator[]             ( const T &index ) const { return operator()( index ); }
     HD auto          operator()             () const { return *this; }
 
-    HD auto          offset                 ( const auto &index, auto ...rem ) const;
+    T_Tv HD auto     offset                 ( const T &index, V ...rem ) const;
     HD auto          offset                 () const { return *this; }
 
     // scalar value/reference for a rank 1 tensor
@@ -87,30 +87,29 @@ public:
     HD TF&           ref                    () const;
 
     // reassign
-    HD void          copy_elements_from     ( const auto &that );
-    HD void          operator-=             ( const auto &that );
-    HD void          operator+=             ( const auto &that );
-    HD void          operator*=             ( const auto &that );
-    HD void          operator/=             ( const auto &that );
-    HD void          operator=              ( const auto &that );
+    T_T  HD void     copy_elements_from     ( const T &that );
+    T_T  HD void     operator-=             ( const T &that );
+    T_T  HD void     operator+=             ( const T &that );
+    T_T  HD void     operator*=             ( const T &that );
+    T_T  HD void     operator/=             ( const T &that );
+    T_T  HD void     operator=              ( const T &that );
     HD void          operator=              ( const TensorView &that );
     HD void          spill_to               ( TensorView &that ); ///< copy data of *this to that, and use data from that
 
     // data copy / transfer — arch-unaware (HD, valid in device code)
-    HD auto          transfer_cost          ( const auto &execution_context ) const;
+    T_T  HD auto     transfer_cost          ( const T &execution_context ) const;
 
-    void             with_same_shape        ( const auto &arch, auto &&func ) const;
+    T_TA void        with_same_shape        ( const T &arch, A &&func ) const;
     HD void          fill_with              ( TF value );
 
     //
-    HD auto          unsqueeze              ( auto axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
-    HD auto          squeeze                ( auto axis, PI index = 0 ) const;
+    T_T  HD auto     unsqueeze              ( T axis ) const; ///< append a trailing dimension of size 1 (preserves strides)
+    T_T  HD auto     squeeze                ( T axis, PI index = 0 ) const;
     HD auto          row                    ( PI index ) const;
 
     // compile-time tags (see container_tags.h)
     template<class... ExtraTags>
     HD auto          with_tags              () const; ///< same view, with ExtraTags... added to the tag set (no-op for tags already present)
-    HD auto          as_already_parallelized() const; ///< == with_tags<container_tags::has_already_been_parallelized>()
 
 private:
     static HD RawPtr _sentinel              () { return RawPtr( nullptr ) + 1; }

@@ -12,52 +12,52 @@ namespace RunDetails {
     // force max_cpu_threads to 1
     template<class Func>
     struct RunSequentialWrapper : RunTraits::RunFunctorWrapper<Func> {
-        HD int max_cpu_threads( auto &&.../* args */ ) { return 1_c; }
-        HD int max_gpu_threads( auto &&.../* args */ ) { return 1_c; }
+        T_VA HD int max_cpu_threads( A &&.../* args */ ) { return 1_c; }
+        T_VA HD int max_gpu_threads( A &&.../* args */ ) { return 1_c; }
     };
 
     // decl
-    HD void run_parallel_from( const auto &execution_space, Ct<int,0>, auto &&func, auto &&list, auto &&...args );
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, auto &&head, auto &&...tail );
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Inp, auto &&head, auto &&...tail );
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Out, auto &&head, auto &&...tail );
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Mut, auto &&head, auto &&...tail );
+    template<class ES,class F,class L,class... A>        HD void run_parallel_from( const ES &execution_space, Ct<int,0>, F &&func, L &&list, A &&...args );
+    template<int n,class ES,class F,class H,class... A>  HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, H &&head, A &&...tail );
+    template<int n,class ES,class F,class H,class... A>  HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Inp, H &&head, A &&...tail );
+    template<int n,class ES,class F,class H,class... A>  HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Out, H &&head, A &&...tail );
+    template<int n,class ES,class F,class H,class... A>  HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Mut, H &&head, A &&...tail );
 
     // end
-    HD void run_parallel_from( const auto &execution_space, Ct<int,0>, auto &&func, auto &&list, auto &&...args ) {
+    template<class ES,class F,class L,class... A> HD void run_parallel_from( const ES &execution_space, Ct<int,0>, F &&func, L &&list, A &&...args ) {
         execution_space.run_parallel( FORWARD( list ), func, FORWARD( args )... );
     }
 
     // Inp
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Inp, auto &&head, auto &&...tail ) {
+    template<int n,class ES,class F,class H,class... A> HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Inp, H &&head, A &&...tail ) {
         make_accessible( execution_space, FORWARD( head ), 1_b, 0_b, [&]( auto &&head ) {
             run_parallel_from( execution_space, cn - 2_c, FORWARD( func ), FORWARD( tail )..., FORWARD( head ) );
         } );
     }
 
     // Out
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Out, auto &&head, auto &&...tail ) {
+    template<int n,class ES,class F,class H,class... A> HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Out, H &&head, A &&...tail ) {
         make_accessible( execution_space, FORWARD( head ), 0_b, 1_b, [&]( auto &&head ) {
             run_parallel_from( execution_space, cn - 2_c, FORWARD( func ), FORWARD( tail )..., FORWARD( head ) );
         } );
     }
 
     // Mut
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, Mut, auto &&head, auto &&...tail ) {
+    template<int n,class ES,class F,class H,class... A> HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, Mut, H &&head, A &&...tail ) {
         make_accessible( execution_space, FORWARD( head ), 1_b, 1_b, [&]( auto &&head ) {
             run_parallel_from( execution_space, cn - 2_c, FORWARD( func ), FORWARD( tail )..., FORWARD( head ) );
         } );
     }
 
     // raw
-    template<int n> HD void run_parallel_from( const auto &execution_space, Ct<int,n> cn, auto &&func, auto &&head, auto &&...tail ) {
+    template<int n,class ES,class F,class H,class... A> HD void run_parallel_from( const ES &execution_space, Ct<int,n> cn, F &&func, H &&head, A &&...tail ) {
         make_accessible( execution_space, FORWARD( head ), 0_b, 0_b, [&]( auto &&head ) {
             run_parallel_from( execution_space, cn - 1_c, FORWARD( func ), FORWARD( tail )..., FORWARD( head ) );
         } );
     }
 } // namespace RunDetails
 
-HD void run_parallel( auto &&list, auto &&func, auto &&...args ) {
+template<class L,class F,class... A> HD void run_parallel( L &&list, F &&func, A &&...args ) {
     // statically chosen from the args memory spaces (single type -> only this branch compiles)
     auto execution_space = execution_space_for( args... );
 
@@ -70,7 +70,7 @@ HD void run_parallel( auto &&list, auto &&func, auto &&...args ) {
     // );
 }
 
-HD void run_sequential( auto &&list, auto &&func, auto &&...args ) {
+template<class L,class F,class... A> HD void run_sequential( L &&list, F &&func, A &&...args ) {
     run_parallel( FORWARD( list ), RunDetails::RunSequentialWrapper<DECAYED_TYPE_OF(func)>{ FORWARD( func ) }, FORWARD( args )... );
 }
 

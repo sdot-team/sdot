@@ -30,23 +30,29 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 
 // zero data-args: identity
-HD auto transfer_cost( const auto &/*ec*/ ) { return 0_c; }
+T_T HD auto transfer_cost( const T &/*ec*/ ) { return 0_c; }
 
-HD auto transfer_cost( const auto &/*ec*/, Inp ) { return 0_c; }
-HD auto transfer_cost( const auto &/*ec*/, Out ) { return 0_c; }
-HD auto transfer_cost( const auto &/*ec*/, Mut ) { return 0_c; }
+T_T HD auto transfer_cost( const T &/*ec*/, Inp ) { return 0_c; }
+T_T HD auto transfer_cost( const T &/*ec*/, Out ) { return 0_c; }
+T_T HD auto transfer_cost( const T &/*ec*/, Mut ) { return 0_c; }
 
 struct AnyFunctor {
-    HD void operator()( auto &&... ) const {}
+    T_VA HD void operator()( A &&... ) const {}
 };
 
+// member-call probes for the single-arg dispatch below
+namespace detail {
+    template<class Arg,class EC> using m_transfer_cost = decltype( std::declval<Arg>().transfer_cost( std::declval<EC>() ) );
+    template<class Arg>          using m_apply_values  = decltype( apply_values( std::declval<Arg&>(), AnyFunctor{} ) );
+}
+
 // single data-arg: delegate to the arg's transfer_cost method (required — static_assert if absent)
-HD auto transfer_cost( const auto &ec, const auto &arg ) {
-    if constexpr ( requires { arg.transfer_cost( ec ); } )
+T_TA HD auto transfer_cost( const T &ec, const A &arg ) {
+    if constexpr ( IS_DETECTED( detail::m_transfer_cost, A, T ) )
         return arg.transfer_cost( ec );
     else if constexpr ( std::is_trivial<DECAYED_TYPE_OF( arg )>::value )
         return 0_c;
-    else if constexpr ( requires { apply_values( arg, AnyFunctor{} ); } )
+    else if constexpr ( IS_DETECTED( detail::m_apply_values, A ) )
         return apply_values( arg, [&]( auto &&...values ) { return ( transfer_cost( ec, values ) + ... + 0_c ); } );
     else {
         // static_assert( sizeof( arg ) == 0, "don't know how to make transfer_cost: arg must provide transfer_cost( ec )" );
@@ -55,12 +61,13 @@ HD auto transfer_cost( const auto &ec, const auto &arg ) {
     }
 }
 
-// multi data-args: recursive sum — requires at least 2 to avoid ambiguity with single-arg default
-HD auto transfer_cost( const auto &ec, const auto &head, const auto &...tail ) requires ( sizeof...( tail ) >= 1 ) {
+// multi data-args: recursive sum — enable_if at least 2 to avoid ambiguity with single-arg default
+template<class EC,class H,class... A,class=std::enable_if_t<( sizeof...( A ) >= 1 )>>
+HD auto transfer_cost( const EC &ec, const H &head, const A &...tail ) {
     return transfer_cost( ec, head ) + transfer_cost( ec, tail... );
 }
 
-auto accessible_from( const auto &ec, const auto &...values ) {
+template<class EC,class... A> auto accessible_from( const EC &ec, const A &...values ) {
     return transfer_cost( ec, values... ) == 0_c;
 }
 

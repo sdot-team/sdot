@@ -12,7 +12,7 @@ namespace sdot {
 #define UTP template<class T,int ct_size>
 #define DTP Vector<T,ct_size>
 
-UTPH DTP::Vector( const auto &values ) requires( requires { values.size(); } ) {
+UTP template<class U,class E> HD DTP::Vector( const U &values ) {
     ASSERT( values.size() == size() );
     PI i = 0;
     sdot::for_each_item( values, [&]( const auto &item ) {
@@ -24,7 +24,7 @@ UTPH DTP::Vector( const auto &values ) requires( requires { values.size(); } ) {
     //     new ( data() + i ) T( *( iter++ ) );
 }
 
-UTPH DTP::Vector( FillWith, auto &&...ctor_args ) {
+UTP T_VA HD DTP::Vector( FillWith, A &&...ctor_args ) {
     for( auto &v : *this )
         new ( &v ) T( ctor_args... );
 }
@@ -37,7 +37,7 @@ UTPH DTP::Vector() {
         new ( &v ) T;
 }
 
-UTPH DTP::Vector( Values, auto &&...values ) : Vector( Reserved() ) {
+UTP T_VA HD DTP::Vector( Values, A &&...values ) : Vector( Reserved() ) {
     PI i = 0;
     auto append = [&]( auto &&value ) {
         new ( data() + i++ ) T( FORWARD( value ) );
@@ -86,7 +86,7 @@ UTPH T& DTP::operator[]( PI index ) {
 //     return std::ranges::lexicographical_compare( operator std::span<T>(), that.operator std::span<T>() );
 // }
 
-UTPH DTP DTP::with_func( auto &&func ) {
+UTP T_U HD DTP DTP::with_func( U &&func ) {
     Vector res;
     for ( PI i = 0; i < ct_size; ++i )
         new ( res.data() + i ) T( func( i ) );

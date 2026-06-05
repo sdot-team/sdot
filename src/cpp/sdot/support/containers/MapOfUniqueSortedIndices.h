@@ -24,9 +24,9 @@ struct MapOfUniqueSortedIndices;
 // Od
 template<class TV>
 struct MapOfUniqueSortedIndices<0,TV> {
-    using TI = TV::value_type;
+    using TI = typename TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const auto &/* map_items */, const auto &/* nb_map_items */, TI /* max_inp_value */ ) {
+    T_TA HD MapOfUniqueSortedIndices( const T &/* map_items */, const A &/* nb_map_items */, TI /* max_inp_value */ ) {
     }
 
     HD void reserve_full_capacity() {
@@ -43,7 +43,7 @@ struct MapOfUniqueSortedIndices<0,TV> {
         return { offset, value };
     }
 
-    HD void for_each_item( auto &&func ) const {
+    T_T HD void for_each_item( T &&func ) const {
         if ( value >= offset )
             func( Vector<TI,0>( Values() ), value - offset );
     }
@@ -55,9 +55,9 @@ struct MapOfUniqueSortedIndices<0,TV> {
 // 1d
 template<class TV>
 struct MapOfUniqueSortedIndices<1,TV> {
-    using TI = TV::value_type;
+    using TI = typename TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value ) ) ) {
+    T_T HD MapOfUniqueSortedIndices( const TV &map_items, T &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value ) ) ) {
         // values.fill_with( 0 );
         next_offset = 1;
         offset = 0;
@@ -83,7 +83,7 @@ struct MapOfUniqueSortedIndices<1,TV> {
         return { offset, values[ key[ 0 ] ].ref() };
     }
 
-    HD void for_each_item( auto &&func ) const {
+    T_T HD void for_each_item( T &&func ) const {
         for( PI i = 0; i < values.size(); ++i )
             if ( values[ i ] >= offset )
                 func( Vector<TI,1>( Values(), i ), values[ i ] - offset );
@@ -98,9 +98,9 @@ struct MapOfUniqueSortedIndices<1,TV> {
 // 2d. TODO: hash table ?
 template<class TV>
 struct MapOfUniqueSortedIndices<2,TV> {
-    using TI = TV::value_type;
+    using TI = typename TV::value_type;
 
-    HD MapOfUniqueSortedIndices( const TV &map_items, auto &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value * max_inp_value ) ) ) {
+    T_T HD MapOfUniqueSortedIndices( const TV &map_items, T &nb_map_items, TI max_inp_value ) : max_inp_value( max_inp_value ), values( map_items.offset( nb_map_items.post_increment( max_inp_value * max_inp_value ) ) ) {
         // values.fill_with( 0 );
         next_offset = 1;
         offset = 0;
@@ -126,7 +126,7 @@ struct MapOfUniqueSortedIndices<2,TV> {
         return { offset, values[ key[ 0 ] * max_inp_value + key[ 1 ] ].ref() };
     }
 
-    HD void for_each_item( auto &&func ) const {
+    T_T HD void for_each_item( T &&func ) const {
         for( PI i = 0; i < values.size(); ++i ) {
             for( PI j = 0; j < values.size(); ++j ) {
                 PI k = i * max_inp_value + j;

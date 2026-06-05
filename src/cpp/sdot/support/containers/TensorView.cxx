@@ -15,8 +15,6 @@ namespace sdot {
 template <typename T> struct Is_TensorView : std::false_type {};
 UTP struct Is_TensorView<DTP> : std::true_type {};
 
-template <typename T> concept TensorView_c = Is_TensorView<T>::value;
-
 namespace details::TensorView {
     /// bind the leading TensorView params and expand a TagList into the trailing tag pack
     template<class TF,class MemorySpace,class Shape,class Strides,class List> struct with_tag_list;
@@ -34,8 +32,8 @@ UTP HD DTP::TensorView( TF *data, Shape shape, Strides strides, MemorySpace memo
 UTP HD DTP::TensorView() : _raw_ptr( nullptr ) {
 }
 
-UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
-    if constexpr ( requires { DECAYED_TYPE_OF( index.size() )::value; } ) {
+UTP T_Tv HD auto DTP::operator()( const T &index, V ...rem ) const {
+    if constexpr ( HAS_CONSTEXPR_SIZE( index ) ) {
         if constexpr ( DECAYED_TYPE_OF( index.size() )::value )
             return operator()( index[ Ct<int,0>() ], index.without_index( Ct<int,0>() ), rem... );
         else
@@ -44,9 +42,9 @@ UTP HD auto DTP::operator()( const auto &index, auto ...rem ) const {
         return row( index )( rem... );
 }
 
-UTP HD auto DTP::offset( const auto &index, auto ...rem ) const {
+UTP T_Tv HD auto DTP::offset( const T &index, V ...rem ) const {
     TensorView res = *this;
-    if constexpr ( requires { DECAYED_TYPE_OF( index.size() )::value; } ) {
+    if constexpr ( HAS_CONSTEXPR_SIZE( index ) ) {
         if constexpr ( DECAYED_TYPE_OF( index.size() )::value )
             return offset( index[ Ct<int,0>() ], index.without_index( Ct<int,0>() ), rem... );
         else
@@ -62,23 +60,23 @@ UTP HD auto DTP::offset( const auto &index, auto ...rem ) const {
 
 // `index` is a full multi-index, so a[index] / b[index] are rank-0 views.
 struct AddTensorItemElementwise {              ///< same-shape operand: a[i] += b[i]
-    HD void operator()( auto index, auto a, auto b ) const { a[ index ] += b[ index ]; }
+    T_TAB HD void operator()( T index, A a, B b ) const { a[ index ] += b[ index ]; }
 };
 struct AddTensorItemBroadcast {                ///< scalar / rank-0 operand: a[i] += b
-    HD void operator()( auto index, auto a, auto b ) const { a[ index ] += b; }
+    T_TAB HD void operator()( T index, A a, B b ) const { a[ index ] += b; }
 };
 
 /// true iff `B` is a tensor operand with the same rank as the destination (-> element-wise);
 /// anything else (a scalar, or a lower-rank view) is broadcast.
 template<class B,int dst_rank>
 HD constexpr bool add_is_elementwise() {
-    if constexpr ( requires { B::ct_rank; } )
+    if constexpr ( HAS_CT_RANK( B ) )
         return int( B::ct_rank ) == dst_rank;
     else
         return false;
 }
 
-UTP HD void DTP::operator+=( const auto &that ) {
+UTP T_T HD void DTP::operator+=( const T &that ) {
     if constexpr ( ct_rank == 0 ) {
         // base case: accumulate in place (also what stops the per-item recursion above)
         if constexpr ( DECAYED_TYPE_OF( accessible_from( current_execution_context(), *this ) )::value ) {
@@ -95,7 +93,7 @@ UTP HD void DTP::operator+=( const auto &that ) {
     }
 }
 
-UTP HD void DTP::operator-=( const auto &that ) {
+UTP T_T HD void DTP::operator-=( const T &that ) {
     if constexpr ( ct_rank == 0 ) {
         if constexpr ( DECAYED_TYPE_OF( accessible_from( current_execution_context(), *this ) )::value ) {
             ref() -= TF( that );
@@ -111,11 +109,11 @@ UTP HD void DTP::operator-=( const auto &that ) {
     }
 }
 
-UTP HD void DTP::operator*=( const auto &that ) {
+UTP T_T HD void DTP::operator*=( const T & ) {
     TODO;
 }
 
-UTP HD void DTP::operator/=( const auto &that ) {
+UTP T_T HD void DTP::operator/=( const T & ) {
     TODO;
 }
 
@@ -123,11 +121,11 @@ UTP HD void DTP::operator=( const TensorView &that ) {
     copy_elements_from( that );
 }
 
-UTP HD void DTP::operator=( const auto &that ) {
+UTP T_T HD void DTP::operator=( const T &that ) {
     copy_elements_from( that );
 }
 
-UTP HD auto DTP::squeeze( auto axis, PI index ) const {
+UTP T_T HD auto DTP::squeeze( T axis, PI index ) const {
     auto new_strides = _strides.without_index( axis );
     auto new_shape = _shape.without_index( axis );
 
@@ -151,13 +149,6 @@ UTP HD auto DTP::row( PI index ) const {
 UTP template<class... ExtraTags> HD auto DTP::with_tags() const {
     // same data, tag pack extended with ExtraTags... (appended verbatim, no axis transform)
     return TensorView<TF,MemorySpace,Shape,Strides,Tags...,ExtraTags...>( data().raw, _shape, _strides, _memory_space );
-}
-
-UTP HD auto DTP::as_already_parallelized() const {
-    if constexpr ( has_tag<container_tags::has_already_been_parallelized> )
-        return *this; // already tagged -> keep the type stable (no growth on repeated nesting)
-    else
-        return with_tags<container_tags::has_already_been_parallelized>();
 }
 
 UTP HD auto DTP::data() const {
@@ -194,9 +185,9 @@ UTP HD auto DTP::nb_items() const {
     return product( _shape );
 }
 
-UTP HD void DTP::copy_elements_from( const auto &that ) {
+UTP T_T HD void DTP::copy_elements_from( const T &that ) {
     if constexpr ( ct_rank == 0 ) {
-        if constexpr( requires { that.shape(); } )
+        if constexpr( Is_TensorView<DECAYED_TYPE_OF( that )>::value )
             ref() = that.value();
         else
             ref() = that;
@@ -215,11 +206,11 @@ UTP HD auto DTP::is_contiguous() const {
     return _strides == contiguous_strides<TF>( _shape );
 }
 
-UTP HD void DTP::for_each_index( auto &&func ) const {
+UTP T_T HD void DTP::for_each_index( T &&func ) const {
     cartesian_product( map( _shape, range<PI> ) ).for_each_item( FORWARD( func ) );
 }
 
-UTP HD void DTP::for_each_item( auto &&func ) const {
+UTP T_T HD void DTP::for_each_item( T &&func ) const {
     for_each_index( [&]( auto &index ) {
         func( operator()( index ) );
     } );
@@ -253,7 +244,7 @@ namespace details::TensorView {
     };
 
     struct TensorFillFunctor {
-        GD void operator()( auto index, auto dst, auto value ) const {
+        T_TAB GD void operator()( T index, A dst, B value ) const {
             dst( index ) = value;
         }
     };
@@ -268,7 +259,7 @@ UTP HD void DTP::fill_with( TF value ) {
 }
 
 // transfer_cost for TensorView: accessible without transfer → cost 0, else 1
-UTP HD auto DTP::transfer_cost( const auto &ec ) const {
+UTP T_T HD auto DTP::transfer_cost( const T &ec ) const {
     return sdot::transfer_cost_per_byte( ec, _memory_space );
 }
 
@@ -307,7 +298,7 @@ UTP HD Strides DTP::strides() const {
     return _strides;
 }
 
-UTP HD auto DTP::stride( auto d ) const {
+UTP T_T HD auto DTP::stride( T d ) const {
     return _strides[ d ];
 }
 
@@ -421,31 +412,11 @@ UTP HD bool DTP::is_valid() const {
 // // };
 
 
-HD void make_accessible( auto execution_space, TensorView_c auto &&value, auto inp, auto out, auto &&func ) {
-    if constexpr ( DECAYED_TYPE_OF( transfer_cost_per_byte( execution_space, value.memory_space() ) )::value == 0 ) {
-        func( FORWARD( value ) );
-    } else {
-        // Materialize a contiguous copy in the execution space's native memory space, optionally bring
-        // the data in, run, then optionally bring the result back (transfers driven by the exec space's
-        // stream). NB: assumes a contiguous source; strided cross-space transfer is a TODO. Host-only
-        // (allocation + cudaMemcpy); never reached on device (operands are accessible there).
-        // auto dst_ms      = native_memory_space( execution_space );
-        // auto new_strides = contiguous_strides<TF>( t.shape() );
-        // using DstMS      = DECAYED_TYPE_OF( dst_ms );
-        // using NewStrides = DECAYED_TYPE_OF( new_strides );
-
-        // dst_ms.template with_reservation<TF>( nb_items(), [&]( Ptr<TF,DstMS> buf ) {
-        //     TensorView<TF,DstMS,Shape,NewStrides> dst( buf.raw, _shape, new_strides, dst_ms );
-        //     if ( inp )
-        //         copy( buf, Ptr<TF,MemorySpace>( data().raw, _memory_space ), nb_items(), execution_space );
-        //     func( dst );
-        //     if ( out )
-        //         copy( Ptr<TF,MemorySpace>( data().raw, _memory_space ), buf, nb_items(), execution_space );
-        // } );
-        static_assert( inp || out, "if not one the same space, value must be preceded by Inp(), Out() or Mut()" );
-        TODO;
-    }
-}
+// NB: the cross-space transfer for TensorView used to live here as a make_accessible overload, but it
+// made make_accessible (a fully generic policy over scalars/aggregates/views) leak a TensorView-specific
+// overload. The accessible case (func(value)) is already handled generically in hardware/make_accessible.h.
+// When real strided cross-space transfer is implemented, expose it as a customization point on the data
+// type that the generic else-branch delegates to — not as a competing overload.
 
 #undef UTP
 #undef DTP

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../common_macros.h"
+
 namespace sdot {
 
 // ---------------------------------------------------------------------------
@@ -13,7 +15,8 @@ namespace sdot {
 // ---------------------------------------------------------------------------
 struct MemorySpace {};
 
-auto memory_space( const auto &value ) requires requires { value.memory_space(); } {
+// SFINAE via trailing return: only participates when value has a .memory_space() method
+T_T auto memory_space( const T &value ) -> decltype( value.memory_space() ) {
     return value.memory_space();
 }
 

@@ -70,7 +70,7 @@ UTP HD void DTP::init_as_aligned_simplex( TI cut_id ) {
         cut_ids( num_cut ) = cut_id;
 }
 
-UTP HD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
+UTP T_TA HD void DTP::init_as_hypercube( const T &frame, const A &cut_id ) {
     auto v = this;
 
     is_fully_bounded = cut_id != CellBoundary::INFINITE;
@@ -148,7 +148,7 @@ UTP HD void DTP::init_as_hypercube( const auto &frame, const auto &cut_id ) {
     }
 }
 
-UTP HD void DTP::init_as_hypercube_bwd( const auto &frame, auto &p, const auto &batch_index ) {
+UTP template<class FR,class P,class BI> HD void DTP::init_as_hypercube_bwd( const FR &frame, P &p, const BI &batch_index ) {
     // Fwd: F[r][c] = frame(1+r,c),  A = F^{-1},  row_d = A[d,:] via F^T * row_d = e_d.
     //
     // grad_frame(0,c)   = Σ_l gV(l,c)  +  Σ_d G_dot_d * A[d,c]
@@ -260,7 +260,7 @@ UTP HD TI DTP::cut_id( PI num_cut ) const {
     return cut_ids( num_cut );
 }
 
-UTP HD bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex ) {
+UTP T_T HD bool DTP::already_in_simplex( T &simplex, PI beg, PI next_num_vertex ) {
     for( PI simplex_ind = beg; simplex_ind < ct_dim + 1; ++simplex_ind )
         if ( next_num_vertex == simplex[ simplex_ind ] )
             return true;
@@ -268,7 +268,7 @@ UTP HD bool DTP::already_in_simplex( auto &simplex, PI beg, PI next_num_vertex )
 }
 
 /// Fan triangulation — recursive core.
-UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto &simplex, PI num_vertex, auto &item_map, auto &&func ) {
+UTP template<int d,class S,class IM,class F> HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, S &simplex, PI num_vertex, IM &item_map, F &&func ) {
     // register the new vertex
     simplex[ d ] = num_vertex;
 
@@ -295,7 +295,7 @@ UTP T_d HD void DTP::for_each_simplex_rec( const Vector<TI,d> &cut_indices, auto
     }
 }
 
-UTP HD void DTP::for_each_facet_simplex( auto &item_map, auto &&func ) {
+UTP T_TA HD void DTP::for_each_facet_simplex( T &item_map, A &&func ) {
     if ( nb_vertices == 0 )
         return;
 
@@ -337,7 +337,7 @@ UTP HD void DTP::for_each_facet_simplex( auto &item_map, auto &&func ) {
     }
 }
 
-UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
+UTP T_TA HD void DTP::for_each_simplex( T &item_map, A &&func ) {
     constexpr int ct_simplex = ct_dim + 1;
     if ( nb_vertices == 0 )
         return;
@@ -362,7 +362,7 @@ UTP HD void DTP::for_each_simplex( auto &item_map, auto &&func ) {
     }
 }
 
-UTP HD void DTP::for_each_face( auto &&func ) {
+UTP T_T HD void DTP::for_each_face( T &&func ) {
     if ( dim == 2 ) {
         std::vector<PI> indices( nb_vertices() );
         std::iota( indices.begin(), indices.end(), 0 );
@@ -436,7 +436,7 @@ UTP HD void DTP::for_each_face( auto &&func ) {
 
 }
 
-UTP HD void DTP::measure_bwd( auto &item_map, auto &&p, auto &&batch_index ) {
+UTP T_TAB HD void DTP::measure_bwd( T &item_map, A &&p, B &&batch_index ) {
     // infinite cell
     if ( ! is_fully_bounded() )
         return;
@@ -493,7 +493,7 @@ UTP HD void DTP::measure_bwd( auto &item_map, auto &&p, auto &&batch_index ) {
     }
 }
 
-UTP HD auto DTP::measure( auto &item_map ) -> TF {
+UTP T_T HD auto DTP::measure( T &item_map ) -> TF {
     // infinite cell
     if ( ! is_fully_bounded() )
         return std::numeric_limits<TF>::max();
@@ -537,7 +537,7 @@ UTP HD bool DTP::contains( const Pt &p ) const {
     return true;
 }
 
-UTP HD DTP::Pt DTP::centroid() {
+UTP HD typename DTP::Pt DTP::centroid() {
     Pt res( Size(), dim, 0 );
     TF mea = 0;
     for_each_simplex( [&]( const auto &indices ) {
@@ -556,7 +556,7 @@ UTP HD void DTP::check_if_fully_closed() {
     is_fully_bounded() = true;
 }
 
-UTP HD void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
+UTP T_TA HD void DTP::cut( const T &cut_dir, A cut_dot, SI cut_id ) {
     // check to grow enough so that all the vertices stay on the same side even if we grow more
     if ( ! is_fully_bounded() )
         grow_infinite_cuts( cut_dir, cut_dot );
@@ -594,7 +594,7 @@ UTP HD void DTP::cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
         check_if_fully_closed();
 }
 
-UTP HD PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
+UTP T_TAB HD PI DTP::scalar_products( T &sps, const A &cut_dir, B cut_dot ) {
     PI nb_out = 0;
     for ( PI v = 0; v < nb_vertices; ++v ) {
         TF sp = vertex_positions( v, 0 ) * cut_dir[ 0 ];
@@ -608,7 +608,7 @@ UTP HD PI DTP::scalar_products( auto &sps, const auto &cut_dir, auto cut_dot ) {
 }
 
 // generic swap-and-pop (indices_to_remove sorted ascending), fills ws.corr with old->new map
-UTP HD void DTP::swap_and_pop( auto &nb, auto &&move_row ) {
+UTP T_TA HD void DTP::swap_and_pop( T &nb, A &&move_row ) {
     TODO;
     // const PI nb_initial = PI( nb );
     // ws.reservation = nb_initial;
@@ -755,7 +755,7 @@ UTP HD void DTP::apply_cut_corr() {
     //         cell.edge_indices( e, 2 + d ) = ws.corr[ cell.edge_indices( e, 2 + d ) ];
 }
 
-UTP HD void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out ) {
+UTP T_TA HD void DTP::cut_2d( const T &cut_dir, A cut_dot, SI cut_id, PI nb_out ) {
     // const SI old_nb_vertices = nb_vertices;
 
     // // helper to copy vertex_positions and cut_planes/cut_ids together
@@ -912,7 +912,7 @@ UTP HD void DTP::cut_2d( const auto &cut_dir, auto cut_dot, SI cut_id, PI nb_out
     // }
 }
 
-UTP HD void DTP::get_data_from( const auto &src_cell ) {
+UTP T_T HD void DTP::get_data_from( const T &src_cell ) {
     TODO;
     // vertex_positions.get_data_from( src_vertex_positions, { Values(), src_nb_vertices, dim } );
     // if ( dim != 2 ) {
@@ -939,7 +939,7 @@ UTP HD void DTP::clear_cell() {
     nb_cuts = 0;
 }
 
-UTP HD PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_id ) {
+UTP T_TA HD PI DTP::register_the_new_cut( const T &cut_dir, A cut_dot, SI cut_id ) {
     PI res = nb_cuts++;
     for ( PI d = 0; d < dim; ++d )
         cut_planes( res, d ) = cut_dir[ d ];
@@ -948,7 +948,7 @@ UTP HD PI DTP::register_the_new_cut( const auto &cut_dir, auto cut_dot, SI cut_i
     return res;
 }
 
-UTP HD DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
+UTP T_T HD typename DTP::Pt DTP::solve_position( PI num_vertex, T &&add_func ) const {
     Ci ci = vertex_cuts( num_vertex );
 
     auto M  = Matrix<TF,ct_dim>::with_func( [&]( PI r, PI c ) {
@@ -962,7 +962,7 @@ UTP HD DTP::Pt DTP::solve_position( PI num_vertex, auto &&add_func ) const {
     return M.solve_ge( V );
 }
 
-UTP HD DTP::Pt DTP::solve_position( PI num_vertex ) const {
+UTP HD typename DTP::Pt DTP::solve_position( PI num_vertex ) const {
     return solve_position( num_vertex, []( auto ) { return 0; } );
 }
 
@@ -970,7 +970,7 @@ UTP HD DTP::Pt DTP::solve_position( PI num_vertex ) const {
 // added to its offset (uniform spatial growth). sp(s) = cut_dir · v(s) - cut_dot is linear in s;
 // evaluate at s=0 and s=1 via SimpleSquareMatrix::solve_ge. For each vertex with sp(0)<0 and
 // sp(1)>0 the crossing is at s* = -sp(0)/(sp(1)-sp(0)). Apply s_grow = max(s*) to all INFINITE cuts.
-UTP HD void DTP::grow_infinite_cuts( const auto &new_cut_dir, auto new_cut_dot ) {
+UTP T_TA HD void DTP::grow_infinite_cuts( const T &new_cut_dir, A new_cut_dot ) {
     // check to grow enough so that all the vertices stay on the same side
     TF s_grow = 0; // std::numeric_limits<TF>::max();
     bool need_to_grow = false;

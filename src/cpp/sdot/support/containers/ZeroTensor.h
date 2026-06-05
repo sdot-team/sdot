@@ -29,16 +29,16 @@ public:
 
     // shape
     HD Shape         shape                () const { return _shape; }
-    HD auto          shape                ( auto d ) const { return _shape[ d ]; }
+    T_U HD auto      shape                ( U d ) const { return _shape[ d ]; }
     HD auto          nb_items             () const;
 
     // always accessible from any execution context — no transfer needed
-    HD auto          transfer_cost        ( const auto & ) const { return 0_c; }
+    T_U HD auto      transfer_cost        ( const U & ) const { return 0_c; }
 
     // indexing — peels one dimension per call, result is always zero
     HD auto          operator()           () const { return *this; }
-    HD auto          operator()           ( auto index, auto ...rem ) const;
-    HD auto          operator[]           ( auto index ) const { return operator()( index ); }
+    T_Tv HD auto     operator()           ( T index, V ...rem ) const;
+    T_U  HD auto     operator[]           ( U index ) const { return operator()( index ); }
 
     // scalar access
     HD               operator TF          () const { return TF(0); }

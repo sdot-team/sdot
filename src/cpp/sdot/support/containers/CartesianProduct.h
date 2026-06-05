@@ -20,14 +20,14 @@ namespace CartesianProductDetail {
         const Next &next;
         Func       &func;
         Acc         acc;
-        HD void operator()( auto &&value ) const {
+        T_T HD void operator()( T &&value ) const {
             next.for_each_item( func, acc.with_appended_value( FORWARD( value ) ) );
         }
     };
 
     // builders used by cartesian_product / cartesian_product_ranges (functors over apply_values)
-    struct MakeProduct       { HD auto operator()( auto &&...lists ) const; };
-    struct MakeProductRanges { HD auto operator()( auto &&...lists ) const; };
+    struct MakeProduct       { T_VA HD auto operator()( A &&...lists ) const; };
+    struct MakeProductRanges { T_VA HD auto operator()( A &&...lists ) const; };
 }
 
 template<class Head,class... Tail>
@@ -35,11 +35,11 @@ struct CartesianProducts<Head,Tail...> {
     using Next = CartesianProducts<Tail...>;
 
     // call func( multi_index ) for each combination; `acc` accumulates the indices chosen so far
-    HD void for_each_item( auto &&func, auto acc ) const {
+    T_TA HD void for_each_item( T &&func, A acc ) const {
         sdot::for_each_item( head, CartesianProductDetail::ForEachStep<Next,DECAYED_TYPE_OF( func ),DECAYED_TYPE_OF( acc )>{ next, func, acc } );
     }
 
-    HD void for_each_item( auto &&func ) const {
+    T_T HD void for_each_item( T &&func ) const {
         for_each_item( FORWARD( func ), tuple() );
     }
 
@@ -47,14 +47,14 @@ struct CartesianProducts<Head,Tail...> {
     // for_each_item (head = most significant axis): thread `rel` of `mod` visits the linear indices
     // rel, rel+mod, ..., decoding each into its multi-index. O( nb_items / mod ) per thread — no full
     // scan, unlike the generic fallback in for_each_item_split.h. Requires each axis to provide item_at().
-    HD void for_each_item_split( PI rel, PI mod, auto &&func ) const {
+    T_T HD void for_each_item_split( PI rel, PI mod, T &&func ) const {
         const PI n = PI( nb_items() );
         for ( PI k = rel; k < n; k += mod )
             func( item_at( k ) );
     }
 
     // multi-index (Tuple) of the k-th item in flattened order; head is the most significant axis.
-    HD auto item_at( PI k, auto acc ) const {
+    T_T HD auto item_at( PI k, T acc ) const {
         const PI nn = PI( next.nb_items() );
         return next.item_at( k % nn, acc.with_appended_value( head.item_at( k / nn ) ) );
     }
@@ -70,56 +70,56 @@ struct CartesianProducts<Head,Tail...> {
 
 template<>
 struct CartesianProducts<> {
-    HD void for_each_item( auto &&func, auto acc ) const {
+    T_TA HD void for_each_item( T &&func, A acc ) const {
         func( acc );
     }
 
-    HD void for_each_item( auto &&func ) const {
+    T_T HD void for_each_item( T &&func ) const {
         for_each_item( FORWARD( func ), tuple() );
     }
 
     // a single (empty) combination: only thread rel == 0 runs it
-    HD void for_each_item_split( PI rel, PI /*mod*/, auto &&func ) const {
+    T_T HD void for_each_item_split( PI rel, PI /*mod*/, T &&func ) const {
         if ( rel == 0 )
             func( tuple() );
     }
 
-    HD auto item_at( PI /*k*/, auto acc ) const { return acc; }
+    T_T HD auto item_at( PI /*k*/, T acc ) const { return acc; }
 
     constexpr auto nb_items() const {
         return 1;
     }
 };
 
-template<class... Lists>
-HD auto transfer_cost( const auto &ec, const CartesianProducts<Lists...> &arg ) {
+template<class EC,class... Lists>
+HD auto transfer_cost( const EC &ec, const CartesianProducts<Lists...> &arg ) {
     if constexpr( sizeof...( Lists ) )
         return transfer_cost( ec, arg.head ) + transfer_cost( ec, arg.next );
     else
         return 0_c;
 }
 
-HD auto cartesian_product_args() {
+inline HD auto cartesian_product_args() {
     return CartesianProducts<>{};
 }
 
-HD auto cartesian_product_args( auto &&head, auto &&...tail ) {
+T_Tv HD auto cartesian_product_args( T &&head, V &&...tail ) {
     return CartesianProducts<DECAYED_TYPE_OF( head ),DECAYED_TYPE_OF( tail )...>{
         FORWARD( head ), cartesian_product_args( FORWARD( tail )... )
     };
 }
 
-HD auto cartesian_product( auto &&tuple_of_lists ) {
+T_T HD auto cartesian_product( T &&tuple_of_lists ) {
     return tuple_of_lists.apply_values( CartesianProductDetail::MakeProduct{} );
 }
 
-HD auto cartesian_product_ranges( auto &&tuple_of_lists ) {
+T_T HD auto cartesian_product_ranges( T &&tuple_of_lists ) {
     return tuple_of_lists.apply_values( CartesianProductDetail::MakeProductRanges{} );
 }
 
 namespace CartesianProductDetail {
-    HD auto MakeProduct::operator()( auto &&...lists ) const { return cartesian_product_args( FORWARD( lists )... ); }
-    HD auto MakeProductRanges::operator()( auto &&...lists ) const { return cartesian_product_args( range( FORWARD( lists ) )... ); }
+    T_VA HD auto MakeProduct::operator()( A &&...lists ) const { return cartesian_product_args( FORWARD( lists )... ); }
+    T_VA HD auto MakeProductRanges::operator()( A &&...lists ) const { return cartesian_product_args( range( FORWARD( lists ) )... ); }
 }
 
 } // namespace sdot

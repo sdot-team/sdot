@@ -17,24 +17,24 @@ public:
     SCInt          ct_size            = 1 + sizeof...( Tail );
     using          Next               = Tuple<Tail...>;
 
-    HD             Tuple              ( Function, auto &&func, auto index ); ///< allows for starting with index != 0
-    HD             Tuple              ( Function, auto &&func );
+    HD T_TA        Tuple              ( Function, T &&func, A index ); ///< allows for starting with index != 0
+    HD T_T         Tuple              ( Function, T &&func );
 
-    HD             Tuple              ( Values, auto head, auto... tail );
+    HD T_Tv        Tuple              ( Values, T head, V... tail );
     T_VT HD        Tuple              ( const Tuple<T...> &that );
     HD             Tuple              ( const Tuple &that ) = default;
     HD             Tuple              () = default;
 
-    HD void        for_each_item      ( auto &&cb_func ) const;
-    HD void        for_each_item      ( auto &&cb_func );
-    HD auto        apply_values       ( auto &&cb_func ) const;
-    HD auto        operator[]         ( auto &&index ) const;
-    HD auto        operator==         ( const auto &that ) const;
+    HD T_T void    for_each_item      ( T &&cb_func ) const;
+    HD T_T void    for_each_item      ( T &&cb_func );
+    HD T_T auto    apply_values       ( T &&cb_func ) const;
+    HD T_T auto    operator[]         ( T &&index ) const;
+    HD T_T auto    operator==         ( const T &that ) const;
     static HD auto size               ();
-    HD void        set                ( auto &&index, auto &&value );
+    HD T_TA void   set                ( T &&index, A &&value );
 
-    HD auto        with_appended_value( auto &&new_value ) const;
-    HD auto        without_index      ( auto index ) const;
+    HD T_T auto    with_appended_value( T &&new_value ) const;
+    HD T_T auto    without_index      ( T index ) const;
 
     Head           head;
     Next           tail;
@@ -46,23 +46,23 @@ class Tuple<> {
 public:
     SCInt          ct_size            = 0;
 
-    HD             Tuple              ( Function, auto &&/*func*/, auto /*index*/ );
-    HD             Tuple              ( Function, auto &&/*func*/ );
+    HD T_TA        Tuple              ( Function, T &&/*func*/, A /*index*/ );
+    HD T_T         Tuple              ( Function, T &&/*func*/ );
     HD             Tuple              ( const Tuple &that ) = default;
     HD             Tuple              ( Values );
     HD             Tuple              () = default;
 
-    HD void        for_each_item      ( auto &&/* cb */ ) const;
-    HD auto        apply_values       ( auto &&cb ) const;
-    HD Void        operator[]         ( auto ) const;
-    HD auto        operator==         ( const auto &that ) const;
+    HD T_T void    for_each_item      ( T &&/* cb */ ) const;
+    HD T_T auto    apply_values       ( T &&cb ) const;
+    HD T_T Void    operator[]         ( T ) const;
+    HD T_T auto    operator==         ( const T &that ) const;
     static HD auto size               ();
-    HD void        set                ( auto &&index, auto &&value );
+    HD T_TA void   set                ( T &&index, A &&value );
 
-    HD auto        with_appended_value( auto &&new_value ) const;
+    HD T_T auto    with_appended_value( T &&new_value ) const;
 };
 
-constexpr auto tuple( auto &&...a ) {
+T_VT constexpr auto tuple( T &&...a ) {
     return Tuple<DECAYED_TYPE_OF( a )...>( Values(), a... );
 }
 
@@ -75,7 +75,7 @@ constexpr auto concat( const Tuple<A...> &a, const Tuple<B...> &b ) {
     } );
 }
 
-constexpr auto map( auto &&list, auto &&func ) { // requires requires { list.apply_values( []( auto... ) {} ); } {
+T_TA constexpr auto map( T &&list, A &&func ) { // requires requires { list.apply_values( []( auto... ) {} ); } {
     return list.apply_values( [&]( auto... values ) {
         return tuple( func( values )... );
     } );

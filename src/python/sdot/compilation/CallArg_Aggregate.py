@@ -222,18 +222,32 @@ class CallArg_Aggregate( CallArg ):
 
         # apply_values, batch_sizes() + operator()()
         batch_axes = getattr( self.python_class, 'batch_axes', [] )
-        lines.append(  f"    HD auto apply_values( auto &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
-        lines.append(  f"    HD auto apply_values( auto &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
+        lines.append(  f"    template<class F> HD auto apply_values( F &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
+        lines.append(  f"    template<class F> HD auto apply_values( F &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
         lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
 
         # Generic slice operator: Tuple<> → identity, any other index → slice each field.
-        # Sliced fields are accessed via their own operator(), so the return type is deduced.
+        # Each field is sliced via its own operator(), so the resulting struct has different
+        # (lower-rank) tensor types. We spell out the return type's template arguments explicitly
+        # (decltype of each sliced field) because aggregate CTAD from designated initializers is
+        # C++20-only — C++17 cannot deduce them. The return type's template-parameter order matches
+        # this struct's `template_args` (same fields, the batch axis is a runtime member, not a param).
         # When an unbatch_version exists (e.g. BatchOfCells → Cell) it is used as the return type;
         # otherwise the same struct type is returned (Cell → Cell, for vmap).
         return_type = unbatch_version.__name__ if unbatch_version is not None else base_cpp_name
         if unbatch_version is not None:
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
-        lines.append(  "    HD auto operator()( auto batch_index ) const {" )
+
+        return_template_args = []
+        for n, _ in template_args:
+            if n.startswith( "T_" ):
+                return_template_args.append( f"decltype( { n[ 2: ] }( batch_index ) )" )
+            else:  # TI, ct_<axis>: passed through unchanged
+                return_template_args.append( n )
+        if return_template_args:
+            return_type += f"<{ ', '.join( return_template_args ) }>"
+
+        lines.append(  "    template<class BI> HD auto operator()( BI batch_index ) const {" )
         lines.append(  "        if constexpr ( std::is_same_v<std::decay_t<decltype( batch_index )>, Tuple<>> ) {" )
         lines.append(  "            return *this;" )
         lines.append(  "        } else {" )

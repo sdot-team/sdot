@@ -24,7 +24,7 @@ namespace sdot {
 //       cuda_cost < cpu_cost  → CUDA (GPU data avoids a transfer)
 //       otherwise             → CPU  (tie or CPU-native data; current context is host)
 // ---------------------------------------------------------------------------
-HD auto execution_space_for( [[maybe_unused]] const auto &...args ) {
+T_VA HD auto execution_space_for( [[maybe_unused]] const A &...args ) {
 #ifdef __CUDA_ARCH__
     return ExecutionContext_Cuda{};
 #elif defined( __CUDACC__ )

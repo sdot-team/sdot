@@ -20,14 +20,14 @@ struct Ct {
         return i;
     }
 
-    void display( auto &os ) const {
+    T_U void display( U &os ) const {
         os << "Ct(" << i  << ")";
     }
 };
 
 // 5_c will produce a Ct<int,5>()
 template<char... Digits>
-consteval auto operator""_c() {
+constexpr auto operator""_c() {
     constexpr int v = [] {
         char ds[] = { Digits... };
         int r = 0;
@@ -40,7 +40,7 @@ consteval auto operator""_c() {
 
 // 1_c will produce a Ct<bool,1>()
 template<char... Digits>
-consteval auto operator""_b() {
+constexpr auto operator""_b() {
     constexpr int v = [] {
         char ds[] = { Digits... };
         int r = 0;
@@ -55,10 +55,10 @@ template<class A,A i,class B,B j>
 struct TypePromote<Ct<A,i>,Ct<B,j>> { static_assert( i == j ); using type = Ct<typename TypePromote<A,B>::type,i>; };
 
 template<class A,A i,class B>
-struct TypePromote<Ct<A,i>,B> { using type = TypePromote<A,B>::type; };
+struct TypePromote<Ct<A,i>,B> { using type = typename TypePromote<A,B>::type; };
 
 template<class A,class B,B j>
-struct TypePromote<A,Ct<B,j>> { using type = TypePromote<A,B>::type; };
+struct TypePromote<A,Ct<B,j>> { using type = typename TypePromote<A,B>::type; };
 
 
 // Ct Ct
