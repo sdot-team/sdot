@@ -12,6 +12,10 @@ BOUNDARY = -1
 class Cell:
     """
         2D -> vertex_indices and edge_indices are undefined
+
+        A Cell stays a Cell after batching/vmap: batch axes are leading tensor dimensions
+        (tracked in the instance `batch_axes`), never a distinct type. The `_make_*` / `_measures`
+        helpers below take a `batch_axes` dict { axis_name: size }; {} means a single cell.
     """
 
     # base attributes
@@ -40,8 +44,8 @@ class Cell:
 
     # --------------------------------------- ctor: make_full_space ------------------------------------
     @staticmethod
-    def make_full_space( dim: int ):
-        return _make_full_spaces( Cell, dim, {} )
+    def make_full_space( dim: int, batch_axes: dict = None ):
+        return Cell._make_full_spaces( dim, batch_axes or {} )
 
     # ---------------------------------- ctor: make_aligned_hypercube ----------------------------------
     @staticmethod
@@ -90,19 +94,23 @@ class Cell:
 
         return Cell.make_hypercube( frame, cut_id = cut_id )
 
+    # ---------------------------------- ctor: make_hypercube ----------------------------------
     @staticmethod
-    def make_hypercube( frame, cut_id = BOUNDARY ):
+    def make_hypercube( frame, cut_id = BOUNDARY, batch_axes: dict = None ):
         """
         frame: (dim+1, dim)  — row 0 is origin, rows 1..dim are edge vectors
+               with batch_axes, leading dimensions describe the batch (e.g. (N, dim+1, dim))
         """
         frame  = driver.array( frame )
         cut_id = driver.array( cut_id, dtype = int )
-        return _make_hypercubes( Cell, frame, cut_id, {} )
+        return Cell._make_hypercubes( frame, cut_id, batch_axes or {} )
 
+    # ---------------------------------- measure ----------------------------------
     @property
     def measure( self ) -> any:
-        return _measures( self, self.batch_axes_dict )
+        return Cell._measures( self, self.batch_axes_dict )
 
+    # ---------------------------------- cut ----------------------------------
     def cut( self, cut_plane, cut_offset = None, cut_id = BOUNDARY ):
         cut_plane = driver.array( cut_plane )
 
@@ -115,16 +123,16 @@ class Cell:
                 name = "cut",
                 header = """
                     struct CutFunctor {
-                        HD void operator()( const auto &batch_index, auto &&p ) const {
-                            p.batch_of_cells( batch_index ).cut(  );
+                        template<class BI,class P> HD void operator()( const BI &batch_index, P &&p ) const {
+                            p.cell( batch_index ).cut(  );
                         }
                     };
                 """,
                 fwd_code = """
-                    run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), CutFunctor{}, p );
+                    run_parallel( cartesian_product_ranges( p.cell.batch_sizes() ), CutFunctor{}, p );
                 """,
             ),
-            batch_of_cells = Mutable( self ),
+            cell = Mutable( self ),
             cut_planes     = cut_plane,
         )
 
@@ -162,133 +170,112 @@ class Cell:
         if pts.shape[ 0 ]:
             plotter.add_mesh( pyvista.PolyData( driver.to_numpy( pts ), faces = faces ), show_edges = True )
 
+    # --------------------------------------------------------------------------------------
+    # Internal FFI helpers. `batch_axes` is a { axis_name: size } dict of the leading (batch)
+    # dimensions; {} means a single cell. Batch axes are leading tensor dims (not struct
+    # members), so their sizes are read from shapes at runtime — Cell stays Cell.
+    # --------------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Shared FFI helpers — called by Cell, BatchOfCells, and future nested variants.
-# Each function takes a `batch_axes` dict { axis_name: size } describing the
-# leading output dimensions; empty dict means single-cell (scalar output).
-# ---------------------------------------------------------------------------
+    @staticmethod
+    def _batch_size_exprs( batch_axes: dict ) -> list:
+        """C++ expressions for the batch sizes — read from a representative field's leading dims."""
+        return [ f"p.cell.is_fully_bounded.shape( Ct<int,{ i }>() )" for i in range( len( batch_axes ) ) ]
 
-def _make_full_spaces( cls, dim: int, batch_axes: dict[ str, int ] ):
-    """  """
-    return cast( cls, driver.call(
-        FfiCodeParallel(
-            batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
-            fwd_body = "p.batch_of_cells( batch_index ).init_as_unbounded();",
-            name = "make_full_spaces"
-        ),
-        batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ) )
-    )
+    @staticmethod
+    def _return_parameters_for( dim: int, batch_axes: dict ) -> dict:
+        """Axis variables to allocate a new (possibly batched) Cell output."""
+        kw = dict(
+            max_of_nb_vertices = 64,
+            max_of_nb_edges = 64,
+            max_of_nb_cuts = 64,
+            dim = dim,
+        )
+        if batch_axes:
+            kw[ "batch_axes" ] = list( batch_axes.keys() )
+        kw.update( batch_axes )
+        return kw
 
-
-def _make_hypercubes( cls, frames, cut_ids, batch_axes: dict ):
-    """Shared hypercube constructor used by all Cell variants."""
-    dim = frames.shape[ -1 ]
-    return cast( cls, driver.call(
-        FfiCodeParallel(
-            batch_axes = [ f"p.batch_of_cells.{ axis }" for axis in batch_axes.keys() ],
-            fwd_body = "p.batch_of_cells( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
-            bwd_body = "p.batch_of_cells( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
-            name = "make_full_spaces"
-        ),
-        batch_of_cells = Return( cls, **_return_parameters_for( dim, batch_axes ) ),
-        cut_ids = cut_ids,
-        frames = frames,
-    ) )
-
-def _return_parameters_for( dim: int, batch_axes: dict[ str, int ] ) -> dict:
-    """ axes variables to create a new Cell """
-    kw = dict(
-        max_of_nb_vertices = 64,
-        max_of_nb_edges = 64,
-        max_of_nb_cuts = 64,
-        dim = dim,
-    )
-    kw.update( batch_axes )
-    return kw
-
-
-
-
-
-
-def _max_nb_map_items( dim: int, nb_cuts: int = None ) -> int:
-    if nb_cuts is None:
-        nb_cuts = 256
-    res = 0
-    if dim >= 2:
-        res += nb_cuts
-    if dim >= 3:
-        res += nb_cuts * nb_cuts
-    if dim >= 4:
-        for _ in range( 3, dim ):
-            res += nb_cuts * nb_cuts
-    return res
-
-
-def _measures( cell_obj, batch_axes: dict ):
-    """
-    Shared measure implementation used by all Cell variants.
-
-    batch_axes: ordered { axis_name: size } for the leading output dimensions,
-                e.g. {} for a single Cell, {'batch_size_Cell': N} for BatchOfCells,
-                {'batch_size_PD': M, 'batch_size_Cell': N} for a nested batch.
-    """
-    from math import prod
-
-    dim         = cell_obj.dim
-    max_nb_cuts = cell_obj.nb_cuts.max()
-
-    max_of_nb_map_items = _max_nb_map_items( dim, max_nb_cuts )
-    max_nb_threads      = min( driver.nb_threads(), max( 1, prod( batch_axes.values(), start = 1 ) ) )
-
-    args = {}
-    if dim != 2:
-        args[ "map_items" ] = Workspace(
-            Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
-            max_of_nb_map_items = max_of_nb_map_items,
-            max_nb_threads      = max_nb_threads,
+    @staticmethod
+    def _make_full_spaces( dim: int, batch_axes: dict ):
+        return cast( Cell, driver.call(
+            FfiCodeParallel(
+                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                fwd_body = "p.cell( batch_index ).init_as_unbounded();",
+                name = "make_full_spaces"
+            ),
+            cell = Return( Cell, **Cell._return_parameters_for( dim, batch_axes ) ) )
         )
 
-    return driver.call(
-        FfiCodeCustom(
-            name = "measure",
-            header = """
-                struct MeasureFunctor {
-                    """ + """
-                    HD auto max_gpu_threads( auto &&map_items, auto &&.../* nb_map_items, outputs, max_nb_cuts, batch_of_cells */ ) const {
-                        return PI( map_items.shape( Ct<int,0>() ) );
-                    }
-                    """ * ( dim != 2 ) + """
+    @staticmethod
+    def _make_hypercubes( frames, cut_ids, batch_axes: dict ):
+        dim = frames.shape[ -1 ]
+        return cast( Cell, driver.call(
+            FfiCodeParallel(
+                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                fwd_body = "p.cell( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
+                bwd_body = "p.cell( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
+                name = "make_hypercubes"
+            ),
+            cell = Return( Cell, **Cell._return_parameters_for( dim, batch_axes ) ),
+            cut_ids = cut_ids,
+            frames = frames,
+        ) )
 
-                    HD void per_thread( const auto &thread_info, const auto &/* batch_indices */, auto &&cont, auto &&p, auto &&...args ) const {
-                        constexpr int dim = decltype( p.batch_of_cells.dim )::value;
-                        if constexpr( dim != 2 ) {
-                            auto item_map = recursive_map_of_unique_sorted_indices( Ct<int,dim-1>(), p.map_items( thread_info.global_id() ), p.nb_map_items( thread_info.global_id() ), p.max_nb_cuts );
-                            cont( item_map, p, args... );
-                        } else {
-                            cont( Void{}, p, args... );
-                        }
-                    }
+    @staticmethod
+    def _max_nb_map_items( dim: int, nb_cuts: int = None ) -> int:
+        if nb_cuts is None:
+            nb_cuts = 256
+        res = 0
+        if dim >= 2:
+            res += nb_cuts
+        if dim >= 3:
+            res += nb_cuts * nb_cuts
+        if dim >= 4:
+            for _ in range( 3, dim ):
+                res += nb_cuts * nb_cuts
+        return res
 
-                    HD void operator()( const auto &batch_index, auto &&item_map, auto &&p, Void ) const {
-                        p.batch_of_cells( batch_index ).measure_bwd( item_map, p, batch_index );
-                    }
+    @staticmethod
+    def _measures( cell_obj, batch_axes: dict ):
+        from math import prod
 
-                    HD void operator()( const auto &batch_index, auto &&item_map, auto &&p ) const {
-                        p.output( batch_index ) = p.batch_of_cells( batch_index ).measure( item_map );
-                    }
-                };
-            """,
-            fwd_code = """
-                run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p );
-            """,
-            bwd_code = """
-                run_parallel( cartesian_product_ranges( p.batch_of_cells.batch_sizes() ), MeasureFunctor{}, p, Void{} );
-            """,
-        ),
-        output         = Return( Tensor( *batch_axes.keys() ), **batch_axes ),
-        max_nb_cuts    = max_nb_cuts,
-        batch_of_cells = cell_obj,
-        **args,
-    )
+        max_nb_cuts = cell_obj.nb_cuts.max()
+        dim = cell_obj.dim
+
+        max_of_nb_map_items = Cell._max_nb_map_items( dim, max_nb_cuts )
+        max_nb_threads = min( driver.nb_threads(), max( 1, prod( batch_axes.values(), start = 1 ) ) )
+
+        if dim != 2:
+            per_thread_args = [ "item_map" ]
+            per_thread = """
+                constexpr int dim = decltype( p.cell.dim )::value;
+                auto item_map = recursive_map_of_unique_sorted_indices( Ct<int,dim-1>(), p.map_items( thread_info.global_id() ), p.nb_map_items( thread_info.global_id() ), p.max_nb_cuts );
+                cont( p, item_map );
+            """
+            args = {
+                "map_items" : Workspace(
+                    Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
+                    max_of_nb_map_items = max_of_nb_map_items,
+                    max_nb_threads      = max_nb_threads,
+                )
+            }
+            pre = ""
+        else:
+            per_thread_args = []
+            per_thread = ""
+            args = {}
+            pre = "Void item_map; "
+
+        return driver.call(
+            FfiCodeParallel( name = "measure",
+                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                per_thread_args = per_thread_args,
+                per_thread = per_thread,
+                fwd_body = pre + "p.output( batch_index ) = p.cell( batch_index ).measure( item_map );",
+                bwd_body = pre + "p.cell( batch_index ).measure_bwd( item_map, p, batch_index );",
+            ),
+            output = Return( Tensor( *batch_axes.keys() ), **batch_axes ),
+            max_nb_cuts = max_nb_cuts,
+            cell = cell_obj,
+            **args,
+        )

@@ -31,12 +31,13 @@ def batch_variant_of( base_cls ):
         annotations = get_all_annotations( base_cls )
         bn = f"batch_size_{ base_cls.__name__ }"
 
+        # Annotations are copied unchanged (base, unbatched). The batch axis is no longer
+        # baked into the tensor shapes here — it is `batch_axes` (below) and gets prepended
+        # to each tensor as a leading dimension at analysis time (see CallArg_Aggregate).
+        # A batch variant is thus just "the base type with batch_axes preset + nicer ctors".
         for name, annotation in annotations.items():
             if name not in cls.__annotations__:
-                new_annotation = annotation
-                if make_variant := getattr( annotation, "make_variant", None ):
-                    new_annotation = make_variant( [ bn ], 0 )
-                cls.__annotations__[ name ] = new_annotation
+                cls.__annotations__[ name ] = annotation
 
         cls.BaseVersion  = base_cls
         cls.batch_axes   = [ bn ]

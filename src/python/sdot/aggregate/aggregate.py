@@ -110,6 +110,16 @@ def _setup_distribution_class( cls ):
             return res
         cls.batch_axes_dict = property( batch_axes_dict )
 
+    if 'with_prepended_batch_axis' not in vars( cls ):
+        # vmap hook (see JaxDriver batch rule): return a same-typed instance carrying the
+        # moved leading-N tensors, with one batch axis prepended to its instance batch_axes.
+        # Type-stable — Cell stays Cell. `N` is unused (the size lives in the moved shapes).
+        def with_prepended_batch_axis( self, N, moved_leaves ):
+            inst = type( self )( **moved_leaves )
+            inst.batch_axes = [ f"vmap_{ len( self.batch_axes ) }" ] + list( self.batch_axes )
+            return inst
+        cls.with_prepended_batch_axis = with_prepended_batch_axis
+
     for axis_name in _axis_names_of( cls ):
         if axis_name not in vars( cls ):
             def get_axis_size( self, a = axis_name ):

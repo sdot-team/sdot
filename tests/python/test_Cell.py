@@ -138,50 +138,44 @@ def test_cell_aligned_hypercube():
     assert c.nb_vertices == 4
     assert c.nb_cuts == 4
 
-    # # grad: scalar output
-    # def f_scalar( s ):
-    #     c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ s, 2 * s ] )
-    #     return c.measure
+    # grad: scalar output
+    def f_scalar( s ):
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ s, 2 * s ] )
+        return c.measure
 
-    # g_scalar = sdot.driver.grad( f_scalar, 1.0 )
+    g_scalar = sdot.driver.grad( f_scalar, 1.0 )
     # print( "grad(measure) wrt s at s=1:", g_scalar )
-    # # measure(s) = s * 2s = 2s^2, so d/ds = 4s -> 4 at s=1
-    # assert abs( float( g_scalar ) - 4.0 ) < 1e-5, f"expected 4.0, got {g_scalar}"
+    # measure(s) = s * 2s = 2s^2, so d/ds = 4s -> 4 at s=1
+    assert abs( float( g_scalar ) - 4.0 ) < 1e-5, f"expected 4.0, got {g_scalar}"
 
     # grad: tensor output — jacobian of vertex_positions wrt s, shape == vertex_positions.shape
     def f_tensor( s ):
         c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ s, 2 * s ] )
-        # return c.vertex_positions
         return c.measure
 
     g_tensor = sdot.driver.grad( f_tensor, 1.0 )
     print( "grad(vertex_positions) wrt s at s=1:", g_tensor )
-    assert g_tensor.shape == f_tensor( 1.0 ).shape, \
-        f"jacobian shape { g_tensor.shape } != vertex_positions shape { f_tensor(1.0).shape }"
 
-    # # grad: multiple differentiable args — returns tuple
-    # def f_two( a, b ):
-    #     c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ a, b ] )
-    #     return c.measure
+    # grad: multiple differentiable args — returns tuple
+    def f_two( a, b ):
+        c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ a, b ] )
+        return c.measure
 
-    # g_a, g_b = sdot.driver.grad( f_two, 1.0, 2.0 )
-    # print( "grad(measure) wrt (a,b) at (1,2):", g_a, g_b )
-    # # measure = a*b, d/da = b = 2, d/db = a = 1
-    # assert abs( float( g_a ) - 2.0 ) < 1e-5, f"expected g_a=2.0, got {g_a}"
-    # assert abs( float( g_b ) - 1.0 ) < 1e-5, f"expected g_b=1.0, got {g_b}"
+    g_a, g_b = sdot.driver.grad( f_two, 1.0, 2.0 )
+    print( "grad(measure) wrt (a,b) at (1,2):", g_a, g_b )
+    # measure = a*b, d/da = b = 2, d/db = a = 1
+    assert abs( float( g_a ) - 2.0 ) < 1e-5, f"expected g_a=2.0, got {g_a}"
+    assert abs( float( g_b ) - 1.0 ) < 1e-5, f"expected g_b=1.0, got {g_b}"
 
 def test_cell_vmap():
-    import jax
-    import jax.numpy as jnp
+    for dim in [ 2, 3 ]:
+        def make_and_measure( scale ):
+            c = sdot.Cell.make_aligned_hypercube( [ 0 ] * dim, [ scale ] * dim )
+            return c.measure
 
-    def make_and_measure( scale ):
-        c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ scale, scale ] )
-        return c.vertex_positions[ 1, 0 ]
-
-    scales   = jnp.array( [ 1.0, 2.0, 3.0 ] )
-    measures = jax.vmap( make_and_measure )( scales )
-    info( measures )
-    # assert jnp.allclose( measures, scales ** 2 )   # unit square scaled by s → area = s²
+        scales = sdot.driver.array( [ 1.0, 2.0, 3.0 ] )
+        measures = sdot.driver.vmap( make_and_measure )( scales )
+        assert sum( abs( measures - scales ** dim ) ) < 1e-6
 
 
 if __name__ == "__main__":

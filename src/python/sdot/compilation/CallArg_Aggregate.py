@@ -32,6 +32,18 @@ class CallArg_Aggregate( CallArg ):
         self.sub_dict = {}
         self._additional_signature_items = []
 
+        # batch_axes prepended (as leading tensor dimensions) to every tensor of this aggregate.
+        # Source, in priority order: the instance (vmap sets it per-instance), an explicit
+        # `batch_axes` in the Return's type_kwargs, then the class default. They are *not* struct
+        # members — their sizes are read from tensor shapes — so a batched aggregate stays the
+        # same C++ struct as its unbatched form (e.g. Cell stays Cell, BatchOfCells = Cell + axis).
+        if python_value is not None:
+            self.batch_axes = list( getattr( python_value, "batch_axes", [] ) )
+        elif ctor_kwargs and "batch_axes" in ctor_kwargs:
+            self.batch_axes = list( ctor_kwargs[ "batch_axes" ] )
+        else:
+            self.batch_axes = list( getattr( python_class, "batch_axes", [] ) )
+
         # analysis: recursively analyse each annotated attribute into a sub-CallArg.
         # (skipped by backward_version, which fills sub_dict with transformed children itself.)
         if build_sub_dict:
@@ -42,6 +54,9 @@ class CallArg_Aggregate( CallArg ):
                         value = getattr( python_value, name )
                     except AttributeError:
                         raise RuntimeError( f"Unable to find attribute { name } in { python_value }" )
+                # prepend this aggregate's batch_axes as leading dims of each tensor annotation
+                if self.batch_axes and ( make_variant := getattr( annotation, "make_variant", None ) ):
+                    annotation = make_variant( self.batch_axes, 0 )
                 result = CallArg.factory( call_args, self, name, annotation, value, io_category, ctor_args, ctor_kwargs )
                 if result is None:
                     self._additional_signature_items.append( f"{ name }_absent" )
@@ -221,10 +236,14 @@ class CallArg_Aggregate( CallArg ):
         lines = []
 
         # apply_values, batch_sizes() + operator()()
-        batch_axes = getattr( self.python_class, 'batch_axes', [] )
+        # batch_axes are leading tensor dimensions (not struct members): their sizes are read from
+        # the shape of a representative field, so a batched aggregate keeps the same struct layout.
+        batch_axes = self.batch_axes
+        rep_field  = next( iter( self.sub_dict ), None )
+        batch_size_exprs = [ f"{ rep_field }.shape( Ct<int,{ i }>() )" for i in range( len( batch_axes ) ) ]
         lines.append(  f"    template<class F> HD auto apply_values( F &&func ) const {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
         lines.append(  f"    template<class F> HD auto apply_values( F &&func ) {{ return func( { ', '.join( self.sub_dict.keys() ) } ); }}" )
-        lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_axes ) } ); }}" )
+        lines.append(  f"    HD auto batch_sizes() const {{ return tuple( { ', '.join( batch_size_exprs ) } ); }}" )
 
         # Generic slice operator: Tuple<> → identity, any other index → slice each field.
         # Each field is sliced via its own operator(), so the resulting struct has different
@@ -267,6 +286,8 @@ class CallArg_Aggregate( CallArg ):
         if axis_variable_names:
             lines.append(  "    /* axis values */" )
             for axis_variable_name in axis_variable_names:
+                if axis_variable_name in batch_axes: # batch axes live as leading tensor dims, not members
+                    continue
                 if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
                     lines.append( f"    Ct<TI,ct_{ axis_variable_name }> { axis_variable_name };" )
                 else: # else, attribute to be filled during construction
@@ -339,6 +360,8 @@ class CallArg_Aggregate( CallArg ):
         # axes
         system = self.axis_system( use_attributes = False, recursive = True )
         for axis_variable_name in axis_variable_names:
+            if axis_variable_name in self.batch_axes: # batch axes are leading tensor dims, not members
+                continue
             if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
                 lines.append( f"{ beg_line }    .{ axis_variable_name } = Ct<TI,{ self.value_of_axis_variable( axis_variable_name ) }>()," )
             else: # else, attribute to be filled during construction

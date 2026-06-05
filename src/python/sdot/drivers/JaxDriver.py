@@ -377,6 +377,9 @@ class JaxDriver:
     def is_a_tensor( self, value ):
         return isinstance( value, ( jax.core.Tracer, jax.Array, numpy.ndarray, jax.ShapeDtypeStruct, ad_util.SymbolicZero ) )
 
+    def vmap( self, func ):
+        return jax.vmap( func )
+
     def differentiable_type( self, dtype ):
         if dtype is None or dtype is float:
             return True
@@ -679,50 +682,39 @@ class JaxDriver:
         return ret
 
     def _register_vmap_rule( self, module_name: str, code, orig_args: dict, fai: CallArgsAnalysis ):
-        """Register a JAX vmap batching rule for the given FfiCodeParallel primitive.
+        """Register a JAX vmap batching rule for an FfiCodeParallel primitive.
 
-        Convention: the vmap batch axis is read at C++ runtime from the shape of the
-        first batched input tensor — tensor-level, not aggregate-level.  Output tensors
-        get N prepended via the BatchVersion of any Return type (internal detail; the
-        Python caller still receives the base type with batch-traced tensors).
+        Type-stable convention (mirrors the C++ "Cell stays Cell" choice): vmap prepends one
+        batch axis as a leading tensor dimension on every batched value, without changing any
+        type. An aggregate gains an entry in its instance-level `batch_axes`; a Tensor Return
+        gains a leading axis; the FfiCodeParallel gains a prepended batch axis whose size is read
+        at runtime from the first batched input's leading shape. The axis is never a struct member.
         """
         from jax.interpreters import batching as jax_batching
         from .JaxMlirPrimitive import _vmap_rules, _cache
-        from ..aggregate.Return import Return
         from ..compilation.CallArgsAnalysis import CallArgsAnalysis
 
         # Flat list of all input tensors in FFI order
         all_inputs = fai.differentiable_tensor_inputs + fai.non_differentiable_tensor_inputs
 
-        # For each flat input, compute its full C++ path in the Parameters struct
-        def _cpp_path( tensor ):
+        # Attribute path ([ kwarg, field, ... ]) of each flat input in the Parameters struct
+        def _path( tensor ):
             parts = []
             ca = tensor
             while ca.parent is not None:
                 parts.append( ca.name_in_parent )
                 ca = ca.parent()
             parts.reverse()
-            return ".".join( parts )
+            return parts
 
-        input_paths = [ _cpp_path( t ) for t in all_inputs ]
+        input_paths = [ _path( t ) for t in all_inputs ]
 
-        # Map top-level kwarg name → flat input index (only top-level, non-nested)
-        input_kwarg_to_idx = {}
-        for i, t in enumerate( all_inputs ):
-            # top-level kwarg: parent is fai.arguments
-            if t.parent is not None and t.parent() is fai.arguments:
-                input_kwarg_to_idx[ t.name_in_parent ] = i
-
-        # Return recipes: kwarg_name → (BatchVersionCls, batch_axis_name, orig_type_kwargs)
-        return_recipes = {}
-        for kw, arg in orig_args.items():
-            if isinstance( arg, Return ) and hasattr( arg.return_type, 'BatchVersion' ):
-                bv = arg.return_type.BatchVersion
-                bn = bv.batch_axes[ 0 ]
-                return_recipes[ kw ] = ( bv, bn, dict( arg.type_kwargs ) )
-
-        if not return_recipes:
-            return  # no Return arg with a BatchVersion → can't auto-batch
+        # Group flat input indices by top-level kwarg, keeping the remaining field path.
+        # rest == []  → the kwarg is itself a top-level tensor input
+        # rest != []  → the kwarg is an aggregate, rest is the field path inside it
+        flat_by_kwarg : dict[ str, list ] = {}
+        for i, parts in enumerate( input_paths ):
+            flat_by_kwarg.setdefault( parts[ 0 ], [] ).append( ( i, parts[ 1: ] ) )
 
         jax_driver = self
 
@@ -755,19 +747,23 @@ class JaxDriver:
                         ( N, ) + flat_args[ i ].shape
                     )
 
-            # C++ expression for vmap batch size: read from the first batched input's shape
-            vmap_axis_expr = f"p.{ input_paths[ first_batch_idx ] }.shape( Ct<int,0>() )"
+            # C++ expression for the vmap batch size: read from the first batched input's leading shape
+            vmap_axis_expr = "p." + ".".join( input_paths[ first_batch_idx ] ) + ".shape( Ct<int,0>() )"
             batched_code   = code.with_prepended_batch_axis( vmap_axis_expr )
 
-            # Rebuild orig_args: tensor inputs → moved arrays, Return → BatchVersion(N)
+            # Prepend the vmap axis on every batched value. Our argument types (Return, Mutable,
+            # aggregate instances) each know how to do this via `with_prepended_batch_axis`, so the
+            # dispatch is polymorphic — no isinstance on our own types. Foreign values fall through:
+            # a top-level tensor input becomes its moved array, a scalar stays unchanged.
             new_args = {}
             for kw, arg in orig_args.items():
-                if kw in return_recipes:
-                    bv_cls, bn, orig_kw = return_recipes[ kw ]
-                    new_args[ kw ] = Return( bv_cls, **{ bn: N, **orig_kw } )
-                elif kw in input_kwarg_to_idx:
-                    new_args[ kw ] = moved[ input_kwarg_to_idx[ kw ] ]
-                else:
+                prepend = getattr( arg, "with_prepended_batch_axis", None )
+                if prepend is not None:
+                    moved_leaves = { rest[ 0 ]: moved[ idx ] for idx, rest in flat_by_kwarg.get( kw, [] ) if rest }
+                    new_args[ kw ] = prepend( N, moved_leaves )
+                elif kw in flat_by_kwarg:                       # foreign top-level tensor input
+                    new_args[ kw ] = moved[ flat_by_kwarg[ kw ][ 0 ][ 0 ] ]
+                else:                                           # scalar / unbatched value
                     new_args[ kw ] = arg
 
             # Build batched CallArgsAnalysis and compile the batched module

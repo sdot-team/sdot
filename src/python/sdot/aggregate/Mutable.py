@@ -13,6 +13,10 @@ class Mutable:
         self.dyn_axis_capacities = dyn_axis_capacities
         self.value = value
 
+    def with_prepended_batch_axis( self, N, moved_leaves ):
+        """vmap hook: batch the wrapped value (an aggregate) and re-wrap it as Mutable."""
+        return Mutable( self.value.with_prepended_batch_axis( N, moved_leaves ), **self.dyn_axis_capacities )
+
     def configure_call_arg( self, call_arg: CallArg, fai, mutable, driver ):
         return call_arg.configure( self.value, fai, self.dyn_axis_capacities, driver )
 

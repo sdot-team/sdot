@@ -4,7 +4,9 @@ from .drivers.driver import driver
 
 from .BatchOfCellWorkspace import BatchOfCellWorkspace
 from .MatrixTerms import MatrixTerms
-from .BatchOfCells import BatchOfCells as BatchOfCells
+# BatchOfCells was removed (a Cell now stays a Cell across batching). PowerDiagram is WIP;
+# this alias keeps it importable until its batched-cells workspace is reworked onto Cell + batch_axes.
+from .Cell import Cell as BatchOfCells
 from .Plotter import Plotter
 from .Norm2 import Norm2
 from .Bsp import Bsp
