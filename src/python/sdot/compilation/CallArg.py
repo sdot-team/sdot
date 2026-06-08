@@ -172,7 +172,8 @@ class CallArg:
         # 1. explicit value given through ctor_kwargs (bare or prefixed candidate names)
         for candidate in candidates:
             if candidate in self.ctor_kwargs:
-                return int( self.ctor_kwargs[ candidate ] )
+                # return int( self.ctor_kwargs[ candidate ] )
+                return self.ctor_kwargs[ candidate ]
 
         # 2. a child standing for a dynamic axis carries its value directly
         child = self.children.get( name )

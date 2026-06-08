@@ -199,6 +199,19 @@ class JaxDriver:
     def array_type( self ):
         return ( jax.Array, jax_core.Tracer )
 
+    def normalized_type_for( self, dtype ) -> str:
+        """TL type name ( e.g. 'FP32', 'SI64' ) for a python / numpy / framework scalar
+        type or a Dtype. Driver-independent: it goes through the Dtype abstraction and
+        resolves an unsized type to the driver's float / index width."""
+        if dtype is float:
+            dtype = self.ftype
+        elif dtype is int:
+            dtype = self.itype
+        d = Dtype.factory( dtype )
+        if d.size is None:
+            d = Dtype( d.floating_point, ( self.ftype if d.floating_point else self.itype ).size, d.signed )
+        return d.cpp_name
+
     @property
     def normalized_dtype( self ):
         return self.normalized_type_for( self.dtype )

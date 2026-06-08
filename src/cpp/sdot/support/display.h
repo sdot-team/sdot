@@ -5,6 +5,8 @@
 
 namespace sdot {
 
+T_T void display( std::ostream &os, const T &value );
+
 // priority tag for ordered SFINAE dispatch (replaces C++20 requires{} chains)
 template<int N> struct _disp_priority : _disp_priority<N-1> {};
 template<>      struct _disp_priority<0> {};

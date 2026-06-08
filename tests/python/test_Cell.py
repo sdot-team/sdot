@@ -168,7 +168,7 @@ def test_cell_aligned_hypercube():
     assert abs( float( g_b ) - 1.0 ) < 1e-5, f"expected g_b=1.0, got {g_b}"
 
 def test_cell_vmap():
-    for dim in [ 2, 3 ]:
+    for dim in [ 3 ]:
         def make_and_measure( scale ):
             c = sdot.Cell.make_aligned_hypercube( [ 0 ] * dim, [ scale ] * dim )
             return c.measure

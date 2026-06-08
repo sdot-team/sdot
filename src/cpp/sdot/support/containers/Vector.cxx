@@ -13,15 +13,13 @@ namespace sdot {
 #define DTP Vector<T,ct_size>
 
 UTP template<class U,class E> HD DTP::Vector( const U &values ) {
-    ASSERT( values.size() == size() );
     PI i = 0;
     sdot::for_each_item( values, [&]( const auto &item ) {
         if ( i < ct_size )
             new ( data() + i++ ) T( item );
     } );
-    // auto iter = values.begin();
-    // for( PI i = 0; i < size(); ++i )
-    //     new ( data() + i ) T( *( iter++ ) );
+    for(; i < ct_size; ++i )
+        new ( data() + i ) T;
 }
 
 UTP T_VA HD DTP::Vector( FillWith, A &&...ctor_args ) {

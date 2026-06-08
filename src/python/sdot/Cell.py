@@ -25,8 +25,10 @@ class Cell:
     cut_ids           : Tensor( "nb_cuts[]", dtype = int )
 
     # nD attributes when n > 2
-    vertex_indices    : Conditional( lambda a: a.dim > 2, Tensor( "nb_vertices[]", "dim + 1", dtype = int ) ) # vertex index -> sorted cut indices
-    edge_indices      : Conditional( lambda a: a.dim > 2, Tensor( "nb_edges[]", "dim + 1", dtype = int ) ) # edge index -> vertex indices (vertex on each side) + cut_indices
+    # vertex_indices    : Conditional( lambda a: a.dim > 2, Tensor( "nb_vertices[]", "dim + 1", dtype = int ) ) # vertex index -> sorted cut indices
+    # edge_indices      : Conditional( lambda a: a.dim > 2, Tensor( "nb_edges[]", "dim + 1", dtype = int ) ) # edge index -> vertex indices (vertex on each side) + cut_indices
+    vertex_indices    : Tensor( "nb_vertices[]", "dim + 1", dtype = int ) # vertex index -> sorted cut indices
+    edge_indices      : Tensor( "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
 
     # generated attributes
     if TYPE_CHECKING:
@@ -222,29 +224,36 @@ class Cell:
         ) )
 
     @staticmethod
-    def _max_nb_map_items( dim: int, nb_cuts: int = None ) -> int:
+    def _max_nb_map_items( dim: int, nb_cuts: int = None ):
         if nb_cuts is None:
             nb_cuts = 256
         res = 0
-        if dim >= 2:
-            res += nb_cuts
-        if dim >= 3:
-            res += nb_cuts * nb_cuts
-        if dim >= 4:
-            for _ in range( 3, dim ):
-                res += nb_cuts * nb_cuts
+        res += nb_cuts * ( dim >= 2 )
+        res += nb_cuts * nb_cuts * ( dim >= 3 )
         return res
 
     @staticmethod
     def _measures( cell_obj, batch_axes: dict ):
-        from math import prod
-
-        max_nb_cuts = cell_obj.nb_cuts.max()
+        # Workspace and kernel strides must be sized from a *static* allocation bound,
+        # never from runtime data: under vmap/grad the actual `nb_cuts` is a traced value
+        # (and would leak a tracer into shapes / the dylib cache key). `max_of_nb_cuts` is
+        # the compile-time capacity of the cut buffers, known regardless of the driver.
+        max_nb_cuts = cell_obj.max_of_nb_cuts
         dim = cell_obj.dim
 
         max_of_nb_map_items = Cell._max_nb_map_items( dim, max_nb_cuts )
-        max_nb_threads = min( driver.nb_threads(), max( 1, prod( batch_axes.values(), start = 1 ) ) )
 
+        # `map_items` is per-thread scratch indexed by `thread_info.global_id()`, so it needs one
+        # row per concurrent worker. The runtime worker count is min( nb_items, hardware_threads ),
+        # and `nb_items` includes the vmap/batch axes that are only prepended *after* this point
+        # (by the driver's batching rule) — so it is not visible here. We therefore size the
+        # workspace by the hardware thread pool, which always bounds global_id() on CPU and GPU.
+        max_nb_threads = driver.nb_threads()
+
+        per_thread_args = []
+        per_thread = ""
+        args = {}
+        pre = "Void item_map; "
         if dim != 2:
             per_thread_args = [ "item_map" ]
             per_thread = """
@@ -256,15 +265,10 @@ class Cell:
                 "map_items" : Workspace(
                     Tensor( "max_nb_threads", "nb_map_items[ max_nb_threads ]", dtype = int ),
                     max_of_nb_map_items = max_of_nb_map_items,
-                    max_nb_threads      = max_nb_threads,
+                    max_nb_threads = max_nb_threads,
                 )
             }
             pre = ""
-        else:
-            per_thread_args = []
-            per_thread = ""
-            args = {}
-            pre = "Void item_map; "
 
         return driver.call(
             FfiCodeParallel( name = "measure",
