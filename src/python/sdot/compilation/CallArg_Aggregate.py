@@ -274,8 +274,8 @@ class CallArg_Aggregate( CallArg ):
         for axis_variable_name in axis_variable_names:
             if axis_variable_name not in batch_axes:
                 lines.append( f"                .{ axis_variable_name } = { axis_variable_name }," )
-        for name in self.sub_dict.keys():
-            lines.append( f"                .{ name } = { name }( batch_index )," )
+        for name, argument in self.sub_dict.items():
+            lines.append( f"                .{ name } = { argument.batch_slice_code( name, 'batch_index' ) }," )
         lines.append(  "            };" )
         lines.append(  "        }" )
         lines.append(  "    }" )

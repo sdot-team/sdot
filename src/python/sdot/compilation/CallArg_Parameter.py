@@ -63,6 +63,10 @@ class CallArg_Parameter( CallArg ):
         """(code generation, override) The scalar is used directly by its name."""
         return self.ffi_name()
 
+    def batch_slice_code( self, name, batch_index ):
+        """(code generation, override) A scalar parameter is not batched: pass it through unchanged."""
+        return name
+
     def beg_with_same_shape( self, name, s, lines ):
         """(code generation, override) No-op: a scalar has no shape."""
         return s

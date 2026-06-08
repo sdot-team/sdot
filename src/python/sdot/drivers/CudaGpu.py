@@ -6,8 +6,9 @@ _libcuda = None
 
 
 class CudaGpu( Device ):
-    def __init__( self, device_id ):
+    def __init__( self, device_id, mem_fraction = 0.5 ):
         self.device_id = device_id
+        self.mem_fraction = mem_fraction  # fraction of total_dev_mem reserved for per-thread scratch
         self._attrs = None  # (nb_sm, max_thr_per_sm, regs_per_sm, shm_per_sm, total_dev_mem, sm_major, sm_minor)
 
     @property
@@ -73,14 +74,23 @@ class CudaGpu( Device ):
 
         # SM-level occupancy constraints (simultaneous threads per SM)
         thr_per_sm = max_thr_per_sm
-        if nb_regs_per_thread         > 0: thr_per_sm = min( thr_per_sm, regs_per_sm // nb_regs_per_thread         )
-        if nb_shared_bytes_per_thread > 0: thr_per_sm = min( thr_per_sm, shm_per_sm  // nb_shared_bytes_per_thread )
+        if nb_regs_per_thread > 0:
+            thr_per_sm = min( thr_per_sm, regs_per_sm // nb_regs_per_thread )
+        if nb_shared_bytes_per_thread > 0:
+            thr_per_sm = min( thr_per_sm, shm_per_sm  // nb_shared_bytes_per_thread )
 
         n = nb_waves * nb_sm * max( 1, thr_per_sm )
 
-        # global memory budgets (constrain total work units, not per-SM occupancy)
-        if nb_local_bytes_per_thread  > 0: n = min( n, total_dev_mem     // nb_local_bytes_per_thread  )
-        if nb_pinned_bytes_per_thread > 0: n = min( n, _total_host_ram() // nb_pinned_bytes_per_thread )
+        # global memory budgets (constrain total work units, not per-SM occupancy).
+        # `total_dev_mem` is the raw physical memory; only a fraction is actually allocatable
+        # because the input/output data buffers and the XLA/JAX runtime must also reside on the
+        # card. Reserve `mem_fraction` of it for per-thread scratch so the sum of all argument
+        # buffers stays under XLA's per-call base limit (~the whole card).
+        if nb_local_bytes_per_thread > 0:
+            usable_dev_mem = int( total_dev_mem * self.mem_fraction )
+            n = min( n, usable_dev_mem // nb_local_bytes_per_thread  )
+        if nb_pinned_bytes_per_thread > 0:
+            n = min( n, _total_host_ram() // nb_pinned_bytes_per_thread )
 
         return max( 1, n )
 

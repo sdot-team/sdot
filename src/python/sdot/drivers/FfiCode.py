@@ -118,9 +118,9 @@ class FfiCodeParallel( FfiCode ):
         prms = [ "class BI", "class P" ] + [ f"class T_{ a }" for a in pa ]
         lines.append( f"    template<{ ', '.join( prms ) }> HD void operator()( { ', '.join( args ) } ) const {{" )
         if pass_name == "fwd":
-            lines.append( self._fwd_body )
+            lines.append( indent( dedent( self._fwd_body ), '        ' ) )
         if pass_name == "bwd" and self._bwd_body:
-            lines.append( self._bwd_body )
+            lines.append( indent( dedent( self._bwd_body ), '        ' ) )
         lines.append( "    }" )
 
         lines.append( "};" )

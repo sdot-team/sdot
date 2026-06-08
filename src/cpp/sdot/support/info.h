@@ -80,7 +80,7 @@ GD void __display_device( const auto &value ) {
 // ----------------- unified entry -----------------
 // HD so the same info(...) works in host and device code (the macro expands identically in both);
 // the body picks std::cout (host) or printf (device, prefixed with block/thread id) at compile time.
-HD T_VT void __info( const char *arg_names, const T &...arg_values ) {
+T_VT HD void __info( const char *arg_names, const T &...arg_values ) {
 #ifdef __CUDA_ARCH__
     printf( "\033[90m[gpu blk=%d thr=%d]\033[0m %s = ", blockIdx.x, threadIdx.x, arg_names );
     int cpt = 0;

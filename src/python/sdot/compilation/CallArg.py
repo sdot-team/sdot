@@ -227,6 +227,15 @@ class CallArg:
         """(code generation) C++ expression building this argument in the handler body. Abstract."""
         raise NotImplementedError
 
+    def batch_slice_code( self, name: str, batch_index: str ) -> str:
+        """(code generation) C++ expression slicing this member by the batch index.
+
+        Used by a batched aggregate's `operator()( batch_index )`, which rebuilds the
+        struct by slicing each member. The default slices through the member's own
+        `operator()` (a tensor loses its leading dimension, a nested aggregate recurses).
+        """
+        return f"{ name }( { batch_index } )"
+
     def assemble_return( self ) -> any:
         """(value management) Rebuild the python value returned to the caller. Abstract."""
         raise NotImplementedError

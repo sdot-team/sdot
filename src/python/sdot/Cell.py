@@ -248,7 +248,8 @@ class Cell:
         # and `nb_items` includes the vmap/batch axes that are only prepended *after* this point
         # (by the driver's batching rule) — so it is not visible here. We therefore size the
         # workspace by the hardware thread pool, which always bounds global_id() on CPU and GPU.
-        max_nb_threads = driver.nb_threads()
+        max_nb_threads = driver.nb_threads( nb_local_bytes_per_thread = max_of_nb_map_items * 8 )
+        info( max_nb_threads )
 
         per_thread_args = []
         per_thread = ""
