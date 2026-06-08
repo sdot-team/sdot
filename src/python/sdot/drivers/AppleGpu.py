@@ -4,10 +4,16 @@ import os
 
 class AppleGpu( Device ):
     """
-    Apple GPU device (jax-metal).
+    Apple GPU device.
 
-    Option A: kernels run as CPU code on Metal's unified memory.
-    CPU pointers returned by typed_data() are directly valid on Apple Silicon.
+    Two regimes coexist behind this single device:
+
+    * Torch (MPS): tensors live on the Metal GPU; bindings receive device pointers directly.
+    * JAX: the graph runs on the *CPU* XLA backend (jax-metal does not dispatch custom calls,
+      and is incompatible with recent jax). The generated binding is an Obj-C++ `.mm` whose
+      XLA FFI handler launches a Metal compute kernel on the unified-memory pointers it receives.
+      So `driver_version_for_jax` resolves to the CPU jax device while the GPU work happens
+      inside the binding. `is_apple_gpu` is what drives the Metal codegen branch in JaxDriver.
     """
 
     @property
@@ -44,4 +50,10 @@ class AppleGpu( Device ):
         return "AppleGpu"
 
     def driver_version_for_jax( self, devices ):
-        return devices( "METAL" )[ 0 ]
+        # The Metal work is launched from inside the binding; the JAX arrays themselves stay on
+        # the CPU XLA backend (jax-metal is unavailable / cannot dispatch the custom call).
+        # Prefer a real METAL device if one happens to be present, otherwise fall back to CPU.
+        try:
+            return devices( "METAL" )[ 0 ]
+        except RuntimeError:
+            return devices( "cpu" )[ 0 ]

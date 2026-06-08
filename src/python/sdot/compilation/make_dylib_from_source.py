@@ -12,8 +12,14 @@ import os
 
 
 def make_dylib_from_source( code: str, dylib_name: str, other_src_paths: list, device: Device ):
-    # .cu extension lets xmake route the file through nvcc (defines __CUDACC__)
-    ext = ".cu" if device.is_cuda_gpu else ".cpp"
+    # .cu  -> xmake routes the file through nvcc (defines __CUDACC__)
+    # .mm  -> Objective-C++ (Metal binding: the handler launches a Metal kernel)
+    if device.is_cuda_gpu:
+        ext = ".cu"
+    elif device.is_apple_gpu:
+        ext = ".mm"
+    else:
+        ext = ".cpp"
     path = compilation_directories.src_dir( dylib_name ) / f"binding{ ext }"
     try:
         old_code = path.read_text()
@@ -77,6 +83,15 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device: Device ):
     #         f"xmake >= 3.0.8 requis (trouvé { xmake_number }). Lancez : xmake update"
     #     )
 
+    # The Metal binding is a plain Obj-C++ shared lib loaded via ctypes: no nanobind translation
+    # unit, but it links the Metal / Foundation frameworks for the runtime kernel launch.
+    sources    = list( src_paths )
+    frameworks = ""
+    if device.is_apple_gpu:
+        frameworks = "Metal,Foundation"
+    else:
+        sources.append( nanobind_source )
+
     env = {
         **os.environ,
         **( { "XMAKE_ROOT": "y" } if hasattr( os, "getuid" ) and os.getuid() == 0 else {} ),
@@ -91,7 +106,8 @@ def make_dylib_from_files( dylib_name: str, src_paths: list, device: Device ):
                                       compilation_directories.additional_includes_dir()
                                   ] + jax_include ) ),
         "SDOT_XMAKE_CXXFLAGS"   : str.join( ",", [ "-fno-strict-aliasing" ] ),
-        "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, list( src_paths ) + [ nanobind_source ] ) ),
+        "SDOT_XMAKE_SOURCES"    : str.join( ",", map( str, sources ) ),
+        "SDOT_XMAKE_FRAMEWORKS" : frameworks,
         "SDOT_XMAKE_DEFINES"    : "",
         "SDOT_XMAKE_TARGET"     : dylib_name,
         "PATH"                  : extended_path,

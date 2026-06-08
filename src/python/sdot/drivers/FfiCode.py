@@ -26,6 +26,18 @@ class FfiCode:
     def name( self ) -> str:
         raise NotImplementedError
 
+    def metal_source( self, pass_name: str, fai, module_name: str ) -> "tuple[ list[ str ], str ]":
+        """(Metal codegen) Return ( header_lines, handler_body ) for the binding's `pass_name`.
+
+        Uniform entry point used by the Metal dylib builder — each FfiCode decides internally
+        what to emit (no isinstance in the driver). The default reuses the device-agnostic
+        header/code, which is exactly what a hand-written FfiCodeCustom wants. Subclasses with a
+        templated body (e.g. FfiCodeParallel) override this to generate MSL instead.
+        """
+        header = self.header_for( pass_name )
+        header_lines = [ dedent( header ) ] if header else []
+        return header_lines, self.code_for( pass_name )
+
 
 class FfiCodeCustom( FfiCode ):
     """ FfiCode with manually written C++ strings — no automatic vmap support. """
@@ -88,6 +100,13 @@ class FfiCodeParallel( FfiCode ):
         self._fwd_body        = fwd_body
         self._bwd_body        = bwd_body
         self._name            = name
+
+    def metal_source( self, pass_name: str, fai, module_name: str ) -> "tuple[ list[ str ], str ]":
+        # Emit an MSL kernel from the same per-element body (no host functor / run_parallel).
+        # The CallArgs own the tensor -> MSL mapping (struct + buffers); we hand them the body.
+        if pass_name != "fwd":
+            raise NotImplementedError( "metal backward for FfiCodeParallel is not implemented yet" )
+        return [], fai.metal_forward_source( module_name, self._fwd_body, self._batch_axes )
 
     def with_prepended_batch_axis( self, name: str ) -> 'FfiCodeParallel':
         return FfiCodeParallel(

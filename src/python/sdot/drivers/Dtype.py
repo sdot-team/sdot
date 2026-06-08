@@ -129,3 +129,14 @@ class Dtype:
         if self.signed:
             return f"xla::ffi::S{ self.size or driver.itype.size }"
         return f"xla::ffi::U{ self.size or driver.itype.size }"
+
+    def msl_name( self ) -> str:
+        """Metal Shading Language scalar type for this dtype (size resolved via the driver)."""
+        from .driver import driver
+        size = self.size or ( driver.ftype.size if self.floating_point else driver.itype.size )
+        if self.floating_point:
+            # MSL has no `double`; the Metal binding runs in FP32 anyway.
+            return { 16: "half", 32: "float", 64: "float" }[ size ]
+        if self.signed:
+            return { 8: "char", 16: "short", 32: "int", 64: "long" }[ size ]
+        return { 8: "uchar", 16: "ushort", 32: "uint", 64: "ulong" }[ size ]

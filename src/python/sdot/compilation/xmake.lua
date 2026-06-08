@@ -81,3 +81,8 @@ target(os.getenv("SDOT_XMAKE_TARGET") or "sdot_binding")
     add_defines(get_env_list("SDOT_XMAKE_DEFINES"))
     add_files(get_env_list("SDOT_XMAKE_SOURCES"))
     add_packages(requires)
+
+    -- macOS frameworks (e.g. Metal / Foundation for the Metal binding)
+    for _, fw in ipairs(get_env_list("SDOT_XMAKE_FRAMEWORKS")) do
+        add_frameworks(fw)
+    end

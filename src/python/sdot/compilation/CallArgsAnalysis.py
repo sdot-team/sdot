@@ -172,6 +172,115 @@ class CallArgsAnalysis:
     def get_code_for_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
         self.arguments.struct_decl( struct_name, includes, lines )
 
+    # ----------------------------------- Metal (MSL) -----------------------------------
+
+    @staticmethod
+    def _tensor_path( tensor ) -> list[ str ]:
+        """Attribute path of `tensor` inside the Parameters aggregate, e.g. [ 'a' ] for a
+        top-level tensor named 'a' (reachable in the handler as `p.a`)."""
+        parts = []
+        ca = tensor
+        while ca.parent is not None:
+            parts.append( ca.name_in_parent )
+            ca = ca.parent()
+        parts.reverse()
+        return parts
+
+    def _metal_forward_tensors( self ):
+        """Real (non dynamic-axis) tensors in FFI buffer order, each as ( tensor, is_output )."""
+        res = []
+        for tensor in self.differentiable_tensor_inputs + self.non_differentiable_tensor_inputs:
+            if not tensor.represents_a_dynamic_axis:
+                res.append( ( tensor, False ) )
+        for tensor in self.tensor_outputs:
+            if not tensor.represents_a_dynamic_axis:
+                res.append( ( tensor, True ) )
+        return res
+
+    def metal_forward_source( self, kernel_name: str, body: str, batch_axes: list[ str ] ) -> str:
+        """Emit the Metal forward handler body for a per-element parallel kernel.
+
+        Builds (a) the MSL source — one accessor struct per (type, read/write), a Params struct
+        mirroring the tensor fields of `p`, and a kernel running `body` once per grid thread —
+        and (b) the host-side sdot::metal_launch_1d call binding each TensorView's unified-memory
+        pointer. The same `body` is used on CPU/CUDA; here `p.<field>( batch_index )` resolves to
+        an element accessor, with `batch_index` mapped to the flat thread id.
+
+        Tensor-subset only: every tensor must be top-level and contiguous with shape equal to the
+        batch shape (so the flat thread id indexes it directly). Scalar parameters, aggregates,
+        and strided/non-batch-shaped tensors are not handled yet.
+        """
+        from textwrap import dedent, indent
+
+        tensors = self._metal_forward_tensors()
+        if self.parameters:
+            raise NotImplementedError( "metal forward: scalar parameters not supported yet" )
+
+        acc_defs    = {}   # struct name -> definition
+        sig_params  = []   # kernel signature buffer params
+        struct_flds = []   # Params struct fields
+        struct_init = []   # Params struct initializer
+        host_bufs   = []   # host MetalBuf{...} entries
+
+        for index, ( tensor, is_output ) in enumerate( tensors ):
+            path = self._tensor_path( tensor )
+            if len( path ) != 1:
+                raise NotImplementedError( f"metal forward: nested tensor '{ '.'.join( path ) }' not supported yet" )
+            name     = path[ 0 ]
+            host     = f"p.{ name }"
+            msl_type = tensor.dtype.msl_name()
+            cpp_type = tensor.dtype.cpp_name
+
+            kind   = "W" if is_output else "R"
+            acc    = f"_acc_{ kind }_{ msl_type }"
+            if acc not in acc_defs:
+                if is_output:
+                    acc_defs[ acc ] = ( f"struct { acc } {{ device { msl_type } *p; uint gid; "
+                                        f"device { msl_type } &operator()( uint ) const {{ return p[ gid ]; }} }};" )
+                else:
+                    acc_defs[ acc ] = ( f"struct { acc } {{ device const { msl_type } *p; uint gid; "
+                                        f"{ msl_type } operator()( uint ) const {{ return p[ gid ]; }} }};" )
+
+            qual = "" if is_output else "const "
+            sig_params.append( f"    device { qual }{ msl_type } *{ name }_buf [[buffer({ index })]]," )
+            struct_flds.append( f"    { acc } { name };" )
+            struct_init.append( f"{{ { name }_buf, _gid }}" )
+            host_bufs.append(
+                f"        MetalBuf{{ (void *)( { host }.data().raw ), "
+                f"size_t( { host }.nb_items() ) * sizeof( { cpp_type } ), { 'true' if is_output else 'false' } }},"
+            )
+
+        msl_lines = [
+            "#include <metal_stdlib>",
+            "using namespace metal;",
+            "",
+            *acc_defs.values(),
+            "",
+            "struct _P {",
+            *struct_flds,
+            "};",
+            "",
+            f"kernel void { kernel_name }(",
+            *sig_params,
+            "    uint _gid [[thread_position_in_grid]]",
+            ") {",
+            f"    _P p {{ { ', '.join( struct_init ) } }};",
+            "    uint batch_index = _gid;",
+            indent( dedent( body ).strip( "\n" ), "    " ),
+            "}",
+        ]
+        msl = "\n".join( msl_lines )
+
+        grid = " * ".join( f"size_t( { ax } )" for ax in batch_axes ) or "1"
+
+        out = [
+            f'static const char *_sdot_msl = R"SDOT_MSL(\n{ msl }\n)SDOT_MSL";',
+            f'metal_launch_1d( _sdot_msl, "{ kernel_name }", {{',
+            *host_bufs,
+            f'    }}, ( { grid } ) );',
+        ]
+        return "\n".join( out )
+
     def arg_decl( self ) -> str:
         declarations = []
 

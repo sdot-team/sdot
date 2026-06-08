@@ -824,6 +824,19 @@ class JaxDriver:
         JaxDriver._registered_ffi_targets.add( module_name )
 
         from ..compilation.force_build import force_build
+
+        # Metal binding: a plain Obj-C++ dylib loaded via ctypes (no nanobind module to import).
+        if self.device.is_apple_gpu:
+            if not force_build():
+                try:
+                    self._register_metal_target( module_name )
+                    return
+                except OSError:
+                    pass
+            self._make_metal_dylib( code, args, module_name )
+            self._register_metal_target( module_name )
+            return
+
         if not force_build():
             try:
                 self._try_to_import_and_register_ffi_target( module_name )
@@ -849,6 +862,43 @@ class JaxDriver:
             # jax.ffi not available in older JAX (< 0.4.37) — use xla_extension directly
             from jaxlib import xla_extension as xe
             xe.register_custom_call_target( module_name, capsule, platform = platform )
+
+    def _register_metal_target( self, module_name: str ):
+        """Load the Metal binding dylib via ctypes and register its FFI handler with JAX.
+
+        The handler is registered on the *CPU* backend: the JAX graph runs on CPU and the
+        handler launches the Metal kernel internally. No nanobind / importable module is
+        involved — we read the handler address through an extern "C" trampoline and wrap it in
+        a PyCapsule by hand. Raises OSError if the dylib is missing (triggers a rebuild).
+        """
+        import ctypes
+        from sdot.generated_files import compilation_directories
+
+        dylib_dir = compilation_directories.dylib_dir()
+        candidates = sorted( dylib_dir.glob( f"{ module_name }*.so" ) ) + sorted( dylib_dir.glob( f"{ module_name }*.dylib" ) )
+        if not candidates:
+            raise OSError( f"Metal binding dylib for '{ module_name }' not found in { dylib_dir }" )
+
+        lib = ctypes.CDLL( str( candidates[ 0 ] ) )
+        trampoline = getattr( lib, f"sdot_ffi_capsule_{ module_name }" )
+        trampoline.restype = ctypes.c_void_p
+        handler_addr = trampoline()
+
+        PyCapsule_New = ctypes.pythonapi.PyCapsule_New
+        PyCapsule_New.restype  = ctypes.py_object
+        PyCapsule_New.argtypes = [ ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p ]
+        capsule = PyCapsule_New( handler_addr, b"xla._CUSTOM_CALL_TARGET", None )
+
+        # keep a reference so the dylib is not unloaded while the target stays registered
+        JaxDriver._metal_libs.setdefault( module_name, [] ).append( lib )
+
+        try:
+            jax.ffi.register_ffi_target( module_name, capsule, platform = "cpu" )
+        except AttributeError:
+            from jaxlib import xla_extension as xe
+            xe.register_custom_call_target( module_name, capsule, platform = "cpu" )
+
+    _metal_libs: dict = {}
 
     def _ensure_backward_target( self, code: FfiCode, bfai: CallArgsAnalysis, fwd_module_name: str ) -> str:
         """Lazily compile and register the backward FFI target from the actual bfai.
@@ -905,6 +955,40 @@ class JaxDriver:
         lines.append( "" )
 
         self._append_nb_module( lines, module_name )
+
+        include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
+
+        from ..compilation.make_dylib_from_source import make_dylib_from_source
+        return make_dylib_from_source( str.join( "\n", include_lines + lines ), module_name, [], self.device )
+
+    def _make_metal_dylib( self, code: FfiCode, fai: CallArgsAnalysis, module_name: str ):
+        """Compile the Metal binding: same XLA FFI handler as the CPU path, but emitted as
+        Objective-C++ (it launches a Metal kernel), with no nanobind module — instead an
+        extern "C" trampoline exposes the handler address to the ctypes loader."""
+        already_visited = set()
+        fai.arguments.generate_structures( already_visited )
+
+        includes = set( code.includes_for( "fwd" ) )
+        includes.add( "sdot/jax_ffi_wrappers.h" )
+        includes.add( "sdot/metal/metal_launch.h" )
+
+        lines = []
+        lines.append( "" )
+        lines.append( "using namespace sdot;" )
+        lines.append( "" )
+
+        # Each FfiCode decides what to emit for Metal (FfiCodeCustom keeps its hand-written body;
+        # FfiCodeParallel generates an MSL kernel). No isinstance: uniform polymorphic interface.
+        header_lines, body = code.metal_source( "fwd", fai, module_name )
+        lines.extend( header_lines )
+
+        self._handler_source( includes, lines, body, fai, module_name, "Parameters" )
+        lines.append( "" )
+
+        # extern "C" trampoline — returns the FFI handler address for the ctypes-built capsule
+        lines.append( f'extern "C" void *sdot_ffi_capsule_{ module_name }() {{' )
+        lines.append( f'    return reinterpret_cast<void *>( binding_{ module_name } );' )
+        lines.append( "}" )
 
         include_lines = [ f"#include <{ include }>" for include in sorted( includes, key = lambda s: ( -len( s ), s ) ) ]
 
