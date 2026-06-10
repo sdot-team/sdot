@@ -25,6 +25,10 @@ class AppleGpu( Device ):
         return "metal"
 
     @property
+    def codegen_target( self ):
+        return "metal"
+
+    @property
     def cpp_type( self ):
         return "ExecutionContext_Cpu"
 

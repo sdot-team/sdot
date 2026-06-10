@@ -45,6 +45,11 @@ class Device:
     def signature( self ) -> str:
         raise NotImplementedError
 
+    @property
+    def codegen_target( self ) -> str:
+        """Codegen context tag for per-context FfiCode selectors ( see FfiCode.select_for )."""
+        raise NotImplementedError
+
     def __eq__( self, value, / ) -> bool:
         if not isinstance( value, Device ):
             value = Device.factory( value )

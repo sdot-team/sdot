@@ -12,10 +12,14 @@ _cache: dict = {}
 _vmap_rules: dict = {}
 
 def _make_ir_attr( v ):
+    # Attribute widths must match the handler's Attr<...> decode type, i.e. the driver's
+    # normalized int / float widths (e.g. SI32 / FP32 on Metal, SI64 / FP64 on CPU).
+    from .driver import driver
     if isinstance( v, ( int, numpy.integer ) ):
-        return ir.IntegerAttr.get( ir.IntegerType.get_signless( 64 ), int( v ) )
+        return ir.IntegerAttr.get( ir.IntegerType.get_signless( driver.itype.size ), int( v ) )
     if isinstance( v, ( float, numpy.floating ) ):
-        return ir.FloatAttr.get( ir.F64Type.get(), float( v ) )
+        float_type = { 16: ir.F16Type, 32: ir.F32Type, 64: ir.F64Type }[ driver.ftype.size ]
+        return ir.FloatAttr.get( float_type.get(), float( v ) )
     raise NotImplementedError( f"Unsupported FFI attribute type: { type( v ) }" )
 
 def get_or_create( module_name: str, output_specs, attributes: dict = {} ) -> jax_core.Primitive:

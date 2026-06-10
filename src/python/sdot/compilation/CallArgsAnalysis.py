@@ -207,14 +207,13 @@ class CallArgsAnalysis:
         an element accessor, with `batch_index` mapped to the flat thread id.
 
         Tensor-subset only: every tensor must be top-level and contiguous with shape equal to the
-        batch shape (so the flat thread id indexes it directly). Scalar parameters, aggregates,
-        and strided/non-batch-shaped tensors are not handled yet.
+        batch shape (so the flat thread id indexes it directly). Scalar parameters are passed as
+        1-element read-only buffers ( `p.<name>` is the value ). Aggregates and strided /
+        non-batch-shaped tensors are not handled yet.
         """
         from textwrap import dedent, indent
 
         tensors = self._metal_forward_tensors()
-        if self.parameters:
-            raise NotImplementedError( "metal forward: scalar parameters not supported yet" )
 
         acc_defs    = {}   # struct name -> definition
         sig_params  = []   # kernel signature buffer params
@@ -249,6 +248,19 @@ class CallArgsAnalysis:
                 f"        MetalBuf{{ (void *)( { host }.data().raw ), "
                 f"size_t( { host }.nb_items() ) * sizeof( { cpp_type } ), { 'true' if is_output else 'false' } }},"
             )
+
+        # scalar parameters -> 1-element read-only buffers; `p.<name>` is the value
+        for offset, parameter in enumerate( self.parameters ):
+            index    = len( tensors ) + offset
+            name     = parameter.name
+            host     = f"p.{ name }"
+            cpp_type = parameter.cpp_type_name()
+            msl_type = Dtype.factory( cpp_type ).msl_name()
+
+            sig_params.append( f"    device const { msl_type } *{ name }_buf [[buffer({ index })]]," )
+            struct_flds.append( f"    { msl_type } { name };" )
+            struct_init.append( f"{ name }_buf[ 0 ]" )
+            host_bufs.append( f"        MetalBuf{{ (void *)( &{ host } ), sizeof( { cpp_type } ), false }}," )
 
         msl_lines = [
             "#include <metal_stdlib>",

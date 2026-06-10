@@ -1,7 +1,12 @@
 from ..compilation.CallArg_Tensor import CallArg_Tensor
 from ..compilation.IoCategory import IoCategory
+
+from ..util.append_if_unique import append_if_unique
+
 from ..drivers.driver import driver
 from ..drivers.Dtype import Dtype
+
+from .AxisVariableEquation import AxisVariableEquation
 from .AxisExpr import AxisExpr
 
 import numpy
@@ -23,13 +28,13 @@ class Tensor:
     """
 
     represents_a_dynamic_axis : str
-    comes_from_a_dim_list : bool
-    removed_dim_axes : list[ int ]
+    comes_from_a_dim_list     : bool
+    removed_dim_axes          : list[ int ]
 
-    ct_variables : list
-    shape : list[ AxisExpr ]
-    dtype : Dtype
-    name : str
+    ct_variables              : list
+    shape                     : list[ AxisExpr ]
+    dtype                     : Dtype
+    name                      : str
 
     def __init__( self, *axis_exprs, dtype = None, ct_variables = None, represents_a_dynamic_axis = "" ):
         assert ct_variables is None or isinstance( ct_variables, list )
@@ -41,15 +46,6 @@ class Tensor:
         self.ct_variables = list( ct_variables ) if ct_variables is not None else []
         self.shape = [ AxisExpr( s ) for s in axis_exprs ]
         self.dtype = Dtype.factory( dtype )
-
-        # add argument variables in ct_variables
-        for expr in self.shape:
-            for term in expr.terms:
-                if term.variable.arguments:
-                    for argument in term.variable.arguments:
-                        for aterm in argument.terms:
-                            if aterm.variable.name not in self.ct_variables:
-                                self.ct_variables.append( aterm.variable.name )
 
 
     def __call__( self, array = None, dtype = None ):
@@ -101,6 +97,26 @@ class Tensor:
     def type_call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
         return CallArg_Tensor( call_args, parent, name_in_parent, self, python_value, io_category, ctor_args, ctor_kwargs, self.shape, self.dtype, self.ct_variables, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
 
-    def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
+    @property
+    def ct_axis_variable_names( self ):
+        # user variables
+        res = [ v for v in self.ct_variables ]
+
+        # add argument variables
+        for expr in self.shape:
+            for term in expr.terms:
+                if term.variable.arguments:
+                    for argument in term.variable.arguments:
+                        for aterm in argument.terms:
+                            if aterm.variable.name not in self.ct_variables:
+                                append_if_unique( res, aterm.variable.name )
+
+        return res
+
+    @property
+    def axis_variable_names( self ):
+        res = []
         for s in self.shape:
-            s.get_axis_variable_names( axis_variable_names )
+            s.get_axis_variable_names( res )
+        return res
+

@@ -200,7 +200,7 @@ class CallArg_Aggregate( CallArg ):
         sources = []
         for name, argument in self.sub_dict.items():
             argument.add_axis_tensor_sources( sources, [ name ], use_attributes, recursive )
-        return AxisVariableSystem( sources )
+        return AxisVariableSystem.from_sources( sources )
 
     def check_axis_consistency( self ):
         """(analysis, override) Check this scope's tensors agree, then recurse into children."""

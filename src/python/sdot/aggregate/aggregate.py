@@ -1,5 +1,9 @@
 from ..util.get_all_annotations import get_all_annotations
-from ..drivers.driver import driver
+from ..util.append_if_unique import append_if_unique
+# from ..drivers.driver import driver
+
+from .AxisVariableEquation import AxisVariableEquation
+from .AxisVariableSystem import AxisVariableSystem
 from .Workspace import Workspace
 from .Tensor import Tensor
 
@@ -18,11 +22,10 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
       - BaseVersion = cls
 
     Usage::
-
         @aggregate
         class MyStruct:
-            positions = Tensor( "nb_points", "dim" )
-            weights   = Tensor( "nb_points" )
+            positions : Tensor( "nb_points", "dim" )
+            weights   : Tensor( "nb_points" )
     """
     fields = get_all_annotations( cls )
 
@@ -43,10 +46,12 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
             cls.__annotations__[ axis_name ] = t
             fields[ axis_name ] = t
 
+    # batch data
     cls.BaseVersion = cls
-    cls.batch_axes  = []
+    cls.batch_axes = []
 
-    _setup_distribution_class( cls )
+    # append methods
+    _setup_aggregate( cls )
 
     return cls
 
@@ -55,7 +60,7 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
 # Internal helpers (also used by batch_variant_of)
 # ---------------------------------------------------------------------------
 
-def _setup_distribution_class( cls ):
+def _setup_aggregate( cls ):
     fields = get_all_annotations( cls )
 
     if '__aggregate_init__' not in vars( cls ):
@@ -110,6 +115,9 @@ def _setup_distribution_class( cls ):
             return res
         cls.batch_axes_dict = property( batch_axes_dict )
 
+    if '_aggregate_items' not in vars( cls ):
+        cls._aggregate_items = _aggregate_items
+
     if 'with_prepended_batch_axis' not in vars( cls ):
         # vmap hook (see JaxDriver batch rule): return a same-typed instance carrying the
         # moved leading-N tensors, with one batch axis prepended to its instance batch_axes.
@@ -120,7 +128,8 @@ def _setup_distribution_class( cls ):
             return inst
         cls.with_prepended_batch_axis = with_prepended_batch_axis
 
-    for axis_name in _axis_names_of( cls ):
+    # value for each axis name
+    for axis_name in _axis_variable_names_of( cls ):
         if axis_name not in vars( cls ):
             def get_axis_size( self, a = axis_name ):
                 return _axis_count( self, a )
@@ -133,67 +142,23 @@ def _setup_distribution_class( cls ):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _axis_names_of( cls ) -> list[ str ]:
+def _axis_variable_names_of( cls ) -> list[ str ]:
     res = []
     for attr in get_all_annotations( cls ).values():
-        if getattr( attr, "get_axis_variable_names", None ):
-            attr.get_axis_variable_names( res )
+        for name in getattr( attr, "axis_variable_names", [] ):
+            append_if_unique( res, name )
     return res
 
-def _axis_sources_of( distribution, fields_to_avoid ):
-    """AxisTensorSource list for an @aggregate instance (same view the CallArg side uses)."""
-    from .AxisVariableSystem import AxisTensorSource
 
-    sources = []
-    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
-        if tensor_field in fields_to_avoid or not isinstance( tensor_field, Tensor ):
-            continue
-        sources.append( AxisTensorSource(
-            shape        = tensor_field.shape,
-            ct_variables = tensor_field.ct_variables,
-            numpy_value  = getattr( distribution, tensor_name, None )
-        ) )
-    return sources
+def _aggregate_items( self ) -> list[ str ]:
+    res = {}
+    for name, attr in get_all_annotations( type( self ) ).items():
+        res[ name ] = ( attr, getattr( self, name ) )
+    return res
 
 
-def _axis_count( distribution, axis_name, fields_to_avoid = None ):
-    if fields_to_avoid is None:
-        fields_to_avoid = []
+def _axis_count( self, axis_name ):
+    """Resolve an axis variable value (int, or list for an expansion axis) for `distribution`."""
+    return AxisVariableSystem( self ).value_of( axis_name )
 
-    from .AxisVariableSystem import AxisVariableSystem
-    value = AxisVariableSystem( _axis_sources_of( distribution, fields_to_avoid ) ).local_value_of( axis_name )
-    if value is not None:
-        return value
 
-    for tensor_name, tensor_field in get_all_annotations( type( distribution ) ).items():
-        if tensor_field in fields_to_avoid or not isinstance( tensor_field, Tensor ):
-            continue
-        array = getattr( distribution, tensor_name, None )
-        if array is None:
-            continue
-
-        n = 0
-        for expr in tensor_field.shape:
-            if len( expr.terms ) == 1 and expr.terms[ 0 ].variable.name == axis_name and expr.terms[ 0 ].variable.arguments:
-                ndim = 1
-                for argument in expr.terms[ 0 ].variable.arguments:
-                    name, offset, coeff = argument.as_single_name()
-                    ac = None if name is None else _axis_count( distribution, name )
-                    if ac is None:
-                        ndim = 0
-                        break
-                    ndim *= offset + coeff * ac
-                if ndim:
-                    return [ ( array.shape[ n + i ] - expr.offset ) // expr.terms[ 0 ].coeff for i in range( ndim ) ]
-
-            all_the_arguments = [ a for term in expr.terms if term.variable.arguments for a in term.variable.arguments ]
-            if len( all_the_arguments ) == 1:
-                arg_name, arg_offset, arg_coeff = all_the_arguments[ 0 ].as_single_name()
-                if arg_name == axis_name:
-                    nb_with_argument = sum( 1 for e in tensor_field.shape if e.has_argument() )
-                    if nb_with_argument == 1:
-                        return ( array.ndim - ( len( tensor_field.shape ) - nb_with_argument ) - arg_offset ) // arg_coeff
-
-            n += expr.ndim( lambda n, _: getattr( distribution, n ) )
-
-    return None

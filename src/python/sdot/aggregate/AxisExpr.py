@@ -1,8 +1,14 @@
 from __future__ import annotations
+from typing_extensions import Optional
+
+from jax._src.xla_bridge import OptionsDict
 
 from ..util import append_if_unique, index
+
 from .AxisVariable import AxisVariable
+
 from dataclasses import dataclass
+import numpy
 import ast
 import re
 
@@ -63,18 +69,64 @@ class AxisExpr:
         for term in self.terms:
             if term.variable.arguments:
                 for argument in term.variable.arguments:
-                    res *= argument.value( value_of_axis_variable, False )
+                    # res *= argument.value( value_of_axis_variable, False )
+                    raise NotImplementedError
         return res
 
-    def value( self, value_of_axis_variable, use_dyn_size ):
+    def value( self, system, forbidden_names ) -> Optional[ int ]:
         res = self.offset
         for term in self.terms:
-            res += term.coeff * term.variable.value( value_of_axis_variable, use_dyn_size )
+            value = term.variable.value( system, forbidden_names )
+            if value is None:
+                return None
+            res += term.coeff * value
         return res
+
+    def solve( self, name, actual_shape_list, actual_shape_offset, system, forbidden_names: list[ str ], care_about_argument = True ) -> tuple[ Optional[ int | numpy.ndarray ], Optional[ int ] ]:
+        """Return ( value, nb_terms_in_actual_shape_list )"""
+
+        # argument ?
+        if care_about_argument:
+            argument = self.argument
+            if argument is not None:
+                length = argument.value( system, forbidden_names )
+                if length is not None:
+                    res = numpy.empty( [ length ], dtype = int )
+                    for index in range( length ):
+                        value, _ = self.solve( name, actual_shape_list, actual_shape_offset + index, system, forbidden_names, care_about_argument = False )
+                        info( index, value, name, self )
+                        if value is None:
+                            return None, None
+                        assert isinstance( value, int )
+                        res[ index ] = value
+                    return res, length
+
+        # if we have `name` in some of the term...
+        for num_term, term in enumerate( self.terms ):
+            if AxisExpr._term_name( term ) == name:
+                lhs = actual_shape_list[ actual_shape_offset ]
+                res = lhs - self.offset
+                # ...and we can find the values for the other terms
+                for num_mret, mret in enumerate( self.terms ):
+                    if num_mret == num_term:
+                        continue
+                    v = system.value_of( AxisExpr._term_name( mret ), forbidden_names + [ name ] )
+                    if v is None:
+                        return None, 1
+                    res -= mret.coeff * v
+                assert res % term.coeff == 0
+                return res // term.coeff, 1
+        return None, 1
 
     def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         for term in self.terms:
             append_if_unique( axis_variable_names, self._term_name( term ) )
+            if term.variable.arguments is not None:
+                for argument in term.variable.arguments:
+                    argument.get_axis_variable_names( axis_variable_names )
+            if term.variable.selection is not None:
+                for selection in term.variable.selection:
+                    selection.get_axis_variable_names( axis_variable_names )
 
     @staticmethod
     def _term_name( term ) -> str:
@@ -83,33 +135,41 @@ class AxisExpr:
             return "max_of_" + term.variable.name
         return term.variable.name
 
-    def as_equation_row( self, names: list[ str ] ):
-        """
-        Express this axis as a single linear equation over `names`:
-
-            axis_size == offset + sum( coeff * value_of( name ) )
-
-        Returns ( row, offset ) where `row[ i ]` is the coefficient of `names[ i ]`,
-        or None when the axis cannot be written as one such row (e.g. an expansion
-        `( ... )` that spans several axes).
-        """
-        if self.has_argument():
-            return None
-        row = [ 0 ] * len( names )
+    @property
+    def argument( self ) -> Optional[ AxisExpr ]:
+        res = []
         for term in self.terms:
-            row[ index( names, self._term_name( term ) ) ] = term.coeff
-        return row, self.offset
+            if term.variable.arguments is not None:
+                if len( term.variable.arguments ) != 1:
+                    raise NotImplementedError
+                res.append( term.variable.arguments[ 0 ] )
+        if len( res ) > 1:
+            raise NotImplementedError
+        if len( res ) == 1:
+            return res[ 0 ]
+        return None
 
-    def has_argument( self ):
-        for term in self.terms:
-            if term.variable.arguments:
-                return True
-        return False
+    # def as_equation_row( self, names: list[ str ] ):
+    #     """
+    #     Express this axis as a single linear equation over `names`:
 
-    def as_single_name( self ):
-        if len( self.terms ) == 1 and not self.terms[ 0 ].variable.selection and not self.terms[ 0 ].variable.arguments:
-           return self.terms[ 0 ].variable.name, self.offset, self.terms[ 0 ].coeff
-        return None, None, None
+    #         axis_size == offset + sum( coeff * value_of( name ) )
+
+    #     Returns ( row, offset ) where `row[ i ]` is the coefficient of `names[ i ]`,
+    #     or None when the axis cannot be written as one such row (e.g. an expansion
+    #     `( ... )` that spans several axes).
+    #     """
+    #     if self.has_argument():
+    #         return None
+    #     row = [ 0 ] * len( names )
+    #     for term in self.terms:
+    #         row[ index( names, self._term_name( term ) ) ] = term.coeff
+    #     return row, self.offset
+
+    # def as_single_name( self ):
+    #     if len( self.terms ) == 1 and not self.terms[ 0 ].variable.selection and not self.terms[ 0 ].variable.arguments:
+    #        return self.terms[ 0 ].variable.name, self.offset, self.terms[ 0 ].coeff
+    #     return None, None, None
 
     def _parse( self, node ):
         match node:

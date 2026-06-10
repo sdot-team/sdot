@@ -24,6 +24,10 @@ class CudaGpu( Device ):
         return f"cuda_sm{ sm_major }{ sm_minor }"
 
     @property
+    def codegen_target( self ):
+        return "cuda"
+
+    @property
     def cpp_type( self ):
         return "ExecutionContext_Cuda"
 

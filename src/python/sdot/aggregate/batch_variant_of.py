@@ -1,5 +1,5 @@
 from ..util.get_all_annotations import get_all_annotations
-from .aggregate import _setup_distribution_class
+from .aggregate import _setup_aggregate
 
 from typing import TypeVar
 _T = TypeVar( '_T' )
@@ -43,7 +43,7 @@ def batch_variant_of( base_cls ):
         cls.batch_axes   = [ bn ]
         base_cls.BatchVersion = cls
 
-        _setup_distribution_class( cls )
+        _setup_aggregate( cls )
 
         # copy only staticmethods; everything else must be explicitly redefined
         for attr_name, val in vars( base_cls ).items():

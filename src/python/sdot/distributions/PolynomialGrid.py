@@ -26,9 +26,10 @@ class PolynomialGrid( Distribution ):
 
     values : Tensor( "shape( dim )", "nb_coeffs", ct_variables = [ "nb_coeffs" ] )
     frame  : Tensor( "dim + 1", "dim" )
-    knots  : Tensor( "nb_knots[ dim ]" ) # ListOfTensors( "dim", [ "shape[ index ]" ] )
+    knots  : Tensor( "dim", "nb_knots[ dim ]" ) # ListOfTensors( "dim", [ "shape[ index ]" ] )
 
     if TYPE_CHECKING:
+        def __init__( self, values = None, frame = None, knots = None ): ...
         max_of_nb_knots : int  #
         nb_coeffs       : int  # (order+1)^dim
         shape           : list[ int ]

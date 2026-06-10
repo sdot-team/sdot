@@ -20,6 +20,10 @@ class Cpu( Device ):
         return "cpu"
 
     @property
+    def codegen_target( self ):
+        return "cpu"
+
+    @property
     def is_cpu( self ):
         return True
 

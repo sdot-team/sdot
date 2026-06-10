@@ -2,61 +2,117 @@ from __future__ import annotations
 
 from ..util import append_if_unique, index
 from .AxisExpr import AxisExpr
-from dataclasses import dataclass, field
-from typing import Any, Optional
 
-
-@dataclass
-class AxisTensorSource:
-    """
-    One tensor contributing equations to an `AxisVariableSystem`.
-
-    A source is produced the same way by an `@aggregate` instance (from its `Tensor`
-    fields + attribute values) and by a `CallArg_Aggregate` (from its `sub_dict`), so
-    the system itself never depends on `CallArg`.
-
-    `shape`        declared axes, as a list of `AxisExpr`.
-    `ct_variables` axis variable names known at compile time for this tensor.
-    `numpy_value`  concrete array when available (python-side resolution), else None.
-    `cpp_ref`      C++ expression to reach the tensor for run-time resolution
-                   (e.g. "t_di0" in an FFI handler, or "positions" inside a struct).
-                   None when no C++ codegen is needed (pure `@aggregate` use).
-    """
-
-    shape        : list[ AxisExpr ]
-    ct_variables : list[ str ]      = field( default_factory = list )
-    numpy_value  : Optional[ Any ]  = None
-    cpp_ref      : Optional[ str ]  = None
+from typing import Optional, cast
 
 
 class AxisVariableSystem:
     """
-    The linear system relating the shapes of a set of tensors to their axis variables,
-    for a single scope (the tensors directly contained in one aggregate).
+    The single place where axis variables are resolved, for one aggregate scope.
 
-    Each usable axis yields one equation:
-
-        tensor.shape[ axis ] == offset + sum( coeff * value_of( axis_variable ) )
-
-    Axis variables sharing a name across tensors share a column, which is exactly the
-    "must be equal" constraint of tensors in the same aggregate. The system is pure:
-    it knows nothing about the aggregate tree. Traversal (descending into children,
-    ascending to parents for explicit `ctor_kwargs`) is the caller's responsibility.
-
-    `explicit_values` are axis variable values given out-of-band (typically resolved
-    `ctor_kwargs`); they take precedence over shape-derived values.
     """
 
-    names    : list[ str ]
-    ct_names : list[ str ]
-
-    def __init__( self, sources: list[ AxisTensorSource ], explicit_values: Optional[ dict ] = None ):
-        self.sources = list( sources )
+    def __init__( self, aggregate, explicit_values: Optional[ dict ] = None ):
         self.explicit_values = dict( explicit_values or {} )
+        self.aggregate = aggregate
+
+    def value_of( self, name: str, forbidden_names = None ) -> int | list[ int ] | None:
+        """Concrete value of `name` (int, or list for an expansion axis), else None."""
+
+        # avoid infinite recursion
+        if forbidden_names is None:
+            forbidden_names = [ name ]
+        elif name in forbidden_names:
+            return None
+
+        # in explicit_values ?
+        if name in self.explicit_values:
+            v = self.explicit_values[ name ]
+            if isinstance( v, ( list, tuple ) ):
+                return [ int( e ) for e in v ]
+            return int( v )
+
+        # using len( shape )
+        for annotation, value in self.aggregate._aggregate_items().values():
+            a_shape = getattr( annotation, "shape", None )
+            v_shape = getattr( value, "shape", None )
+            if a_shape is not None and v_shape is not None:
+                axes_with_arguments = [] # list[ AxisExpr]
+                for axis_expr in a_shape:
+                    axis_expr = cast( AxisExpr, axis_expr )
+                    arg = axis_expr.argument
+                    if arg is not None:
+                        axes_with_arguments.append( arg )
+                if len( axes_with_arguments ) == 1:
+                    expr = axes_with_arguments[ 0 ]
+                    value, _ = expr.solve( name, [ len( v_shape ) - 1 ], 0, self, forbidden_names + [ name ] )
+                    if value is not None:
+                        return value
+
+        # direct solve ?
+        info( name )
+        for annotation, value in self.aggregate._aggregate_items().values():
+            a_shape = getattr( annotation, "shape", None )
+            v_shape = getattr( value, "shape", None )
+            if a_shape is not None and v_shape is not None:
+                index_v_shape = 0
+                for axis_expr in a_shape:
+                    axis_expr = cast( AxisExpr, axis_expr )
+
+                    res, off = axis_expr.solve( name, v_shape, index_v_shape, self, forbidden_names )
+                    if res is not None:
+                        return res
+
+                    info( name, off )
+                    if off is None:
+                        return None
+                    index_v_shape += off
+
+        # TODO: system solve
+
+        return None
+
+
+    @classmethod
+    def from_sources( cls, sources: list[ AxisTensorSource ], explicit_values: Optional[ dict ] = None ):
+        """(legacy) Build a system from pushed `AxisTensorSource`s (the C++ codegen path)."""
+        self = cls.__new__( cls )
+        self.aggregate = None
+        self.explicit_values = dict( explicit_values or {} )
+        self._init_from_sources( list( sources ) )
+        return self
+
+    # -- lazy queries (aggregate path) ----------------------------------------
+
+    def has( self, name: str ) -> bool:
+        if self.aggregate is None:
+            return name in self.names or name in self.explicit_values
+        return ( name in self.explicit_values
+                 or name in self.aggregate._axis_variable_names()
+                 or name in self.aggregate._ct_axis_variable_names() )
+
+    def check_consistency( self ):
+        """Raise if two known tensor shapes imply different values for the same axis variable."""
+        if self.aggregate is None:
+            return self._sources_check_consistency()
+
+        seen: dict = {}
+        for name, equation in self.aggregate._axis_variable_equations():
+            value = equation.direct_value()
+            if value is None or isinstance( value, list ):
+                continue
+            if name in seen and seen[ name ] != value:
+                raise ValueError( f"inconsistent value for axis variable '{ name }': { seen[ name ] } vs { value }" )
+            seen[ name ] = value
+
+    # -- legacy source machinery (C++ codegen path) ---------------------------
+
+    def _init_from_sources( self, sources: list[ AxisTensorSource ] ):
+        self.sources = sources
 
         # axis variable names (run-time + compile-time), in order of appearance
-        self.names = []
         self.ct_names = []
+        self.names = []
         for src in self.sources:
             for expr in src.shape:
                 expr.get_axis_variable_names( self.names )
@@ -74,17 +130,11 @@ class AxisVariableSystem:
                 row, offset = eq
                 self.equations.append( ( src, axis, row, offset ) )
 
-    # -- queries --------------------------------------------------------------
-
-    def has( self, name: str ) -> bool:
-        return name in self.names or name in self.explicit_values
-
     def _pins( self, num_axis: int, row: list[ int ] ) -> bool:
         """True if `row` determines axis `num_axis` alone (single non-zero coeff)."""
         return row[ num_axis ] != 0 and sum( 1 for c in row if c != 0 ) == 1
 
-    def local_value_of( self, name: str ) -> Optional[ int ]:
-        """Concrete value of `name` from explicit values or a pinning tensor shape, else None."""
+    def _sources_local_value_of( self, name: str ) -> Optional[ int ]:
         if name in self.explicit_values:
             return int( self.explicit_values[ name ] )
 
@@ -99,8 +149,7 @@ class AxisVariableSystem:
 
         return None
 
-    def check_consistency( self ):
-        """Raise if two known tensor shapes imply different values for the same axis variable."""
+    def _sources_check_consistency( self ):
         for num_axis, name in enumerate( self.names ):
             seen = None
             for src, axis, row, offset in self.equations:
@@ -112,7 +161,7 @@ class AxisVariableSystem:
                 elif seen != val:
                     raise ValueError( f"inconsistent value for axis variable '{ name }': { seen } vs { val }" )
 
-    # -- C++ codegen ----------------------------------------------------------
+    # -- C++ codegen (legacy source path only) --------------------------------
 
     def cpp_runtime_expr( self, name: str ) -> str:
         """

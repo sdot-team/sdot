@@ -69,7 +69,7 @@ def test_inconsistent_shapes_are_rejected():
         AxisTensorSource( shape = [ AxisExpr( "nb_points" ) ], numpy_value = numpy.zeros( 5 ) ),
         AxisTensorSource( shape = [ AxisExpr( "nb_points" ) ], numpy_value = numpy.zeros( 7 ) ),
     ]
-    system = AxisVariableSystem( sources )
+    system = AxisVariableSystem.from_sources( sources )
     assert system.local_value_of( "nb_points" ) == 5  # first value found
     try:
         system.check_consistency()

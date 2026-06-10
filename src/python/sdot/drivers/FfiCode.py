@@ -1,5 +1,32 @@
 from textwrap import dedent, indent
 
+
+def select_for( value, context: set ):
+    """Resolve a per-context codegen value.
+
+    `value` is either a plain value (applies everywhere) or a dict whose keys are selectors: a
+    set of tags joined by '/' or ',' (e.g. "metal", "fwd/metal", "fwd,metal"); "*" or "" is the
+    universal fallback. A selector matches when all its tags are in `context` (the active tags,
+    typically { pass, target }). The most specific match wins; an equally-specific conflict is an
+    error. Returns None when nothing matches (callers substitute their own default).
+    """
+    if not isinstance( value, dict ):
+        return value
+
+    best, best_score, ambiguous = None, -1, False
+    for key, v in value.items():
+        tags = set() if key in ( "*", "" ) else { t.strip() for t in key.replace( ",", "/" ).split( "/" ) if t.strip() }
+        if tags <= context:
+            score = len( tags )
+            if score > best_score:
+                best, best_score, ambiguous = v, score, False
+            elif score == best_score and score > 0:
+                ambiguous = True
+    if ambiguous:
+        raise ValueError( f"ambiguous codegen selector for context { context } among { list( value ) }" )
+    return best
+
+
 class FfiCode:
     """ Abstract base for all FfiCode variants. Subclasses generate C++ on demand. """
 
@@ -59,17 +86,16 @@ class FfiCodeCustom( FfiCode ):
         return self._includes.get( "*", [] ) + self._includes.get( pass_name, [] )
 
     def signature( self ) -> str:
-        parts = [ self._fwd_code, self._bwd_code, repr( self._header ), repr( self._includes ) ]
+        parts = [ repr( self._fwd_code ), repr( self._bwd_code ), repr( self._header ), repr( self._includes ) ]
         if self._name:
             parts.insert( 0, self._name )
         return "__".join( parts )
 
     def code_for( self, pass_name: str ) -> str:
-        if pass_name == "fwd":
-            return self._fwd_code
-        if pass_name == "bwd":
-            return self._bwd_code
-        return ""
+        # fwd_code / bwd_code may be plain strings or per-context dicts ( see select_for ).
+        from .driver import driver
+        src = self._fwd_code if pass_name == "fwd" else self._bwd_code if pass_name == "bwd" else ""
+        return select_for( src, { pass_name, driver.device.codegen_target } ) or ""
 
     @property
     def has_grad_code( self ) -> bool:
@@ -101,12 +127,18 @@ class FfiCodeParallel( FfiCode ):
         self._bwd_body        = bwd_body
         self._name            = name
 
+    def body_for( self, pass_name: str, target: str ) -> str:
+        """The per-element body for `pass_name`, resolved for codegen `target` (see select_for).
+        The same string feeds the CPU/CUDA functor or, on Metal, the generated MSL kernel."""
+        src = self._fwd_body if pass_name == "fwd" else self._bwd_body
+        return select_for( src, { pass_name, target } ) or ""
+
     def metal_source( self, pass_name: str, fai, module_name: str ) -> "tuple[ list[ str ], str ]":
         # Emit an MSL kernel from the same per-element body (no host functor / run_parallel).
         # The CallArgs own the tensor -> MSL mapping (struct + buffers); we hand them the body.
         if pass_name != "fwd":
             raise NotImplementedError( "metal backward for FfiCodeParallel is not implemented yet" )
-        return [], fai.metal_forward_source( module_name, self._fwd_body, self._batch_axes )
+        return [], fai.metal_forward_source( module_name, self.body_for( "fwd", "metal" ), self._batch_axes )
 
     def with_prepended_batch_axis( self, name: str ) -> 'FfiCodeParallel':
         return FfiCodeParallel(
@@ -120,6 +152,9 @@ class FfiCodeParallel( FfiCode ):
         )
 
     def header_for( self, pass_name: str ) -> str:
+        from .driver import driver
+        target = driver.device.codegen_target
+
         lines = []
         lines.append( f"struct Parallel_{ pass_name } {{" )
 
@@ -136,10 +171,9 @@ class FfiCodeParallel( FfiCode ):
         args = [ "BI batch_index", "P &&p" ] + [ f"T_{ a } { a }" for a in pa ]
         prms = [ "class BI", "class P" ] + [ f"class T_{ a }" for a in pa ]
         lines.append( f"    template<{ ', '.join( prms ) }> HD void operator()( { ', '.join( args ) } ) const {{" )
-        if pass_name == "fwd":
-            lines.append( indent( dedent( self._fwd_body ), '        ' ) )
-        if pass_name == "bwd" and self._bwd_body:
-            lines.append( indent( dedent( self._bwd_body ), '        ' ) )
+        body = self.body_for( pass_name, target )
+        if body:
+            lines.append( indent( dedent( body ), '        ' ) )
         lines.append( "    }" )
 
         lines.append( "};" )
@@ -163,7 +197,7 @@ class FfiCodeParallel( FfiCode ):
         return ""
 
     def signature( self ) -> str:
-        parts = [ self._fwd_body, self._bwd_body, repr( self._batch_axes ), repr( self._includes ), repr( self._per_thread ),  ]
+        parts = [ repr( self._fwd_body ), repr( self._bwd_body ), repr( self._batch_axes ), repr( self._includes ), repr( self._per_thread ),  ]
         if self._name:
             parts.insert( 0, self._name )
         return "__".join( parts )

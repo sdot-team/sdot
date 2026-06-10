@@ -91,6 +91,54 @@ def test_metal_parallel_codegen():
     assert numpy.allclose( numpy.asarray( out ), ref ), ( numpy.asarray( out )[ :8 ], ref[ :8 ] )
 
 
+def test_metal_scalar_param():
+    """A scalar parameter ( `scale` ) reaches the MSL kernel as a 1-element buffer: `p.scale`."""
+    sdot.driver.framework = "jax"
+    sdot.driver.device = "metal"
+
+    n = 512
+    a = sdot.driver.array( numpy.linspace( 0, 1, n, dtype = numpy.float32 ) )
+
+    out = sdot.driver.call(
+        FfiCodeParallel(
+            name       = "pscale",
+            batch_axes = [ "p.output.nb_items()" ],
+            fwd_body   = "p.output( batch_index ) = p.scale * p.a( batch_index );",
+        ),
+        output = sdot.Return( sdot.Tensor( "n" ), n = n ),
+        a = a,
+        scale = 2.5,
+    )
+
+    assert numpy.allclose( numpy.asarray( out ), numpy.asarray( a ) * 2.5 )
+
+
+def test_metal_target_specific_body():
+    """Per-context body selection: the "metal" variant must win over the "*" fallback."""
+    sdot.driver.framework = "jax"
+    sdot.driver.device = "metal"
+
+    n = 256
+    a = sdot.driver.array( numpy.linspace( 0, 1, n, dtype = numpy.float32 ) )
+
+    out = sdot.driver.call(
+        FfiCodeParallel(
+            name       = "psel",
+            batch_axes = [ "p.output.nb_items()" ],
+            fwd_body   = {
+                "*":     "p.output( batch_index ) = p.a( batch_index );",
+                "metal": "p.output( batch_index ) = p.a( batch_index ) * 10.0f;",
+            },
+        ),
+        output = sdot.Return( sdot.Tensor( "n" ), n = n ),
+        a = a,
+    )
+
+    assert numpy.allclose( numpy.asarray( out ), numpy.asarray( a ) * 10.0 )
+
+
 if __name__ == "__main__":
     test_metal_elementwise_add()
     test_metal_parallel_codegen()
+    test_metal_scalar_param()
+    test_metal_target_specific_body()
