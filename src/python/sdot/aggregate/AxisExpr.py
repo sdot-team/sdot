@@ -1,13 +1,10 @@
 from __future__ import annotations
 from typing_extensions import Optional
 
-from jax._src.xla_bridge import OptionsDict
+from ..util import append_if_unique
 
-from ..util import append_if_unique, index
+from .AxisTerm import AxisTerm
 
-from .AxisVariable import AxisVariable
-
-from dataclasses import dataclass
 import numpy
 import ast
 import re
@@ -18,6 +15,9 @@ class AxisExpr:
 
     Example: `3 * dim + nb_elements[ dim, 2 * nb_points ] + 1 + nb_items`
 
+    It is a linear combination `offset + sum( coeff * variable )`, each `coeff * variable`
+    stored as an `AxisTerm`.
+
     Notation:
         `[ ... ]`  Dynamic value — the variable becomes a tensor whose rank equals the
                    number of index arguments; a `max_of_<name>` accessor is also generated.
@@ -26,13 +26,8 @@ class AxisExpr:
                    `nb_knots( dim ) + 1`  →  `nb_knots_0 + 1`, ..., `nb_knots_{dim-1} + 1`
     """
 
-    @dataclass
-    class Term:
-        variable: AxisVariable
-        coeff: int
-
     offset: int
-    terms: list[ AxisExpr.Term ]
+    terms: list[ AxisTerm ]
 
     def __init__( self, value ):
         if isinstance( value, AxisExpr ):
@@ -57,18 +52,17 @@ class AxisExpr:
     def unidimensional_version( self ):
         res = AxisExpr( self.offset )
         for term in self.terms:
-            if term.variable.name == "dim":
+            if term.name == "dim":
                 res.offset += term.coeff
                 continue
-            nterm = AxisExpr.Term( variable = term.variable.unidimensional_version(), coeff = term.coeff )
-            res.terms.append( nterm )
+            res.terms.append( term.unidimensional_version() )
         return res
 
     def ndim( self, value_of_axis_variable ) -> int:
         res = 1
         for term in self.terms:
-            if term.variable.arguments:
-                for argument in term.variable.arguments:
+            if term.arguments:
+                for argument in term.arguments:
                     # res *= argument.value( value_of_axis_variable, False )
                     raise NotImplementedError
         return res
@@ -76,7 +70,7 @@ class AxisExpr:
     def value( self, system, forbidden_names ) -> Optional[ int ]:
         res = self.offset
         for term in self.terms:
-            value = term.variable.value( system, forbidden_names )
+            value = term.variable_value( system, forbidden_names )
             if value is None:
                 return None
             res += term.coeff * value
@@ -90,86 +84,59 @@ class AxisExpr:
             argument = self.argument
             if argument is not None:
                 length = argument.value( system, forbidden_names )
-                if length is not None:
+                # an expansion spans a statically known number of axes (e.g. `dim`); a symbolic
+                # length (CppScalar) means we can't enumerate the axes -> leave it to the caller.
+                if isinstance( length, int ):
                     res = numpy.empty( [ length ], dtype = int )
                     for index in range( length ):
                         value, _ = self.solve( name, actual_shape_list, actual_shape_offset + index, system, forbidden_names, care_about_argument = False )
-                        info( index, value, name, self )
                         if value is None:
-                            return None, None
+                            return None, length
                         assert isinstance( value, int )
                         res[ index ] = value
                     return res, length
 
         # if we have `name` in some of the term...
         for num_term, term in enumerate( self.terms ):
-            if AxisExpr._term_name( term ) == name:
+            if term.exposed_name == name:
                 lhs = actual_shape_list[ actual_shape_offset ]
                 res = lhs - self.offset
                 # ...and we can find the values for the other terms
                 for num_mret, mret in enumerate( self.terms ):
                     if num_mret == num_term:
                         continue
-                    v = system.value_of( AxisExpr._term_name( mret ), forbidden_names + [ name ] )
+                    v = mret.variable_value( system, forbidden_names + [ name ] )
                     if v is None:
                         return None, 1
                     res -= mret.coeff * v
-                assert res % term.coeff == 0
+                if isinstance( res, int ):
+                    assert res % term.coeff == 0
                 return res // term.coeff, 1
         return None, 1
 
     def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         for term in self.terms:
-            append_if_unique( axis_variable_names, self._term_name( term ) )
-            if term.variable.arguments is not None:
-                for argument in term.variable.arguments:
+            append_if_unique( axis_variable_names, term.exposed_name )
+            if term.arguments is not None:
+                for argument in term.arguments:
                     argument.get_axis_variable_names( axis_variable_names )
-            if term.variable.selection is not None:
-                for selection in term.variable.selection:
+            if term.selection is not None:
+                for selection in term.selection:
                     selection.get_axis_variable_names( axis_variable_names )
-
-    @staticmethod
-    def _term_name( term ) -> str:
-        """Name under which a term's variable is exposed (dynamic selection -> max_of_*)."""
-        if term.variable.selection is not None:
-            return "max_of_" + term.variable.name
-        return term.variable.name
 
     @property
     def argument( self ) -> Optional[ AxisExpr ]:
         res = []
         for term in self.terms:
-            if term.variable.arguments is not None:
-                if len( term.variable.arguments ) != 1:
+            if term.arguments is not None:
+                if len( term.arguments ) != 1:
                     raise NotImplementedError
-                res.append( term.variable.arguments[ 0 ] )
+                res.append( term.arguments[ 0 ] )
         if len( res ) > 1:
             raise NotImplementedError
         if len( res ) == 1:
             return res[ 0 ]
         return None
-
-    # def as_equation_row( self, names: list[ str ] ):
-    #     """
-    #     Express this axis as a single linear equation over `names`:
-
-    #         axis_size == offset + sum( coeff * value_of( name ) )
-
-    #     Returns ( row, offset ) where `row[ i ]` is the coefficient of `names[ i ]`,
-    #     or None when the axis cannot be written as one such row (e.g. an expansion
-    #     `( ... )` that spans several axes).
-    #     """
-    #     if self.has_argument():
-    #         return None
-    #     row = [ 0 ] * len( names )
-    #     for term in self.terms:
-    #         row[ index( names, self._term_name( term ) ) ] = term.coeff
-    #     return row, self.offset
-
-    # def as_single_name( self ):
-    #     if len( self.terms ) == 1 and not self.terms[ 0 ].variable.selection and not self.terms[ 0 ].variable.arguments:
-    #        return self.terms[ 0 ].variable.name, self.offset, self.terms[ 0 ].coeff
-    #     return None, None, None
 
     def _parse( self, node ):
         match node:
@@ -185,17 +152,17 @@ class AxisExpr:
             case ast.Call( func=ast.Name( id=name ), args=args, keywords=[] ):
                 self.terms.append( AxisExpr._term_from_call( name, args ) )
             case ast.Name( id=name ):
-                self.terms.append( AxisExpr.Term( AxisVariable( None, None, name ), 1 ) )
+                self.terms.append( AxisTerm( 1, name ) )
             case ast.Constant( value=int( n ) ):
                 self.offset += n
             case _:
                 raise ValueError( f"unsupported expression: {ast.dump( node )}" )
 
     @staticmethod
-    def _term_from_node( node, coeff: int = 1 ) -> 'AxisExpr.Term':
+    def _term_from_node( node, coeff: int = 1 ) -> AxisTerm:
         match node:
             case ast.Name( id=name ):
-                return AxisExpr.Term( AxisVariable( None, None, name ), coeff )
+                return AxisTerm( coeff, name )
             case ast.Subscript( value=ast.Name( id=name ), slice=cmp ):
                 return AxisExpr._term_from_subscript( name, cmp, coeff )
             case ast.Call( func=ast.Name( id=name ), args=args, keywords=[] ):
@@ -204,20 +171,20 @@ class AxisExpr:
                 raise ValueError( f"unsupported: {ast.dump( node )}" )
 
     @staticmethod
-    def _term_from_subscript( name: str, cmp, coeff: int = 1 ) -> 'AxisExpr.Term':
+    def _term_from_subscript( name: str, cmp, coeff: int = 1 ) -> AxisTerm:
         if isinstance( cmp, ast.Tuple ):
             selection = [ AxisExpr._from_node( elt ) for elt in cmp.elts ]
         else:
             selection = [ AxisExpr._from_node( cmp ) ]
-        return AxisExpr.Term( AxisVariable( None, selection, name ), coeff )
+        return AxisTerm( coeff, name, selection = selection )
 
     @staticmethod
-    def _term_from_call( name: str, args, coeff: int = 1 ) -> 'AxisExpr.Term':
+    def _term_from_call( name: str, args, coeff: int = 1 ) -> AxisTerm:
         arguments = [ AxisExpr._from_node( arg ) for arg in args ]
-        return AxisExpr.Term( AxisVariable( arguments, None, name ), coeff )
+        return AxisTerm( coeff, name, arguments = arguments )
 
     @staticmethod
-    def _from_node( node ) -> 'AxisExpr':
+    def _from_node( node ) -> AxisExpr:
         s = object.__new__( AxisExpr )
         s.offset = 0
         s.terms = []

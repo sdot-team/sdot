@@ -7,9 +7,11 @@ import sdot
 # numpy.random.seed( 0 )
 
 def test_PolynomialGrid():
-    grid = sdot.PolynomialGrid( values = [ [ [ 1, 2, 3 ] ] ] )
-    info( grid.shape )
-    # info( grid.nb_coeffs )
+    grid = sdot.PolynomialGrid( values = [ [ [ 1, 2, 3 ] ] ], knots = [ [ 1, 2, 3 ], [ 3, 4, 4 ] ] )
+    # info( grid.shape )
+    info( grid.nb_coeffs )
+    info( grid.max_of_nb_knots )
+    info( grid.dim )
     # info( grid.dim )
     # image = image.normalized_version( mass = 1 )
 

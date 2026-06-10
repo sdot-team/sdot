@@ -2,7 +2,6 @@ from ..util.get_all_annotations import get_all_annotations
 from ..util.append_if_unique import append_if_unique
 # from ..drivers.driver import driver
 
-from .AxisVariableEquation import AxisVariableEquation
 from .AxisVariableSystem import AxisVariableSystem
 from .Workspace import Workspace
 from .Tensor import Tensor
@@ -37,8 +36,8 @@ def aggregate( cls: type[ _T ] ) -> type[ _T ]:
         if isinstance( field, Tensor ):
             for expr in field.shape:
                 for term in expr.terms:
-                    if term.variable.selection is not None:
-                        dynamic_shapes[ term.variable.name ] = term.variable.selection
+                    if term.selection is not None:
+                        dynamic_shapes[ term.name ] = term.selection
 
     for axis_name, selection in dynamic_shapes.items():
         if axis_name not in fields:

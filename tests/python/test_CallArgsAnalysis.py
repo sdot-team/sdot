@@ -1,7 +1,6 @@
 from sdot.compilation.CallArgsAnalysis import CallArgsAnalysis
-from sdot.aggregate.AxisVariableSystem import AxisVariableSystem, AxisTensorSource
+from sdot.aggregate.AxisVariableSystem import AxisVariableSystem
 from sdot.aggregate.Conditional import Conditional
-from sdot.aggregate.AxisExpr import AxisExpr
 from sdot.aggregate.Tensor import Tensor
 from sdot.aggregate import aggregate
 
@@ -65,12 +64,14 @@ def test_ascend_to_prefixed_kwargs():
 
 def test_inconsistent_shapes_are_rejected():
     """check_consistency catches two shapes implying different values for the same axis."""
-    sources = [
-        AxisTensorSource( shape = [ AxisExpr( "nb_points" ) ], numpy_value = numpy.zeros( 5 ) ),
-        AxisTensorSource( shape = [ AxisExpr( "nb_points" ) ], numpy_value = numpy.zeros( 7 ) ),
-    ]
-    system = AxisVariableSystem.from_sources( sources )
-    assert system.local_value_of( "nb_points" ) == 5  # first value found
+    @aggregate
+    class Dist:
+        positions : Tensor( "nb_points" )
+        weights   : Tensor( "nb_points" )
+
+    d = Dist( positions = numpy.zeros( 5 ), weights = numpy.zeros( 7 ) )
+    system = AxisVariableSystem( d )
+    assert system.value_of( "nb_points" ) == 5  # first value found
     try:
         system.check_consistency()
         assert False, "expected an inconsistency error"

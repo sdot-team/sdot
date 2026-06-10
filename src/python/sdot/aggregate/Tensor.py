@@ -6,7 +6,6 @@ from ..util.append_if_unique import append_if_unique
 from ..drivers.driver import driver
 from ..drivers.Dtype import Dtype
 
-from .AxisVariableEquation import AxisVariableEquation
 from .AxisExpr import AxisExpr
 
 import numpy
@@ -105,11 +104,11 @@ class Tensor:
         # add argument variables
         for expr in self.shape:
             for term in expr.terms:
-                if term.variable.arguments:
-                    for argument in term.variable.arguments:
+                if term.arguments:
+                    for argument in term.arguments:
                         for aterm in argument.terms:
-                            if aterm.variable.name not in self.ct_variables:
-                                append_if_unique( res, aterm.variable.name )
+                            if aterm.name not in self.ct_variables:
+                                append_if_unique( res, aterm.name )
 
         return res
 

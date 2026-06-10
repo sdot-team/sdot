@@ -40,9 +40,9 @@ class CallArgsAnalysis:
             if isinstance( arg, ( Return, Workspace ) ) and isinstance( arg.return_type, Tensor ):
                 for expr in arg.return_type.shape:
                     for term in expr.terms:
-                        if term.variable.selection is not None:
-                            n = term.variable.name
-                            dynamic_shapes[ n ] = term.variable.selection
+                        if term.selection is not None:
+                            n = term.name
+                            dynamic_shapes[ n ] = term.selection
                             source_kwargs.setdefault( n, {} ).update( getattr( arg, 'type_kwargs', {} ) )
 
         for name, selection in dynamic_shapes.items():

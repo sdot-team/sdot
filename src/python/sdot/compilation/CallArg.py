@@ -139,9 +139,11 @@ class CallArg:
         """(code generation) Add this argument's handler parameter declarations. Default: none."""
         pass
 
-    def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
-        """(analysis) Contribute tensor sources to an AxisVariableSystem. Default: none (leaves override)."""
-        pass
+    def _collect_cpp_axis_items( self, items, attributes, use_attributes, recursive ):
+        """(code generation) Contribute C++-shaped tensors to a `_CppScope` for axis resolution.
+        Default: recurse into children (leaves with a shape override to add themselves)."""
+        for name, arg in self.children.items():
+            arg._collect_cpp_axis_items( items, attributes + [ name ], use_attributes, recursive )
 
     def check_axis_consistency( self ):
         """(analysis) Raise if tensor shapes disagree on a shared axis variable.
@@ -181,9 +183,10 @@ class CallArg:
             val = child.python_value
             return int( val.item() ) if hasattr( val, "item" ) else int( val )
 
-        # 3. local linear system over the shapes of the directly contained tensors
-        if axis_system := getattr( self, "axis_system", None ):
-            value = axis_system( recursive = False ).local_value_of( name )
+        # 3. local resolution over the shapes of the directly contained tensors
+        if getattr( self, "_aggregate_items", None ):
+            from ..aggregate.AxisVariableSystem import AxisVariableSystem
+            value = AxisVariableSystem( self ).value_of( name )
             if value is not None:
                 return value
 

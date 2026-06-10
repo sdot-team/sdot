@@ -7,6 +7,18 @@ from .CallArg import CallArg
 from typing import Optional
 from weakref import ref
 
+
+class _CppScope:
+    """Adapts a flat `{ key: ( annotation, cpp_value ) }` map to the `_aggregate_items`
+    interface, so `AxisVariableSystem` can resolve over C++-shaped tensors."""
+
+    def __init__( self, items: dict ):
+        self._items = items
+
+    def _aggregate_items( self ):
+        return self._items
+
+
 class CallArg_Aggregate( CallArg ):
     """
     A struct-like argument: a python object whose annotated attributes are recursively
@@ -174,39 +186,56 @@ class CallArg_Aggregate( CallArg ):
         for argument in self.sub_dict.values():
             argument.generate_structures( already_visited )
 
-    def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
-        """(analysis, override) Contribute the children's tensors to an AxisVariableSystem.
+    def _aggregate_items( self ):
+        """(analysis) Duck-typed view consumed by `AxisVariableSystem`: one item per direct
+        child, pairing the child itself (exposing the declared `.shape` for tensors) with its
+        concrete python value (exposing the numpy `.shape`). Nested aggregates and shapeless
+        leaves have no `.shape` and are simply skipped by the resolver."""
+        res = {}
+        for name, child in self.sub_dict.items():
+            res[ name ] = ( child, getattr( child, "python_value", None ) )
+        return res
 
-        A nested aggregate is a distinct axis variable scope, so its tensors are only
-        added when `recursive` is set (i.e. for C++ assembly, where every tensor is in
-        scope as a flat FFI variable).
+    def check_axis_consistency( self ):
+        """(analysis, override) Check this scope's tensors agree, then recurse into children."""
+        from ..aggregate.AxisVariableSystem import AxisVariableSystem
+        AxisVariableSystem( self ).check_consistency()
+        for argument in self.sub_dict.values():
+            argument.check_axis_consistency()
+
+    # -- C++ codegen resolution (shapes as CppScalar) -------------------------
+
+    def axis_system( self, use_attributes: bool = False, recursive: bool = True, explicit_values = None ):
         """
-        if not recursive:
-            return
-        for name, argument in self.sub_dict.items():
-            argument.add_axis_tensor_sources( sources, attributes + [ name ], use_attributes, recursive )
+        (code generation) `AxisVariableSystem` over this scope's tensors with C++-expression
+        shapes (`CppScalar`), so `value_of` returns the C++ value of an axis variable.
 
-    def axis_system( self, use_attributes: bool = False, recursive: bool = True ):
-        """
-        (analysis) Build the `AxisVariableSystem` for this aggregate, one source per tensor.
-
-        `recursive`      include tensors of nested aggregates (used for C++ assembly where
-                         every tensor is in scope as a flat FFI variable); when False, only
-                         the directly contained tensors are considered.
+        `recursive`      also flatten nested aggregates' tensors (in scope as flat FFI
+                         variables during C++ assembly); when False, only direct tensors.
         `use_attributes` reference tensors by attribute path instead of flat FFI name.
         """
         from ..aggregate.AxisVariableSystem import AxisVariableSystem
 
-        sources = []
+        items: dict = {}
         for name, argument in self.sub_dict.items():
-            argument.add_axis_tensor_sources( sources, [ name ], use_attributes, recursive )
-        return AxisVariableSystem.from_sources( sources )
+            argument._collect_cpp_axis_items( items, [ name ], use_attributes, recursive )
+        return AxisVariableSystem( _CppScope( items ), explicit_values = explicit_values )
 
-    def check_axis_consistency( self ):
-        """(analysis, override) Check this scope's tensors agree, then recurse into children."""
-        self.axis_system( recursive = False ).check_consistency()
-        for argument in self.sub_dict.values():
-            argument.check_axis_consistency()
+    def _collect_cpp_axis_items( self, items, attributes, use_attributes, recursive ):
+        """(code generation, override) A nested aggregate is a distinct scope: its tensors are
+        contributed only when `recursive` (C++ assembly, where every tensor is a flat FFI var)."""
+        if not recursive:
+            return
+        for name, argument in self.sub_dict.items():
+            argument._collect_cpp_axis_items( items, attributes + [ name ], use_attributes, recursive )
+
+    def cpp_runtime_expr( self, name: str, explicit_values = None ) -> str:
+        """(code generation) C++ expression for the run-time value of axis variable `name`."""
+        val = self.axis_system( explicit_values = explicit_values ).value_of( name )
+        return str( val ) if val is not None else "0"
+
+    # capacity of a DynamicAxis resolves exactly like a plain axis
+    cpp_capacity_expr = cpp_runtime_expr
 
     def get_arg_decl( self, non_differentiable_inputs: list, differentiable_inputs: list, parameters: list, outputs: list ):
         """(code generation, override) Gather the children's handler argument declarations."""
@@ -357,15 +386,16 @@ class CallArg_Aggregate( CallArg ):
         # decl
         lines = [ struct_name + "{" ]
 
-        # axes
-        system = self.axis_system( use_attributes = False, recursive = True )
+        # axes. compile-time axes have a known int value (emitted as a constexpr); seed them as
+        # explicit values so a run-time axis expression depending on them resolves to that int.
+        ct_values = { n: self.value_of_axis_variable( n ) for n in ct_axis_variable_names }
         for axis_variable_name in axis_variable_names:
             if axis_variable_name in self.batch_axes: # batch axes are leading tensor dims, not members
                 continue
             if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
-                lines.append( f"{ beg_line }    .{ axis_variable_name } = Ct<TI,{ self.value_of_axis_variable( axis_variable_name ) }>()," )
+                lines.append( f"{ beg_line }    .{ axis_variable_name } = Ct<TI,{ ct_values[ axis_variable_name ] }>()," )
             else: # else, attribute to be filled during construction
-                lines.append( f"{ beg_line }    .{ axis_variable_name } = { system.cpp_runtime_expr( axis_variable_name ) }," )
+                lines.append( f"{ beg_line }    .{ axis_variable_name } = { self.cpp_runtime_expr( axis_variable_name, explicit_values = ct_values ) }," )
 
         # attributes
         for name, argument in self.sub_dict.items():

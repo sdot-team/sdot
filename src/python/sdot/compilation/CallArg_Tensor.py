@@ -10,6 +10,13 @@ from typing import Optional
 from weakref import ref
 
 
+class _CppShape:
+    """A tensor's concrete shape expressed as C++ `CppScalar`s, for C++-side axis resolution."""
+
+    def __init__( self, shape: list ):
+        self.shape = shape
+
+
 class CallArg_Tensor( CallArg ):
     """
     An array argument (input, output, or mutable). It owns the `shape` (a list of
@@ -228,9 +235,9 @@ class CallArg_Tensor( CallArg ):
         """True if axis n is declared compile-time (all terms in ct_variables, no dynamic selection)."""
         expr = self.shape[ n ]
         for term in expr.terms:
-            if term.variable.selection is not None or term.variable.arguments is not None:
+            if term.selection is not None or term.arguments is not None:
                 return False
-            if term.variable.name not in self.ct_variables:
+            if term.name not in self.ct_variables:
                 return False
         return True
 
@@ -277,9 +284,10 @@ class CallArg_Tensor( CallArg ):
         for s in self.shape:
             s.get_axis_variable_names( axis_variable_names )
 
-    def add_axis_tensor_sources( self, sources, attributes, use_attributes, recursive ):
-        """(analysis, override) Contribute this tensor (shape + value + C++ ref) to an AxisVariableSystem."""
-        from ..aggregate.AxisVariableSystem import AxisTensorSource
+    def _collect_cpp_axis_items( self, items, attributes, use_attributes, recursive ):
+        """(code generation, override) Contribute this tensor to a `_CppScope`: its declared
+        shape (`self`) paired with a value whose `.shape` entries are C++ size expressions."""
+        from ..aggregate.CppScalar import CppScalar
 
         # NoneTensor has no shape to contribute
         if self._is_none:
@@ -299,12 +307,8 @@ class CallArg_Tensor( CallArg ):
         else:
             cpp_ref = "t_" + self.ffi_name()
 
-        sources.append( AxisTensorSource(
-            shape        = self.shape,
-            ct_variables = self.ct_variables,
-            numpy_value  = self.python_value,
-            cpp_ref      = cpp_ref
-        ) )
+        cpp_shape = _CppShape( [ CppScalar( f"{ cpp_ref }.shape( { i } )" ) for i in range( len( self.shape ) ) ] )
+        items[ "_".join( attributes ) ] = ( self, cpp_shape )
 
     def ffi_output_name( self ):
         """(code generation) Name of this tensor in the flat FFI output list."""
@@ -333,7 +337,7 @@ class CallArg_Tensor( CallArg ):
 
         if self.represents_a_dynamic_axis:
             assert self.parent
-            capa = self.parent().axis_system().cpp_capacity_expr( "max_of_" + self.represents_a_dynamic_axis )
+            capa = self.parent().cpp_capacity_expr( "max_of_" + self.represents_a_dynamic_axis )
             extr = f", { self.num_in_dynamic_axes }, { capa }"
 
         # mutable (has both input and output buffers)
