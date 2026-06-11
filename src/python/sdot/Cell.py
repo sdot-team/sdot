@@ -34,6 +34,8 @@ class Cell:
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
 
+        batch_axes_dict: dict[ str, int ]
+
         max_of_nb_vertices: int
         max_of_nb_edges: int
         max_of_nb_cuts: int
@@ -179,11 +181,6 @@ class Cell:
     # --------------------------------------------------------------------------------------
 
     @staticmethod
-    def _batch_size_exprs( batch_axes: dict ) -> list:
-        """C++ expressions for the batch sizes — read from a representative field's leading dims."""
-        return [ f"p.cell.is_fully_bounded.shape( Ct<int,{ i }>() )" for i in range( len( batch_axes ) ) ]
-
-    @staticmethod
     def _return_parameters_for( dim: int, batch_axes: dict ) -> dict:
         """Axis variables to allocate a new (possibly batched) Cell output."""
         kw = dict(
@@ -201,7 +198,7 @@ class Cell:
     def _make_full_spaces( dim: int, batch_axes: dict ):
         return cast( Cell, driver.call(
             FfiCodeParallel(
-                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                parallel_over = [ "cell" ],
                 fwd_body = "p.cell( batch_index ).init_as_unbounded();",
                 name = "make_full_spaces"
             ),
@@ -213,7 +210,7 @@ class Cell:
         dim = frames.shape[ -1 ]
         return cast( Cell, driver.call(
             FfiCodeParallel(
-                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                parallel_over = [ "cell" ],
                 fwd_body = "p.cell( batch_index ).init_as_hypercube( p.frames( batch_index ), p.cut_ids( batch_index ) );",
                 bwd_body = "p.cell( batch_index ).init_as_hypercube_bwd( p.frames( batch_index ), p, batch_index );",
                 name = "make_hypercubes"
@@ -272,7 +269,7 @@ class Cell:
 
         return driver.call(
             FfiCodeParallel( name = "measure",
-                batch_axes = Cell._batch_size_exprs( batch_axes ),
+                parallel_over = [ "cell" ],
                 per_thread_args = per_thread_args,
                 per_thread = per_thread,
                 fwd_body = pre + "p.output( batch_index ) = p.cell( batch_index ).measure( item_map );",

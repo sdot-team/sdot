@@ -951,7 +951,7 @@ class JaxDriver:
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.code_for( "fwd" ), fai, module_name, "Parameters" )
+        self._handler_source( includes, lines, code.code_for( "fwd", fai ), fai, module_name, "Parameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, module_name )
@@ -1017,7 +1017,7 @@ class JaxDriver:
         if self.device.is_cuda_gpu:
             lines.append( "cudaStream_t ExecutionContext_Cuda::default_stream;" )
 
-        self._handler_source( includes, lines, code.code_for( "bwd" ), bfai, bwd_module_name, "GradParameters" )
+        self._handler_source( includes, lines, code.code_for( "bwd", bfai ), bfai, bwd_module_name, "GradParameters" )
         lines.append( "" )
 
         self._append_nb_module( lines, bwd_module_name )

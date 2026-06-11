@@ -46,7 +46,7 @@ class FfiCode:
     def has_grad_code( self ) -> bool:
         raise NotImplementedError
 
-    def code_for( self, pass_name: str ) -> str:
+    def code_for( self, pass_name: str, fai = None ) -> str:
         raise NotImplementedError
 
     @property
@@ -63,7 +63,7 @@ class FfiCode:
         """
         header = self.header_for( pass_name )
         header_lines = [ dedent( header ) ] if header else []
-        return header_lines, self.code_for( pass_name )
+        return header_lines, self.code_for( pass_name, fai )
 
 
 class FfiCodeCustom( FfiCode ):
@@ -91,7 +91,7 @@ class FfiCodeCustom( FfiCode ):
             parts.insert( 0, self._name )
         return "__".join( parts )
 
-    def code_for( self, pass_name: str ) -> str:
+    def code_for( self, pass_name: str, fai = None ) -> str:
         # fwd_code / bwd_code may be plain strings or per-context dicts ( see select_for ).
         from .driver import driver
         src = self._fwd_code if pass_name == "fwd" else self._bwd_code if pass_name == "bwd" else ""
@@ -108,20 +108,27 @@ class FfiCodeCustom( FfiCode ):
 
 class FfiCodeParallel( FfiCode ):
     """
-    Trivially parallel FfiCode: iterates over cartesian_product_ranges of batch_axes,
-    one independent call per element — no synchronisation, auto-dispatched to GPU.
+    Trivially parallel FfiCode: iterates in parallel over the batch axes of the objects named
+    in `parallel_over`, one independent call per element — no synchronisation, auto-dispatched
+    to GPU.
 
-    Supports vmap via with_prepended_batch_axis().
+    `parallel_over` is a list of attribute paths into the `Parameters` aggregate (e.g. "cell",
+    "power_diagram.cell"). The iteration space (sizes + ordering) is resolved at codegen time
+    from those objects' named `batch_axes` by `BatchPlan` — this FfiCode stays a pure codegen
+    description and never hard-codes C++ size expressions.
+
+    vmap is transparent: it adds a named batch axis on the *objects* (see the JaxDriver batch
+    rule), which `BatchPlan` then picks up — so `with_prepended_batch_axis` is a no-op here.
     """
 
-    def __init__( self, batch_axes: list[ str ], fwd_body: str, bwd_body: str = "",
+    def __init__( self, parallel_over: list[ str ], fwd_body: str, bwd_body: str = "",
                   per_thread_args: "list[ str ] | dict[ str, list[ str ] ]" = None,
                   per_thread: "str | dict[ str, str ]" = None,
                   includes: "list | dict[ str, list ]" = None,
                   name: str = "" ) -> None:
         self._per_thread_args = { "*": per_thread_args } if isinstance( per_thread_args, list ) else ( per_thread_args or {} )
         self._per_thread      = { "*": per_thread } if isinstance( per_thread, str ) else ( per_thread or {} )
-        self._batch_axes      = list( batch_axes )
+        self._parallel_over   = list( parallel_over )
         self._includes        = { "*": includes } if isinstance( includes, list ) else ( includes or {} )
         self._fwd_body        = fwd_body
         self._bwd_body        = bwd_body
@@ -136,20 +143,15 @@ class FfiCodeParallel( FfiCode ):
     def metal_source( self, pass_name: str, fai, module_name: str ) -> "tuple[ list[ str ], str ]":
         # Emit an MSL kernel from the same per-element body (no host functor / run_parallel).
         # The CallArgs own the tensor -> MSL mapping (struct + buffers); we hand them the body.
+        from ..compilation.BatchPlan import BatchPlan
         if pass_name != "fwd":
             raise NotImplementedError( "metal backward for FfiCodeParallel is not implemented yet" )
-        return [], fai.metal_forward_source( module_name, self.body_for( "fwd", "metal" ), self._batch_axes )
+        plan = BatchPlan( fai, self._parallel_over )
+        return [], fai.metal_forward_source( module_name, self.body_for( "fwd", "metal" ), plan.size_exprs )
 
     def with_prepended_batch_axis( self, name: str ) -> 'FfiCodeParallel':
-        return FfiCodeParallel(
-            per_thread_args = self._per_thread_args,
-            per_thread      = self._per_thread,
-            batch_axes      = [ name ] + self._batch_axes,
-            includes        = self._includes,
-            fwd_body        = self._fwd_body,
-            bwd_body        = self._bwd_body,
-            name            = self._name,
-        )
+        # vmap axes live on the objects (BatchPlan reads them); nothing to change on the code.
+        return self
 
     def header_for( self, pass_name: str ) -> str:
         from .driver import driver
@@ -197,13 +199,14 @@ class FfiCodeParallel( FfiCode ):
         return ""
 
     def signature( self ) -> str:
-        parts = [ repr( self._fwd_body ), repr( self._bwd_body ), repr( self._batch_axes ), repr( self._includes ), repr( self._per_thread ),  ]
+        parts = [ repr( self._fwd_body ), repr( self._bwd_body ), repr( self._parallel_over ), repr( self._includes ), repr( self._per_thread ),  ]
         if self._name:
             parts.insert( 0, self._name )
         return "__".join( parts )
 
-    def code_for( self, pass_name: str ) -> str:
-        batch_sizes = ", ".join( self._batch_axes )
+    def code_for( self, pass_name: str, fai = None ) -> str:
+        from ..compilation.BatchPlan import BatchPlan
+        batch_sizes = ", ".join( BatchPlan( fai, self._parallel_over ).size_exprs )
         return f"run_parallel( cartesian_product_ranges( tuple( { batch_sizes } ) ), Parallel_{ pass_name }(), p );"
 
     @property

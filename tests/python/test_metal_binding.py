@@ -79,7 +79,7 @@ def test_metal_parallel_codegen():
     out = sdot.driver.call(
         FfiCodeParallel(
             name       = "padd",
-            batch_axes = [ "p.output.nb_items()" ],
+            parallel_over = [ "output" ],
             fwd_body   = "p.output( batch_index ) = p.a( batch_index ) + p.b( batch_index );",
         ),
         output = sdot.Return( sdot.Tensor( "n" ), n = n ),
@@ -102,7 +102,7 @@ def test_metal_scalar_param():
     out = sdot.driver.call(
         FfiCodeParallel(
             name       = "pscale",
-            batch_axes = [ "p.output.nb_items()" ],
+            parallel_over = [ "output" ],
             fwd_body   = "p.output( batch_index ) = p.scale * p.a( batch_index );",
         ),
         output = sdot.Return( sdot.Tensor( "n" ), n = n ),
@@ -124,7 +124,7 @@ def test_metal_target_specific_body():
     out = sdot.driver.call(
         FfiCodeParallel(
             name       = "psel",
-            batch_axes = [ "p.output.nb_items()" ],
+            parallel_over = [ "output" ],
             fwd_body   = {
                 "*":     "p.output( batch_index ) = p.a( batch_index );",
                 "metal": "p.output( batch_index ) = p.a( batch_index ) * 10.0f;",

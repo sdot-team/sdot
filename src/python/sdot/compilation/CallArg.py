@@ -118,11 +118,8 @@ class CallArg:
         """(code generation) Add the C++ includes this argument needs. Default: none."""
         pass
 
-    def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ str ], name_list_so_far: list[ str ] ):
+    def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ tuple[ str ] ], name_list_so_far: list[ str ] ):
         """(analysis) Collect compile-time axis variable names, prefixed by the path.
-
-        These bubble up through nested aggregates (becoming template parameters of the
-        outer struct). Default behaviour: recurse into children.
         """
         for name, arg in self.children.items():
             arg.get_ct_axis_variable_names( ct_axis_variable_names, name_list_so_far + [ name ] )
@@ -153,8 +150,15 @@ class CallArg:
         for arg in self.children.values():
             arg.check_axis_consistency()
 
-    def value_of_axis_variable( self, variable_name: str, is_a_dyn_size: bool = False ) -> int:
+    def value_of_axis_variable( self, variable_name: str | tuple[ str ], is_a_dyn_size: bool = False ) -> int:
         """(analysis) Resolve the integer value of an axis variable, or raise if impossible."""
+        if isinstance( variable_name, tuple ):
+            if len( variable_name ) > 1:
+                ch = self.children[ variable_name[ 0 ] ]
+                return ch.value_of_axis_variable( tuple( list( variable_name )[ 1: ] ), is_a_dyn_size )
+            assert len( variable_name ) == 1
+            variable_name = variable_name[ 0 ]
+
         res = self._find_axis_variable( variable_name, [ variable_name ], is_a_dyn_size, came_from = None )
         if res is None:
             raise RuntimeError( f"Unable to find axis variable value for '{ variable_name }' in '{ self.name_in_parent }'" )

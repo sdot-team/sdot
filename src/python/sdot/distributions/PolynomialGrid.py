@@ -1,6 +1,6 @@
+from ..drivers.driver import driver, FfiCodeParallel
 from ..aggregate import Tensor, Return, aggregate
 from .Distribution import Distribution
-from ..drivers.driver import driver
 from typing import TYPE_CHECKING
 
 # from itertools import product as iproduct
@@ -30,6 +30,9 @@ class PolynomialGrid( Distribution ):
 
     if TYPE_CHECKING:
         def __init__( self, values = None, frame = None, knots = None ): ...
+
+        batch_axes_dict : dict[ str, int ]
+
         max_of_nb_knots : int  #
         nb_coeffs       : int  # (order+1)^dim
         shape           : list[ int ]
@@ -48,11 +51,16 @@ class PolynomialGrid( Distribution ):
     def nb_coeffs_for( dim, order ):
         return ( order + 1 ) ** dim
 
+    @property
     def mass( self ):
-        return driver.call( "mass_of_polynomial_grid", "sdot/Distribution/mass_of_polynomial_grid.h",
-            res = Return( Tensor() ),
-            polynomial_grid = self,
-            grad = False
+        return driver.call(
+            FfiCodeParallel( name = "PolynomialGrid",
+                parallel_over = [ "polynomial_grid" ],
+                fwd_body = "p.output( batch_index ) = p.polynomial_grid( batch_index ).mass();",
+                bwd_body = "p.polynomial_grid( batch_index ).mass_bwd( p, batch_index );",
+            ),
+            output = Return( Tensor( *self.batch_axes_dict.keys() ), **self.batch_axes_dict ),
+            polynomial_grid = self
         )
 
     def normalized_version( self, **kwargs ):

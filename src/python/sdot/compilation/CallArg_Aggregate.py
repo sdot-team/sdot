@@ -252,7 +252,7 @@ class CallArg_Aggregate( CallArg ):
         file for embedding inside a hand-written struct.
         """
 
-        ct_axis_variable_names : list[ str ] = []
+        ct_axis_variable_names : list[ tuple ] = []
         axis_variable_names: list[ str ] = []
         template_args = TemplateArgs()
         includes = set()
@@ -317,7 +317,8 @@ class CallArg_Aggregate( CallArg ):
             for axis_variable_name in axis_variable_names:
                 if axis_variable_name in batch_axes: # batch axes live as leading tensor dims, not members
                     continue
-                if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
+                # scope-local axes are bare; they are compile-time iff exposed as a bare ct tuple
+                if ( axis_variable_name, ) in ct_axis_variable_names: # always a ct_axis -> make a constexpr
                     lines.append( f"    Ct<TI,ct_{ axis_variable_name }> { axis_variable_name };" )
                 else: # else, attribute to be filled during construction
                     lines.append( f"    SI { axis_variable_name };" )
@@ -340,7 +341,7 @@ class CallArg_Aggregate( CallArg ):
         # lines.append( "    }" )
 
         # data members
-        lines.append(  f"    /* attributes */" )
+        lines.append(  "    /* attributes */" )
         for name, argument in self.sub_dict.items():
             lines.append( f"    { argument.cpp_type_name( [ name ] ) } { name };" )
 
@@ -369,7 +370,7 @@ class CallArg_Aggregate( CallArg ):
         """
 
         # get info
-        ct_axis_variable_names : list[ str ] = []
+        ct_axis_variable_names : list[ tuple( str ) ] = []
         axis_variable_names: list[ str ] = []
         template_args = TemplateArgs()
         for name, argument in self.sub_dict.items():
@@ -388,11 +389,12 @@ class CallArg_Aggregate( CallArg ):
 
         # axes. compile-time axes have a known int value (emitted as a constexpr); seed them as
         # explicit values so a run-time axis expression depending on them resolves to that int.
-        ct_values = { n: self.value_of_axis_variable( n ) for n in ct_axis_variable_names }
+        ct_values = { "_".join( n ): self.value_of_axis_variable( n ) for n in ct_axis_variable_names }
         for axis_variable_name in axis_variable_names:
             if axis_variable_name in self.batch_axes: # batch axes are leading tensor dims, not members
                 continue
-            if axis_variable_name in ct_axis_variable_names: # always a ct_axis -> make a constexpr
+            # scope-local axes are bare; they are compile-time iff exposed as a bare ct tuple
+            if ( axis_variable_name, ) in ct_axis_variable_names: # always a ct_axis -> make a constexpr
                 lines.append( f"{ beg_line }    .{ axis_variable_name } = Ct<TI,{ ct_values[ axis_variable_name ] }>()," )
             else: # else, attribute to be filled during construction
                 lines.append( f"{ beg_line }    .{ axis_variable_name } = { self.cpp_runtime_expr( axis_variable_name, explicit_values = ct_values ) }," )

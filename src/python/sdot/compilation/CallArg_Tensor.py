@@ -17,6 +17,22 @@ class _CppShape:
         self.shape = shape
 
 
+class _RuntimeAxisScope:
+    """`AxisExpr.value` resolution for the compilation runtime path, delegating to a CallArg's
+    scope-aware `value_of_axis_variable`. With `use_dyn_size`, a `[ ]`-selection axis (exposed
+    as `max_of_<name>`) resolves to its actual dynamic size — for trimming an output — instead
+    of its max capacity. Implements the same `value_of` interface as `AxisVariableSystem`."""
+
+    def __init__( self, call_arg, use_dyn_size: bool ):
+        self.call_arg = call_arg
+        self.use_dyn_size = use_dyn_size
+
+    def value_of( self, name, forbidden_names = None ):
+        if self.use_dyn_size and name.startswith( "max_of_" ):
+            return self.call_arg.value_of_axis_variable( name[ len( "max_of_" ): ], True )
+        return self.call_arg.value_of_axis_variable( name, False )
+
+
 class CallArg_Tensor( CallArg ):
     """
     An array argument (input, output, or mutable). It owns the `shape` (a list of
@@ -149,7 +165,7 @@ class CallArg_Tensor( CallArg ):
         slices = []
         for expr in self.shape:
             try:
-                slices.append( slice( 0, int( expr.value( self.value_of_axis_variable, True ) ) ) )
+                slices.append( slice( 0, int( expr.value( _RuntimeAxisScope( self, True ), [] ) ) ) )
             except Exception:
                 slices.append( slice( None ) )
 
@@ -159,7 +175,7 @@ class CallArg_Tensor( CallArg ):
         """(analysis) Concrete size of each axis, resolved through the axis variables."""
         res = []
         for expr in self.shape:
-            res.append( expr.value( self.value_of_axis_variable, use_dyn_size ) )
+            res.append( expr.value( _RuntimeAxisScope( self, use_dyn_size ), [] ) )
         return res
 
     @property
@@ -249,7 +265,7 @@ class CallArg_Tensor( CallArg ):
         if not expr.terms:
             return expr.offset
         try:
-            return int( expr.value( self.value_of_axis_variable, False ) )
+            return int( expr.value( _RuntimeAxisScope( self, False ), [] ) )
         except ( KeyError, RuntimeError, AttributeError, TypeError ):
             return None
 
@@ -273,11 +289,10 @@ class CallArg_Tensor( CallArg ):
         """
         return "T_" + "_".join( names )
 
-    def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ str ], name_list_so_far: list[ str ] ):
+    def get_ct_axis_variable_names( self, ct_axis_variable_names: list[ tuple[ str ] ], name_list_so_far: list[ str ] ):
         """(analysis, override) Expose this tensor's compile-time axes, prefixed by the path."""
         for name in self.ct_variables:
-            complete_name = "_".join( name_list_so_far[ : -1 ] + [ name ] )
-            append_if_unique( ct_axis_variable_names, complete_name )
+            append_if_unique( ct_axis_variable_names, tuple( name_list_so_far[ : -1 ] + [ name ] ) )
 
     def get_axis_variable_names( self, axis_variable_names: list[ str ] ):
         """(analysis, override) Expose the run-time axis variables appearing in the shape."""
