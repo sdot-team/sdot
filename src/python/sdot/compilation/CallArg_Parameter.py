@@ -67,6 +67,10 @@ class CallArg_Parameter( CallArg ):
         """(code generation, override) A scalar parameter is not batched: pass it through unchanged."""
         return name
 
+    def named_squeeze_code( self, name ):
+        """(code generation, override) A scalar parameter has no axis to squeeze: pass it through."""
+        return name
+
     def beg_with_same_shape( self, name, s, lines ):
         """(code generation, override) No-op: a scalar has no shape."""
         return s

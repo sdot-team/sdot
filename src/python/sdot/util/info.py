@@ -32,7 +32,7 @@ def _array_to_str( obj, nl ):
         return str( v )
 
     cells  = [ [ fmt( v ) for v in row ] for row in flat ]
-    widths = [ max( len( cells[ r ][ c ] ) for r in range( len( cells ) ) ) for c in range( flat.shape[ 1 ] ) ]
+    widths = [ max( [ len( cells[ r ][ c ] ) for r in range( len( cells ) ) ] + [ 0 ] ) for c in range( flat.shape[ 1 ] ) ]
     lines  = [ "  ".join( cell.rjust( widths[ c ] ) for c, cell in enumerate( row ) ) for row in cells ]
     body   = nl.join( lines )
 

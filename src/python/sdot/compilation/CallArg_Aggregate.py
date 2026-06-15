@@ -67,13 +67,44 @@ class CallArg_Aggregate( CallArg ):
                     except AttributeError:
                         raise RuntimeError( f"Unable to find attribute { name } in { python_value }" )
                 # prepend this aggregate's batch_axes as leading dims of each tensor annotation
+                field_batch_axes = None
                 if self.batch_axes and ( make_variant := getattr( annotation, "make_variant", None ) ):
                     annotation = make_variant( self.batch_axes, 0 )
+                    # the prepended axes become this field's named batch axes, at leading positions
+                    field_batch_axes = [ ( axis, i ) for i, axis in enumerate( self.batch_axes ) ]
                 result = CallArg.factory( call_args, self, name, annotation, value, io_category, ctor_args, ctor_kwargs )
                 if result is None:
                     self._additional_signature_items.append( f"{ name }_absent" )
                 else:
+                    # record per-tensor batch axes ( name, position ) so the named C++ machinery
+                    # ( AxisNames / BatchOf ) can address them; the aggregate's batch axes are a
+                    # leading dim shared by every tensor field. ( None on a field means: not a
+                    # batched tensor field — e.g. a nested aggregate, which carries its own. )
+                    if field_batch_axes is not None and getattr( result, "batch_axes", "missing" ) is None:
+                        result.batch_axes = field_batch_axes
                     self.sub_dict[ name ] = result
+
+    def _field_batch_tags( self, argument ) -> Optional[ str ]:
+        """`ax_…,ax_…` axis-name tags to wrap `argument` in a `BatchOf<…>`, or None.
+
+        A *raw* member ( tensor or dynamic axis ) is wrapped in `BatchOf` exactly when it carries
+        batch axes *and* this aggregate is itself unbatched (the Parameters root): such a member is
+        the body-facing object the `parallel_over` loop indexes by a named `batch_index`, and a raw
+        view's own `operator()` would otherwise consume the index positionally. A *batched
+        aggregate* member ( e.g. a Cell field ) is never wrapped — it carries its own named
+        `operator()`. A member of a batched aggregate is never wrapped either ( its axes are
+        resolved by the aggregate's `squeeze` )."""
+        if self.batch_axes:
+            return None
+        if getattr( argument, "sub_dict", None ) is not None:  # a batched aggregate: not wrapped
+            return None
+        ax = getattr( argument, "batch_axes", None )
+        if ax is None:                                         # not declared batched: a plain field
+            return None
+        # declared via Batched ( None vs [] is meaningful ): wrap even when empty ( []  = broadcast,
+        # an empty BatchOf whose operator() returns the field unchanged ). `( name, position )` pairs.
+        names = [ name for name, _pos in sorted( ax, key = lambda np: np[ 1 ] ) ]
+        return ",".join( f"ax_{ name }" for name in names )
 
     @property
     def children( self ) -> dict[ str, 'CallArg' ]:
@@ -167,7 +198,12 @@ class CallArg_Aggregate( CallArg ):
         else:
             attributes_macro = f"#define ATTRIBUTES_OF_{ cpp_name }"
 
-        all_lines = [ "#pragma once", "" ] + inc_lines + [ "", parameters_template_macro, "", parameters_declaration_macro, "", parameter_names_macro, "", attributes_macro ]
+        # batch-axis tag structs this struct's body refers to ( e.g. its named operator() ); they
+        # must be visible where the ATTRIBUTES macro expands, so declare them in this header.
+        from .axis_tag_decls import axis_tag_decls
+        tag_lines = axis_tag_decls( self.batch_axes )
+
+        all_lines = [ "#pragma once", "" ] + inc_lines + [ "" ] + tag_lines + [ "", parameters_template_macro, "", parameters_declaration_macro, "", parameter_names_macro, "", attributes_macro ]
         code = "\n".join( all_lines ) + "\n"
 
         from ..generated_files.compilation_directories import generated_includes_dir
@@ -282,32 +318,58 @@ class CallArg_Aggregate( CallArg ):
         # this struct's `template_args` (same fields, the batch axis is a runtime member, not a param).
         # When an unbatch_version exists (e.g. BatchOfCells → Cell) it is used as the return type;
         # otherwise the same struct type is returned (Cell → Cell, for vmap).
-        return_type = unbatch_version.__name__ if unbatch_version is not None else base_cpp_name
         if unbatch_version is not None:
             includes.add( f"sdot/{ unbatch_version.__name__ }.h" )
 
-        return_template_args = []
-        for n, _ in template_args:
-            if n.startswith( "T_" ):
-                return_template_args.append( f"decltype( { n[ 2: ] }( batch_index ) )" )
-            else:  # TI, ct_<axis>: passed through unchanged
-                return_template_args.append( n )
-        if return_template_args:
-            return_type += f"<{ ', '.join( return_template_args ) }>"
+        def _rebuilt_struct( field_proj, accessor_tmpl: str, return_type: str ) -> None:
+            """Emit a `return ReturnType{ .axes…, .field = field_proj( arg, name ), … };` body.
 
-        lines.append(  "    template<class BI> HD auto operator()( BI batch_index ) const {" )
-        lines.append(  "        if constexpr ( std::is_same_v<std::decay_t<decltype( batch_index )>, Tuple<>> ) {" )
-        lines.append(  "            return *this;" )
-        lines.append(  "        } else {" )
-        lines.append( f"            return { return_type }{{" )
-        for axis_variable_name in axis_variable_names:
-            if axis_variable_name not in batch_axes:
-                lines.append( f"                .{ axis_variable_name } = { axis_variable_name }," )
-        for name, argument in self.sub_dict.items():
-            lines.append( f"                .{ name } = { argument.batch_slice_code( name, 'batch_index' ) }," )
-        lines.append(  "            };" )
-        lines.append(  "        }" )
-        lines.append(  "    }" )
+            `field_proj( argument, name )` projects each direct member (its own slice/squeeze, so a
+            scalar parameter passes through). The return type's `T_…` template args are deduced via
+            `accessor_tmpl` applied to the (possibly underscore-flattened) member accessor — this is
+            only well-formed for a flat struct (the batched aggregates that actually use it); the
+            unbatched-root `operator()` is never instantiated, so its latent form is harmless."""
+            rt_args = []
+            for n, _ in template_args:
+                if n.startswith( "T_" ):  # a tensor/aggregate field; its (depth-1) accessor is n[2:]
+                    rt_args.append( f"decltype( { accessor_tmpl.format( acc = n[ 2: ] ) } )" )
+                else:  # TI, ct_<axis>: passed through unchanged
+                    rt_args.append( n )
+            if rt_args:
+                return_type += f"<{ ', '.join( rt_args ) }>"
+            lines.append( f"        return { return_type }{{" )
+            for axis_variable_name in axis_variable_names:
+                if axis_variable_name not in batch_axes:
+                    lines.append( f"            .{ axis_variable_name } = { axis_variable_name }," )
+            for name, argument in self.sub_dict.items():
+                lines.append( f"            .{ name } = { field_proj( argument, name ) }," )
+            lines.append(  "        };" )
+
+        if batch_axes:
+            # batched aggregate: `squeeze( nm, i )` resolves one named axis at a time, squeezing it
+            # across every member and rebuilding ( type-stable, lower-rank members ). The body-facing
+            # `operator()( batch_index )` peels every axis present in the index by name, reusing that
+            # squeeze — so the aggregate stays a real aggregate ( p.cell.dim, p.cell.batch_sizes()
+            # keep working ) instead of being hidden behind a BatchOf wrapper.
+            includes.add( "sdot/support/containers/BatchOf.h" )
+            ax_tags = ",".join( f"ax_{ name }" for name in batch_axes )
+            lines.append(  "    template<class Name> HD auto squeeze( Name nm, PI i ) const {" )
+            _rebuilt_struct( lambda argument, name: argument.named_squeeze_code( name ), "{acc}.squeeze( nm, i )", base_cpp_name )
+            lines.append(  "    }" )
+            lines.append(  "    template<class BI> HD auto operator()( BI batch_index ) const {" )
+            lines.append( f"        return peel_named_axes( *this, batch_index, container_tags::AxisNames<{ ax_tags }>{{}} );" )
+            lines.append(  "    }" )
+        else:
+            # unbatched aggregate ( e.g. the Parameters root ): the only projection is the empty
+            # index identity ( the batched members are wrapped in BatchOf, indexed directly ).
+            return_type = unbatch_version.__name__ if unbatch_version is not None else base_cpp_name
+            lines.append(  "    template<class BI> HD auto operator()( BI batch_index ) const {" )
+            lines.append(  "        if constexpr ( std::is_same_v<std::decay_t<decltype( batch_index )>, Tuple<>> ) {" )
+            lines.append(  "            return *this;" )
+            lines.append(  "        } else {" )
+            _rebuilt_struct( lambda argument, name: argument.batch_slice_code( name, "batch_index" ), "{acc}( batch_index )", return_type )
+            lines.append(  "        }" )
+            lines.append(  "    }" )
 
         lines.append(  "" )
 
@@ -340,10 +402,15 @@ class CallArg_Aggregate( CallArg ):
         #     s = argument.end_with_same_shape( name, s, lines )
         # lines.append( "    }" )
 
-        # data members
+        # data members. A batched root member is wrapped in BatchOf<…> so the body can index it
+        # by a named batch_index ( p.cell( batch_index ), p.frames( batch_index ), … ).
         lines.append(  "    /* attributes */" )
         for name, argument in self.sub_dict.items():
-            lines.append( f"    { argument.cpp_type_name( [ name ] ) } { name };" )
+            member_type = argument.cpp_type_name( [ name ] )
+            if ( tags := self._field_batch_tags( argument ) ) is not None:
+                includes.add( "sdot/support/containers/BatchOf.h" )
+                member_type = f"BatchOf<{ member_type }{ ',' + tags if tags else '' }>"
+            lines.append( f"    { member_type } { name };" )
 
         return lines, includes, template_args
 
@@ -399,9 +466,13 @@ class CallArg_Aggregate( CallArg ):
             else: # else, attribute to be filled during construction
                 lines.append( f"{ beg_line }    .{ axis_variable_name } = { self.cpp_runtime_expr( axis_variable_name, explicit_values = ct_values ) }," )
 
-        # attributes
+        # attributes. A batched root member is wrapped in BatchOf<…> ( its type is deduced from the
+        # value so we never respell it ) to match the struct's member type.
         for name, argument in self.sub_dict.items():
-            lines.append( f"{ beg_line }    .{ name } = { argument.assembled_code( beg_line + '    ' ) }," )
+            value = argument.assembled_code( beg_line + '    ' )
+            if ( tags := self._field_batch_tags( argument ) ) is not None:
+                value = f"BatchOf<DECAYED_TYPE_OF( ( { value } ) ){ ',' + tags if tags else '' }>{{ { value } }}"
+            lines.append( f"{ beg_line }    .{ name } = { value }," )
 
         lines.append( beg_line + "}" )
 

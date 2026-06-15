@@ -127,10 +127,10 @@ faulthandler.enable()
 #     import jax
 #     assert jax.grad( f )( 2.0 ) == 1
 
-# def test_cell_2D_cut():
-#     c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ 1, 1 ] )
-#     c.cut( [ 1, 0 ], 0.5 )
-#     info( c )
+def test_cell_2D_cut():
+    c = sdot.Cell.make_aligned_hypercube( [ 0, 0 ], [ 1, 1 ] )
+    # c.cut( [ 1, 0 ], 0.5 )
+    info( c )
 
 def test_cell_aligned_hypercube():
     # basic ctor
@@ -178,6 +178,28 @@ def test_cell_vmap():
         assert sum( abs( measures - scales ** dim ) ) < 1e-6
 
 
+def test_make_aligned_hypercubes():
+    # broadcast (option B): min_coords ( dim, ) and cut_id ( scalar ) are shared across the N cubes;
+    # max_coords ( N, dim ) carries the batch axis. Forward-only: check each cube's bounding box.
+    import numpy
+    dim        = 3
+    min_coords = [ 0.0 ] * dim
+    max_coords = [ [ 1.0, 1.0, 1.0 ], [ 2.0, 2.0, 2.0 ] ]
+
+    cells = sdot.Cell.make_aligned_hypercubes( min_coords, max_coords )
+    vp    = numpy.asarray( sdot.driver.to_numpy( cells.vertex_positions ) )  # ( N, max_nb_vertices, dim )
+    nbv   = numpy.asarray( sdot.driver.to_numpy( cells.nb_vertices ) )       # ( N, ) valid vertex count
+
+    assert vp.shape[ 0 ] == 2
+    for i, mx in enumerate( max_coords ):
+        verts = vp[ i ][ : nbv[ i ] ]                  # only the valid vertices ( rest is capacity )
+        assert verts.shape[ 0 ] == 2 ** dim
+        assert numpy.allclose( verts.min( axis = 0 ), min_coords )
+        assert numpy.allclose( verts.max( axis = 0 ), mx )
+
+
 if __name__ == "__main__":
     # test_cell_aligned_hypercube()
+    test_cell_2D_cut()
     test_cell_vmap()
+    test_make_aligned_hypercubes()

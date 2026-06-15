@@ -7,6 +7,7 @@
 
 #include "contiguous_strides.h" // IWYU pragma: export
 #include "container_tags.h" // IWYU pragma: export
+#include "AxisNames.h" // IWYU pragma: export
 #include "Vector.h" // IWYU pragma: export
 #include "Tuple.h" // IWYU pragma: export
 

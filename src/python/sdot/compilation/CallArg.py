@@ -243,6 +243,14 @@ class CallArg:
         """
         return f"{ name }( { batch_index } )"
 
+    def named_squeeze_code( self, name: str ) -> str:
+        """(code generation) C++ expression squeezing this member's named axis `nm` at index `i`.
+
+        Used by a batched aggregate's generated `squeeze( nm, i )`, which rebuilds the struct by
+        squeezing the same named axis on every member. The default squeezes through the member's
+        own `squeeze` (a tensor drops the named axis; a scalar parameter passes through)."""
+        return f"{ name }.squeeze( nm, i )"
+
     def assemble_return( self ) -> any:
         """(value management) Rebuild the python value returned to the caller. Abstract."""
         raise NotImplementedError

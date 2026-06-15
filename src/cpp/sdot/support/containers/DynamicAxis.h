@@ -11,15 +11,28 @@ struct DynamicSizeException {
 };
 
 
+// forward declaration: rebuild a DynamicAxis from a (possibly tag-rewritten) sizes view, keeping
+// all of its TensorView template parameters — including the `Tags...` ( AxisNames ).
+template<class TI,class MemorySpace,class Shape,class Strides,class... Tags>
+HD auto dynamic_axis_from_sizes( PI num_dynamic_axis, PI capacity, const TensorView<TI,MemorySpace,Shape,Strides,Tags...> &sizes );
+
 //
-template<class TI,class MemorySpace,class Shape,class Strides=DECAYED_TYPE_OF( contiguous_strides<TI>( Shape() ) )>
+template<class TI,class MemorySpace,class Shape,class Strides=DECAYED_TYPE_OF( contiguous_strides<TI>( Shape() ) ),class... Tags>
 class DynamicAxis {
 public:
-    using           Sizes          = TensorView<TI,MemorySpace,Shape,Strides>;
+    using           Sizes          = TensorView<TI,MemorySpace,Shape,Strides,Tags...>;
 
-    // slicing/subparts
-    T_VA HD auto    operator()     ( A...indices ) const { auto new_sizes = sizes( indices... ); using TT = DECAYED_TYPE_OF( new_sizes ); return DynamicAxis<TI,MemorySpace,typename TT::Shape,typename TT::Strides>{ num_dynamic_axis, capacity, new_sizes }; }
+    // slicing/subparts ( tags are carried through: the new sizes view keeps / rewrites them )
+    T_VA HD auto    operator()     ( A...indices ) const { return dynamic_axis_from_sizes( num_dynamic_axis, capacity, sizes( indices... ) ); }
     T_U  HD auto    row            ( U index ) const { return operator()( index ); }
+
+    // named squeeze ( for a batched aggregate's generated squeeze ): resolve the named axis on the
+    // sizes view ( its AxisNames tag maps the name to its position — no leading assumption ).
+    T_U  HD auto    squeeze        ( U name, PI index = 0 ) const { return dynamic_axis_from_sizes( num_dynamic_axis, capacity, sizes.squeeze( name, index ) ); }
+
+    // same axis with ExtraTags added ( e.g. AxisNames<…> ): delegated to the sizes view
+    template<class... ExtraTags>
+    HD auto         with_tags      () const { return dynamic_axis_from_sizes( num_dynamic_axis, capacity, sizes.template with_tags<ExtraTags...>() ); }
 
     // info
     T_U  HD auto    transfer_cost  ( const U &execution_context ) const { return sizes.transfer_cost( execution_context ); }
@@ -55,7 +68,14 @@ public:
 };
 
 // deduction guide: aggregate CTAD is C++20; this keeps DynamicAxis( n, capa, tensor_view ) working in C++17
-template<class TI,class MemorySpace,class Shape,class Strides>
-DynamicAxis( PI, PI, TensorView<TI,MemorySpace,Shape,Strides> ) -> DynamicAxis<TI,MemorySpace,Shape,Strides>;
+template<class TI,class MemorySpace,class Shape,class Strides,class... Tags>
+DynamicAxis( PI, PI, TensorView<TI,MemorySpace,Shape,Strides,Tags...> ) -> DynamicAxis<TI,MemorySpace,Shape,Strides,Tags...>;
+
+// rebuild a DynamicAxis from a sizes view, preserving every TensorView template parameter ( Tags
+// included ) — used by operator()/squeeze/with_tags so a derived axis keeps its AxisNames.
+template<class TI,class MemorySpace,class Shape,class Strides,class... Tags>
+HD auto dynamic_axis_from_sizes( PI num_dynamic_axis, PI capacity, const TensorView<TI,MemorySpace,Shape,Strides,Tags...> &sizes ) {
+    return DynamicAxis<TI,MemorySpace,Shape,Strides,Tags...>{ num_dynamic_axis, capacity, sizes };
+}
 
 } // namespace sdot

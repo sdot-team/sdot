@@ -158,6 +158,10 @@ class FfiCodeParallel( FfiCode ):
         target = driver.device.codegen_target
 
         lines = []
+        # Templated on the batch-axis name tags `Ax...` (supplied by `code_for` from the BatchPlan,
+        # in iteration order): the positional index from `cartesian_product_ranges` is zipped into a
+        # named `batch_index` ( Tuple<AxisIndex<Ax>...> ) that every batched member is indexed with.
+        lines.append( "template<class... Ax>" )
         lines.append( f"struct Parallel_{ pass_name } {{" )
 
         # per_thread
@@ -170,9 +174,10 @@ class FfiCodeParallel( FfiCode ):
         pa = self.per_thread_args_for( pass_name )
 
         # operator()
-        args = [ "BI batch_index", "P &&p" ] + [ f"T_{ a } { a }" for a in pa ]
+        args = [ "BI _batch_index", "P &&p" ] + [ f"T_{ a } { a }" for a in pa ]
         prms = [ "class BI", "class P" ] + [ f"class T_{ a }" for a in pa ]
         lines.append( f"    template<{ ', '.join( prms ) }> HD void operator()( { ', '.join( args ) } ) const {{" )
+        lines.append( "        auto batch_index = named_batch_index<Ax...>( _batch_index );" )
         body = self.body_for( pass_name, target )
         if body:
             lines.append( indent( dedent( body ), '        ' ) )
@@ -182,7 +187,8 @@ class FfiCodeParallel( FfiCode ):
         return "\n".join( lines )
 
     def includes_for( self, pass_name: str ) -> list[ str ]:
-        return self._includes.get( "*", [] ) + self._includes.get( pass_name, [] )
+        # the generated functor zips the positional index into a named one ( named_batch_index )
+        return [ "sdot/support/containers/BatchOf.h" ] + self._includes.get( "*", [] ) + self._includes.get( pass_name, [] )
 
     def per_thread_args_for( self, pass_name: str ) -> list[ str ]:
         if pass_name in self._per_thread_args:
@@ -206,8 +212,10 @@ class FfiCodeParallel( FfiCode ):
 
     def code_for( self, pass_name: str, fai = None ) -> str:
         from ..compilation.BatchPlan import BatchPlan
-        batch_sizes = ", ".join( BatchPlan( fai, self._parallel_over ).size_exprs )
-        return f"run_parallel( cartesian_product_ranges( tuple( { batch_sizes } ) ), Parallel_{ pass_name }(), p );"
+        plan        = BatchPlan( fai, self._parallel_over )
+        batch_sizes = ", ".join( plan.size_exprs )
+        ax_tags     = ", ".join( f"ax_{ name }" for name in plan.axes )
+        return f"run_parallel( cartesian_product_ranges( tuple( { batch_sizes } ) ), Parallel_{ pass_name }<{ ax_tags }>(), p );"
 
     @property
     def has_grad_code( self ) -> bool:

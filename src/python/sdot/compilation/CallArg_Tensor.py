@@ -78,7 +78,8 @@ class CallArg_Tensor( CallArg ):
         dtype                     : Optional[ Dtype ] = None,
         ct_variables              : Optional[ list[ str ] ] = None,
         represents_a_dynamic_axis : str = "",
-        comes_from_basic_array    : bool = False
+        comes_from_basic_array    : bool = False,
+        batch_axes                : Optional[ list[ str ] ] = None
     ):
         # value management: fill shape/dtype from the concrete array when not given
         if ct_variables is None:
@@ -91,6 +92,13 @@ class CallArg_Tensor( CallArg ):
         assert isinstance( dtype, Dtype )
 
         super().__init__( name_in_parent, parent, python_class, python_value, io_category, ctor_args, ctor_kwargs )
+
+        # Explicitly declared batch axes as ( name, position ) pairs ( see Batched ), or None when
+        # not declared. A tensor listed in an FfiCodeParallel `parallel_over` iterates over these;
+        # the remaining axes are the per-element core, projected / broadcast per object (BatchPlan).
+        # None vs [] is meaningful: [] = declared, no batch axis (broadcast); None = not declared
+        # (an output tensor then iterates over all its named shape axes; a raw input is rejected).
+        self.batch_axes                = None if batch_axes is None else list( batch_axes )
 
         self.represents_a_dynamic_axis = represents_a_dynamic_axis
         self.comes_from_basic_array    = comes_from_basic_array
@@ -202,6 +210,18 @@ class CallArg_Tensor( CallArg ):
             prefix = "T"
         return f"{ prefix }{ self.ndim }{ Dtype.factory( self.dtype ).cpp_name }{ '-'.join( ct_values ) }"
 
+    def axis_names_tag( self ) -> Optional[ str ]:
+        """`container_tags::AxisNames< ax_… >` for this tensor's declared batch axes, or None.
+
+        The tag carries the *names* of this view's batch axes (in shape-position order) so the
+        named machinery (`BatchOf`, named `squeeze`) can address an axis by name rather than by a
+        fragile leading-position convention. `batch_axes` is `[ ( name, position ) ]`; the tag
+        lists names sorted by position so it matches the tensor's actual axis order."""
+        if not self.batch_axes:
+            return None
+        names = [ name for name, _pos in sorted( self.batch_axes, key = lambda np: np[ 1 ] ) ]
+        return "container_tags::AxisNames<" + ",".join( f"ax_{ name }" for name in names ) + ">"
+
     def _concrete_cpp_type( self ) -> str:
         """Concrete C++ type for this tensor at the current call site (used as template arg value)."""
         shape_t = self.shape_type( False )
@@ -210,8 +230,17 @@ class CallArg_Tensor( CallArg ):
         if self._is_none:
             return f"NoneTensor<{ self.dtype.cpp_name }>"
         if self.represents_a_dynamic_axis:
-            return f"DynamicAxis<TI,DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
-        return f"TensorView<{ self.dtype.cpp_name },DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
+            base = f"DynamicAxis<TI,DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
+        else:
+            base = f"TensorView<{ self.dtype.cpp_name },DECAYED_TYPE_OF( memory_space ),{ shape_t }>"
+        # add the named batch axes as a tag. We go through `with_tags<>()` (decltype of the
+        # resulting view) rather than respelling the `Strides` template arg, so the default
+        # strides stay implicit and the value side (`ffi_conversion_code`) matches exactly. We spell
+        # out decay_t<decltype(...)> ( not the DECAYED_TYPE_OF macro ): `base` contains commas that a
+        # function-like macro would mis-split.
+        if tag := self.axis_names_tag():
+            return f"std::decay_t<decltype( std::declval<{ base }>().template with_tags<{ tag }>() )>"
+        return base
 
     def get_template_args( self, template_args, names ):
         """(code generation, override) Emit the compile-time axis values, dtype, and tensor type parameter.
@@ -355,15 +384,22 @@ class CallArg_Tensor( CallArg ):
             capa = self.parent().cpp_capacity_expr( "max_of_" + self.represents_a_dynamic_axis )
             extr = f", { self.num_in_dynamic_axes }, { capa }"
 
+        # tag the produced view with its named batch axes so the type matches `_concrete_cpp_type`
+        # (and `BatchOf` / named `squeeze` can resolve axes by name). Both tensor views and dynamic
+        # axes carry batch axes ( zero/none return earlier, before `_tagged` ).
+        tag = self.axis_names_tag()
+        def _tagged( expr ):
+            return f"{ expr }.template with_tags<{ tag }>()" if tag else expr
+
         # mutable (has both input and output buffers)
         if self.io_category.has_input and self.io_category.want_output:
             if self._is_none:
-                return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )"
-            return f"{ base }_mut( { ct_shape }, memory_space, { self.ffi_output_name() }, { self.ffi_input_name() }{ extr } )"
+                return _tagged( f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )" )
+            return _tagged( f"{ base }_mut( { ct_shape }, memory_space, { self.ffi_output_name() }, { self.ffi_input_name() }{ extr } )" )
 
         # pure output
         if not self.io_category.has_input and self.io_category.want_output:
-            return f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )"
+            return _tagged( f"{ base }_out( { ct_shape }, memory_space, { self.ffi_output_name() }{ extr } )" )
 
         # pure input — static dispatch on tensor kind
         if self.io_category.has_input and not self.io_category.want_output:
@@ -371,7 +407,7 @@ class CallArg_Tensor( CallArg ):
                 return f"zero_tensor_inp( { ct_shape }, { self.ffi_input_name() } )"
             if self._is_none:
                 return f"none_tensor_inp<{ self.dtype.cpp_name }>()"
-            return f"{ base }_inp( { ct_shape }, memory_space, { self.ffi_input_name() }{ extr } )"
+            return _tagged( f"{ base }_inp( { ct_shape }, memory_space, { self.ffi_input_name() }{ extr } )" )
 
         raise NotImplementedError
 
@@ -429,7 +465,8 @@ class CallArg_Tensor( CallArg ):
             dtype                     = self.dtype,
             ct_variables              = self.ct_variables,
             represents_a_dynamic_axis = self.represents_a_dynamic_axis,
-            comes_from_basic_array    = self.comes_from_basic_array
+            comes_from_basic_array    = self.comes_from_basic_array,
+            batch_axes                = self.batch_axes
         )
 
         res.orig_parent = self.parent

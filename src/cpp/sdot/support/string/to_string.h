@@ -5,7 +5,7 @@
 
 namespace sdot {
 
-std::string to_string( const auto &v ) {
+T_T std::string to_string( const T &v ) {
     std::ostringstream ss;
     display( ss, v );
     return ss.str();

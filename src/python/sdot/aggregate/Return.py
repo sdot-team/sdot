@@ -22,18 +22,18 @@ class Return:
         self.type_kwargs = kwargs
         self.type_args   = args
 
-    def with_prepended_batch_axis( self, N, moved_leaves ):
-        """vmap hook (see JaxDriver batch rule): prepend one batch axis of size `N` to this output.
+    def with_prepended_batch_axis( self, N, moved_leaves, axis_name ):
+        """vmap hook (see JaxDriver batch rule): prepend the batch axis `axis_name` (size `N`) to
+        this output.
 
         A Tensor return gains a leading axis (via Tensor.make_variant); an aggregate return keeps
         its class and gains an entry in `batch_axes`. Type-stable in both cases.
         """
         kw = dict( self.type_kwargs )
         if make_variant := getattr( self.return_type, "make_variant", None ):  # Tensor return
-            return Return( make_variant( [ "vmap_0" ], 0 ), *self.type_args, **{ "vmap_0": N }, **kw )
+            return Return( make_variant( [ axis_name ], 0 ), *self.type_args, **{ axis_name: N }, **kw )
         old_axes = kw.pop( "batch_axes", list( getattr( self.return_type, "batch_axes", [] ) ) )
-        axis     = f"vmap_{ len( old_axes ) }"
-        return Return( self.return_type, *self.type_args, batch_axes = [ axis ] + old_axes, **{ axis: N }, **kw )
+        return Return( self.return_type, *self.type_args, batch_axes = [ axis_name ] + old_axes, **{ axis_name: N }, **kw )
 
     def call_arg_factory( self, call_args, parent, name_in_parent, io_category: IoCategory, ctor_args, ctor_kwargs ):
         new_io_category = IoCategory(

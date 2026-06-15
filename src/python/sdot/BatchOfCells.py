@@ -1,6 +1,7 @@
-from .aggregate import aggregate, Workspace, Tensor, Return, Mutable, Conditional, Batched
+from .aggregate import batch_variant_of, Workspace, Tensor, Return, Mutable
 from .drivers.driver import driver, FfiCodeCustom, FfiCodeParallel
 from typing import TYPE_CHECKING, cast, overload
+from .Cell import Cell
 import numpy
 
 # constant
@@ -8,39 +9,36 @@ INFINITE = -2
 BOUNDARY = -1
 
 
-@aggregate
-class Cell:
+@batch_variant_of( Cell )
+class BatchOfCells:
     """
-        2D -> vertex_indices and edge_indices are undefined
     """
-
-    # base attributes
-    is_fully_bounded  : Tensor( dtype = int )
-    vertex_positions  : Tensor( "nb_vertices[]", "dim", ct_variables = [ "dim" ] )
-    cut_planes        : Tensor( "nb_cuts[]", "dim + 1" )
-    cut_ids           : Tensor( "nb_cuts[]", dtype = int )
-
-    # nD attributes when n > 2
-    # vertex_indices    : Conditional( lambda a: a.dim > 2, Tensor( "nb_vertices[]", "dim + 1", dtype = int ) ) # vertex index -> sorted cut indices
-    # edge_indices      : Conditional( lambda a: a.dim > 2, Tensor( "nb_edges[]", "dim + 1", dtype = int ) ) # edge index -> vertex indices (vertex on each side) + cut_indices
-    vertex_indices    : Tensor( "nb_vertices[]", "dim + 1", dtype = int ) # vertex index -> sorted cut indices
-    edge_indices      : Tensor( "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
 
     # generated attributes
     if TYPE_CHECKING:
         def __default_init__( self, *args, **kwargs ): ...
 
-        batch_axes_dict: dict[ str, int ]
+        # base attributes
+        is_fully_bounded  : Tensor( "batch_size", dtype = int )
+        vertex_positions  : Tensor( "batch_size", "nb_vertices[]", "dim", ct_variables = [ "dim" ] )
+        cut_planes        : Tensor( "batch_size", "nb_cuts[]", "dim + 1" )
+        cut_ids           : Tensor( "batch_size", "nb_cuts[]", dtype = int )
+
+        # nD attributes when n > 2
+        vertex_indices    : Tensor( "batch_size", "nb_vertices[]", "dim + 1", dtype = int ) # vertex index -> sorted cut indices
+        edge_indices      : Tensor( "batch_size", "nb_edges[]", "dim + 1", dtype = int ) # edge index -> vertex indices (vertex on each side) + cut_indices
+
+        batch_axes_dict   : dict[ str, int ]
 
         max_of_nb_vertices: int
-        max_of_nb_edges: int
-        max_of_nb_cuts: int
+        max_of_nb_edges   : int
+        max_of_nb_cuts    : int
 
-        nb_vertices: numpy.array
-        nb_edges: numpy.array
-        nb_cuts: numpy.array
+        nb_vertices       : numpy.array
+        nb_edges          : numpy.array
+        nb_cuts           : numpy.array
 
-        dim: int
+        dim               : int
 
     # --------------------------------------- ctor: make_full_space ------------------------------------
     @staticmethod
@@ -50,81 +48,54 @@ class Cell:
     # ---------------------------------- ctor: make_aligned_hypercube ----------------------------------
     @staticmethod
     @overload
-    def make_aligned_hypercube( dim: int, *, cut_id: int = BOUNDARY ) -> 'Cell':
+    def make_aligned_hypercubes( dim: int, *, cut_ids: int = BOUNDARY ) -> 'BatchOfCells':
         """Unit hypercube [0, 1]^dim."""
         ...
 
     @staticmethod
     @overload
-    def make_aligned_hypercube( max_coords, *, cut_id: int = BOUNDARY ) -> 'Cell':
+    def make_aligned_hypercubes( max_coords, *, cut_ids: int = BOUNDARY ) -> 'BatchOfCells':
         """Axis-aligned hypercube from the origin [0,...,0] to max_coords."""
         ...
 
     @staticmethod
     @overload
-    def make_aligned_hypercube( min_coords, max_coords, *, cut_id: int = BOUNDARY ) -> 'Cell':
+    def make_aligned_hypercubes( min_coords, max_coords, *, cut_ids: int = BOUNDARY ) -> 'BatchOfCells':
         """Axis-aligned hypercube from min_coords to max_coords."""
         ...
 
     @staticmethod
-    def make_aligned_hypercube( *args, **kwargs ) -> 'Cell':
-        cut_id = kwargs.get( 'cut_id', BOUNDARY )
+    def make_aligned_hypercubes( *args, **kwargs ) -> 'BatchOfCells':
+        # cut_id = kwargs.get( 'cut_id', BOUNDARY )
 
-        if len( args ) == 1 and isinstance( args[ 0 ], int ):
-            # make_aligned_hypercube(dim) — unit cube [0,1]^dim
-            dim        = args[ 0 ]
-            min_coords = driver.zeros( [ dim ] )
-            max_coords = driver.ones( [ dim ] )
-        elif len( args ) == 1:
-            # make_aligned_hypercube(max_coords) — origin to max_coords
-            max_coords = driver.array( args[ 0 ] )
-            dim        = max_coords.shape[ 0 ]
-            min_coords = driver.zeros( [ dim ] )
-        elif len( args ) == 2:
-            # make_aligned_hypercube(min_coords, max_coords)
-            min_coords = driver.array( args[ 0 ] )
-            max_coords = driver.array( args[ 1 ] )
-            dim        = min_coords.shape[ 0 ]
-        else:
-            raise TypeError( f"make_aligned_hypercube: unexpected arguments {args!r}" )
+        # if len( args ) == 1 and isinstance( args[ 0 ], int ):
+        #     # make_aligned_hypercube(dim) — unit cube [0,1]^dim
+        #     dim        = args[ 0 ]
+        #     min_coords = driver.zeros( [ dim ] )
+        #     max_coords = driver.ones( [ dim ] )
+        # elif len( args ) == 1:
+        #     # make_aligned_hypercube(max_coords) — origin to max_coords
+        #     max_coords = driver.array( args[ 0 ] )
+        #     dim        = max_coords.shape[ 0 ]
+        #     min_coords = driver.zeros( [ dim ] )
+        # elif len( args ) == 2:
+        #     # make_aligned_hypercube(min_coords, max_coords)
+        #     min_coords = driver.array( args[ 0 ] )
+        #     max_coords = driver.array( args[ 1 ] )
+        #     dim        = min_coords.shape[ 0 ]
+        # else:
+        #     raise TypeError( f"make_aligned_hypercube: unexpected arguments {args!r}" )
 
-        diff  = max_coords - min_coords
-        diag  = cast( numpy.array, driver.array( numpy.eye( dim ) ) ) * diff
-        frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
+        # diff  = max_coords - min_coords
+        # diag  = cast( numpy.array, driver.array( numpy.eye( dim ) ) ) * diff
+        # frame = driver.stack( [ min_coords ] + [ diag[ r ] for r in range( dim ) ], axis = 0 )
 
-        return Cell.make_hypercube( frame, cut_id = cut_id )
-
-    # ------------------------------ ctor: make_aligned_hypercubes -----------------------------
-    @staticmethod
-    def make_aligned_hypercubes( min_coords, max_coords, cut_id = BOUNDARY ):
-        """Batched axis-aligned hypercubes (option-B broadcast).
-
-        `max_coords` is `( N, dim )` — one cube per row, carrying the batch axis "n". `min_coords`
-        `( dim, )` and `cut_id` (scalar) carry *no* batch axis: they are broadcast over the N cubes
-        with no materialization (see Batched / peel_named_axes). Returns a batched Cell.
-        """
-        min_coords = driver.array( min_coords )
-        max_coords = driver.array( max_coords )
-        cut_id     = driver.array( cut_id, dtype = int )
-
-        nb  = max_coords.shape[ 0 ]
-        dim = max_coords.shape[ 1 ]
-
-        return cast( Cell, driver.call(
-            FfiCodeParallel(
-                parallel_over = [ "cell" ],
-                fwd_body = "p.cell( batch_index ).init_as_aligned_hypercube( p.min_coords( batch_index ), p.max_coords( batch_index ), p.cut_id( batch_index ) );",
-                name = "make_aligned_hypercubes"
-            ),
-            cell       = Return( Cell, **Cell._return_parameters_for( dim, { "n": nb } ) ),
-            min_coords = Batched( min_coords, [] ),            # broadcast over n
-            max_coords = Batched( max_coords, [ ( "n", 0 ) ] ),# one row per cube
-            cut_id     = Batched( cut_id, [] ),                # broadcast over n
-        ) )
+        # return Cell.make_hypercube( frame, cut_id = cut_id )
+        raise NotImplementedError
 
     # ---------------------------------- ctor: make_hypercube ----------------------------------
     @staticmethod
-    def make_hypercube( frame, cut_id = BOUNDARY, batch_axes: dict = None ):
+    def make_hypercubes( frames, cut_ids = BOUNDARY, batch_axes: dict = None ):
         """
         frame: (dim+1, dim)  — row 0 is origin, rows 1..dim are edge vectors
                with batch_axes, leading dimensions describe the batch (e.g. (N, dim+1, dim))
@@ -135,7 +106,7 @@ class Cell:
 
     # ---------------------------------- measure ----------------------------------
     @property
-    def measure( self ) -> any:
+    def measures( self ) -> any:
         return Cell._measures( self, self.batch_axes_dict )
 
     # ---------------------------------- cut ----------------------------------

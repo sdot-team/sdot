@@ -169,7 +169,28 @@ class CallArgsAnalysis:
             if tensor.represents_a_dynamic_axis:
                 lines.append( f"    auto t_{ tensor.ffi_name() } = { tensor.ffi_conversion_code() };" )
 
+    @staticmethod
+    def _collect_axis_names( call_arg, out: list ):
+        """Gather every batch-axis name appearing in the call ( aggregates and tensors ), in a
+        stable first-seen order, so each can be emitted as a `struct ax_<name> {};` tag."""
+        from ..util import append_if_unique
+        for name in getattr( call_arg, "batch_axes", None ) or []:
+            # aggregate carries names; a tensor carries ( name, position ) pairs
+            append_if_unique( out, name if isinstance( name, str ) else name[ 0 ] )
+        for child in getattr( call_arg, "children", {} ).values():
+            CallArgsAnalysis._collect_axis_names( child, out )
+
     def get_code_for_parameters_struct( self, includes: set, lines: list[ str ], struct_name: str ):
+        # batch-axis name tags, used both as `AxisNames<…>` on tensor types and as the `Ax...` the
+        # `Parallel_*` functor is instantiated with. Guarded so they coexist with the same tags
+        # already declared by an included generated struct header ( see axis_tag_decls ).
+        from .axis_tag_decls import axis_tag_decls
+        axis_names: list = []
+        self._collect_axis_names( self.arguments, axis_names )
+        lines.extend( axis_tag_decls( axis_names ) )
+        if axis_names:
+            lines.append( "" )
+
         self.arguments.struct_decl( struct_name, includes, lines )
 
     # ----------------------------------- Metal (MSL) -----------------------------------

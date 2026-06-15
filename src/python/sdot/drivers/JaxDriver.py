@@ -760,22 +760,26 @@ class JaxDriver:
                         ( N, ) + flat_args[ i ].shape
                     )
 
-            # C++ expression for the vmap batch size: read from the first batched input's leading shape
-            vmap_axis_expr = "p." + ".".join( input_paths[ first_batch_idx ] ) + ".shape( Ct<int,0>() )"
-            batched_code   = code.with_prepended_batch_axis( vmap_axis_expr )
+            # One vmap = one named batch axis, shared by every input of this call (so same name ⇒
+            # joined iteration in the BatchPlan). The name is derived from how many batch axes are
+            # already present, so a nested vmap gets a fresh name — deterministically (no per-object
+            # counter ⇒ no false joins, and a stable module signature).
+            from ..aggregate.Batched import Batched
+            vmap_name      = f"vmap_{ jax_driver._existing_axis_count( orig_args ) }"
+            batched_code   = code.with_prepended_batch_axis( vmap_name )
 
             # Prepend the vmap axis on every batched value. Our argument types (Return, Mutable,
             # aggregate instances) each know how to do this via `with_prepended_batch_axis`, so the
-            # dispatch is polymorphic — no isinstance on our own types. Foreign values fall through:
-            # a top-level tensor input becomes its moved array, a scalar stays unchanged.
+            # dispatch is polymorphic — no isinstance on our own types. A foreign top-level tensor is
+            # wrapped in `Batched` to name its ( moved-to-0 ) batch axis; a scalar stays unchanged.
             new_args = {}
             for kw, arg in orig_args.items():
                 prepend = getattr( arg, "with_prepended_batch_axis", None )
                 if prepend is not None:
                     moved_leaves = { rest[ 0 ]: moved[ idx ] for idx, rest in flat_by_kwarg.get( kw, [] ) if rest }
-                    new_args[ kw ] = prepend( N, moved_leaves )
+                    new_args[ kw ] = prepend( N, moved_leaves, vmap_name )
                 elif kw in flat_by_kwarg:                       # foreign top-level tensor input
-                    new_args[ kw ] = moved[ flat_by_kwarg[ kw ][ 0 ][ 0 ] ]
+                    new_args[ kw ] = Batched( moved[ flat_by_kwarg[ kw ][ 0 ][ 0 ] ], [ ( vmap_name, 0 ) ] )
                 else:                                           # scalar / unbatched value
                     new_args[ kw ] = arg
 
@@ -801,6 +805,21 @@ class JaxDriver:
         for cache_key, prim in _cache.items():
             if cache_key[ 0 ] == module_name:
                 jax_batching.primitive_batchers[ prim ] = batch_rule
+
+    @staticmethod
+    def _existing_axis_count( orig_args: dict ) -> int:
+        """How many batch axes are already present among the call's arguments (0 for a fresh
+        top-level vmap). Used to name a nested vmap's axis without colliding with outer ones."""
+        from ..aggregate.Return import Return
+        best = 0
+        for arg in orig_args.values():
+            ba = getattr( arg, "batch_axes", None )
+            if ba is not None:
+                best = max( best, len( ba ) )
+            elif isinstance( arg, Return ):
+                axes = arg.type_kwargs.get( "batch_axes", getattr( arg.return_type, "batch_axes", None ) )
+                best = max( best, len( axes or [] ) )
+        return best
 
     def _module_name_for( self, code: FfiCode, main_list: CallArgsAnalysis ):
         # get signature — include device type to avoid CPU/GPU cache collision

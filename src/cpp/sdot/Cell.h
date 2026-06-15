@@ -20,6 +20,11 @@ struct Cell {
     T_TAB HD void init_as_hypercube_bwd( const T &frame, A &p, const B &batch_index );
     T_TA  HD void init_as_hypercube    ( const T &frame, const A &cut_id );
 
+    /// axis-aligned hypercube from `min_coords` to `max_coords` ( rank-1 views, one entry per axis;
+    /// either may be broadcast ). Builds the diagonal frame in-place and delegates to init_as_hypercube.
+    template<class MIN,class MAX,class CI>
+    HD void       init_as_aligned_hypercube( const MIN &min_coords, const MAX &max_coords, const CI &cut_id );
+
 
     // retrieve info in tensors --------------------------------------------------------------
     HD Pt         vertex_position        ( PI num_vertex ) const;

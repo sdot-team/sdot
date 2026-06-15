@@ -46,6 +46,11 @@ class Tensor:
         self.shape = [ AxisExpr( s ) for s in axis_exprs ]
         self.dtype = Dtype.factory( dtype )
 
+        # named batch axes as ( name, position ), or None when this Tensor declares none. Set by
+        # make_variant when batch axes are prepended (e.g. a vmapped output) so the resulting
+        # CallArg_Tensor can carry an AxisNames tag and be wrapped in BatchOf. See CallArg_Tensor.
+        self.batch_axes = None
+
 
     def __call__( self, array = None, dtype = None ):
         if array is None:
@@ -71,6 +76,15 @@ class Tensor:
         res.removed_dim_axes = []
         res.dtype = self.dtype
 
+        # the prepended axes are this variant's named batch axes, at leading positions; any axes the
+        # source already declared shift right by that many.
+        res.batch_axes = [ ( ax, i ) for i, ax in enumerate( additional_batch_axes ) ]
+        if self.batch_axes:
+            k = len( additional_batch_axes )
+            res.batch_axes += [ ( name, pos + k ) for name, pos in self.batch_axes ]
+        if not res.batch_axes:
+            res.batch_axes = None
+
         # ct_variables
         if unidimensional_version:
             res.ct_variables = [ ct_variable for ct_variable in self.ct_variables if ct_variable != "dim" ]
@@ -94,7 +108,7 @@ class Tensor:
         return res
 
     def type_call_arg_factory( self, call_args, parent, name_in_parent, python_value, io_category: IoCategory, ctor_args, ctor_kwargs ):
-        return CallArg_Tensor( call_args, parent, name_in_parent, self, python_value, io_category, ctor_args, ctor_kwargs, self.shape, self.dtype, self.ct_variables, represents_a_dynamic_axis = self.represents_a_dynamic_axis )
+        return CallArg_Tensor( call_args, parent, name_in_parent, self, python_value, io_category, ctor_args, ctor_kwargs, self.shape, self.dtype, self.ct_variables, represents_a_dynamic_axis = self.represents_a_dynamic_axis, batch_axes = getattr( self, "batch_axes", None ) )
 
     @property
     def ct_axis_variable_names( self ):

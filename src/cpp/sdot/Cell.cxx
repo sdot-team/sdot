@@ -148,6 +148,19 @@ UTP T_TA HD void DTP::init_as_hypercube( const T &frame, const A &cut_id ) {
     }
 }
 
+UTP template<class MIN,class MAX,class CI> HD void DTP::init_as_aligned_hypercube( const MIN &min_coords, const MAX &max_coords, const CI &cut_id ) {
+    // diagonal frame: origin = min_coords, edge vector b = ( max_coords[b] - min_coords[b] ) * e_b.
+    // built as a small accessor so we reuse the tested init_as_hypercube ( frame( 0, d ) = origin,
+    // frame( 1 + b, d ) = edge b, component d ).
+    auto frame = [&]( PI r, PI c ) -> TF {
+        if ( r == 0 )
+            return TF( min_coords( c ) );
+        const PI b = r - 1;
+        return b == c ? TF( TF( max_coords( c ) ) - TF( min_coords( c ) ) ) : TF( 0 );
+    };
+    init_as_hypercube( frame, cut_id );
+}
+
 UTP template<class FR,class P,class BI> HD void DTP::init_as_hypercube_bwd( const FR &frame, P &p, const BI &batch_index ) {
     // Fwd: F[r][c] = frame(1+r,c),  A = F^{-1},  row_d = A[d,:] via F^T * row_d = e_d.
     //

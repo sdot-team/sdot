@@ -126,6 +126,12 @@ UTP T_T HD void DTP::operator=( const T &that ) {
 }
 
 UTP T_T HD auto DTP::squeeze( T axis, PI index ) const {
+    // `axis` may be addressed by name: if `T` is one of this view's named axes (an AxisNames
+    // tag), resolve it to its position and squeeze positionally. Otherwise `T` is a Ct<int,N>
+    // position and we fall through to the positional body.
+    if constexpr ( is_axis_name<T,Tags...> ) {
+        return squeeze( Ct<int,axis_position_of<T,Tags...>>(), index );
+    } else {
     auto new_strides = _strides.without_index( axis );
     auto new_shape = _shape.without_index( axis );
 
@@ -140,6 +146,7 @@ UTP T_T HD auto DTP::squeeze( T axis, PI index ) const {
     using Op = container_ops::squeeze<DECAYED_TYPE_OF( axis )>;
     using Result = typename details::TensorView::with_tag_list<TF,MemorySpace,NewShape,NewStrides,tags_after<Op,Tags...>>::type;
     return Result( ptr, new_shape, new_strides, _memory_space );
+    }
 }
 
 UTP HD auto DTP::row( PI index ) const {

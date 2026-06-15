@@ -121,9 +121,9 @@ def _setup_aggregate( cls ):
         # vmap hook (see JaxDriver batch rule): return a same-typed instance carrying the
         # moved leading-N tensors, with one batch axis prepended to its instance batch_axes.
         # Type-stable — Cell stays Cell. `N` is unused (the size lives in the moved shapes).
-        def with_prepended_batch_axis( self, N, moved_leaves ):
+        def with_prepended_batch_axis( self, N, moved_leaves, axis_name ):
             inst = type( self )( **moved_leaves )
-            inst.batch_axes = [ f"vmap_{ len( self.batch_axes ) }" ] + list( self.batch_axes )
+            inst.batch_axes = [ axis_name ] + list( self.batch_axes )
             return inst
         cls.with_prepended_batch_axis = with_prepended_batch_axis
 
