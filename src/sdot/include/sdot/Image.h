@@ -1,0 +1,74 @@
+#pragma once
+
+// the members + generated methods (`operator()`, `kernel_form`, ...) as macros this struct
+// drops in, plus the axes it names -- written to the build include tree by `CallArg_Aggregate`.
+#include <sdot/generated/aggregates/Image.h>
+#include <loom/support/common_macros.h>
+
+namespace sdot {
+
+SDOT_TEMPLATE_DECL_FOR_Image
+struct Image {
+    SDOT_ATTRIBUTES_OF_Image
+
+    SCInt  ct_dim       = DECAYED_TYPE_OF( nb_dims )::value;
+    using  TF           = DECAYED_TYPE_OF( values )::TF;
+
+    /// this distribution CUTS the cell into pieces ( one per block ): the integrator reserves
+    /// a spare cell for it in the scratch ( `PowerDiagram::nb_work_cells` )
+    static constexpr bool cuts_pieces = true;
+
+    // build a FULLY-POPULATED image -- each of `origin` / `frame` / `knots` that is unbound
+    // (a `NoneTensor`) replaced by its documented default -- and hand it to `cont`. Lets the
+    // methods below be written ONCE against a complete image instead of gating on `is_valid`.
+    HD auto   with_defaults( auto &&cont ) const;
+
+    // total measure of the piecewise-constant function: sum over cells of value * cell volume.
+    HD TF  measure   () const;
+
+    // ---- integrating a CELL against this image --------------------------------------------------
+    // The image as a DISTRIBUTION: what `PowerDiagram::measures` calls when given
+    // one. The contract (that of any distribution) is written in `distributions/Distribution.py`;
+    // it fits in one sentence: cut `cell` into pieces on which the density is CONSTANT,
+    // and pass each one to `func( piece, value, add_value_grad )`.
+    //
+    // Here a piece is `cell INTERSECT grid block`. The cutting is therefore only 2d cuts
+    // per block met, made in the two spare cells that the caller provides
+    // (`PieceWorkspace.h`) -- the original cell is never touched, which makes it possible
+    // to open one piece after another without copying it.
+    HD void   for_each_piece ( const auto &cell, auto &&ws, auto &&func ) const;
+    HD void   _for_each_piece( const auto &cell, auto &&ws, auto &&func ) const;
+
+    // the largest `i` such that `knots( axis, i ) <= t`, clamped to `[ 0, nb_cells - 1 ]` (the
+    // knots are increasing, hence a binary search -- a production image has many blocks).
+    HD SI  knot_index   ( SI axis, TF t, SI nb_cells ) const;
+
+    // adjoint of `measure` w.r.t. `values`: since mass = Sum_c values(c) * cell_volume(c) is linear
+    // in `values`, grad_values(c) = grad_mass * cell_volume(c). `grad_mass` is the scalar cotangent.
+    HD void   measure_bwd  ( auto &&grad_values, auto &&grad_mass ) const;
+
+    // unidimension piece
+    struct Udp          { SI index; TF pos; TF mass; TF y; };
+    HD auto   udp_start () const;
+    HD auto   udp_cont  ( auto &&udp, auto mass_to_take, auto &&cb_parts ) const;
+
+    // jump directly to the `Udp` state a sequential walk would be in after having consumed exactly
+    // `target_mass` -- via binary search over a PRECOMPUTED per-cell cumulative-mass array (built by
+    // `fill_cell_cum_mass`), instead of walking there step by step. Lets independent work-items each
+    // resume the walk at their own chunk's boundary in parallel.
+    HD auto   udp_at    ( auto &&cell_cum_mass, auto target_mass ) const;
+
+    // fills `cell_cum_mass[0..nb_cells]` (exclusive prefix of each cell's mass, sentinel = total
+    // mass) -- cached on the PYTHON side as `Image.cell_cum_mass` (a `ComputedAttribute`, see
+    // `distributions/Image.py`) so `SdotPlan1d` reads it ready-made instead of rebuilding it on every
+    // forward/backward call. Sequential (one thread does a whole angle): `nb_cells` is small enough
+    // that no cooperative scan is worth the complexity here.
+    HD void   fill_cell_cum_mass( auto &&cell_cum_mass ) const;
+};
+
+}
+
+#include "Image.cxx"
+
+// its convolved density, for the transport solver ( `sdotplan/Convolved.h` )
+#include "sdotplan/convolved/Image.h"

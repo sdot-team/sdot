@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# build outputs
+build/
+*.o
+*.a
+*.so
+*.so.p
+*.dylib
+compile_commands.json
+catalogue_record
+
+# THE PRECOMPILED KERNELS: `<tag>/<key>.so` per architecture, produced by `make catalogue`. Only the README is tracked.
+src/sdot/precompiled-kernels/*
+!src/sdot/precompiled-kernels/README.md
+
+# the runner ( errand )
+.errand/
+runs/
+
+# misc
+tmp/
+.cache/
+bench/cases/
+.DS_Store
+
+# the docs site ( vitepress ): keep its config and theme, not its dependencies nor its builds
+node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+.pytest_cache/
+
+# the wheels `make wheels` builds
+/dist/

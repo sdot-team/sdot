@@ -1,0 +1,9 @@
+from errand import test
+
+if test( "basic" ):
+    from sdot import SumOfDiracs
+    di = SumOfDiracs( positions = [ [ 1 ], [ 2 ], [ 3 ] ] )
+    assert di.mass == 3
+
+    dj = SumOfDiracs( positions = [ [ 1 ], [ 2 ], [ 3 ] ], weights = [ 2, 2, 4 ] )
+    assert dj.mass == 8

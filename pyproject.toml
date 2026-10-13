@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sdot"
+version = "2026.10.10.1"
+requires-python = ">=3.10"
+dependencies = [
+    "loom-ffi==2026.10.10.1",
+    "numpy",
+    "scipy",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sdot"]
+# the precompiled kernels are build products, ignored by git: say that the wheel ships them anyway
+artifacts = ["src/sdot/precompiled-kernels/**"]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+]
