@@ -96,7 +96,9 @@ class Distribution( Aggregate ):
         return viz
 
     def display_blocks( self, threshold = 0.0 ):
-        """WHERE THE DENSITY HAS MASS, for a display ( `PowerDiagram.support_pieces` ): `( dirs [ B, F, d ], offs [ B, F ],
+        """= Internals
+
+        WHERE THE DENSITY HAS MASS, for a display ( `PowerDiagram.support_pieces` ): `( dirs [ B, F, d ], offs [ B, F ],
         ids [ B, F ] )`, `B` convex BLOCKS whose union is the region where the density exceeds `threshold * max`. Block `b` is
         `dirs[ b, f ] . x <= offs[ b, f ]` for each wall `f` ( a zero direction pads ), and `ids[ b, f ]` says what the wall is:
         `SEAM` when the region behind it has mass too -- the walls of two blocks that touch are then not drawn -- or `SUPPORT`
@@ -106,13 +108,19 @@ class Distribution( Aggregate ):
         return None
 
     def blocks_of_cells( self, cells, threshold = 0.0 ):
-        """`( owners, blocks )`: the pieces to cut the cells of `cells` ( a `Cell` batched over the seeds, as `PowerDiagram.cells`
+        """= Internals
+
+        `( owners, blocks )`: the pieces to cut the cells of `cells` ( a `Cell` batched over the seeds, as `PowerDiagram.cells`
         gives it ) into -- piece `p` is cell `owners[ p ]` cut to block `blocks[ p ]` of `display_blocks`, or the whole cell
         when `blocks[ p ] < 0`. A cell that has no mass anywhere has no piece. Choosing too many blocks only costs empty pieces."""
         raise NotImplementedError
 
     def bounding_half_spaces( self ):
-        """The SUPPORT of the distribution, as half-spaces `direction . x <= offset`, or `None`.
+        """The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
+
+        = Internals
+
+        The SUPPORT of the distribution, as half-spaces `direction . x <= offset`, or `None`.
 
         A compact-support density (an image) bounds cells for nothing : everything that
         goes beyond its support brings no mass, so cutting it does NOT change the result --
@@ -132,7 +140,9 @@ class Distribution( Aggregate ):
         return None
 
     def inscribed_box( self ):
-        """A BOX `( lo, hi )` ( two `[ d ]` host arrays ) lying INSIDE the region where the density is positive, or `None`.
+        """= Internals
+
+        A BOX `( lo, hi )` ( two `[ d ]` host arrays ) lying INSIDE the region where the density is positive, or `None`.
 
         It is where the solver packs the seeds of its starting point ( `sdotplan/Solve.h`, the similarity ): seeds that are
         all in the box have a cell with mass, because a cell contains a neighbourhood of its seed. The box need not be the
@@ -145,7 +155,9 @@ class Distribution( Aggregate ):
     #: as `k` grows, itself at `k = 0` ) and `spread_start()` ( the `k` to start from ). See `Mesh.spread`, `SdotPlanNd._solve_by_spreading`
 
     def extra_cuts_per_piece( self, nb_dims ):
-        """How many more cuts than a cell a PIECE can carry.
+        """= Internals
+
+        How many more cuts than a cell a PIECE can carry.
 
         `0` (the default) says "the piece IS the cell" : no cutting, hence no spare cells
         to allocate. An image cuts by the 2d planes of a box of its grid, hence
@@ -157,13 +169,15 @@ class Distribution( Aggregate ):
     target_mass      : RealTensor
     @property
     def mass( self ):
-        """Total mass/measure of this distribution. Implemented by subclasses."""
+        """The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given )."""
         if self.current_mass.is_undefined:
             self._update_current_mass()
         return self.current_mass
 
     def normalized_version( self, nb_dims = None ):
-        """Return a version of this distribution normalized to target_mass, if specified.
+        """= Internals
+
+        Return a version of this distribution normalized to target_mass, if specified.
 
         `nb_dims`: the dimension of the space the distribution is used in, when its caller knows it -- what lets a
         distribution that does not carry one ( `Box` without `origin` nor `frame` ) produce the parameters it lacks.
@@ -179,7 +193,9 @@ class Distribution( Aggregate ):
         raise NotImplementedError
 
     def raw_1d_diracs( self ):
-        """For a 1D dirac-source distribution (`_is_dirac_source`): `( weights, batched_extra,
+        """= Internals
+
+        For a 1D dirac-source distribution (`_is_dirac_source`): `( weights, batched_extra,
         project_fn )`, letting a target distribution's `try_update_sdotplan1d` read plain,
         differentiable backend arrays and bypass `loom.ffi_call` entirely (ordinary autodiff
         differentiates straight through). `None` when this distribution cannot supply this
@@ -202,7 +218,9 @@ class Distribution( Aggregate ):
         return None
 
     def try_update_sdotplan1d( self, plan ):
-        """Attempt to solve `plan` (an `SdotPlan1d` with `self` as one of its two
+        """= Internals
+
+        Attempt to solve `plan` (an `SdotPlan1d` with `self` as one of its two
         distributions) without going through `loom.ffi_call` -- e.g. a closed-form, pure-JAX
         computation. On success: update `plan`'s output fields (at least `plan.cost`) and
         return True. On failure (unsupported combination): change nothing and return False,
@@ -211,7 +229,9 @@ class Distribution( Aggregate ):
         return False
 
     def batch_slice( self, index ):
-        """An UNBATCHED version of `self` for one element (`index`, a traced int) of its
+        """= Internals
+
+        An UNBATCHED version of `self` for one element (`index`, a traced int) of its
         (single) batch axis -- lets `SdotPlan1d` loop over the batch with `jax.lax.map` (one
         instance, and so one `loom.ffi_call`, per iteration) instead of a single call handling
         every batch element's memory at once. This is what lets the loom.ffi_call/C++ path scale

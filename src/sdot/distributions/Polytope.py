@@ -33,7 +33,12 @@ def _volume_of( directions, offsets ):
 
 
 class Polytope( Distribution ):
-    """A CONSTANT density on a convex polytope, zero elsewhere.
+    """A uniform density on the convex polytope `directions . x <= offsets` ( `[ nb_cuts, d ]`, `[ nb_cuts ]` ), zero
+    elsewhere. `Polygon( points )` and `Polyhedron( points )` build one from its vertices.
+
+    = Internals
+
+    A CONSTANT density on a convex polytope, zero elsewhere.
 
         rho( x ) = density      if  directions( c ) . x <= offsets( c )  for every c
                  = 0            otherwise
@@ -97,7 +102,9 @@ class Polytope( Distribution ):
         return self._dirs, self._offs
 
     def inscribed_box( self ):
-        """the largest cube in the polytope ( the density is constant on it ), see `Distribution.inscribed_box`"""
+        """= Internals
+
+        the largest cube in the polytope ( the density is constant on it ), see `Distribution.inscribed_box`"""
         from ._inscribed import largest_cube
         cube = largest_cube( self._dirs, self._offs )
         return None if cube is None else cube[ :2 ]

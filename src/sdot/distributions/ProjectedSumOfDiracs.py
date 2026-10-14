@@ -9,7 +9,13 @@ from .Distribution import Distribution
 
 
 class ProjectedSumOfDiracs( Distribution ):
-    """Diracs whose 1D position is the PROJECTION of a shared ambient point onto a per-item normal,
+    """1D diracs that are the projections of shared points on a direction per item of a batch -- e.g. one per angle of a
+    tomography: `points` `[ n, proj_dim ]`, `normal` `[ proj_dim ]` per item, `weights` `[ n ]` the masses. The projected
+    positions are computed on the fly, never stored.
+
+    = Internals
+
+    Diracs whose 1D position is the PROJECTION of a shared ambient point onto a per-item normal,
     computed ON THE FLY inside the kernel -- so the `[ nb_angles, n ]` projected positions are NEVER
     materialized (the whole point: at 1e7 diracs x 1000 angles that array is 80GB).
 

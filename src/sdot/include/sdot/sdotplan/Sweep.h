@@ -34,7 +34,15 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <unistd.h>
+#ifdef _WIN32
+    // not <windows.h>: its macros ( INFINITE, min, max ) leak into everything included after
+    extern "C" {
+        struct sdot_MemoryStatusEx { unsigned long length, load; unsigned long long total_phys, avail_phys, total_page, avail_page, total_virtual, avail_virtual, avail_ext; };
+        __declspec( dllimport ) int __stdcall GlobalMemoryStatusEx( sdot_MemoryStatusEx * );
+    }
+#else
+    #include <unistd.h>
+#endif
 #include <vector>
 
 namespace sdot {
@@ -197,7 +205,12 @@ struct Sweep {
     void grow_scratch() {
         resize_scratch();
         const double bytes = double( words ) * 4.0 * double( scratch.size() );
-        const double ram = double( sysconf( _SC_PHYS_PAGES ) ) * double( sysconf( _SC_PAGESIZE ) );
+        #ifdef _WIN32
+            sdot_MemoryStatusEx status; status.length = sizeof( status );
+            const double ram = GlobalMemoryStatusEx( &status ) ? double( status.total_phys ) : 0.0;
+        #else
+            const double ram = double( sysconf( _SC_PHYS_PAGES ) ) * double( sysconf( _SC_PAGESIZE ) );
+        #endif
         if ( ram > 0 && bytes > 0.5 * ram ) {
             std::fprintf( stderr, "sdotplan: the scratch of the cells reached %.1f GiB ( %lld vertices per cell ), more than half of the "
                                   "memory of the machine, and a cell still does not fit -- giving up\n",

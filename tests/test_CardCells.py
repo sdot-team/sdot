@@ -107,7 +107,8 @@ def _clouds( rng ):
 if test( "the_card_cells_are_the_generic_cells_voronoi" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -124,7 +125,8 @@ if test( "the_card_cells_are_the_generic_cells_voronoi" ):
 if test( "the_card_cells_are_the_generic_cells_with_weights" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -145,7 +147,8 @@ if test( "the_card_cells_are_the_generic_cells_with_weights" ):
 if test( "the_card_cells_overflow_into_the_later_passes" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -166,7 +169,8 @@ if test( "the_card_cells_overflow_into_the_later_passes" ):
 if test( "the_card_cells_small_and_degenerate_clouds" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -188,7 +192,8 @@ if test( "the_card_cells_small_and_degenerate_clouds" ):
 if test( "the_card_cells_follow_the_weights" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -210,7 +215,8 @@ if test( "the_card_cells_follow_the_weights" ):
 if test( "the_card_takes_a_constant_density" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -218,7 +224,7 @@ if test( "the_card_takes_a_constant_density" ):
     else:
         # an `Image` whose values are all equal on exactly the box is a constant density: the card takes it ( `rho`,
         # read on the card ), and integrates the same thing as the generic path
-        from sdot import Image
+        from sdot.distributions.Image import Image
         rng = numpy.random.default_rng( 5 )
         pos = rng.uniform( 0.001, 0.999, size = ( 3000, 2 ) )
         img = Image( numpy.full( ( 2, 3 ), 2.5 ) )
@@ -259,7 +265,8 @@ def _card_laplacian( out, n ):
 if test( "the_card_laplacian_is_the_generic_one" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -314,7 +321,8 @@ if test( "the_card_laplacian_is_the_generic_one" ):
 if test( "the_card_moments_are_the_generic_ones" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -357,7 +365,8 @@ def _measures_fn( pos, w, tree, kernel, card, wrt ):
 if test( "the_card_adjoint_is_the_generic_one" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -384,7 +393,8 @@ if test( "the_card_adjoint_is_the_generic_one" ):
 if test( "the_card_adjoint_is_the_finite_difference" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -406,7 +416,8 @@ if test( "the_card_adjoint_is_the_finite_difference" ):
 if test( "the_card_runs_under_jit" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -461,7 +472,7 @@ def _host_tree( pos, leaf = 10 ):
 
 def _check_tree_rule( pos, t, leaf = 10 ):
     """the tree of `pos` by its rule ( see above ), whatever the side of the tied seeds"""
-    from sdot import AaBsp as Bsp
+    from sdot.AaBsp import AaBsp as Bsp
     n = len( pos )
     depth = Bsp.max_depth_for( n, leaf )
     assert len( t[ "beg" ] ) == 2 ** depth - 1
@@ -512,7 +523,8 @@ def _tied_clouds( rng ):
 if test( "the_card_tree_is_the_host_tree" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -534,7 +546,8 @@ if test( "the_card_tree_is_the_host_tree" ):
 if test( "the_card_tree_follows_the_rule_on_ties" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -561,7 +574,8 @@ if test( "the_card_tree_follows_the_rule_on_ties" ):
 if test( "the_card_tree_majorants_bound_the_weights" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -590,7 +604,8 @@ if test( "the_card_tree_majorants_bound_the_weights" ):
 if test( "the_card_tree_is_built_under_jit_from_traced_positions" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -634,7 +649,8 @@ if test( "the_card_tree_is_built_under_jit_from_traced_positions" ):
 if test( "the_card_fourth_pass_works_in_batches" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -682,7 +698,8 @@ if test( "the_card_fourth_pass_works_in_batches" ):
 if test( "the_card_raises_past_the_vertex_limit" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -730,7 +747,8 @@ if test( "the_card_variant_follows_the_inputs" ):
     # pure Python: the variant chosen from the seeds and the tree, synthetic sizes past 32-bit indices and depth 32
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     assert card_variant_for( 32, 10 ** 6, 2 ** 18 - 1 ) == "sdot::gpu2d::Variant<float, int, int, 32>"
@@ -752,7 +770,8 @@ if test( "the_card_variant_follows_the_inputs" ):
 if test( "the_wide_card_variant_computes_the_same_cells" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -848,7 +867,8 @@ def _sphere3( k, rng, n_back = 1500, r = 0.2 ):
 if test( "the_card_cells_3d_are_the_generic_cells_voronoi" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -862,7 +882,8 @@ if test( "the_card_cells_3d_are_the_generic_cells_voronoi" ):
 if test( "the_card_cells_3d_are_the_generic_cells_with_weights" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -881,7 +902,8 @@ if test( "the_card_cells_3d_are_the_generic_cells_with_weights" ):
 if test( "the_card_cells_3d_overflow_into_the_later_passes" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -900,7 +922,8 @@ if test( "the_card_cells_3d_overflow_into_the_later_passes" ):
 if test( "the_card_cells_3d_small_and_degenerate_clouds" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -942,7 +965,8 @@ if test( "the_card_cells_3d_small_and_degenerate_clouds" ):
 if test( "the_card_cells_3d_follow_the_weights" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -964,7 +988,8 @@ if test( "the_card_cells_3d_follow_the_weights" ):
 if test( "the_card_laplacian_3d_is_the_generic_one" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1016,7 +1041,8 @@ if test( "the_card_laplacian_3d_is_the_generic_one" ):
 if test( "the_card_moments_3d_are_the_generic_ones" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1059,7 +1085,8 @@ def _measures_fn3( pos, w, tree, kernel, card, wrt ):
 if test( "the_card_adjoint_3d_is_the_generic_one" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1084,7 +1111,8 @@ if test( "the_card_adjoint_3d_is_the_generic_one" ):
 if test( "the_card_adjoint_3d_is_the_finite_difference" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1111,7 +1139,8 @@ if test( "the_card_adjoint_3d_is_the_finite_difference" ):
 if test( "the_card_3d_runs_under_jit" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1147,7 +1176,8 @@ if test( "the_card_3d_runs_under_jit" ):
 if test( "the_card_tree_3d_is_the_host_tree" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1179,7 +1209,8 @@ if test( "the_card_tree_3d_is_the_host_tree" ):
 if test( "the_card_3d_third_pass_works_in_batches" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:
@@ -1221,7 +1252,8 @@ if test( "the_card_3d_third_pass_works_in_batches" ):
 if test( "the_card_3d_raises_past_the_vertex_limit" ):
     import numpy
     import loom
-    from sdot import AaBsp, PowerDiagram, box_half_spaces
+    from sdot.AaBsp import AaBsp
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.PowerDiagram_Bsp import card_variant_for
     _GPU = bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) )
     if not _GPU:

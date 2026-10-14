@@ -8,7 +8,16 @@ from .Distribution import Distribution
 
 
 class Mesh( Distribution ):
-    """A PIECEWISE LINEAR density on a mesh of simplices, DISCONTINUOUS between them ( DG1 ): one value per corner of each simplex.
+    """A piecewise linear density on a mesh of simplices ( triangles in 2D, tetrahedra in 3D ), zero outside.
+
+    `nodes` `[ nb_nodes, d ]`, `simplices` `[ nb_simplices, d + 1 ]` ( indices of nodes ). `values`: `[ nb_nodes ]` for a
+    continuous density ( one value per node ), or `[ nb_simplices, d + 1 ]` for a density discontinuous between simplices
+    ( one value per corner of each simplex: zeros make a hole ). Constant by default. Differentiable with respect to
+    `values`.
+
+    = Internals
+
+    A PIECEWISE LINEAR density on a mesh of simplices, DISCONTINUOUS between them ( DG1 ): one value per corner of each simplex.
 
         rho( x ) = sum_i lambda_i( x ) values( e, i )      for x in the simplex e ( barycentric coordinates ),
                  = 0                                       outside the mesh.
@@ -182,7 +191,9 @@ class Mesh( Distribution ):
             return None
 
     def spread( self, k ):
-        """the same mesh, the values spread by `k` corner averages ( see the class docstring ); `self` for `k = 0`"""
+        """= Internals
+
+        the same mesh, the values spread by `k` corner averages ( see the class docstring ); `self` for `k = 0`"""
         if k <= 0:
             return self
         from ..corner_averages import corner_averages
@@ -190,7 +201,9 @@ class Mesh( Distribution ):
         return self.with_values( corner_averages( nodes, sx, cv, [ k ], method = "cheb", eps = self.SPREAD_EPS )[ 0 ] )
 
     def spread_start( self ):
-        """the first power of 2 `k` whose spread density is under `SPREAD_FLATNESS` times its mean -- `None` when the mesh is not
+        """= Internals
+
+        the first power of 2 `k` whose spread density is under `SPREAD_FLATNESS` times its mean -- `None` when the mesh is not
         readable on the host ( a tracer: no continuation )"""
         geo = self._host_geometry()
         if geo is None:
@@ -228,7 +241,9 @@ class Mesh( Distribution ):
         return numpy.concatenate( [ numpy.eye( d ), -numpy.eye( d ) ] ), numpy.concatenate( [ hi, -lo ] )
 
     def inscribed_box( self ):
-        """the largest cube that fits in ONE simplex where the density is positive ( see `Distribution.inscribed_box` ): a LP per
+        """= Internals
+
+        the largest cube that fits in ONE simplex where the density is positive ( see `Distribution.inscribed_box` ): a LP per
         simplex, the best kept. A cube that straddles several simplices could be larger, and this one is always inside"""
         from ._inscribed import largest_cube
         try:
@@ -259,7 +274,9 @@ class Mesh( Distribution ):
         return None if best is None else best[ :2 ]
 
     def domain_box( self ):
-        """`( lo, hi )` of the domain: the box of the mesh, widened by `MARGIN` ( see `bounding_half_spaces` )"""
+        """= Internals
+
+        `( lo, hi )` of the domain: the box of the mesh, widened by `MARGIN` ( see `bounding_half_spaces` )"""
         lo, hi = self._bbox
         pad = self.MARGIN * float( numpy.max( hi - lo ) )
         return lo - pad, hi + pad
@@ -267,7 +284,9 @@ class Mesh( Distribution ):
     # ---- the display of the cells where the mesh has mass ( `PowerDiagram.support_pieces` ) ----------------------------------
 
     def display_blocks( self, threshold = 0.0 ):
-        """`( dirs, offs, ids )`: one block per simplex with mass -- a corner `> threshold * max( values )` -- ( see
+        """= Internals
+
+        `( dirs, offs, ids )`: one block per simplex with mass -- a corner `> threshold * max( values )` -- ( see
         `Distribution.display_blocks` ). Its `d + 1` facets are `SEAM`s when they are shared with another simplex and the density
         exceeds the threshold somewhere on them ( the neighbour then holds the same part of the facet ), `SUPPORT`s otherwise; a
         positive threshold adds the plane `rho = threshold` where the simplex has nodes under it ( a `SUPPORT`: the density is
@@ -275,7 +294,9 @@ class Mesh( Distribution ):
         return self._display( threshold )[ "blocks" ]
 
     def blocks_of_cells( self, cells, threshold = 0.0 ):
-        """`( owners, blocks )` for the cells of `cells` ( see `Distribution.blocks_of_cells` ). The border of the support is
+        """= Internals
+
+        `( owners, blocks )` for the cells of `cells` ( see `Distribution.blocks_of_cells` ). The border of the support is
         made of the `SUPPORT` facets ( and of the `rho = threshold` planes ): a cell whose box meets the box of none of them
         does not cross it, and is kept whole ( block `-1` ) if its centroid is in a block, dropped otherwise. The others are cut
         to each block their box meets ( `overlapping_pairs` )."""

@@ -4,7 +4,12 @@ from .Image import Image
 
 
 class Box:
-    """A CONSTANT density on a box -- a parallelepiped -- zero elsewhere.
+    """A uniform density on a box: `origin + frame^T [ 0, 1 ]^d`. The rows of `frame` are the edges of the box, or `frame`
+    is their lengths ( an axis-aligned box ). By default the unit cube, in the dimension of the source it is used with.
+
+    = Internals
+
+    A CONSTANT density on a box -- a parallelepiped -- zero elsewhere.
 
         rho( x ) = density      if  x = origin + frame^T t  with  t in [ 0, 1 ]^d
                  = 0            otherwise
@@ -35,11 +40,15 @@ class Box:
 
     @property
     def nb_dims_or_none( self ):
-        """the dimension, or `None` while the box has no default to make up"""
+        """= Internals
+
+        the dimension, or `None` while the box has no default to make up"""
         return self._nb_dims
 
     def image( self, nb_dims = None ):
-        """the `Image` of one pixel that this box is, in dimension `nb_dims` ( or its own )"""
+        """= Internals
+
+        the `Image` of one pixel that this box is, in dimension `nb_dims` ( or its own )"""
         d = self._nb_dims if self._nb_dims is not None else nb_dims
         if d is None:
             raise ValueError( "Box : the dimension of the space is not known yet ( give `origin`, `frame` or `nb_dims`, "
@@ -54,7 +63,7 @@ class Box:
             else:
                 frame = numpy.asarray( self.frame, dtype = float )
                 frame = numpy.diag( frame ) if frame.ndim == 1 else frame.reshape( d, d )
-            self._images[ d ] = Image( values = numpy.full( ( 1, ) * d, float( self.density ) ), origin = origin, frame = frame )
+            self._images[ d ] = Image( values = numpy.full( ( 1, ) * d, float( self.density ) ), origin = origin, pixel_frame = frame )
         return self._images[ d ]
 
     def normalized_version( self, nb_dims = None ):

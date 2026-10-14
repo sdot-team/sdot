@@ -23,7 +23,8 @@ if test( "the_3d_facet_mass_of_gaussians_is_exact_on_any_plane" ):
     # triangles and the in-plane frame of `SumOfGaussians::facet_mass_3d`, against the closed form
     import numpy
     from math import erf, exp, pi, sqrt
-    from sdot import PowerDiagram, SumOfGaussians, box_half_spaces
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
     c = numpy.array( [ [ 0.43, 0.58, 0.47 ], [ 0.52, 0.31, 0.66 ], [ 0.2, 0.7, 0.5 ] ] )
     s = numpy.array( [ 0.17, 0.05, 0.3 ] )                 # narrow ( the exact 2D reduction matters ), mid, wide
     w = numpy.array( [ 0.5, 1.0, 0.7 ] )
@@ -47,7 +48,8 @@ if test( "the_3d_facet_mass_of_gaussians_is_symmetric" ):
     # frames ), and must agree. ( No finite difference here: the measures of a 3D gaussian come from an adaptive quadrature,
     # `PointwiseDensity`, whose noise is above the checks this one makes. )
     import numpy
-    from sdot import PowerDiagram, SumOfGaussians, box_half_spaces
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
     rng = numpy.random.default_rng( 33 )
     n = 30
     pos = rng.uniform( 0.1, 0.9, size = ( n, 3 ) )
@@ -62,7 +64,9 @@ if test( "the_3d_facet_mass_of_gaussians_is_symmetric" ):
 if test( "the_3d_transport_towards_gaussians_is_solved" ):
     # the solver's laplacian reads `facet_mass`: in 3D it did not compile before ( `sdotplan/Sweep.h`, `density_facet_mass` )
     import numpy
-    from sdot import Iterative, OtProblem, SumOfDiracs, SumOfGaussians
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
     rng = numpy.random.default_rng( 34 )
     n = 40
     dens = SumOfGaussians( positions = rng.uniform( 0.35, 0.65, size = ( 4, 3 ) ), sigmas = [ 0.15, 0.2, 0.18, 0.25 ] )
@@ -115,9 +119,9 @@ if test( "the_2d_moments_of_gaussians_are_exact" ):
     rho = sdot.SumOfGaussians( c, s, weights = m )
     a = m / m.sum()
     ref = [ ( a * c[ :, 0 ] ).sum(), ( a * c[ :, 1 ] ).sum(), ( a * ( ( c ** 2 ).sum( 1 ) + 2 * s ** 2 ) ).sum(), 1.0 ]
-    moments = { acc: [ numpy.asarray( sdot.PowerDiagram( x, w, distribution = rho, accelerator = acc ).moment( k ).raw ) for k in range( 4 ) ]
+    moments = { acc: [ numpy.asarray( sdot.PowerDiagram( x, w, distribution = rho, accelerator = acc ).moment( k ) ) for k in range( 4 ) ]
                 for acc in ( None, "plain" ) }
-    measures = numpy.asarray( sdot.PowerDiagram( x, w, distribution = rho ).measures.raw )
+    measures = numpy.asarray( sdot.PowerDiagram( x, w, distribution = rho ).measures )
     for k in range( 4 ):
         assert abs( moments[ None ][ k ].sum() - ref[ k ] ) < 1e-6, ( k, moments[ None ][ k ].sum(), ref[ k ] )     # the tails beyond 6 sigmas
         assert numpy.abs( moments[ None ][ k ] - moments[ "plain" ][ k ] ).max() < 1e-6, k

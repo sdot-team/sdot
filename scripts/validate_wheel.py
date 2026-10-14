@@ -94,15 +94,16 @@ def validate( wheels: list, keep: bool ) -> int:
         _run( [ py, "-m", "pip", "install", "--quiet", *( f"{ w }[jax]" if w.name.startswith( "loom" ) else str( w ) for w in wheels ) ], check = True )
 
         # Quick pre-check: fail fast if the install is badly packaged, BEFORE compiling.
-        r = _run( [ py, "-c", PRECHECK ], cwd = work_dir, capture_output = True, text = True )
+        clean = { k: v for k, v in os.environ.items() if k not in ( "PYTHONPATH", "SDOT_BUILD_DIR" ) }    # nothing of the checkout
+        r = _run( [ py, "-c", PRECHECK ], cwd = work_dir, env = clean, capture_output = True, text = True )
         if r.returncode:
             print( r.stdout + r.stderr, flush = True )
             raise RuntimeError( "import pre-check failed" )
         # .resolve() on both sides: on macOS /var is a symlink to /private/var, and
         # __file__ is not canonicalized whereas include_roots() is.
-        venv_real = str( venv_dir.resolve() )
-        for line in re.findall( r"/[^\s'\]\[,]+", r.stdout ):
-            if not str( Path( line ).resolve() ).startswith( venv_real ):
+        venv_real = os.path.normcase( str( venv_dir.resolve() ) )
+        for line in re.findall( r"(?:[A-Za-z]:)?/[^\s'\]\[,]+", r.stdout ):     # a Windows path keeps its drive
+            if not os.path.normcase( str( Path( line ).resolve() ) ).startswith( venv_real ):
                 raise RuntimeError(
                     f"path outside the venv (import from the checkout?): { line }\n{ r.stdout }"
                 )

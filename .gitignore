@@ -37,3 +37,7 @@ docs/.vitepress/dist/
 
 # the wheels `make wheels` builds
 /dist/
+
+# what only this machine knows ( hosts, paths ): see errand-envs.py
+errand-vars.py
+*.sif

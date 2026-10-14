@@ -1,131 +1,229 @@
-# API — PowerDiagram
+<!-- written by scripts/api_docs.py from the docstrings: do not edit -->
 
-## `PowerDiagram( positions, weights=None, boundaries=None, accelerator=None, distribution=None, kernel_dtype=None, scratch_capacity=None )`
+# API — Power Diagrams
 
-Constructs a power diagram (Laguerre tessellation) from a set of weighted sites.
+The geometry under the plans: power diagrams, their cells, and what speeds them up.
 
-`PowerDiagram` is a VIEW: it holds the seeds and the domain, and rebuilds whatever is asked for,
-cell by cell, in a per-work-item scratch. How the seeds are stored is the job of a specialization
-picked at construction (`accelerator`):
+::: v-pre
 
-| Class | Storage | When |
-|---|---|---|
-| `PowerDiagram_Bsp` | `sorted_positions` / `sorted_weights` in the order of an `AaBsp` tree (`tree`), one leaf read contiguously; each cell is only cut by the seeds the tree cannot rule out | the default, as soon as the positions are concrete |
-| `PowerDiagram_Plain` | `positions` / `weights` as given; every cell is cut by the `n - 1` bisectors | `accelerator = "plain"`, or traced positions (no tree can be built on them) |
-
-Whatever the storage, `pd.positions` / `pd.weights` read and write the seeds in the USER's order,
-and `measures` / `cells` come out in that order too. Setting `pd.weights = w` on a BSP storage
-re-sorts the weights and refreshes the per-node weight majorant in one kernel, without rebuilding
-the tree -- this is what `SdotPlanNd` does at every step. Setting `pd.positions` rebuilds the tree.
+## `PowerDiagram`
 
 ```python
-from sdot import PowerDiagram, box_half_spaces
-import numpy as np
-
-pd = PowerDiagram( positions = np.random.rand( 100, 2 ), boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
-pd = PowerDiagram( positions = np.random.rand( 100, 2 ), weights = np.zeros( 100 ) )
+PowerDiagram(positions=None, weights=None, *args, accelerator=None, **kwargs)
 ```
 
-| Argument | Type | Description |
-|---|---|---|
-| `positions` | array `(n, d)` | Site positions |
-| `weights` | array `(n,)` or `None` | Laguerre weights (default: none — standard Voronoi) |
-| `boundaries` | `( directions, offsets )` or `None` | The convex domain `direction . x <= offset`; absent, boundary cells stay unbounded |
-| `accelerator` | `None` (an `AaBsp` built here), an `AaBsp` built on these positions, or `"plain"` | Which seeds are worth trying — changes the cost, never the result |
-| `distribution` | `Image`, `SumOfGaussians`, ... | What the measures integrate against (default: Lebesgue) |
-| `kernel_dtype` | `"FP32"` (default) or `"FP64"` | The float the geometry is cut in; measures and gradients come out in the positions' float |
-| `scratch_capacity` | int | How many vertices per cell the per-work-item scratch is sized for at first (doubled on overflow) |
+Power diagram ( Laguerre ) -- THE VIEW, and what all the storages have in common.
 
----
+The cell of seed `i` is where its POWER DISTANCE wins:
 
-## `PowerDiagram.measures`
+    |x - d_i|² - w_i  <=  |x - d_j|² - w_j   for every other j
 
-The measure (area, volume, or the integral of `distribution`) of every cell, `[ n ]`. Differentiable
-with respect to `positions`, `weights` and the distribution's values.
+Expanded, the inequality loses its `|x|²` on both sides and becomes a half-space: a power
+diagram costs exactly what a Voronoi diagram costs, one plane per rival and the same cut. Only the
+DIFFERENCES of weights reach the planes: "all equal" and "no weights at all" are the same
+object, and the Euclidean case is called `Voronoi` ( see `Voronoi.py` ).
 
----
+`PowerDiagram( positions, weights, ... )` does not carry a diagram: it carries its SEEDS and the
+convex domain that bounds them, and rebuilds what it is asked for, cell by cell, in the
+scratch of a work-item ( `diagram/Ops.h` ). This file is the CONTRACT -- what a user reads and
+writes: `positions`, `weights`, `measures`, `cells`, `cell( i )` -- and the common trunk: the domain,
+the distribution, the scratch, the three kernels. HOW the seeds are laid out is up to a
+specialization, chosen at construction:
 
-## `PowerDiagram.moments`
+  * `PowerDiagram_Plain` -- the seeds as they came, each cell cut by the `n - 1`
+    bisectors. The floor, and what remains when the positions are a tracer;
+  * `PowerDiagram_Bsp`   -- the seeds in the order of a BSP tree ( `AaBsp` ), a leaf being
+    read in one piece, and each cell cut only by the seeds the tree could not
+    rule out. The default as soon as the positions are concrete.
 
-`( masses, first, second )`: for every cell, `∫ρ`, `∫xρ` (`[ n, d ]`) and `∫|x|²ρ` -- what a
-transport cost and the cell barycenters are made of. Same sweep as `measures`; closed forms on
-piecewise-constant pieces (`Image`, Lebesgue), the adaptive quadrature otherwise. Not
-differentiable: `SdotPlanNd.cost_and_position_grad` derives the transport cost by the envelope
-theorem instead.
+The neighborhood is ACCELERABLE, not the result: an accelerator can only silence cuts that
+would have removed nothing, so the cells are the SAME, up to rounding errors.
 
----
+| Attribute | |
+|---|---|
+| `cells` | All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them. |
+| `measures` | The measure of each cell, `[ n ]` -- its integral against `distribution` when there is one. Differentiable with respect to the positions, the weights and the parameters of the distribution. |
+| `moments` | `( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and `int \|x\|^2 rho`. Not differentiable ( see `moment` ). |
 
-## `PowerDiagram.hessian_rows()`
+### `.add_to_viz(viz, seeds=True, seed_color='#000000', support_only=True, threshold=0.0, **kwargs)`
 
-`( nb_nbrs, ids, vals )`: for every cell, its neighbours and `∫_facet ρ / ( 2 |pᵢ − pⱼ| )` -- the
-sparse Jacobian of the measures with respect to the weights (`∂mᵢ/∂wⱼ = −vals`,
-`∂mᵢ/∂wᵢ = Σ vals`), which is the Hessian of the dual transport functional. Piecewise-constant
-distributions only.
+Draws itself into a `Visualizer`: all the cells, in one call ( see `cells` ), and the
+seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_to_viz`
+( `opacity`, `faces`, `edges`, ... ). The quick ways to look at it -- `write_html`,
+`write_pvd`, `show` -- are those of `Displayable`.
 
----
+`support_only`: the cells only where the distribution has mass ( `support_pieces`, with
+`threshold` ) -- an image with zero pixels does not show its cells there.
 
-## `PowerDiagram.cells`
+### `.hessian_rows()`
 
-Every cell, as one `Cell` batched over the seeds — what a display needs.
+The derivatives of the measures with respect to the weights, row by row: `( nb_nbrs, ids, vals )`, the neighbors of each cell and the coefficients ( host arrays ).
+
+### `.laplacian_solve(rhs, linear_solver='auto')`
+
+The solution `x` of `L x = rhs`, `L` being the derivative of the measures with respect to the weights ( `rhs` sums to zero; `x[ 0 ] == 0` ). Differentiable with respect to `rhs`.
+
+### `.moment(k)`
+
+`int_{cell_i} p( x ) rho( x ) dx`, `[ n ]`, for `p = x_k` ( `k < d` ), `|x|^2` ( `k == d` ) or `1` ( `k == d + 1` ). Differentiable like `measures`.
+
+### `.show(filename=None, title=None, height=500, **kwargs)`
+
+In a notebook ( Jupyter, VS Code, Colab, ... ): displays the page inline, in an iframe
+`height` pixels high -- the wheel and touch gestures are then left to the notebook, they
+can be switched back on from the menu. Elsewhere, or when `filename` is given: writes the
+HTML page ( `filename`, or a temporary file ) and opens it in the browser. Returns the
+path written ( None when nothing was written ).
+
+### `.to_viz(viz=None, title=None, **kwargs)`
+
+A `Visualizer` holding this object ( `viz`, when given: it is then completed ). `title`
+names a NEW scene; `kwargs` are those of `add_to_viz`.
+
+### `.write_html(filename, title=None, **kwargs)`
+
+Writes the self-contained HTML page of this object. Returns the path written.
+
+### `.write_pvd(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView as a `.pvd` collection ( with its `.vtu` beside it ),
+the entry point one opens. Returns the `.pvd` path.
+
+### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `Voronoi`
 
 ```python
-cells = pd.cells
-cells.measure                      # [ n ]
-cells.vertex_positions[ i ]        # the vertices of cell i, [ nv, d ] ( cyclic order in 2D )
-cells.faces[ i ]                   # cycles of vertex indices, one per face ( 2D / 3D )
-cells.add_to_viz( Visualizer() )
+Voronoi(positions, **kwargs)
 ```
 
-`PowerDiagram.cell( i )` builds one cell on the Python side, a call per cut — the oracle of the
-tests, not a display path.
-
----
+The Voronoi diagram of `positions`: a `PowerDiagram` without weights ( same arguments, `weights` excepted ).
 
 ## `Cell`
 
-A convex polytope. `Cell( d, ... )` builds `Cell_1` (a segment), `Cell_2` (a polygon, vertices in
-cyclic order) or `Cell_N` (a simple polytope, every vertex naming its `d` cuts and `d` neighbours in
-`vertex_cuts` / `vertex_nbrs`). What is stored is the practical form -- `vertex_positions
-[ nb_vertices, d ]` in the caller's float, `cut_ids [ nb_cuts ]` -- and it is converted to the
-kernel's form (in `kernel_dtype`, `FP32` by default) on every call. Everything else is derived on the host.
-
-| Attribute / Method | Description |
-|---|---|
-| `.measure` | Area / volume of the cell (`TF::max` when unbounded) |
-| `.vertex_positions` | `[ nb_vertices, d ]` ( a list of them for a batched cell ) |
-| `.edges`, `.faces` | Vertex index pairs / cycles |
-| `.cut_planes` | `( directions, offsets )`, outward unit normals read off the geometry |
-| `.cut_ids` | Which seed each cut faces, or a negative id ( domain, piece, infinite wall ) |
-| `.is_bounded` | Whether no `INFINITE` wall carries a vertex any more |
-| `.cut( direction, offset )` | Cut the cell with a half-space, in place |
-| `.add_to_viz( viz )` | Draw it ( 2D / 3D faces, H-representation beyond ) |
-
-`Cell.make_hypercube( d, origin, axes )` and `Cell.make_unbounded( d )` are the two starting points.
-
----
-
-## Solving for the weights: `SdotPlanNd`
-
-The diagram itself does not solve anything -- it is a view. `SdotPlanNd( src_dist, dst_dist, ... )`
-holds ONE `PowerDiagram` built on the diracs of `src_dist`, and adjusts its weights until the
-measure of every cell against `dst_dist` matches its dirac's mass, by setting `pd.weights = w` at
-every evaluation (the tree is built once).
-
 ```python
-import numpy as np
-from sdot import SdotPlanNd, SumOfDiracs, SumOfGaussians
-
-plan = SdotPlanNd( SumOfDiracs( np.random.rand( 200, 2 ) ), SumOfGaussians( ... ) )
-plan.weights                 # the adjusted weights, in the order of the diracs
-plan.power_diagram()         # the diagram at those weights
-plan.cell_masses             # ~ the target masses
-plan.cost                    # W_2^2 at the adjusted weights
-plan.cost_and_position_grad()   # ... and its derivative w.r.t. the dirac positions (envelope theorem)
+Cell(nb_dims=None, *args, **kwargs)
 ```
 
-`objective = "least_squares"` (default) minimizes `0.5 |measures( w ) - masses|²` with a barrier;
-`objective = "dual"` minimizes the Kantorovich dual functional itself by L-BFGS (gradient = the
-residual, value and gradient from one `moments` sweep, no barrier) -- exact on an `Image`, limited
-to the quadrature tolerance on a smooth density; `objective = "newton"` does the same with the
-damped Newton of Kitagawa–Mérigot–Thibert (`hessian_rows`, a sparse solve per step): a step count
-independent of the number of diracs, what a large cloud needs.
+A convex polytope, possibly unbounded, possibly batched ( `PowerDiagram.cells` is a batch of cells ). Start from
+`Cell.make_hypercube( d, origin, axes )` or `Cell.make_unbounded( d )`, then `cut` it by half-spaces.
+
+| Attribute | |
+|---|---|
+| `cut_planes` | `( directions[ nb_cuts, d ], offsets[ nb_cuts ] )`, re-read off the geometry -- the UNIT outward normal of each face and its offset. A cut without a vertex has a zero direction. |
+| `edges` | `[ nb_edges, 2 ]` : the edges, as vertex indices. |
+| `faces` | A list of cycles of vertex indices, one face per cut that carries one ( 2D and 3D ). |
+| `is_bounded` | Whether the cell is bounded. |
+| `measure` | The measure of the cell: length, area, volume... Infinite ( the largest float ) for an unbounded cell. Differentiable with respect to the vertices. |
+
+### `.add_to_viz(viz, color=None, opacity=1.0, faces=True, edges=True, points=False, owners=None, nb_colors=None)`
+
+Draws itself into a `Visualizer` ( see `sdot.viz.Visualizer`, and `cell_viz` for what an
+unbounded cell drops ). Each item takes its color from its RANK IN THE BATCH,
+on a block reserved in advance : the color of a cell of a diagram says WHICH seed.
+`owners`: the rank to take the color from, per item, on a block of `nb_colors` -- the
+pieces of one cell ( `PowerDiagram.support_pieces` ) have its color.
+
+### `.cut(direction, offset, cut_id=-1)`
+
+Intersects the cell with the half-space `direction . x <= offset`, IN PLACE.
+
+`direction` need not be normalized : `offset` is the dot product it is
+compared against as is. Since the inputs and outputs of a `loom.ffi_call` are disjoint, the
+kernel writes into a NEW cell and the in-place update is only a rebinding. The
+room the cut requires is BOUNDED in advance ( `_cut_capacities` ) : no second pass.
+
+### `.make_hypercube(nb_dims, origin=None, axes=None, cut_id=-1, batch_axes=None, **kwargs)`
+
+A parallelotope: `origin + sum_j t_j axes[ j ]`, `t` in `[ 0, 1 ]^d` ( the unit cube by default ).
+
+### `.make_unbounded(nb_dims, batch_axes=None, **kwargs)`
+
+The whole space, in dimension `nb_dims`, to cut from.
+
+### `.show(filename=None, title=None, height=500, **kwargs)`
+
+In a notebook ( Jupyter, VS Code, Colab, ... ): displays the page inline, in an iframe
+`height` pixels high -- the wheel and touch gestures are then left to the notebook, they
+can be switched back on from the menu. Elsewhere, or when `filename` is given: writes the
+HTML page ( `filename`, or a temporary file ) and opens it in the browser. Returns the
+path written ( None when nothing was written ).
+
+### `.to_viz(viz=None, title=None, **kwargs)`
+
+A `Visualizer` holding this object ( `viz`, when given: it is then completed ). `title`
+names a NEW scene; `kwargs` are those of `add_to_viz`.
+
+### `.vertices(item=0)`
+
+`vertex_positions` of item `item`, in numpy `[ nb_vertices, d ]` -- without the padding
+of a batch.
+
+### `.write_html(filename, title=None, **kwargs)`
+
+Writes the self-contained HTML page of this object. Returns the path written.
+
+### `.write_pvd(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView as a `.pvd` collection ( with its `.vtu` beside it ),
+the entry point one opens. Returns the `.pvd` path.
+
+### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `box_half_spaces`
+
+```python
+box_half_spaces(mi, ma)
+```
+
+The box `mi <= x <= ma` as `2d` half-spaces `direction . x <= offset`.
+
+## `AaBsp`
+
+```python
+AaBsp(positions, weights=None, max_seeds_per_leaf=10)
+```
+
+A tree of boxes over the seeds of a power diagram, which spares each cell the seeds that cannot cut it. The diagrams
+build one by themselves ( the default as soon as the positions are not traced ); `AaBsp.of( power_diagram )` builds
+one explicitly, to give as `accelerator`.
+
+### `.of(power_diagram, max_seeds_per_leaf=10)`
+
+The accelerator of the seeds of `power_diagram` -- its positions AND its weights.
+
+The shortcut one almost always wants: a BSP built on other weights than those
+of the diagram would remain CORRECT (the majorant would only prune less well) but
+would have no reason to be good.
+
+## `SpatialAccelerator`
+
+```python
+SpatialAccelerator(**kwargs)
+```
+
+The base of the accelerators of power diagrams ( `AaBsp` ): what proposes, for each cell, the seeds worth trying.
+
+## `set_kernel_dtype`
+
+```python
+set_kernel_dtype(dtype)
+```
+
+The kernel float for cells ( and diagrams ) built FROM NOW ON without an explicit
+`kernel_dtype` : `"FP32"` ( the default ) or `"FP64"`. Returns the previous setting.
+
+## `kernel_dtype`
+
+```python
+kernel_dtype()
+```
+
+The kernel float of the cells ( and diagrams ) built without saying one: `"FP64"` or `"FP32"` ( see
+`set_kernel_dtype` )
+
+:::

@@ -74,9 +74,6 @@ const filtered = computed( () =>
               @click.prevent="toggleTag( tag )"
             >{{ tag }}</span>
           </div>
-          <a v-if="ex.tutorialLink" :href="withBase( ex.tutorialLink )" class="tutorial-link" @click.stop>
-            Tutorial →
-          </a>
         </div>
       </a>
 
@@ -209,14 +206,6 @@ const filtered = computed( () =>
   color: var(--vp-c-brand-1);
   font-weight: 600;
 }
-
-.tutorial-link {
-  font-size: 0.78rem;
-  color: var(--vp-c-brand-1);
-  text-decoration: none;
-  margin-top: 0.2rem;
-}
-.tutorial-link:hover { text-decoration: underline; }
 
 /* ── Empty state ────────────────────────────────────── */
 .empty {

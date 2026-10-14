@@ -64,16 +64,8 @@ from .viz.Visualizer import Visualizer as Visualizer
 from .viz.convergence import write_convergence_html as write_convergence_html
 
 
-# the public functions return arrays of the caller's framework ( see `loom/boundary.py` ); internal
-# code calls `.internal`, which hands back the loom `Tensor`
-@_loom.public
-def plan( f, g ):
-    pb = OtProblem( f, g )
-    return pb.solve()
-
-@_loom.public
-def w2( f, g ):
-    return plan.internal( f, g ).cost
+from .OtProblem import plan as plan
+from .OtProblem import w2 as w2
 
 # the old names, until callers move to `OtProblem` ( see
 # `notes/2026-10-02-sdotplan.md`: `OtPlan1d` did not say it was semi-discrete, and `OtPlan` said
@@ -87,3 +79,8 @@ def __getattr__( name ):
                        DeprecationWarning, stacklevel = 2 )
         return globals()[ deprecated[ name ] ]
     raise AttributeError( f"module { __name__ !r } has no attribute { name !r}" )
+
+
+# THE BOUNDARY ( `loom/boundary.py` ): what is exported above returns the caller's arrays and views of the objects. The
+# internals import from the submodules, which stay loom
+_loom.export_namespace( globals() )

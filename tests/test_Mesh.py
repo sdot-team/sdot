@@ -27,7 +27,7 @@ def _seeds( n, seed ):
 
 if test( "the_mass_of_a_mesh_is_exact" ):
     import numpy
-    from sdot import Mesh
+    from sdot.distributions.Mesh import Mesh
     nodes, sx = _square_mesh( 300, 1 )
     m = Mesh( nodes, sx, values = _affine( nodes ) )
     # int ( 1 + 0.7 x + 1.9 y ) over the unit square
@@ -39,7 +39,8 @@ if test( "the_mass_of_a_mesh_is_exact" ):
 
 if test( "constant_values_are_lebesgue_whatever_the_triangulation" ):
     import numpy
-    from sdot import Mesh, PowerDiagram, box_half_spaces
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     nodes, sx = _square_mesh( 400, 2 )
     pos = _seeds( 40, 3 )
     w = numpy.random.default_rng( 4 ).uniform( -0.01, 0.01, 40 )
@@ -50,7 +51,8 @@ if test( "constant_values_are_lebesgue_whatever_the_triangulation" ):
 
 if test( "an_affine_density_does_not_depend_on_the_triangulation" ):
     import numpy
-    from sdot import Mesh, PowerDiagram
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
     two = numpy.array( [ [ 0, 0 ], [ 1, 0 ], [ 0, 1 ], [ 1, 1 ] ], dtype = float )
     coarse = Mesh( two, [ [ 0, 1, 2 ], [ 1, 3, 2 ] ], values = _affine( two ) )
     nodes, sx = _square_mesh( 500, 5 )
@@ -72,7 +74,9 @@ if test( "an_affine_density_does_not_depend_on_the_triangulation" ):
 if test( "the_mesh_carries_its_own_derivative" ):
     import numpy
     from loom.testing import check_grad, need
-    from sdot import Mesh, PowerDiagram, set_kernel_dtype
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     nodes, sx = _square_mesh( 12, 8 )
@@ -86,7 +90,9 @@ if test( "the_mesh_carries_its_own_derivative" ):
 
 if test( "the_transport_towards_a_mesh_is_solved" ):
     import numpy
-    from sdot import Iterative, Mesh, OtProblem, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     nodes, sx = _square_mesh( 200, 11 )
     n = 60
     plan = OtProblem( SumOfDiracs( _seeds( n, 12 ) ), Mesh( nodes, sx, values = _affine( nodes ) ) ).solve( Iterative() )
@@ -97,7 +103,8 @@ if test( "the_transport_towards_a_mesh_is_solved" ):
 if test( "a_tetrahedral_mesh_is_a_density_too" ):
     import numpy
     from scipy.spatial import Delaunay
-    from sdot import Mesh, PowerDiagram
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
     rng = numpy.random.default_rng( 13 )
     corners = numpy.array( [ [ x, y, z ] for x in ( 0, 1 ) for y in ( 0, 1 ) for z in ( 0, 1 ) ], dtype = float )
     nodes = numpy.concatenate( [ corners, rng.uniform( 0, 1, size = ( 60, 3 ) ) ] )
@@ -145,7 +152,8 @@ def _dense_hessian( pd, n ):
 if test( "the_hessian_of_a_mesh_is_its_finite_difference" ):
     # `hessian_rows` reads the density on each facet ( `facet_mass` ): the Jacobian of the measures with respect to the weights
     import numpy
-    from sdot import Mesh, PowerDiagram
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
     nodes, sx = _square_mesh( 60, 19 )
     n = 20
     pos = _seeds( n, 20 )
@@ -167,7 +175,8 @@ if test( "a_facet_on_a_mesh_line_counts_once" ):
     # elements meet and hold the facet both. It counts once, by the strict convention on the nodes ( `Mesh.h::owns_facet` ): the
     # Hessian is that of a 7 x 7 mesh of the same affine density, whose lines meet no bisector, and of the other diagonal
     import numpy
-    from sdot import Mesh, PowerDiagram
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
     k = 6
     c = ( numpy.arange( k ) + 0.5 ) / k
     seeds = numpy.array( [ [ x, y ] for y in c for x in c ] )
@@ -184,7 +193,9 @@ if test( "a_solve_on_a_mesh_whose_lines_meet_the_bisectors" ):
     # seeds on a lattice moving along its lines only, so that the first bisectors lie on the lines of the mesh: same weights as on a mesh
     # whose lines do not meet them
     import numpy
-    from sdot import Iterative, Mesh, OtProblem, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     k = 6
     c = ( numpy.arange( k ) + 0.5 ) / k
     seeds = numpy.array( [ [ x, y ] for y in c for x in c ] ) + numpy.array( [ 0.0, 1.0 ] ) * numpy.random.default_rng( 14 ).uniform( -0.03, 0.03, ( k * k, 1 ) )
@@ -202,7 +213,10 @@ if test( "a_solve_on_a_mesh_whose_lines_meet_the_bisectors" ):
 if test( "the_transport_towards_a_mesh_is_solved_on_the_card" ):
     import numpy
     import loom
-    from sdot import Iterative, Mesh, OtProblem, PowerDiagram, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
@@ -225,7 +239,10 @@ if test( "the_transport_towards_a_tetrahedral_mesh_is_solved_on_the_card" ):
     import numpy
     from scipy.spatial import Delaunay
     import loom
-    from sdot import Iterative, Mesh, OtProblem, PowerDiagram, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
@@ -260,7 +277,10 @@ if test( "the_barycenters_and_the_cost_of_a_solve_are_the_moments_of_the_mesh" )
     # `MeshElementDensity`'s ) against the moments of the generic path at the fitted weights: `int x rho`, and
     # `sum_i ( int |x|^2 rho - 2 p_i . int x rho + |p_i|^2 m_i )`
     import numpy
-    from sdot import Iterative, Mesh, OtProblem, PowerDiagram, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     nodes, sx = _square_mesh( 400, 17 )
     n = 300
     mesh = Mesh( nodes, sx, values = _affine( nodes ) )
@@ -278,7 +298,9 @@ if test( "the_width_continuation_of_a_tetrahedral_mesh_goes_through_its_spreadin
     # `continuation = "always"`: the path of the spread meshes ( `Mesh.spread`, the corner averages ), then the mesh
     import numpy
     from scipy.spatial import Delaunay
-    from sdot import Iterative, Mesh, OtProblem, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     rng = numpy.random.default_rng( 23 )
     corners = numpy.array( [ [ x, y, z ] for x in ( 0, 1 ) for y in ( 0, 1 ) for z in ( 0, 1 ) ], dtype = float )
     nodes = numpy.concatenate( [ corners, rng.uniform( 0, 1, size = ( 300, 3 ) ) ] )
@@ -294,7 +316,7 @@ if test( "a_dg1_mesh_holds_a_hole" ):
     # a value per corner: zero on the simplices of a disk, a discontinuity on its border; the mass is exact, `spread( 0 )` is the
     # mesh, and spreading keeps the mass and the positivity and fills the hole
     import numpy
-    from sdot import Mesh
+    from sdot.distributions.Mesh import Mesh
     nodes, sx = _square_mesh( 400, 31 )
     cv = numpy.ones( sx.shape )
     hole = numpy.linalg.norm( nodes[ sx ].mean( 1 ) - 0.5, axis = 1 ) < 0.25
@@ -316,7 +338,9 @@ if test( "the_spreading_solves_what_the_plain_newton_does_not" ):
     # two small far apart bumps on a uniform mesh, zero elsewhere: the plain Newton does not converge, the continuation does
     import numpy
     from scipy.spatial import Delaunay
-    from sdot import Iterative, Mesh, OtProblem, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Mesh import Mesh
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     rng = numpy.random.default_rng( 1 )
     nodes = numpy.concatenate( [ numpy.array( [ [ 0, 0 ], [ 1, 0 ], [ 0, 1 ], [ 1, 1 ] ], float ), rng.uniform( 0, 1, ( 3000, 2 ) ) ] )
     sx = Delaunay( nodes ).simplices

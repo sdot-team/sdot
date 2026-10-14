@@ -14,7 +14,10 @@ import numpy as np
 def provoke():
     import loom
     from loom.benchmark import synchronise as wait
-    from sdot import PowerDiagram, Cell, box_half_spaces, Image, SumOfGaussians
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.Cell import Cell
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
 
     rng = np.random.default_rng( 0 )
     own = _own_arrays()
@@ -48,11 +51,12 @@ def provoke():
 
     # THE TRANSPORT ( `OtProblem.solve` ): one kernel per ( dimension, storage, density ) -- on CPU only,
     # where the solver lives ( `sdot/sdotplan/` ); an image and Gaussians in 2D, an image in 3D
-    from sdot import Iterative, OtProblem, SumOfDiracs, Tuning
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     if loom.resolved_device().is_cpu:
         for d in ( 2, 3 ):
             pos = own( rng.uniform( 0.05, 0.95, size = ( 100, d ) ) )
-            img = Image( values = own( rng.uniform( 0.5, 1.5, size = ( 8, ) * d ) ), origin = [ 0.0 ] * d, frame = ( np.eye( d ) / 8 ).tolist() )
+            img = Image( values = own( rng.uniform( 0.5, 1.5, size = ( 8, ) * d ) ), origin = [ 0.0 ] * d, pixel_frame = ( np.eye( d ) / 8 ).tolist() )
             for acc in ( None, "plain" ):
                 plan = OtProblem( SumOfDiracs( pos ), img ).solve( Iterative( max_iter = 20, tuning = Tuning( accelerator = acc ) ) )
                 plan.cost_and_position_grad()
@@ -72,7 +76,10 @@ def provoke():
 def timed():
     """The kernels whose architecture is a CHOICE: run at a size where they dominate, timed on every architecture the
     machine can behave as (`loom.bench_loop`; a plain loop that runs once when nothing is being built)."""
-    from sdot import PowerDiagram, Image, SdotPlan1d, SumOfDiracs1d, box_half_spaces
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     import loom
     from loom.benchmark import synchronise as wait
     rng = np.random.default_rng( 0 )
@@ -114,11 +121,5 @@ def _vjp( f, x ):
 
 
 if __name__ == "__main__":
-    import os
     import loom
-    if os.environ.get( "LOOM_FRAMEWORK" ) == "torch":
-        # torch on the card is a known failure ( the pointer FFI on a GPU ): its kernels are collected for the CPU only
-        from loom.devices import hardware
-        every = hardware.runs
-        hardware.runs = lambda: [ r for r in every() if r.device == "cpu" ]
     loom.catalogue.build( "sdot", provoke )

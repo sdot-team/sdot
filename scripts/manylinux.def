@@ -1,18 +1,32 @@
-Bootstrap: localimage
-From: manylinux_2_28.sif
+Bootstrap: docker
+From: quay.io/pypa/manylinux_2_28_x86_64
 
 %help
-    The build image of loom's Linux wheels: PyPA's manylinux_2_28 (glibc 2.28, AlmaLinux 8) with a recent clang. A kernel compiled in it
-    needs nothing newer than glibc 2.28 of the machine it runs on, and carries its own libstdc++ (`-static-libstdc++`).
+    The build image of the Linux wheels of loom and sdot: PyPA's manylinux_2_28 ( glibc 2.28, AlmaLinux 8 ) with a recent clang and
+    every framework the catalogue covers. A kernel compiled in it needs nothing newer than glibc 2.28 of the machine it runs on, and
+    carries its own libstdc++ ( -static-libstdc++ ). The CUDA kernels are compiled by the pip nvcc, with GCC 14 as its host compiler;
+    their only external library is libcudart.so.13, which the machine gets from pip ( nvidia-cuda-runtime ).
 
-    apptainer pull manylinux_2_28.sif docker://quay.io/pypa/manylinux_2_28_x86_64
-    apptainer build --fakeroot manylinux_loom.sif manylinux.def
+    errand setup --env lin_wheels       builds it where the environment lives ( see errand-envs.py )
 
 %post
-    dnf -y install clang llvm-toolset libomp-devel libstdc++-static
+    dnf -y install clang llvm-toolset libomp-devel libstdc++-static gcc-toolset-14-gcc-c++
     dnf clean all
-    clang++ --version | head -1
+    /opt/python/cp313-cp313/bin/python -m venv /opt/venv
+    # loom's pinned nvcc ( `loom[cuda]`: the 13.4 frontend collapses on the kernels ), then the frameworks, then what builds and checks a wheel.
+    # jax: old enough for about everyone's jaxlib to take its kernels ( XLA FFI API 0.3, see JAX in errand-envs.py )
+    /opt/venv/bin/pip install --no-cache-dir "pip>=26.2.1" numpy scipy pyyaml devtools typing_extensions ninja pytest \
+        wheel twine auditwheel "nvidia-cuda-nvcc>=13.3,<13.4" "nvidia-cuda-crt<13.4" "nvidia-nvvm<13.4" \
+        "jax[cuda13]==0.10.2" torch cupy-cuda13x
 
 %environment
+    export PATH=/opt/venv/bin:$PATH
+    GCC=/opt/rh/gcc-toolset-14/root/usr/lib/gcc/x86_64-redhat-linux/14
     export LOOM_CXX=/usr/bin/clang++
-    export LOOM_CXXFLAGS="-std=c++23 -static-libstdc++ -static-libgcc"
+    export LOOM_CXXFLAGS="-std=c++23 -static-libstdc++ -static-libgcc --gcc-install-dir=$GCC"
+    export LOOM_LDFLAGS="--gcc-install-dir=$GCC"
+    # nvcc reads the headers of GCC 14 through a g++ ( with a clang as host it sees C++23 features it cannot parse )
+    export LOOM_CUDA_HOST=/opt/rh/gcc-toolset-14/root/usr/bin/g++
+    export LOOM_CUDA_HOST_CXXFLAGS="-std=c++23"
+    # the CUDA runtime the frameworks bring ( pip: nvidia/*/lib ), which their own activation would have put on the path
+    export LD_LIBRARY_PATH=$(echo /opt/venv/lib/python3.13/site-packages/nvidia/*/lib | tr ' ' ':'):${LD_LIBRARY_PATH:-}

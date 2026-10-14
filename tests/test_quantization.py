@@ -2,7 +2,7 @@ from errand import test, skip
 
 if test( "lloyd_on_a_square_reaches_the_regular_grid" ):
     import numpy
-    from sdot import Polygon, quantization
+    from sdot import Polygon, quantization        # the public API: arrays of the caller, views given to the callback
     # 4 diracs of equal mass on the unit square: the centers of the 4 quadrants
     square = Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ], [ 0, 1 ] ] )
     grid = numpy.array( [ [ 0.25, 0.25 ], [ 0.75, 0.25 ], [ 0.25, 0.75 ], [ 0.75, 0.75 ] ] )
@@ -17,7 +17,7 @@ if test( "lloyd_on_a_square_reaches_the_regular_grid" ):
 
 if test( "the_callback_receives_the_positions_of_each_solve" ):
     import numpy
-    from sdot import Polygon, quantization
+    from sdot import Polygon, quantization        # the public API: arrays of the caller, views given to the callback
     square = Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ], [ 0, 1 ] ] )
     x0 = numpy.random.default_rng( 1 ).uniform( 0, 1, ( 50, 2 ) )
     seen = []
@@ -30,7 +30,7 @@ if test( "the_callback_receives_the_positions_of_each_solve" ):
 if test( "max_iter_reached_warns" ):
     import numpy
     import pytest
-    from sdot import Polygon, quantization
+    from sdot import Polygon, quantization        # the public API: arrays of the caller, views given to the callback
     square = Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ], [ 0, 1 ] ] )
     x0 = numpy.random.default_rng( 2 ).uniform( 0, 1, ( 50, 2 ) )
     with pytest.warns( UserWarning, match = "iterations without reaching" ):
@@ -39,7 +39,7 @@ if test( "max_iter_reached_warns" ):
 
 if test( "a_number_of_diracs_starts_them_in_the_support" ):
     import numpy
-    from sdot import Polygon, quantization
+    from sdot import Polygon, quantization        # the public API: arrays of the caller, views given to the callback
     from sdot.quantization import uniform_in_support
     tri = Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 0, 1 ] ] )
     x0 = uniform_in_support( tri, 500, seed = 3 )

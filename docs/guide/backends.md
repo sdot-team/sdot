@@ -1,138 +1,36 @@
-# Backends (JAX / PyTorch)
+# Frameworks and Devices
 
-SDOT abstracts JAX and PyTorch behind a single `driver` object. All tensors SDOT returns live in the active framework, on the active device, with the active dtype — so they slot directly into your computation graph.
+sdot works with NumPy, JAX, PyTorch and CuPy arrays. There is nothing to configure: **the inputs decide**. A transport
+computed from JAX arrays runs where they live and returns JAX arrays, one computed from PyTorch tensors returns PyTorch
+tensors, and so on:
 
----
+::: code-group
 
-## Auto-detection
+<<< @/snippets/hello_numpy.py [NumPy]
 
-By default SDOT inspects already-imported modules and picks a backend in this order:
+<<< @/snippets/hello_jax.py [JAX]
 
-1. `jax` if already imported
-2. `torch` if already imported
-3. First available library on the system (`jax` before `torch`)
+<<< @/snippets/hello_torch.py [PyTorch]
 
-```python
-import jax                  # imports jax first
-import sdot                 # → sdot.driver.framework == "jax"
-```
-
-```python
-import torch                # imports torch first
-import sdot                 # → sdot.driver.framework == "torch"
-```
-
----
-
-## Manual configuration
-
-```python
-import sdot
-
-sdot.driver.framework = "jax"      # "jax" | "torch"
-sdot.driver.dtype     = "FP64"     # "FP32" | "FP64"
-sdot.driver.device    = "cuda:0"   # "cpu" | "cuda:N" | "mps"
-```
-
-Or via environment variables (must be set before launching Python):
-
-```bash
-export SDOT_FRAMEWORK=torch
-export SDOT_DTYPE=FP32
-export SDOT_DEVICE=cuda:0
-```
-
----
-
-## JAX integration
-
-All SDOT operations are compatible with `jax.jit`, `jax.grad`, `jax.vmap`, and `jax.lax.scan`.
-
-```python
-import jax
-import jax.numpy as jnp
-import sdot
-from sdot import PolynomialGrid, SumOfDiracs, distance
-
-sdot.driver.framework = "jax"
-sdot.driver.dtype     = "FP64"
-
-target = PolynomialGrid( values = jnp.ones( ( 10, 10 ) ) )
-
-@jax.jit
-def loss( positions ):
-    return distance( SumOfDiracs( positions ), target )
-
-positions = jnp.array( np.random.rand( 200, 2 ) )
-
-value = loss( positions )
-grad  = jax.grad( loss )( positions )   # differentiates through the OT solver
-```
-
-### Batching with `jax.vmap`
-
-```python
-# Equivalent to BatchOfSumOfDiracs, but using vmap
-loss_batch = jax.vmap( loss )
-grads = jax.grad( lambda ps: loss_batch( ps ).sum() )( positions_batch )
-```
-
----
-
-## PyTorch integration
-
-```python
-import torch
-import sdot
-from sdot import PolynomialGrid, SumOfWeightedDiracs, distance
-
-sdot.driver.framework = "torch"
-sdot.driver.dtype     = "FP64"
-
-target    = PolynomialGrid( values = torch.ones( 10, 10 ) )
-positions = torch.rand( 200, 2, requires_grad = True )
-weights   = torch.ones( 200 ) / 200
-
-d = distance( SumOfWeightedDiracs( positions, weights ), target )
-d.backward()
-
-print( positions.grad )   # shape (200, 2)
-```
-
-### Inside a `nn.Module`
-
-```python
-import torch.nn as nn
-from sdot import PolynomialGrid, SumOfDiracs, distance
-
-class QuantizationLoss( nn.Module ):
-    def __init__( self, target_values ):
-        super().__init__()
-        self.target = PolynomialGrid( values = target_values )
-
-    def forward( self, positions ):
-        return distance( SumOfDiracs( positions ), self.target )
-```
-
----
-
-## dtype and precision
-
-| `dtype` | JAX equivalent | PyTorch equivalent |
-|---|---|---|
-| `"FP32"` | `jnp.float32` | `torch.float32` |
-| `"FP64"` | `jnp.float64` | `torch.float64` |
-
-::: warning FP64 on GPU
-NVIDIA GPUs support FP64 but at reduced throughput. On Apple Silicon (`mps`), FP64 is not supported — use `FP32`.
-
-The Newton solver in SDOT typically converges in a handful of iterations and is numerically stable in FP32, but FP64 is recommended when computing gradients or for research-grade accuracy.
 :::
 
----
+- **Objects**: a plan, a distribution... hand back arrays of the same framework: `p.barycenters` is a JAX array when the
+  inputs were JAX arrays.
+- **Devices**: the computation runs on the device of the inputs. On a CUDA GPU, the whole solve runs on the card for 2D
+  problems ( against a box, a polygon, an image, gaussians or a triangle mesh ) and for 3D problems against a uniform
+  density; anything else raises there.
+- **Gradients**: `jax.grad` and `torch.autograd` go through `w2` and the outputs of a plan ( see
+  [Differentiability](./differentiability) ).
+- **`jax.jit`**: the whole solve is one call inside the compiled program.
+- **Precision**: JAX works in float32 unless `jax_enable_x64` is set; float64 is recommended for gradients.
 
-## Dask (large-scale) _(coming soon)_
+## What decides, when nothing does
 
-::: tip Coming soon
-A Dask backend is planned for datasets that exceed GPU memory, distributing the power diagram construction across workers.
-:::
+A value built from nothing ( a list, a number ) takes the default framework: the one already imported, or
+`loom.default_framework`. sdot relies on [loom](https://hleclerc.github.io/loom/) for this; see its page on
+[frameworks and devices](https://hleclerc.github.io/loom/guide/frameworks).
+
+## Compiled kernels
+
+The C++ / CUDA kernels come precompiled with the package for the common cases. Another combination ( a dimension, a
+distribution, a device ) is compiled on first use and cached, which needs a C++ compiler ( and `nvcc` for NVIDIA GPUs ).

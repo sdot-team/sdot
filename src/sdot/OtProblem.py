@@ -131,7 +131,12 @@ class Tuning:
 
 
 class OtNotConverged( RuntimeError ):
-    """The iterative solve ended WITHOUT meeting its tolerance ( `Iterative( on_failure = "raise" )`, the default ). `solution` is the
+    """Raised when the solver stops without reaching its tolerance. `solution` is the plan it got to ( its `stats` say why ),
+    usable all the same; `Iterative( on_failure = "ignore" )` returns it without raising.
+
+    = Internals
+
+    The iterative solve ended WITHOUT meeting its tolerance ( `Iterative( on_failure = "raise" )`, the default ). `solution` is the
     `SdotPlanNd` it got to, whose `stats` say why ( `status`, `residual`, `start`, `min_start_mass` ... ) and which can be
     used all the same -- or `Iterative( on_failure = "ignore" )` asks for it without the exception."""
 
@@ -147,7 +152,27 @@ class OtNotConverged( RuntimeError ):
 
 
 class Iterative:
-    """The settings of the ITERATIVE REGIME ( `d >= 2`, `SdotPlanNd` ) -- and its type says the regime.
+    """The settings of the solver in 2D and more ( a damped Newton method ), for `OtProblem.solve` -- `ot_solve` takes
+    the same names as keywords.
+
+    * `tol`: the solve stops when every cell mass is within `tol` of its target ( the masses are normalized: the target
+      of a dirac is `1 / n` by default ).
+    * `max_iter`: the number of Newton steps, at most.
+    * `ot_plan`: a previous plan to start from -- a nearby problem then costs a few steps. `weights0`: starting
+      weights instead, when there is no plan.
+    * `continuation`: solve first for a smoothed version of the density, then sharper and sharper ones -- what a density
+      with narrow bumps or empty regions needs. `"auto"` ( when a cell starts empty ), `"always"`, `"never"`.
+    * `precision`: the float of the geometry, `"fp64"`, `"fp32"`, or `"mixed"` ( fp32 then fp64, on a GPU ). `"auto"`:
+      fp64 on a CPU, mixed on a GPU.
+    * `aggregate`: merge the diracs too close for the doubles to separate their cells ( see `SdotPlanNd.clusters` ).
+    * `keep_weights`: keep the weights of every step in `history`.
+    * `on_failure`: `"raise"` an `OtNotConverged`, or `"ignore"` and read `converged`.
+    * `differentiable`: attach the derivatives of the outputs -- `"auto"` when an input is traced ( `jax.grad`... ).
+    * `tuning`: the settings of the benchmarks -- unstable, not for use.
+
+    = Internals
+
+    The settings of the ITERATIVE REGIME ( `d >= 2`, `SdotPlanNd` ) -- and its type says the regime.
 
     `tol` : we stop as soon as `max_i | m_i - nu_i | <= tol`, ABSOLUTE, in the unit of the normalized
     masses ( the target mass of a dirac is `1 / n` ). `max_iter` : Newton steps, at most.
@@ -239,7 +264,12 @@ class Iterative:
 
 
 class Direct:
-    """The settings of the DIRECT REGIME ( `d = 1`, `SdotPlan1d` ) -- and its type says the regime.
+    """The settings of the 1D plan, for `OtProblem.solve` -- `ot_solve` takes the same names as keywords. The 1D plan is
+    exact ( a sort ): there is no tolerance. `with_barycenters` stores the barycenters, which are otherwise not kept.
+
+    = Internals
+
+    The settings of the DIRECT REGIME ( `d = 1`, `SdotPlan1d` ) -- and its type says the regime.
 
     There is neither a tolerance nor a number of iterations : the solution is a sort plus an inversion of the
     cumulative distribution function, hence exact. What remains is to say what we want as OUTPUT.
@@ -255,7 +285,20 @@ class Direct:
 
 
 class OtProblem:
-    """see the module docstring"""
+    """A transport problem, to solve once or again and again.
+
+        pb = OtProblem( SumOfDiracs( positions ), target )
+        p = pb.solve()                                  # the plan
+        pb.source = SumOfDiracs( new_positions )        # change an input...
+        p = pb.solve()                                  # ... and solve again, from the previous solution
+
+    `source` is a sum of diracs, `target` a density, which also gives the domain of the transport. Each `solve` starts
+    from the last solution of this problem, which is what makes a nearby problem cost a few Newton steps: keep the
+    problem in a loop ( a descent, Lloyd, a reconstruction ) rather than calling `ot_solve` again.
+
+    = Internals
+
+    see the module docstring"""
 
     def __init__( self, source, target ):
         """`source` : the DISCRETE distribution -- a `SumOfDiracs` ( or a `ProjectedSumOfDiracs` ) ;
@@ -312,21 +355,31 @@ class OtProblem:
 
     @property
     def nb_dims( self ):
+        """The dimension of the space."""
         return int( self._source.nb_dims.value )
 
     @property
     def nb_diracs( self ):
+        """The number of diracs of the source."""
         return self._nb_diracs_of( self._source )
 
     @property
     def regime( self ):
-        """`"direct"` ( a sort, `d = 1` ) or `"iterative"` ( a damped Newton, `d >= 2` ) -- DEDUCED,
+        """`"iterative"` ( a Newton method, in 2D and more ) or `"direct"` ( a sort, in 1D ): it follows from the inputs.
+
+        = Internals
+
+        `"direct"` ( a sort, `d = 1` ) or `"iterative"` ( a damped Newton, `d >= 2` ) -- DEDUCED,
         never chosen. See the module docstring."""
         return "direct" if self.nb_dims == 1 else "iterative"
 
     @property
     def domain( self ):
-        """The domain, as half-spaces `( directions, offsets )` : `direction . x <= offset`. It comes
+        """The domain of the transport, as half-spaces `( directions, offsets )`: `directions . x <= offsets`.
+
+        = Internals
+
+        The domain, as half-spaces `( directions, offsets )` : `direction . x <= offset`. It comes
         from the support that the TARGET declares, and from it alone. Raises if this support does not bound it."""
         d = self.nb_dims
         support = self._target.bounding_half_spaces()
@@ -354,7 +407,12 @@ class OtProblem:
     # -- solving -------------------------------------------------------------------------------
 
     def solve( self, settings = None, verbose = False ):
-        """The SOLUTION : a `SdotPlan1d` if the regime is direct, a `SdotPlanNd` if it is iterative.
+        """The plan: a `SdotPlanNd` ( or a `SdotPlan1d` in 1D ). `settings`: an `Iterative` ( a `Direct` in 1D ), the default
+        ones when `None`. Starts from the last solution of this problem unless `settings` gives a starting point.
+
+        = Internals
+
+        The SOLUTION : a `SdotPlan1d` if the regime is direct, a `SdotPlanNd` if it is iterative.
 
         `settings` : `None` for the regime's defaults, or a `Direct` / `Iterative` -- and its TYPE
         must be that of the regime, otherwise this raises ( see the module docstring ).
@@ -409,9 +467,18 @@ class OtProblem:
 
 # -- THE SHORTCUT ------------------------------------------------------------------------------
 
-@loom.public
 def ot_solve( source, target, *, verbose = False, **settings ):
-    """Pose the problem and solve it, in one expression -- for a transport that is solved
+    """The transport plan from `source` to `target`, with the settings of the solver as keywords: those of `Iterative` in
+    2D and more ( `tol`, `max_iter`, `ot_plan`... ), of `Direct` in 1D. A name that does not belong to them raises.
+
+        p = ot_solve( SumOfDiracs( positions ), image, tol = 1e-10 )
+        p2 = ot_solve( SumOfDiracs( positions + 0.01 ), image, ot_plan = p )   # starts from p
+
+    To solve again and again, keep an `OtProblem`.
+
+    = Internals
+
+    Pose the problem and solve it, in one expression -- for a transport that is solved
     ONLY ONCE.
 
         sol = ot_solve( SumOfDiracs( pos ), image )
@@ -450,3 +517,13 @@ def ot_solve( source, target, *, verbose = False, **settings ):
                          f"( nb_dims = { pb.nb_dims } ), so its settings are those of `{ cls.__name__ }` "
                          f"( { ', '.join( names ) } ) -- { e }" ) from None
     return pb.solve( solver_settings, verbose )
+
+
+def plan( f, g ):
+    """The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them )"""
+    return OtProblem( f, g ).solve()
+
+
+def w2( f, g ):
+    """`W_2^2` between `f` and `g`"""
+    return plan( f, g ).cost

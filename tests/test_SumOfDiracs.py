@@ -1,7 +1,7 @@
 from errand import test
 
 if test( "basic" ):
-    from sdot import SumOfDiracs
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     di = SumOfDiracs( positions = [ [ 1 ], [ 2 ], [ 3 ] ] )
     assert di.mass == 3
 

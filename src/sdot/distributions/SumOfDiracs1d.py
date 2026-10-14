@@ -14,8 +14,8 @@ from .SumOfDiracs import SumOfDiracs
 
 
 class SumOfDiracs1d( Distribution ):
-    """
-    """
+    """Diracs on a line: `positions` `[ n ]` ( and not `[ n, 1 ]` ), of masses `weights` `[ n ]` ( all equal by
+    default ). `SumOfDiracs( positions[ :, None ] )` describes the same measure."""
 
     nb_diracs        : ShapeVar
     nb_dims          : CtShapeVar

@@ -2,7 +2,8 @@ from errand import test, skip
 
 if test( "measures_of_a_polygon_equal_the_lebesgue_ones_on_its_half_spaces" ):
     import numpy
-    from sdot import Polygon, PowerDiagram, box_half_spaces
+    from sdot.distributions.Polytope import Polygon
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     rng = numpy.random.default_rng( 1 )
     n = 30
     pos = rng.uniform( 0.05, 0.6, size = ( n, 2 ) )
@@ -19,14 +20,14 @@ if test( "measures_of_a_polygon_equal_the_lebesgue_ones_on_its_half_spaces" ):
 
 if test( "a_polygon_must_be_convex" ):
     import pytest
-    from sdot import Polygon
+    from sdot.distributions.Polytope import Polygon
     with pytest.raises( ValueError ):
         Polygon( [ [ 0, 0 ], [ 2, 0 ], [ 2, 2 ], [ 0, 2 ], [ 1, 1 ] ] )
 
 
 if test( "a_box_is_an_image_of_one_pixel" ):
     import numpy
-    from sdot import Box
+    from sdot.distributions.Box import Box
     b = Box( origin = [ 0.2, 0.1 ], frame = [ 0.5, 0.7 ] )
     assert abs( float( b.mass ) - 0.35 ) < 1e-14
     lo, hi = b.bounding_half_spaces()
@@ -37,7 +38,9 @@ if test( "a_box_is_an_image_of_one_pixel" ):
 
 if test( "the_transport_towards_a_polygon_is_solved" ):
     import numpy
-    from sdot import Iterative, OtProblem, Polygon, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     rng = numpy.random.default_rng( 3 )
     n = 40
     hexa = Polygon( [ [ numpy.cos( t ), numpy.sin( t ) ] for t in numpy.arange( 6 ) * numpy.pi / 3 ] )
@@ -58,7 +61,9 @@ def _regular_polygon( k, r = 0.45, c = 0.5 ):
 if test( "the_card_cells_of_a_polygon_are_the_generic_ones" ):
     import numpy
     import loom
-    from sdot import AaBsp, Polygon, PowerDiagram
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Polytope import Polygon
+    from sdot.PowerDiagram import PowerDiagram
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the dedicated cell kernels only exist on a CUDA device" )
     else:
@@ -84,7 +89,9 @@ if test( "the_card_cells_of_a_polygon_are_the_generic_ones" ):
 if test( "the_transport_towards_a_polygon_is_solved_on_the_card" ):
     import numpy
     import loom
-    from sdot import Iterative, OtProblem, Polygon, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
@@ -107,7 +114,7 @@ def _sphere_points( k, seed = 0, r = 0.45, c = 0.5 ):
 def _tangent_polytope( k, seed, r = 0.45, c = 0.5 ):
     """k random planes tangent to a sphere, and the six of the axes: a SIMPLE polyhedron ( three facets per vertex, generically )"""
     import numpy
-    from sdot import Polytope
+    from sdot.distributions.Polytope import Polytope
     n = numpy.random.default_rng( seed ).normal( size = ( k, 3 ) )
     n = numpy.concatenate( [ n / numpy.linalg.norm( n, axis = 1 )[ :, None ], numpy.eye( 3 ), -numpy.eye( 3 ) ] )
     return Polytope( n, n @ numpy.full( 3, c ) + r )
@@ -115,7 +122,8 @@ def _tangent_polytope( k, seed, r = 0.45, c = 0.5 ):
 
 if test( "polyhedron_volume_and_cpu_measures" ):
     import numpy
-    from sdot import Polyhedron, PowerDiagram
+    from sdot.distributions.Polytope import Polyhedron
+    from sdot.PowerDiagram import PowerDiagram
     rng = numpy.random.default_rng( 9 )
     cube = Polyhedron( [ [ x, y, z ] for x in ( 0, 2 ) for y in ( 0, 1 ) for z in ( 0, 1 ) ] )
     assert abs( cube.volume - 2 ) < 1e-12
@@ -130,7 +138,9 @@ if test( "the_card_cells_of_a_polyhedron_are_the_generic_ones" ):
     # have many facets ): it cuts the box of its vertices instead. Both are the same cells as the generic path's.
     import numpy
     import loom
-    from sdot import AaBsp, Polyhedron, PowerDiagram
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Polytope import Polyhedron
+    from sdot.PowerDiagram import PowerDiagram
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the dedicated cell kernels only exist on a CUDA device" )
     else:
@@ -157,7 +167,9 @@ if test( "the_card_cells_of_a_polyhedron_are_the_generic_ones" ):
 if test( "the_transport_towards_a_polyhedron_is_solved_on_the_card" ):
     import numpy
     import loom
-    from sdot import Iterative, OtProblem, Polyhedron, SumOfDiracs
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Polytope import Polyhedron
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
@@ -174,7 +186,10 @@ if test( "the_transport_towards_a_polyhedron_is_solved_on_the_card" ):
 if test( "a_box_without_dimension_takes_it_where_it_is_used" ):
     import numpy
     import pytest
-    from sdot import Box, Iterative, OtProblem, PowerDiagram, SumOfDiracs
+    from sdot.distributions.Box import Box
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     unit = Box()                                  # the unit cube, whatever the dimension
     with pytest.raises(ValueError):
         unit.bounding_half_spaces()
@@ -190,7 +205,9 @@ if test( "a_pyramid_has_no_start_cell_and_cuts_a_box_instead" ):
     # the apex has four facets: not simple, so the cells start from the box of the vertices and the facets cut it
     import numpy
     import loom
-    from sdot import AaBsp, Polyhedron, PowerDiagram
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Polytope import Polyhedron
+    from sdot.PowerDiagram import PowerDiagram
     from sdot.StartCell import start_cell
     pyr = Polyhedron( [ [ 0, 0, 0 ], [ 1, 0, 0 ], [ 1, 1, 0 ], [ 0, 1, 0 ], [ 0.5, 0.5, 1 ] ] )
     cell = start_cell( *pyr.bounding_half_spaces() )

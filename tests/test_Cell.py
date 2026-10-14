@@ -12,14 +12,16 @@ if test( "basic" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 2, 0 ], [ 0, 1 ] ] )
     assert c.measure == 2
 
     # 2D: `vertex_positions` is already the polygon in cyclic order, so no lattice --
     # `Cell_2` does not even have these attributes
-    from sdot import Cell_2
+    from sdot.Cell_2 import Cell_2
     assert isinstance( c, Cell_2 ) and not hasattr( c, "vertex_cuts" )
     assert numpy.allclose( numpy.asarray( c.vertex_positions ), [ [ 0, 0 ], [ 2, 0 ], [ 2, 1 ], [ 0, 1 ] ] )
 
@@ -30,9 +32,11 @@ if test( "basic_1D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
-    from sdot import Cell_1
+    from sdot.Cell_1 import Cell_1
     c = Cell.make_hypercube( 1, [ 0.5 ], [ [ 2 ] ] )
     assert isinstance( c, Cell_1 )
     assert c.measure == 2
@@ -50,7 +54,9 @@ if test( "unbounded_1D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_unbounded( 1 )
     assert float( c.measure ) > 1e300 and not c.is_bounded
@@ -65,7 +71,9 @@ if test( "batch" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 2, 0 ], [ 0, 1 ] ], batch_axes = [ new_batch_axis( 2 ) ] )
     assert tuple( c.measure.value ) == ( 2, 2 )
@@ -88,7 +96,9 @@ if test( "grad_measure" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the adjoint of the shoelace formula, checked by finite differences on the coordinates themselves
@@ -104,7 +114,9 @@ if p := test( "cut" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
     c.cut( [ 1, 0 ], 0.1 )
@@ -126,7 +138,9 @@ if test( "cut_keeps_the_edge_to_cut_correspondence" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
     c.cut( [ 1, 1 ], 1.5 )
@@ -154,7 +168,9 @@ if test( "cut_direction_is_not_normalized" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     a = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
     b = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
@@ -173,7 +189,9 @@ if test( "cut_degenerate" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
 
@@ -194,7 +212,9 @@ if test( "cut_capacity_is_exact" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
     for k in range( 12 ):                                   # an inscribed dodecagon: 12 vertices
@@ -214,7 +234,9 @@ if test( "cut_tangent" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] )
     c.cut( [ 1, 0 ], 1 )
@@ -251,7 +273,9 @@ if test( "cut_unbounded_becomes_bounded" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_unbounded( 2 )
     assert not c.is_bounded
@@ -274,7 +298,9 @@ if test( "cut_unbounded_triangle" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     corners = ( ( 0, 0 ), ( 4, 1 ), ( 1, 3 ) )
     exact = 5.5
@@ -297,7 +323,9 @@ if test( "cut_unbounded_far_from_the_origin" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     shift = numpy.array( [ 1000.0, -500.0 ] )
     corners = [ tuple( numpy.array( p, float ) + shift ) for p in ( ( 0, 0 ), ( 4, 1 ), ( 1, 3 ) ) ]
@@ -317,7 +345,9 @@ if test( "cut_batched" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     nb_items = 64
     c = Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ], batch_axes = [ new_batch_axis( nb_items ) ] )
@@ -334,7 +364,9 @@ if test( "the_float_kernel_cuts_the_same_cells" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     corners = ( ( 0.1, 0.2 ), ( 0.9, 0.15 ), ( 0.8, 0.9 ), ( 0.2, 0.7 ) )
     for kd in ( "FP32", None ):
@@ -488,7 +520,9 @@ if test( "basic_3D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 3 )
     assert c.vertex_cuts.is_defined
@@ -506,7 +540,9 @@ if test( "cut_3D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     for extra in ( [ ( [ 1, 1, 1 ], 2.5 ) ],
                    [ ( [ 1, 1, 1 ], 2.5 ), ( [ -1, -1, -1 ], -0.4 ) ],
@@ -530,7 +566,9 @@ if test( "cut_3D_random" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 12345 )
     for d in ( 3, 4 ):
@@ -554,7 +592,9 @@ if test( "cut_through_existing_vertices" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     for d in ( 3, 4 ):
         for n, o in ( ( [ 1, 1 ] + [ 0 ] * ( d - 2 ), 1.0 ),      # through an entire 2-face
@@ -573,7 +613,9 @@ if test( "cut_through_a_vertex_2D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     origin, axes = [ 0.13, -0.27 ], [ [ 1.7, 0.29 ], [ -0.41, 1.13 ] ]
     o, a0, a1 = ( numpy.asarray( v, float ) for v in ( origin, axes[ 0 ], axes[ 1 ] ) )
@@ -611,7 +653,9 @@ if test( "cut_5D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c, planes = _unit_cube( 5 ), _cube_planes( 5 )
     for n, o in ( ( [ 1, 1, 1, 1, 1 ], 4.5 ), ( [ 1, -0.4, 0.3, 0.2, 0.1 ], 0.75 ) ):
@@ -625,7 +669,9 @@ if test( "cut_nd_empty" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 3 )
     c.cut( [ 1, 1, 1 ], -1.0 )
@@ -640,7 +686,9 @@ if test( "cut_nd_unbounded" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     for d in ( 3, 4 ):
         c, planes = Cell.make_unbounded( d ), []
@@ -659,7 +707,9 @@ if test( "cut_nd_capacity_is_exact" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 3 )
     cap_c = c.nb_cuts.allocated_capacity()
@@ -675,7 +725,9 @@ if test( "cut_nd_batched" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     nb_items = 64
     c = Cell.make_hypercube( 3, [ 0, 0, 0 ], numpy.eye( 3 ).tolist(),
@@ -761,7 +813,9 @@ if test( "measure_3D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 3 )
     assert float( c.measure ) == 1
@@ -775,7 +829,9 @@ if test( "measure_5D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 5 )
     assert float( c.measure ) == 1
@@ -789,7 +845,9 @@ if test( "measure_nd_vs_reference" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 7 )
     for d in ( 3, 4 ):
@@ -811,7 +869,9 @@ if test( "measure_nd_is_additive" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 3 )
     for d in ( 3, 4 ):
@@ -828,7 +888,9 @@ if test( "measure_nd_degenerate" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     for d in ( 3, 4 ):
         for n, o in ( ( [ 1, 1 ] + [ 0 ] * ( d - 2 ), 1.0 ),
@@ -846,7 +908,9 @@ if test( "measure_nd_unbounded_and_empty" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     assert float( Cell.make_unbounded( 3 ).measure ) > 1e300
     c = _unit_cube( 3 )
@@ -859,7 +923,9 @@ if test( "grad_measure_nd" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the adjoint of the splitting: the triangulation is COMBINATORIAL ( it does not move under a
@@ -879,7 +945,9 @@ if test( "measure_nd_batched" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     nb_items = 48
     c = Cell.make_hypercube( 3, [ 0, 0, 0 ], numpy.eye( 3 ).tolist(),
@@ -904,7 +972,9 @@ if test( "viz_drops_the_infinite_planes" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     asked = ( ( [ 1.0, 0.0 ], 1.0 ), ( [ 0.0, 1.0 ], 1.0 ), ( [ 0.0, -1.0 ], 0.0 ) )
     c = Cell.make_unbounded( 2 )
@@ -935,7 +1005,9 @@ if test( "viz_dashes_what_runs_off_and_hides_what_is_made_up" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = Cell.make_unbounded( 2 )
     for n, o in ( ( [ 1, 0 ], 1.0 ), ( [ 0, 1 ], 1.0 ), ( [ 0, -1 ], 0.0 ) ):
@@ -971,7 +1043,9 @@ if test( "viz_the_clipping_box_is_not_geometry" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     from sdot.viz.polytope import polytope_mesh
 
@@ -998,7 +1072,9 @@ if test( "viz_of_a_bounded_cell_is_untouched" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     v = Visualizer()
     Cell.make_hypercube( 2, [ 0, 0 ], [ [ 1, 0 ], [ 0, 1 ] ] ).add_to_viz( v )
@@ -1015,9 +1091,11 @@ if test( "viz_of_a_batch_uses_each_item_own_counts" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
-    from sdot import Voronoi
+    from sdot.Voronoi import Voronoi
     pos = numpy.array( [ [ 0.2, 0.5 ], [ 0.55, 0.5 ], [ 0.9, 0.2 ], [ 0.9, 0.8 ] ] )
     cs = Voronoi( pos, boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) ).cells
     nvs = numpy.asarray( cs.nb_vertices.value )
@@ -1037,9 +1115,11 @@ if test( "viz_colors_are_the_seed_and_nothing_else" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
-    from sdot import PowerDiagram
+    from sdot.PowerDiagram import PowerDiagram
     from sdot.viz.Visualizer import scale_color
 
     pos = numpy.array( [ [ 0.2, 0.5 ], [ 0.5, 0.5 ], [ 0.8, 0.5 ] ] )
@@ -1067,9 +1147,11 @@ if test( "viz_colors_do_not_drift_from_one_frame_to_the_next" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
-    from sdot import Voronoi
+    from sdot.Voronoi import Voronoi
     pos = numpy.array( [ [ 0.2, 0.2 ], [ 0.75, 0.3 ], [ 0.45, 0.8 ], [ 0.9, 0.85 ] ] )
     n, nb_frames = len( pos ), 3
 
@@ -1113,7 +1195,9 @@ if p := experiment( "viz 2D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     v = Visualizer( title = "Cell 2D" )
     for shift, normal in ( ( 0.0, [ 1, 1 ] ), ( 1.3, [ -1, 2 ] ) ):
@@ -1130,7 +1214,9 @@ if p := experiment( "viz 3D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 3 )
     c.cut( [ 1, 1, 1 ], 2.5 )
@@ -1148,7 +1234,9 @@ if p := experiment( "viz 5D" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     c = _unit_cube( 5 )
     c.cut( [ 1, 1, 1, 1, 1 ], 4.5 )
@@ -1166,7 +1254,9 @@ if p := experiment( "viz unbounded" ):
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     v = Visualizer( title = "Unbounded cells" )
     c = Cell.make_unbounded( 3 )
@@ -1191,7 +1281,9 @@ if p := experiment( "viz cut by cut",
     from loom.testing import check_grad
     import loom
     from loom import new_batch_axis
-    from sdot import Cell, Visualizer, box_half_spaces, set_kernel_dtype
+    from sdot.Cell import Cell, set_kernel_dtype
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.PowerDiagram import box_half_spaces
     set_kernel_dtype( "FP64" )
     d   = p.dim
     rng = numpy.random.default_rng( p.seed )

@@ -279,7 +279,15 @@ class _History( Aggregate ):
 
 
 class SdotPlanNd( Displayable ):
-    """see the module docstring"""
+    """A transport plan in 2D and more, from `plan`, `ot_solve` or `OtProblem.solve`.
+
+    Each dirac receives a cell of the power diagram of `weights`, whose mass under the target density is the mass of the
+    dirac: the plan sends each cell onto its dirac. `cost` is `W_2^2`, `barycenters` the barycenter of each cell,
+    `cell_masses` their masses. `converged` and `stats` say how the solve went.
+
+    = Internals
+
+    see the module docstring"""
 
     #: the width continuation of a mesh ( `_solve_by_spreading` ): the largest step of the path, as a ratio of `k + 1`, and the
     #: smallest one a failed stage may be cut down to; the Newton steps of a stage
@@ -626,14 +634,14 @@ class SdotPlanNd( Displayable ):
         )
         pd._solver_weights_after( pd_produced )
 
-        #: the FITTED weights, `[ n ]`, indexed like `positions` ( `weights[ 0 ] == 0`: the gauge )
+        #: the weights of the power diagram of the plan, `[ n ]` ( defined up to a constant: `weights[ 0 ] == 0` )
         self.weights = weights
         self._weights_fit = weights
-        #: the measure of each cell at the FITTED weights, `[ n ]` -- the one Newton measured
+        #: the mass of each cell, `[ n ]`
         self.cell_masses = cell_masses
-        #: the barycenter of each cell, `[ n, d ]` ( its seed if it is empty )
+        #: the barycenter of each cell, `[ n, d ]` ( its dirac if the cell is empty )
         self.barycenters = barycenters
-        #: the transport cost `W_2^2` ( a scalar `Tensor`: `float( sol.cost )` for the number )
+        #: the transport cost, `W_2^2`
         self.cost = cost
         self._clusters = clusters
         self._read_stats( stats, settings )
@@ -924,7 +932,7 @@ class SdotPlanNd( Displayable ):
         return getattr( plan, "_weights_fit", plan.weights ), "ot_plan"
 
     def _read_stats( self, stats, settings ):
-        #: what the solver reports ( see `sdotplan/Solve.h::Stat` ), plus `status` and `start` spelled out
+        #: how the solve went, a dict: `status`, `nb_iter`, `residual`, `nb_diag` ( the power diagrams computed ), timings...
         st = stats.raw
         if loom.is_traced( st ):
             # under a trace ( `jax.jit` ): the numbers are tracers, kept as such -- nothing is read on the host
@@ -955,9 +963,8 @@ class SdotPlanNd( Displayable ):
         self.stats[ "warm_start" ] = self._warm_start
 
     def _read_history( self, history, settings, pd ):
-        #: one dict per ACCEPTED step -- `step = 0` is the starting point: `t`, `residual_l2`,
-        #: `min_measure`, `max_abs_residual`, `nb_diag` ( cumulative ), `nb_evals` ( the diagrams of
-        #: this step ), and `weights` if `keep_weights`
+        #: one dict per Newton step ( the first is the starting point ): `t` the step length, `residual_l2`,
+        #: `max_abs_residual`, `min_measure`, `nb_diag`... and `weights` with `Iterative( keep_weights = True )`
         if loom.is_traced( history.rows.raw ):
             self.history = None                      # under a trace: not read ( it would be a host read of a tracer )
             return
@@ -983,13 +990,21 @@ class SdotPlanNd( Displayable ):
 
     @property
     def converged( self ):
-        """the test passed -- by the full problem, or by the aggregated one ( `"converged (aggregated)"`: the seeds that the
+        """Whether the tolerance was reached.
+
+        = Internals
+
+        the test passed -- by the full problem, or by the aggregated one ( `"converged (aggregated)"`: the seeds that the
         doubles cannot separate answer as a cluster, see the module docstring )"""
         return self.stats[ "status" ] in ( "converged", "converged (aggregated)" )
 
     @property
     def clusters( self ):
-        """Which CLUSTER each dirac belongs to -- `[ n ]`, the smallest index of its cluster ( itself when it is alone ) -- or
+        """Which cluster each dirac belongs to ( `[ n ]`, the smallest index of its cluster ) when diracs too close to be separated were merged, else `None`.
+
+        = Internals
+
+        Which CLUSTER each dirac belongs to -- `[ n ]`, the smallest index of its cluster ( itself when it is alone ) -- or
         `None` when none was merged.
 
         `None` is the common case and it means "the weights suffice". As soon as there are clusters, the masses of the
@@ -1002,12 +1017,20 @@ class SdotPlanNd( Displayable ):
 
     @property
     def target_masses( self ) -> Tensor:
-        """`nu`: the target mass of each cell ( the masses of the diracs, normalized, then rescaled
+        """The mass each cell must reach ( `[ n ]` ): the masses of the diracs, normalized.
+
+        = Internals
+
+        `nu`: the target mass of each cell ( the masses of the diracs, normalized, then rescaled
         to what the domain contains -- see `sdotplan/Solve.h` )"""
         return self._masses * ( self.stats[ "domain_mass" ] / float( self._masses.sum() ) )
 
     def residual( self, weights = None ) -> Tensor:
-        """`measure_i( weights ) - nu_i` -- ZERO at the sought point, DIFFERENTIABLE with respect to
+        """The mass error of each cell, `[ n ]`, at the weights of the plan ( or at `weights` ). Costs one more power diagram.
+
+        = Internals
+
+        `measure_i( weights ) - nu_i` -- ZERO at the sought point, DIFFERENTIABLE with respect to
         `weights` ( see `PowerDiagram.measures` ). One more diagram: it is a diagnostic tool, not
         an output of the solve ( `cell_masses` is )."""
         w = self._weights_fit if weights is None else weights
@@ -1073,7 +1096,11 @@ class SdotPlanNd( Displayable ):
         self.barycenters = RealTensor[ ax, self._pd.dim ]( full )
 
     def power_diagram( self, weights = None ) -> PowerDiagram:
-        """THE ON-DEMAND TOOL: the `PowerDiagram` for `weights` ( by default: the FITTED weights )
+        """The `PowerDiagram` of the plan, at its weights ( or at `weights` ): to inspect or draw its cells.
+
+        = Internals
+
+        THE ON-DEMAND TOOL: the `PowerDiagram` for `weights` ( by default: the FITTED weights )
         -- always the SAME object, on which those weights are set. For drawing, for inspecting, for
         a functional that was not anticipated; nothing in the solve goes through it."""
         self._pd.weights = self._weights_fit if weights is None else weights
@@ -1114,7 +1141,11 @@ class SdotPlanNd( Displayable ):
         return self.cost, self.barycenters, self.cell_masses
 
     def cost_and_position_grad( self ):
-        """`( cost, grad )`: the cost, and its derivative with respect to the dirac POSITIONS
+        """`( cost, grad )`: `W_2^2` and its derivative with respect to the positions of the diracs, `2 m_i ( p_i - b_i )` ( `[ n, d ]` ).
+
+        = Internals
+
+        `( cost, grad )`: the cost, and its derivative with respect to the dirac POSITIONS
         ( `[ n, d ]` ) -- by the envelope theorem: at the optimal weights, the derivative of the cost
         with respect to `p_i` does not go through the cells, and equals `2 m_i ( p_i - b_i )`, `b_i` the
         barycenter of the cell and `m_i` its mass ( which is the target mass of the dirac ). It is the

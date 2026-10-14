@@ -9,7 +9,15 @@ from .Distribution import Distribution
 
 
 class SumOfGaussians( Distribution ):
-    """A sum of ISOTROPIC gaussians, as a continuous density.
+    """A mixture of isotropic gaussians: `positions` `[ k, d ]` their centers, `sigmas` `[ k ]` their standard deviations,
+    `weights` `[ k ]` their masses ( not their heights; equal by default ). Differentiable with respect to all three.
+
+    Its support, which bounds the domain of a transport, is the box holding every gaussian up to `support_sigmas`
+    standard deviations ( 6 by default ), or the box `support_box = ( lo, hi )`.
+
+    = Internals
+
+    A sum of ISOTROPIC gaussians, as a continuous density.
 
         rho( x ) = sum_i  weights( i ) * exp( - |x - positions( i )|^2 / ( 2 sigmas( i )^2 ) )
                             / ( 2 pi sigmas( i )^2 ) ^ ( d / 2 )

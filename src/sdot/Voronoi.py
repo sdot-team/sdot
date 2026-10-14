@@ -2,7 +2,11 @@ from .PowerDiagram import PowerDiagram
 
 
 def Voronoi( positions, **kwargs ):
-    """The Euclidean Voronoi diagram of `positions`: a `PowerDiagram` WITHOUT weights.
+    """The Voronoi diagram of `positions`: a `PowerDiagram` without weights ( same arguments, `weights` excepted ).
+
+    = Internals
+
+    The Euclidean Voronoi diagram of `positions`: a `PowerDiagram` WITHOUT weights.
 
     This is not a special case that was hard-wired, it is the same object said differently. In the
     plane that separates two seeds, weights enter only through their DIFFERENCE (see

@@ -1,45 +1,34 @@
 # Differentiability
 
-Almost all outputs are differentiable with respect to all outputs.
+`sdot.w2` is differentiable with respect to everything that defines the two distributions: the positions and the masses
+of the diracs, and the parameters of the target ( the pixels of an image, the centers, sigmas and masses of gaussians... ).
+The outputs of a plan ( `cost`, `barycenters`, `cell_masses`, `weights` ) are differentiable too.
 
-For instance `distance`, `barycenters`, ... are differentiable with respect to the Dirac positions and weights, the density parameters (image values, frame position, knots, ...), and so on.
+The solver itself is not differentiated: its derivative comes from the implicit function theorem, which costs one more
+power diagram and one linear solve.
 
-The [examples gallery →](/examples/) contains a lot of example that are using differentiation (see tag `differentiation`).
+::: code-group
 
-## With JAX
+<<< @/snippets/grad_jax.py [JAX]
 
-```python
-import jax
-import jax.numpy as jnp
-from sdot import PolynomialGrid, SumOfDiracs, distance
+<<< @/snippets/grad_torch.py [PyTorch]
 
-target = PolynomialGrid( values = jnp.ones( ( 10, 10 ) ) )
+:::
 
-@jax.jit
-def loss( positions ):
-    return distance( SumOfDiracs( positions ), target )
+`jax.jit` works too: the whole solve is one call.
 
-positions = jnp.array( np.random.rand( 100, 2 ) )
-grad = jax.grad( loss )( positions )   # shape (100, 2)
-```
+## The gradient with respect to the positions
 
-## With PyTorch
+At the optimal weights, the derivative of $W_2^2$ with respect to the position $y_i$ of a dirac does not go through the
+cells:
 
-```python
-import torch
-import sdot
+$$\frac{\partial W_2^2}{\partial y_i} = 2 \, m_i \, ( y_i - b_i )$$
 
-sdot.driver.framework = "torch"
+where $m_i$ is the mass of the dirac and $b_i$ the barycenter of its cell:
 
-from sdot import PolynomialGrid, SumOfWeightedDiracs, distance
+<<< @/snippets/grad_formula.py
 
-target    = PolynomialGrid( values = torch.ones( 10, 10 ) )
-positions = torch.rand( 100, 2, requires_grad = True )
-weights   = torch.ones( 100 ) / 100
+A gradient step of $1 / ( 2 m_i )$ therefore moves each dirac to its barycenter: that is the Lloyd algorithm.
 
-d = distance( SumOfWeightedDiracs( positions, weights ), target )
-d.backward()
-
-print( positions.grad )   # shape (100, 2)
-```
-
+The [Gaussian mixture fit](/examples/gaussian-mixture-fit) example fits the parameters of a `SumOfGaussians` by gradient
+descent on `w2`.

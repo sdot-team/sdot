@@ -18,9 +18,8 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guide',      link: '/guide/getting-started' },
-      { text: 'Tutorials',  link: '/tutorials/ot-plan-intro' },
       { text: 'Examples',   link: '/examples/' },
-      { text: 'API',        link: '/api/distributions' },
+      { text: 'API',        link: '/api/ot-plan' },
     ],
 
     sidebar: {
@@ -29,23 +28,13 @@ export default defineConfig({
           text: 'Guide',
           items: [
             { text: 'Getting Started',          link: '/guide/getting-started' },
-            { text: 'Tensors',                  link: '/guide/tensors' },
+            { text: 'W2, Plans and Settings',   link: '/guide/ot-plan' },
             { text: 'Distributions',            link: '/guide/distributions' },
-            { text: 'Ground Metrics',           link: '/guide/ground-metrics' },
-            { text: 'Backends (JAX / PyTorch)', link: '/guide/backends' },
             { text: 'Differentiability',        link: '/guide/differentiability' },
-            { text: 'Ot Plans',                 link: '/guide/ot-plan' },
+            { text: 'Frameworks and Devices',   link: '/guide/backends' },
             { text: 'Performance',              link: '/guide/performance' },
-            { text: 'The FFI boundary',         link: '/guide/ffi-internals' },
-          ]
-        }
-      ],
-      '/tutorials/': [
-        {
-          text: 'Tutorials',
-          items: [
-            { text: 'Optimal Transport Plans', link: '/tutorials/ot-plan-intro' },
-            { text: 'Gaussian Mixture Fit',    link: '/tutorials/gaussian-mixture-fit' },
+            { text: 'Background',               link: '/guide/background' },
+            { text: 'Roadmap',                  link: '/guide/roadmap' },
           ]
         }
       ],
@@ -54,15 +43,8 @@ export default defineConfig({
           text: 'Examples',
           items: [
             { text: 'Gallery',               link: '/examples/' },
-            { text: 'Uniform Fill',          link: '/examples/uniform-fill' },
-            { text: 'Image Transport',       link: '/examples/image-transport' },
             { text: 'Lloyd Quantization',    link: '/examples/lloyd-quantization' },
             { text: 'Gaussian Mixture Fit',  link: '/examples/gaussian-mixture-fit' },
-            { text: 'Power Diagram Geometry',link: '/examples/power-diagram-geometry' },
-            { text: 'Periodic Metrics',      link: '/examples/periodic-metrics' },
-            { text: 'Crowd Motion',          link: '/examples/crowd-motion' },
-            { text: 'Incompressible Euler',  link: '/examples/euler-equations' },
-            { text: 'Fokker-Planck',         link: '/examples/fokker-planck' },
           ]
         }
       ],
@@ -70,9 +52,10 @@ export default defineConfig({
         {
           text: 'API Reference',
           items: [
+            { text: 'W2 and Plans',   link: '/api/ot-plan' },
             { text: 'Distributions',  link: '/api/distributions' },
-            { text: 'OT Plan',        link: '/api/ot-plan' },
-            { text: 'PowerDiagram',   link: '/api/power-diagram' },
+            { text: 'Power Diagrams', link: '/api/power-diagram' },
+            { text: 'Visualization',  link: '/api/visualization' },
           ]
         }
       ],

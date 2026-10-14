@@ -2,7 +2,11 @@ from loom.util import Aggregate
 
 
 class SpatialAccelerator( Aggregate ):
-    """What answers "WHICH seeds are worth trying, and in what order".
+    """The base of the accelerators of power diagrams ( `AaBsp` ): what proposes, for each cell, the seeds worth trying.
+
+    = Internals
+
+    What answers "WHICH seeds are worth trying, and in what order".
 
     An accelerator does not know what a cell is. It knows how the seeds are spread out in
     space, and it derives an ENUMERATION from that: instead of the `n - 1` bisectors that
@@ -40,7 +44,9 @@ class SpatialAccelerator( Aggregate ):
     """
 
     def nb_seeds( self ):
-        """How many seeds it was built on -- or `None` if it does not know.
+        """= Internals
+
+        How many seeds it was built on -- or `None` if it does not know.
 
         An accelerator INDEXES the caller's seeds: built on another cloud, its indices
         designate something else and the answer is wrong without anything saying so. This count

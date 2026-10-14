@@ -138,7 +138,7 @@ if p := bench( "newton",
     if density:
         target = lambda: cases.density_target( p.case, sigma = p.sigma, size = p.image_size )
     else:
-        target = lambda: Image( values = numpy.ones( ( 1, ) * d ), origin = [ 0.0 ] * d, frame = numpy.eye( d ) )
+        target = lambda: Image( values = numpy.ones( ( 1, ) * d ), origin = [ 0.0 ] * d, pixel_frame = numpy.eye( d ) )
 
     def settings( n_points, max_iter ):
         return Iterative( tol = p.tol, max_iter = max_iter, continuation = continuation,

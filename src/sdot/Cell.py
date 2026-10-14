@@ -53,6 +53,8 @@ def set_kernel_dtype( dtype ):
 
 
 def kernel_dtype():
+    """The kernel float of the cells ( and diagrams ) built without saying one: `"FP64"` or `"FP32"` ( see
+    `set_kernel_dtype` )"""
     return DEFAULT_KERNEL_DTYPE
 
 
@@ -88,6 +90,8 @@ class Cell( Aggregate, Displayable ):
     #   _vertex_cut_indices_of( it ), _edges_of( it ), _edge_cuts_of( it ), _faces_of( it ),
     #   _planes_of( it )     the derived tensors, read off an `Item`
 
+    """A convex polytope, possibly unbounded, possibly batched ( `PowerDiagram.cells` is a batch of cells ). Start from
+    `Cell.make_hypercube( d, origin, axes )` or `Cell.make_unbounded( d )`, then `cut` it by half-spaces."""
     def __new__( cls, nb_dims = None, *args, **kwargs ):
         if cls is Cell:
             if nb_dims is None:
@@ -112,12 +116,14 @@ class Cell( Aggregate, Displayable ):
 
     @classmethod
     def make_hypercube( cls, nb_dims, origin = None, axes = None, cut_id = BOUNDARY, batch_axes = None, **kwargs ):
+        """A parallelotope: `origin + sum_j t_j axes[ j ]`, `t` in `[ 0, 1 ]^d` ( the unit cube by default )."""
         res = cls( nb_dims, init_as_unbounded = False, batch_axes = batch_axes, **kwargs )
         res.init_as_hypercube( origin, axes, cut_id )
         return res
 
     @classmethod
     def make_unbounded( cls, nb_dims, batch_axes = None, **kwargs ):
+        """The whole space, in dimension `nb_dims`, to cut from."""
         return cls( nb_dims, batch_axes = batch_axes, **kwargs )
 
     def _empty_like_me( self ):
@@ -150,7 +156,9 @@ class Cell( Aggregate, Displayable ):
     # ---- the kernels ------------------------------------------------------------------------------
 
     def init_as_unbounded( self, batch_axes = None ):
-        """"All of space", represented by a SIMPLEX whose walls are marked `INFINITE`.
+        """= Internals
+
+        "All of space", represented by a SIMPLEX whose walls are marked `INFINITE`.
 
         These planes are not real cuts : they are stopgaps, and their offsets are
         made up. It is `cut` that pushes them back as it goes, until they no longer change
@@ -168,7 +176,9 @@ class Cell( Aggregate, Displayable ):
         )
 
     def init_as_hypercube( self, origin = None, axes = None, cut_id = BOUNDARY, batch_axes = None ):
-        """the parallelotope `origin + sum_j t_j axes[ j ]`, `t` in `[ 0, 1 ]^d` -- the unit cube
+        """= Internals
+
+        the parallelotope `origin + sum_j t_j axes[ j ]`, `t` in `[ 0, 1 ]^d` -- the unit cube
         by default. All the cuts carry `cut_id`."""
         if batch_axes is not None:
             self.apply_batch_axes( batch_axes )
@@ -227,7 +237,11 @@ class Cell( Aggregate, Displayable ):
 
     @property
     def measure( self ) -> Tensor:
-        """The measure of the cell : length, area, volume -- in the caller's float, whatever
+        """The measure of the cell: length, area, volume... Infinite ( the largest float ) for an unbounded cell. Differentiable with respect to the vertices.
+
+        = Internals
+
+        The measure of the cell : length, area, volume -- in the caller's float, whatever
         the kernel's is. `TF::max` for an unbounded cell. Differentiable with respect to
         `vertex_positions`."""
         res = RealTensor[ tuple( self.batch_axes ) ]()
@@ -288,12 +302,18 @@ class Cell( Aggregate, Displayable ):
 
     @property
     def is_bounded( self ):
-        """True if no `INFINITE` wall carries a vertex any more."""
+        """Whether the cell is bounded.
+
+        = Internals
+
+        True if no `INFINITE` wall carries a vertex any more."""
         return self._per_item( lambda it: not self._infinite_cuts_of( it ).any() )
 
     @property
     def vertex_cut_indices( self ):
-        """`[ nb_vertices, d ]` : the `d` cuts ( indices into `cut_ids` ) of which each vertex is the corner."""
+        """= Internals
+
+        `[ nb_vertices, d ]` : the `d` cuts ( indices into `cut_ids` ) of which each vertex is the corner."""
         return self._per_item( self._vertex_cut_indices_of )
 
     @property

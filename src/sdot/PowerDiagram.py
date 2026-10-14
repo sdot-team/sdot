@@ -218,7 +218,9 @@ class PowerDiagram( Aggregate, Displayable ):
         return int( self.nb_dims.value )
 
     def ffi_units( self, call_arg ):
-        """The cell engine as a SHARED LIBRARY ( `sdot/engine/Cells.h` ): every call that holds this diagram links the variant
+        """= Internals
+
+        The cell engine as a SHARED LIBRARY ( `sdot/engine/Cells.h` ): every call that holds this diagram links the variant
         of `sdot_engine` module (`_engine_unit`) its seeds ask for, instead of instantiating the engine in its own kernel. Called by loom for the
         calls on the CPU ( the card has its own cells ), with the resolved types of the members. Says the same as
         `engine::has_unit` ( dimensions 2 and 3 ) and as `engine_seeds()` of the storages."""
@@ -323,7 +325,11 @@ class PowerDiagram( Aggregate, Displayable ):
 
     @property
     def measures( self ) -> Tensor:
-        """The measure of each cell: `[ n ]`, indexed like `positions`.
+        """The measure of each cell, `[ n ]` -- its integral against `distribution` when there is one. Differentiable with respect to the positions, the weights and the parameters of the distribution.
+
+        = Internals
+
+        The measure of each cell: `[ n ]`, indexed like `positions`.
 
         One call, one sweep: each work-item builds a cell in its scratch,
         writes its volume, and starts over with the next seed. Nothing of the diagram is kept.
@@ -339,7 +345,11 @@ class PowerDiagram( Aggregate, Displayable ):
         return self._integral( None )
 
     def moment( self, k ) -> Tensor:
-        """`int_{cell_i} p( x ) rho( x ) dx`, `[ n ]`, for the polynomial `p` that `k` names: `x_k` for `k < d`, `|x|^2` for `k == d`
+        """`int_{cell_i} p( x ) rho( x ) dx`, `[ n ]`, for `p = x_k` ( `k < d` ), `|x|^2` ( `k == d` ) or `1` ( `k == d + 1` ). Differentiable like `measures`.
+
+        = Internals
+
+        `int_{cell_i} p( x ) rho( x ) dx`, `[ n ]`, for the polynomial `p` that `k` names: `x_k` for `k < d`, `|x|^2` for `k == d`
         and `1` for `k == d + 1` ( the mass, by the SAME quadrature as the others -- not by the closed form of `measures` ).
 
         DIFFERENTIABLE like `measures`, with respect to the seeds, the weights and the parameters of the density -- the
@@ -393,7 +403,11 @@ class PowerDiagram( Aggregate, Displayable ):
         return res
 
     def laplacian_solve( self, rhs, linear_solver = "auto" ) -> Tensor:
-        """`x = L^+ rhs`: the solution, with `x[ 0 ] == 0` ( the gauge ), of the system of the LAPLACIAN of the Laguerre graph
+        """The solution `x` of `L x = rhs`, `L` being the derivative of the measures with respect to the weights ( `rhs` sums to zero; `x[ 0 ] == 0` ). Differentiable with respect to `rhs`.
+
+        = Internals
+
+        `x = L^+ rhs`: the solution, with `x[ 0 ] == 0` ( the gauge ), of the system of the LAPLACIAN of the Laguerre graph
         of this diagram -- the hessian of the dual functional of a transport, `d m_i / d w_j`, with the sum of each row
         at zero ( `rhs` must therefore sum to zero too ). `[ n ]`, indexed like `positions`.
 
@@ -431,7 +445,11 @@ class PowerDiagram( Aggregate, Displayable ):
 
     @property
     def moments( self ):
-        """`( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and
+        """`( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and `int |x|^2 rho`. Not differentiable ( see `moment` ).
+
+        = Internals
+
+        `( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and
         `int |x|^2 rho` -- enough to write a TRANSPORT COST, `sum_i int_{cell_i} |x - p_i|^2 rho
         = second - 2 p . first + |p|^2 mass`, and the barycenters `first / mass`. Same sweep as
         `measures`, on a piecewise-constant distribution ( `Image`, or nothing ) only.
@@ -459,7 +477,11 @@ class PowerDiagram( Aggregate, Displayable ):
         return mass, first, second
 
     def hessian_rows( self ):
-        """`( nb_nbrs, ids, vals )`: for each cell `i`, its neighbors `j` ( `ids[ i, :nb_nbrs[ i ] ]`,
+        """The derivatives of the measures with respect to the weights, row by row: `( nb_nbrs, ids, vals )`, the neighbors of each cell and the coefficients ( host arrays ).
+
+        = Internals
+
+        `( nb_nbrs, ids, vals )`: for each cell `i`, its neighbors `j` ( `ids[ i, :nb_nbrs[ i ] ]`,
         indexed like `positions`; negative for the domain, to be ignored ) and `vals[ i, r ] =
         int_{facet ij} rho / ( 2 | p_i - p_j | )` -- enough to assemble the JACOBIAN of the measures with respect
         to the weights, `d m_i / d w_j = - vals`, `d m_i / d w_i = + sum_j vals`, which is also the
@@ -497,7 +519,11 @@ class PowerDiagram( Aggregate, Displayable ):
 
     @property
     def cells( self ) -> Cell:
-        """ALL the cells, in ONE call: a `Cell` batched over the seeds, in the order of
+        """All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them.
+
+        = Internals
+
+        ALL the cells, in ONE call: a `Cell` batched over the seeds, in the order of
         `positions`, its `cut_ids` designating the seeds in that same order.
 
         The query that does not reduce a cell to a number, hence the only one whose memory is
@@ -528,7 +554,9 @@ class PowerDiagram( Aggregate, Displayable ):
         return cells
 
     def support_pieces( self, threshold = 0.0 ):
-        """`( pieces, owners )`: the cells seen ONLY WHERE THE DENSITY HAS MASS -- `pieces` a `Cell` batched over the pieces
+        """= Internals
+
+        `( pieces, owners )`: the cells seen ONLY WHERE THE DENSITY HAS MASS -- `pieces` a `Cell` batched over the pieces
         ( `None` if there is none ), piece `p` being a part of the cell of seed `owners[ p ]`.
 
         The distribution describes where it has mass as convex BLOCKS ( `Distribution.display_blocks`: the boxes of tiles of an
@@ -579,7 +607,9 @@ class PowerDiagram( Aggregate, Displayable ):
         return pieces, owners
 
     def cell( self, i ) -> Cell:
-        """The cell of seed `i`, built PYTHON SIDE -- one `loom.ffi_call` per cut.
+        """= Internals
+
+        The cell of seed `i`, built PYTHON SIDE -- one `loom.ffi_call` per cut.
 
         The slow path, and deliberately so: the same geometry obtained by an orchestration
         entirely different from the kernel's, hence the tests' ORACLE. It is NOT the display

@@ -4,7 +4,7 @@ import tagWeights from './tag-weights.json'
 export default createContentLoader( 'examples/*.md', {
   transform( rawData ) {
     const examples = rawData
-      .filter( p => !p.url.match( /\/examples\/?$/ ) )
+      .filter( p => !p.url.match( /\/examples\/?$/ ) && !p.frontmatter.draft )
       .map( p => {
         const slug = p.url.replace( /\/$/, '' ).split( '/' ).pop()
         return {
@@ -12,7 +12,6 @@ export default createContentLoader( 'examples/*.md', {
           description:  p.frontmatter.description  ?? '',
           tags:         p.frontmatter.tags         ?? [],
           order:        p.frontmatter.order        ?? 999,
-          tutorialLink: p.frontmatter.tutorialLink ?? null,
           link:         p.url,
           image:        slug + '.png',
         }

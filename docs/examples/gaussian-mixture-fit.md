@@ -1,9 +1,8 @@
 ---
 title: Gaussian Mixture Fit
-description: Minimize Wasserstein distance by LBFGS on Gaussian parameters. Demonstrates the use of gradients.
+description: Fit the parameters of Gaussians to a point cloud by minimizing W2, by gradient descent then L-BFGS. Demonstrates the use of gradients.
 tags: [gradient, jax, torch, learning]
 order: 2
-tutorialLink: /tutorials/gaussian-mixture-fit
 ---
 
 <script setup>
@@ -18,7 +17,7 @@ $$
 \min_\theta \; W_2^2\big( \mu, \; \rho_\theta \big), \qquad \rho_\theta = \frac{1}{\sum_k a_k} \sum_k a_k \, \mathcal{N}( c_k, s_k^2 I ).
 $$
 
-The parameters $\theta$ are the centers $c_k$, the sigmas $s_k$ and the masses $a_k$ of the Gaussians. `sdot.w2` is differentiable with respect to all of them, with JAX or PyTorch, and W2 is smooth in $\theta$: a quasi-Newton method fits well, **L-BFGS**.
+The parameters $\theta$ are the centers $c_k$, the sigmas $s_k$ and the masses $a_k$ of the Gaussians. `sdot.w2` is differentiable with respect to all of them, with JAX or PyTorch: a plain gradient descent already finds them.
 
 Unlike a maximum likelihood fit, nothing here can collapse. A Gaussian that shrinks onto a single point does not make the loss go to $-\infty$: it leaves the other points without mass nearby, which W2 charges for.
 
@@ -31,9 +30,56 @@ def loss( centers, sigmas, masses ):
 
 The parameters go in as they are. The masses need not sum to 1: `SumOfGaussians` normalizes them. The domain of the transport is the box that holds the Gaussians up to `support_sigmas = 6` standard deviations, recomputed at each evaluation.
 
-## With JAX and with PyTorch
+## Gradient descent
 
-The optimizer is the L-BFGS of SciPy: it only asks for the value and the gradient, which JAX or PyTorch computes, on one flat vector of parameters. Its `bounds` keep the sigmas and the masses positive: a negative mass would make W2 unbounded below.
+The gradient comes from the autodiff of the framework. Starting from 4 wide Gaussians of equal masses in the middle, a fixed step of 0.5 is enough:
+
+::: code-group
+
+```python [JAX]
+import jax, jax.numpy as jnp
+jax.config.update( "jax_enable_x64", True )
+
+x = jnp.asarray( points )
+
+def loss( centers, sigmas, masses ):
+    return sdot.w2( sdot.SumOfDiracs( x ), sdot.SumOfGaussians( centers, sigmas, weights = masses ) )
+
+value_and_grad = jax.jit( jax.value_and_grad( loss, argnums = ( 0, 1, 2 ) ) )
+
+for step in range( 300 ):
+    value, ( d_centers, d_sigmas, d_masses ) = value_and_grad( centers, sigmas, masses )
+    centers = centers - 0.5 * d_centers
+    sigmas  = sigmas  - 0.5 * d_sigmas
+    masses  = masses  - 0.5 * d_masses
+```
+
+```python [PyTorch]
+import torch
+
+x = torch.as_tensor( points )
+params = [ torch.tensor( p, requires_grad = True ) for p in ( centers, sigmas, masses ) ]
+optimizer = torch.optim.SGD( params, lr = 0.5 )
+
+for step in range( 300 ):
+    optimizer.zero_grad()
+    centers, sigmas, masses = params
+    value = sdot.w2( sdot.SumOfDiracs( x ), sdot.SumOfGaussians( centers, sigmas, weights = masses ) )
+    value.backward()
+    optimizer.step()
+```
+
+:::
+
+W2 goes from 0.25 to 0.0177, and the Gaussians are those of the table below.
+
+::: tip The Lloyd step
+When the parameters are only the positions $y_i$ of diracs (`SumOfDiracs( y )` against a fixed density), the gradient of $W_2^2$ with respect to $y_i$ is $2 \, m_i \, ( y_i - b_i )$, where $m_i$ is the mass of the dirac and $b_i$ the barycenter of its cell. A step of $1 / ( 2 m_i )$ moves each dirac to its barycenter: that is the Lloyd algorithm of the [Lloyd quantization](./lloyd-quantization) example.
+:::
+
+## Going faster: L-BFGS
+
+W2 is smooth in $\theta$: a quasi-Newton method needs 10 times fewer iterations. The optimizer is the L-BFGS of SciPy: it only asks for the value and the gradient, which JAX or PyTorch computes, on one flat vector of parameters. Its `bounds` keep the sigmas and the masses positive: a negative mass would make W2 unbounded below.
 
 ```python
 from scipy.optimize import minimize

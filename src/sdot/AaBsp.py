@@ -14,7 +14,13 @@ from .SpatialAccelerator import SpatialAccelerator
 
 
 class AaBsp( SpatialAccelerator ):
-    """An AXIS-ALIGNED BSP: a binary tree of boxes, each leaf holding a
+    """A tree of boxes over the seeds of a power diagram, which spares each cell the seeds that cannot cut it. The diagrams
+    build one by themselves ( the default as soon as the positions are not traced ); `AaBsp.of( power_diagram )` builds
+    one explicitly, to give as `accelerator`.
+
+    = Internals
+
+    An AXIS-ALIGNED BSP: a binary tree of boxes, each leaf holding a
     handful of seeds.
 
     The tree is built by median cuts on the longest axis, until a leaf
@@ -247,13 +253,17 @@ class AaBsp( SpatialAccelerator ):
             self._majorant_weights = weights
 
     def set_zero_weight_majorants( self ):
-        """the majorants of ZERO weights ( a cold start ): zero, without a call -- on the card, and traced under a `jit`"""
+        """= Internals
+
+        the majorants of ZERO weights ( a cold start ): zero, without a call -- on the card, and traced under a `jit`"""
         self.node_wa = RealTensor[ self.num_bsp_node, self.dim ].zeros()
         self.node_wb = RealTensor[ self.num_bsp_node ].zeros()
 
     @property
     def nb_leaves( self ):
-        """the non-empty leaves ( a host read of the slices when the tree was built on the card )"""
+        """= Internals
+
+        the non-empty leaves ( a host read of the slices when the tree was built on the card )"""
         if self._nb_leaves is None:
             beg = np.asarray( self.node_begin ).reshape( -1 )
             end = np.asarray( self.node_end ).reshape( -1 )
@@ -262,7 +272,9 @@ class AaBsp( SpatialAccelerator ):
 
     @staticmethod
     def max_depth_for( nb_seeds, max_seeds_per_leaf = 10 ):
-        """A MAJORANT of the depth, WITHOUT seeing the points -- and it is REACHED as soon as the
+        """= Internals
+
+        A MAJORANT of the depth, WITHOUT seeing the points -- and it is REACHED as soon as the
         seeds are distinct: the cut is median, so the tree is balanced and its shape
         depends only on `n`. A degenerate cloud (coincident seeds) closes leaves earlier,
         so it only shrinks the tree, never the opposite. That is what says that a
@@ -273,7 +285,9 @@ class AaBsp( SpatialAccelerator ):
 
     @staticmethod
     def max_nb_nodes_for( nb_seeds, max_seeds_per_leaf = 10 ):
-        """A majorant of the number of nodes, `n` alone -- see `max_depth_for`. A binary tree whose
+        """= Internals
+
+        A majorant of the number of nodes, `n` alone -- see `max_depth_for`. A binary tree whose
         leaves are all at the same level has `2 * leaves - 1` of them, and the leaves number at
         most `2 ** ( depth - 1 )`."""
         return 2 * 2 ** ( AaBsp.max_depth_for( nb_seeds, max_seeds_per_leaf ) - 1 ) - 1
@@ -302,7 +316,9 @@ class AaBsp( SpatialAccelerator ):
         return int( self.nb_bsp_seeds.value )
 
     def rank_of_seeds( self ):
-        """the inverse of `seed_indices`: the RANK ( in the tree's order ) of seed `i` ( on the card, and possibly traced,
+        """= Internals
+
+        the inverse of `seed_indices`: the RANK ( in the tree's order ) of seed `i` ( on the card, and possibly traced,
         for a tree built there )"""
         if self._rank is not None:
             return self._rank
@@ -314,7 +330,9 @@ class AaBsp( SpatialAccelerator ):
     # -- what is redone without rebuilding ------------------------------------------------------
 
     def refresh_weight_majorants( self, sorted_positions, sorted_weights ):
-        """The affine majorant of the weights of EACH node, redone on new weights -- the seeds
+        """= Internals
+
+        The affine majorant of the weights of EACH node, redone on new weights -- the seeds
         being given IN THE TREE'S ORDER ( what `PowerDiagram_Bsp` stores ), one slice per
         node. One kernel, one work-item per node ( `AaBsp.h::refresh_majorant` ).
 

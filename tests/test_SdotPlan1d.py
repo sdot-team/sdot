@@ -7,7 +7,9 @@ from errand import test
 if test( "basic" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -26,7 +28,9 @@ if test( "cost_uniform" ):
     # This case also crosses the `udp_cont` bounds guard (a single cell, loop not entered).
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -41,7 +45,9 @@ if test( "cost_two_cells" ):
     # cells (the `while` loop of `udp_cont` runs once), expected cost 1/3.
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -53,7 +59,9 @@ if test( "cost_two_cells" ):
 if test( "grad_cost" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -69,7 +77,9 @@ if test( "grad_cost" ):
 if test( "grad_values" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -86,7 +96,9 @@ if test( "grad_values" ):
 if test( "group_size_cooperative" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -122,7 +134,9 @@ if test( "group_size_cooperative" ):
 if test( "zero_density_cells" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -156,7 +170,9 @@ if test( "single_cell_target" ):
     # FEWER cells than cooperating work-items (most work-items own an empty cell sub-range).
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -178,7 +194,9 @@ if test( "single_cell_target" ):
 if test( "more_threads_than_diracs" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -206,7 +224,9 @@ if test( "more_threads_than_diracs" ):
 if test( "boundary_straddling_cell_grad" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -235,7 +255,9 @@ if test( "boundary_straddling_cell_grad" ):
 if test( "grad_weights" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info
@@ -251,7 +273,9 @@ if test( "grad_weights" ):
 if test( "joint_position_and_weight_value_grad" ):
     import numpy
     import loom
-    from sdot import Image, SdotPlan1d, SumOfDiracs1d
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     from loom.devices import Cpu
     from loom.testing import need
     from loom.util import info

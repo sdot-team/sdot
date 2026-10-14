@@ -13,9 +13,15 @@ class Image( Distribution ):
     """
         Piecewise constant function on a grid.
 
-        Each square/cube/hypercube is defined by `origin` and `frame( dir ) * knots( ... )`
+        Each square/cube/hypercube is defined by `origin` and `frame( dir ) * knots( ... )`: the FIELD `frame` is the
+        frame of ONE pixel ( its rows: the edges of a pixel ).
 
         By default, knots is equal to 0, 1, ... for each dim.
+
+        What the constructor takes is said for the WHOLE image: `Image( values )` fits the image in the unit square
+        ( cube... ) at `origin`, its longest side of length 1, the proportions kept. `frame` gives the edges of the whole
+        image ( rows, or their lengths for an axis-aligned image ), `pixel_frame` those of one pixel ( the field ).
+        With `knots`, the pixels are where the knots say: the default frame is the identity.
     """
 
     nb_dims          : CtShapeVar
@@ -53,7 +59,18 @@ class Image( Distribution ):
     # call -- previously it was, twice per call, see [[otplan1d-kernel-profile]].
     cell_cum_mass    : ComputedAttribute[ RealTensor[ "num_cell_cum" ], ( "values", "frame", "knots" ) ]
 
-    def __init__( self, values, **kwargs ) -> None:
+    def __init__( self, values, frame = None, pixel_frame = None, **kwargs ) -> None:
+        """`frame`: the edges of the WHOLE image ( `[ d, d ]`, or `[ d ]` lengths ). `pixel_frame`: those of ONE pixel ( the
+        field `frame` ). Neither: the longest side of the image is 1. The copies ( `shape` given ) pass `pixel_frame` as is."""
+        if frame is not None and pixel_frame is not None:
+            raise ValueError( "Image: `frame` ( the whole image ) or `pixel_frame` ( one pixel ), not both" )
+        if frame is not None or ( pixel_frame is None and "knots" not in kwargs and "shape" not in kwargs ):
+            if "knots" in kwargs:
+                raise ValueError( "Image: with `knots`, the frame is that of one pixel: `pixel_frame`" )
+            shape = _grid_shape( values, kwargs.get( "batch_axes" ) )
+            pixel_frame = _pixel_frame( frame, shape )
+        if pixel_frame is not None:
+            kwargs[ "frame" ] = pixel_frame
         self.__base_init__( values = values, target_mass = 1.0, **kwargs )
 
     def _grid_geometry( self ):
@@ -93,7 +110,9 @@ class Image( Distribution ):
     # ---- the display of the cells where the image has mass ( `PowerDiagram.support_pieces` ) --------------------------------
 
     def display_blocks( self, threshold = 0.0 ):
-        """`( dirs, offs, ids )`: the tiles that have mass -- a value `> threshold * max( values )` -- gathered into BOXES of the
+        """= Internals
+
+        `( dirs, offs, ids )`: the tiles that have mass -- a value `> threshold * max( values )` -- gathered into BOXES of the
         grid ( see `Distribution.display_blocks` ). On each wall of a box, the tiles behind it are ALL with mass ( the wall is a
         `SEAM` ) or all without ( a `SUPPORT`, the grid's border included ): a wall is never a seam in one place and a border in
         another. Built from the tiles by merging, along one axis at a time, the boxes that follow each other with the same
@@ -102,7 +121,9 @@ class Image( Distribution ):
         return self._display( threshold )[ "blocks" ]
 
     def blocks_of_cells( self, cells, threshold = 0.0 ):
-        """`( owners, blocks )` for the cells of `cells` ( see `Distribution.blocks_of_cells` ). On the box of each cell, in grid
+        """= Internals
+
+        `( owners, blocks )` for the cells of `cells` ( see `Distribution.blocks_of_cells` ). On the box of each cell, in grid
         coordinates: a cell whose box only meets tiles with mass is kept whole ( block `-1` ), one that meets none is dropped,
         and the others are cut to each block their box meets ( a block that the box meets and the cell does not gives an
         empty piece, which draws nothing )."""
@@ -206,7 +227,9 @@ class Image( Distribution ):
 
     @property
     def nb_pieces( self ):
-        """Total flat cell count for the 1D case `SdotPlan1d` consumes (a single `dim`) -- used to
+        """= Internals
+
+        Total flat cell count for the 1D case `SdotPlan1d` consumes (a single `dim`) -- used to
         size `cell_cum_mass` (`nb_pieces + 1`, see `_update_cell_cum_mass`)."""
         return self.shape.static_count()
 
@@ -223,7 +246,7 @@ class Image( Distribution ):
                 values = self.target_mass / mass * self.values,
 
                 origin = self.origin,
-                frame = self.frame,
+                pixel_frame = self.frame,
                 knots = self.knots,
 
                 current_mass = self.target_mass,
@@ -255,11 +278,13 @@ class Image( Distribution ):
         for name in ( "origin", "frame", "knots" ):
             attr = getattr( self, name )
             if attr.is_defined:
-                kwargs[ name ] = attr.value
+                kwargs[ "pixel_frame" if name == "frame" else name ] = attr.value
         return Image( values = self.values.value[ index ], **kwargs )
 
     def ensure_cell_cum_mass( self ):
-        """Materializes `cell_cum_mass` (a lazy `ComputedAttribute`, mirrors `mass`/`current_mass`)
+        """= Internals
+
+        Materializes `cell_cum_mass` (a lazy `ComputedAttribute`, mirrors `mass`/`current_mass`)
         if not already cached. Called once by `SdotPlan1d` before it reads `dst_dist.cell_cum_mass` --
         a plain method (not a same-named property) because the FIELD itself must keep the name
         `cell_cum_mass` for the C++ struct it crosses the FFI as."""
@@ -280,7 +305,7 @@ class Image( Distribution ):
         for name in ( "origin", "frame", "knots" ):
             attr = getattr( self, name )
             if attr.is_defined:
-                detached_kwargs[ name ] = loom.ops().stop_gradient( attr.value )
+                detached_kwargs[ "pixel_frame" if name == "frame" else name ] = loom.ops().stop_gradient( attr.value )
         detached = Image(
             nb_dims = self.nb_dims.value,
             shape = self.shape.value,
@@ -312,7 +337,9 @@ class Image( Distribution ):
         self.cell_cum_mass.set_raw( cell_cum_mass.raw )
 
     def try_update_sdotplan1d( self, plan ):
-        """Closed-form, pure-JAX fast path for `SdotPlan1d.update_outputs` when `self` is its
+        """= Internals
+
+        Closed-form, pure-JAX fast path for `SdotPlan1d.update_outputs` when `self` is its
         1D piecewise-constant target: bypasses `loom.ffi_call`/the C++ kernel entirely (ordinary
         JAX autodiff differentiates straight through `_pure_jax_cost1d.cost_1d_ot`), evaluated
         ~1.2x-6x faster than the C++ kernel from n=1e6 through 1e8 diracs (see
@@ -414,3 +441,27 @@ def _merge_along( lo, hi, ids, a ):
     nhi[ :, a ] = hi[ last, a ]
     nids[ :, a, 1 ] = ids[ last, a, 1 ]
     return nlo, nhi, nids
+
+
+def _grid_shape( values, batch_axes ):
+    """the number of pixels along each axis: the shape of `values` without its batch axes ( the first ones )"""
+    v = values.value if isinstance( values, loom.Tensor ) else values
+    shape = tuple( v.shape ) if hasattr( v, "shape" ) else numpy.shape( v )
+    return shape[ len( batch_axes or () ): ]
+
+
+def _pixel_frame( frame, shape ):
+    """the frame of ONE pixel, from that of the whole image ( `None`: the longest side is 1, the proportions kept ). In the
+    framework of `frame`, which stays differentiable"""
+    d = len( shape )
+    if frame is None:
+        return numpy.eye( d ) / max( shape )
+    if isinstance( frame, ( list, tuple, float, int, numpy.ndarray ) ):
+        f = numpy.asarray( frame, dtype = float )
+        f = numpy.diag( f.reshape( d ) ) if f.ndim <= 1 else f.reshape( d, d )
+        return f / numpy.asarray( shape, dtype = float )[ :, None ]
+    ops = loom.ops( frame )
+    if frame.ndim <= 1:
+        f = ops.reshape( frame, ( d, ) )
+        return ops.stack( [ ops.stack( [ f[ a ] / shape[ a ] if b == a else 0 * f[ a ] for b in range( d ) ], 0 ) for a in range( d ) ], 0 )
+    return ops.stack( [ frame[ a ] / shape[ a ] for a in range( d ) ], 0 )

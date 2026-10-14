@@ -243,7 +243,7 @@ def density_target( name, sigma = 0.02, size = 512 ):
         return SumOfGaussians( c, s, weights = m, support_box = ( [ 0.0, 0.0 ], [ 1.0, 1.0 ] ) )
     if name in ( "image", "image_hole" ):
         return Image( values = synthetic_image( size, hole = name == "image_hole" ), origin = [ 0.0, 0.0 ],
-                      frame = numpy.eye( 2 ) / size )
+                      pixel_frame = numpy.eye( 2 ) / size )
     raise ValueError( f"unknown density case { name !r } ( { ', '.join( DENSITY_CASES ) } )" )
 
 

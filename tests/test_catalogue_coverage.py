@@ -5,7 +5,8 @@ from errand import test
 # LITERALS of the generated source -- every size was another kernel, and a size the catalogue was not built with had to be compiled.
 #
 # This test asks for sizes `provoke` never used, with `LOOM_KERNELS=catalogue` (a kernel that is not there is an error, nothing compiles).
-# It skips when the machine has no catalogue for its architecture (a checkout that has not built one).
+# It skips when the machine has no catalogue for its architecture (a checkout that has not built one), or, under Jax, when its Jax
+# kernels were compiled for a newer XLA FFI API than this jaxlib's (they are compiled then, see loom's `compilation/catalogue.py`).
 
 if test( "sizes_the_catalogue_was_not_built_with_are_served_by_it" ):
     import os
@@ -14,11 +15,14 @@ if test( "sizes_the_catalogue_was_not_built_with_are_served_by_it" ):
     from loom.compilation import catalogue as loom_catalogue
     from errand import skip
     import sdot
-    from sdot import PowerDiagram, box_half_spaces, set_kernel_dtype
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.Cell import set_kernel_dtype
 
     tag = loom.resolved_device().current_catalogue_tag()
     if tag not in loom_catalogue.registered_tags():
         skip( f"no catalogue for { tag } here", hint = "python -m sdot.catalogue builds one" )
+    if loom.resolved_framework().module_name == "jax" and not loom_catalogue.serves_jax_kernels( tag ):
+        skip( f"the Jax kernels of the catalogue for { tag } are not for this jaxlib", hint = "python -m sdot.catalogue rebuilds it" )
 
     previous = os.environ.get( "LOOM_KERNELS" )
     os.environ[ "LOOM_KERNELS" ] = "catalogue"

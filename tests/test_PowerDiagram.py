@@ -38,7 +38,13 @@ if test( "basic_2D" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     v = Voronoi( numpy.array( [ [ 0.25, 0.5 ], [ 0.75, 0.5 ] ] ), boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
     assert numpy.allclose( _measures( v ), 0.5 )
@@ -49,7 +55,13 @@ if test( "one_seed_takes_everything" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3, 4 ):
         v = Voronoi( numpy.full( ( 1, d ), 0.3 ), boundaries = box_half_spaces( numpy.zeros( d ), numpy.full( d, 2.0 ) ) )
@@ -63,7 +75,13 @@ if test( "sum_is_the_domain" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 60 ), ( 3, 40 ), ( 4, 20 ) ):
         rng = numpy.random.default_rng( 12 + d )
@@ -81,7 +99,13 @@ if test( "matches_the_cell_by_cell_build" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 12 ), ( 3, 10 ), ( 4, 6 ) ):
         rng = numpy.random.default_rng( 5 + d )
@@ -98,7 +122,13 @@ if test( "is_the_nearest_seed_partition" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 8 ), ( 3, 8 ) ):
         rng = numpy.random.default_rng( 100 + d )
@@ -115,7 +145,13 @@ if test( "an_off_centre_box" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d = 3
     mi, ma = numpy.array( [ -2.0, 1.0, 0.5 ] ), numpy.array( [ 1.0, 4.0, 2.5 ] )
@@ -136,7 +172,13 @@ if test( "a_box_domain_survives_driver_jit" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 0 )
     pos = rng.uniform( 0.05, 0.95, size = ( 10, 2 ) )
@@ -157,7 +199,13 @@ if test( "a_domain_that_is_not_a_box" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     dirs = numpy.array( [ [ -1.0, 0, 0 ], [ 0, -1.0, 0 ], [ 0, 0, -1.0 ], [ 1.0, 1, 1 ] ] )
     offs = numpy.array( [ 0.0, 0, 0, 1 ] )
@@ -173,7 +221,13 @@ if test( "no_domain_leaves_the_cells_infinite" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     v = Voronoi( numpy.array( [ [ 0.0, 0 ], [ 1.0, 0 ], [ 0.0, 1 ] ] ) )
     assert ( _measures( v ) > 1e300 ).all()
@@ -185,7 +239,13 @@ if test( "more_seeds_than_work_items" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, n = 3, 500
     rng = numpy.random.default_rng( 42 )
@@ -203,7 +263,13 @@ if test( "a_capacity_too_small_is_grown_and_retried" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, n = 3, 30
     rng = numpy.random.default_rng( 8 )
@@ -223,7 +289,13 @@ if test( "seeds_on_a_grid" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     xs = numpy.array( [ 1, 3, 5 ] ) / 6
     pos = numpy.array( [ [ x, y ] for x in xs for y in xs ] )
@@ -235,7 +307,13 @@ if test( "seeds_on_a_3D_grid" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     xs = numpy.array( [ 1, 3 ] ) / 4
     pos = numpy.array( [ [ x, y, z ] for x in xs for y in xs for z in xs ] )
@@ -249,7 +327,13 @@ if test( "a_seed_outside_the_domain_has_no_cell" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.array( [ [ 0.5, 0.5 ], [ 0.2, 0.2 ], [ 5.0, 5.0 ] ] )
     v = Voronoi( pos, boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
@@ -272,7 +356,13 @@ if test( "the_bisector_is_shifted_by_the_weight_gap" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for gap in ( -0.6, -0.25, 0.0, 0.25, 0.6 ):
         pd = PowerDiagram( numpy.array( [ [ 0.0, 0.5 ], [ 1.0, 0.5 ] ] ),
@@ -290,7 +380,13 @@ if test( "equal_weights_are_no_weights" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 30 ), ( 3, 20 ) ):
         rng = numpy.random.default_rng( 20 + d )
@@ -308,7 +404,13 @@ if test( "a_shift_of_every_weight_changes_nothing" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, n = 2, 25
     rng = numpy.random.default_rng( 33 )
@@ -326,7 +428,13 @@ if test( "weighted_cells_still_tile_the_domain" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 40 ), ( 3, 25 ), ( 4, 12 ) ):
         rng = numpy.random.default_rng( 50 + d )
@@ -343,7 +451,13 @@ if test( "is_the_least_power_distance_partition" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 8 ), ( 3, 8 ) ):
         rng = numpy.random.default_rng( 70 + d )
@@ -361,7 +475,13 @@ if test( "matches_the_cell_by_cell_build_with_weights" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 12 ), ( 3, 10 ), ( 4, 6 ) ):
         rng = numpy.random.default_rng( 90 + d )
@@ -379,7 +499,13 @@ if test( "a_dominated_seed_loses_its_cell" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.array( [ [ 0.25, 0.5 ], [ 0.5, 0.5 ], [ 0.75, 0.5 ] ] )
     m = _measures( PowerDiagram( pos, weights = numpy.array( [ 0.0, -1.0, 0.0 ] ),
@@ -394,7 +520,13 @@ if test( "a_big_enough_weight_swallows_the_domain" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.array( [ [ 0.25, 0.4 ], [ 0.5, 0.6 ], [ 0.8, 0.3 ] ] )
     m = _measures( PowerDiagram( pos, weights = numpy.array( [ 0.0, 10.0, 0.0 ] ),
@@ -410,7 +542,13 @@ if test( "the_memory_changes_nothing_but_the_cost" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3 ):
         rng = numpy.random.default_rng( 5 + d )
@@ -442,7 +580,13 @@ if test( "voronoi_is_the_power_diagram_without_weights" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.random.default_rng( 4 ).uniform( 0.1, 0.9, size = ( 15, 2 ) )
     box = ( [ 0, 0 ], [ 1, 1 ] )
@@ -520,7 +664,13 @@ if test( "measures_derive_wrt_the_seeds" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the adjoint against the finite difference, positions AND weights at the same time -- `check_grad` draws
@@ -537,7 +687,13 @@ if test( "measures_derive_wrt_positions_alone" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # no weights at all: `weights` is a `NoneTensor`, so its gradient too, and the branch
@@ -553,7 +709,13 @@ if test( "measures_derive_wrt_weights_alone" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the other half: positions frozen, only the weights move. This is the derivative a semi-discrete
@@ -570,7 +732,13 @@ if test( "the_weight_jacobian_is_the_facet_over_the_gap" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the classical formula: `dm_i/dw_j = -|F_ij| / ( 2 |d_i - d_j| )` for `j != i`, and the
@@ -603,7 +771,13 @@ if test( "the_position_jacobian_is_the_facet_moment" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the other half of the same derivation: `dm_i/dd_j = |F_ij| ( d_j - b_ij ) / |d_j - d_i|`,
@@ -637,7 +811,13 @@ if test( "the_domain_carries_no_gradient" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # a LIMIT, not a property: a domain cut carries `cut_id == BOUNDARY`, which says
@@ -668,7 +848,13 @@ if test( "cells_are_the_cells" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3 ):
         rng = numpy.random.default_rng( 5 )
@@ -695,7 +881,13 @@ if test( "cells_measure_like_measures" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3 ):
         rng = numpy.random.default_rng( 11 )
@@ -713,7 +905,13 @@ if test( "cells_of_an_unbounded_diagram" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.array( [ [ x, y ] for x in ( 0.25, 0.5, 0.75 ) for y in ( 0.25, 0.5, 0.75 ) ] )
     bounded = numpy.asarray( Voronoi( pos ).cells.is_bounded ).reshape( -1 )
@@ -729,7 +927,13 @@ if test( "weighted_cells_are_the_weighted_cells" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3 ):
         rng = numpy.random.default_rng( 320 + d )
@@ -777,7 +981,13 @@ if test( "the_bsp_holds_every_seed_exactly_once" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n, leaf in ( ( 2, 200, 30 ), ( 3, 137, 8 ), ( 2, 1, 30 ), ( 4, 40, 1 ) ):
         rng = numpy.random.default_rng( 400 + d * 17 + n )
@@ -808,7 +1018,13 @@ if test( "the_tree_shape_does_not_depend_on_the_data" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for n in ( 1, 7, 30, 31, 100, 1057, 5000 ):
         for leaf in ( 1, 8, 30 ):
@@ -839,7 +1055,13 @@ if test( "a_bsp_node_contains_its_subtree" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 411 )
     pos = rng.normal( size = ( 300, 3 ) )
@@ -875,7 +1097,13 @@ if test( "the_weight_majorant_majorates" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 420 )
     pos = rng.uniform( 0, 1, size = ( 400, 2 ) )
@@ -940,7 +1168,13 @@ if test( "an_accelerator_for_other_seeds_is_refused" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 425 )
     pos = rng.uniform( 0, 1, size = ( 20, 2 ) )
@@ -959,7 +1193,13 @@ if test( "the_accelerator_changes_nothing_to_the_measures" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     cases = []
     for d in ( 2, 3 ):
@@ -988,7 +1228,13 @@ if test( "the_accelerator_keeps_every_facet" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d in ( 2, 3 ):
         rng = numpy.random.default_rng( 440 + d )
@@ -1007,7 +1253,13 @@ if test( "the_accelerator_survives_the_degenerate_layouts" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     box2 = ( [ 0, 0 ], [ 1, 1 ] )
 
@@ -1045,7 +1297,13 @@ if test( "the_accelerator_survives_concurrent_bisectors" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     def ring( k, rng, n_back = 2000 ):
         a = 2 * numpy.pi * ( numpy.arange( k ) + rng.uniform( -0.1, 0.1, k ) ) / k
@@ -1077,7 +1335,13 @@ if test( "the_generic_cell_survives_almost_coincident_seeds" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 0 )
     pos0 = rng.uniform( 0, 1, size = ( 600, 3 ) )
@@ -1105,7 +1369,13 @@ if test( "an_unbounded_diagram_falls_back_to_the_full_sweep" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 460 )
     pos = rng.uniform( 0, 1, size = ( 30, 2 ) )
@@ -1126,7 +1396,13 @@ if test( "a_domain_that_is_not_a_box_is_accelerated_too" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 470 )
     pos = rng.uniform( 0.05, 0.4, size = ( 50, 2 ) )
@@ -1146,7 +1422,13 @@ if test( "an_accelerator_built_on_other_weights_is_still_right" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 480 )
     pos = rng.uniform( 0.02, 0.98, size = ( 70, 2 ) )
@@ -1179,7 +1461,13 @@ if test( "the_accelerator_changes_nothing_to_the_derivatives" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the derivatives go through the SURVIVING cuts, so they can only differ if a
@@ -1222,7 +1510,13 @@ if test( "an_accelerated_diagram_draws_the_same_cells" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 495 )
     pos = rng.uniform( 0.05, 0.95, size = ( 40, 2 ) )
@@ -1255,7 +1549,13 @@ if p := bench( "pd accelerated",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     import time
 
@@ -1355,7 +1655,13 @@ if p := experiment( "vor 2D",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     v = Voronoi( _seeds( 2, p.nb_points, p.seed ), boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
     viz = Visualizer( title = f"Voronoi 2D, { p.nb_points } seeds" )
@@ -1373,7 +1679,13 @@ if p := experiment( "vor 2D open",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     v = Voronoi( _seeds( 2, p.nb_points, p.seed ) )
     viz = Visualizer( title = f"Voronoi 2D unbounded, { p.nb_points } seeds" )
@@ -1390,7 +1702,13 @@ if p := experiment( "vor 3D",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     v = Voronoi( _seeds( 3, p.nb_points, p.seed ), boundaries = box_half_spaces( [ 0 ] * 3, [ 1 ] * 3 ) )
     viz = Visualizer( title = f"Voronoi 3D, { p.nb_points } seeds" )
@@ -1413,7 +1731,13 @@ if p := experiment( "vor 3D open",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( p.seed )
     k = p.nb_per_side
@@ -1436,7 +1760,13 @@ if p := experiment( "vor moving seeds",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( p.seed )
     pos = rng.uniform( 0.15, 0.85, size = ( p.nb_points, 2 ) )
@@ -1466,7 +1796,13 @@ if p := experiment( "pd 2D weights",
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = _seeds( 2, p.nb_points, p.seed )
     w = numpy.random.default_rng( p.seed + 1 ).uniform( -p.spread, p.spread, p.nb_points )
@@ -1491,9 +1827,9 @@ if p := experiment( "pd 2D weights",
 
 
 def _unit_box_image( shape, values ):
-    """An image over `[ 0, shape_0 ] x ...`: origin 0, identity frame, knots 0, 1, 2, ... --
-    the defaults, so the box `k` is literally the unit cube at `k`."""
-    return Image( values = numpy.asarray( values, float ).reshape( shape ) )
+    """An image over `[ 0, shape_0 ] x ...`: origin 0, pixels of 1, knots 0, 1, 2, ... -- so the box `k` is
+    literally the unit cube at `k`."""
+    return Image( values = numpy.asarray( values, float ).reshape( shape ), pixel_frame = numpy.eye( len( shape ) ) )
 
 
 def _mc_image_measures( pos, values, weights = None, nb_samples = 300000, seed = 0 ):
@@ -1533,7 +1869,13 @@ if test( "a_constant_image_is_the_volume_up_to_its_mass" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, shape in ( ( 2, ( 3, 4 ) ), ( 3, ( 2, 3, 2 ) ) ):
         rng = numpy.random.default_rng( 900 + d )
@@ -1559,7 +1901,13 @@ if test( "no_distribution_is_still_the_plain_volume" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     rng = numpy.random.default_rng( 901 )
     for d in ( 2, 3 ):
@@ -1578,7 +1926,13 @@ if test( "an_image_integrates_what_a_sampling_says" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, shape, n in ( ( 2, ( 4, 3 ), 10 ), ( 3, ( 2, 3, 2 ), 8 ) ):
         rng = numpy.random.default_rng( 902 + d )
@@ -1601,7 +1955,13 @@ if test( "an_image_integrates_what_a_sampling_says_with_weights" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, shape, n = 2, ( 4, 4 ), 9
     rng = numpy.random.default_rng( 903 )
@@ -1660,7 +2020,13 @@ if test( "an_image_honors_its_origin_frame_and_knots" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, n = 2, 8
     shape = ( 3, 3 )
@@ -1675,7 +2041,7 @@ if test( "an_image_honors_its_origin_frame_and_knots" ):
     t = rng.uniform( knots[ :, 0 ] + 0.1, knots[ :, -1 ] - 0.1, size = ( n, d ) )
     pos = origin + t @ frame
 
-    img = Image( values = values, origin = origin, frame = frame, knots = knots )
+    img = Image( values = values, origin = origin, pixel_frame = frame, knots = knots )
 
     # the domain, written in the physical frame: column `a` of `F^-1` is the normal of axis
     # `a`, and the useful band goes from `knots( a, 0 )` to `knots( a, shape_a )`.
@@ -1700,7 +2066,13 @@ if test( "an_unbounded_diagram_is_finite_against_an_image" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, shape, n = 2, ( 3, 3 ), 6
     rng = numpy.random.default_rng( 905 )
@@ -1723,7 +2095,13 @@ if test( "an_image_leaves_the_derivatives_right" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the adjoint against the finite difference. A piece is a polytope whose cuts carry
@@ -1746,7 +2124,13 @@ if test( "the_density_carries_its_own_derivative" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # `d mass / d value of a box` is the VOLUME of the piece -- the only thing the
@@ -1760,7 +2144,7 @@ if test( "the_density_carries_its_own_derivative" ):
     box = ( numpy.zeros( d ), numpy.array( shape, float ) )
 
     check_grad( lambda v: PowerDiagram( pos, boundaries = box_half_spaces( *box ),
-                    distribution = Image( values = v ) ).measures, values )
+                    distribution = Image( values = v, pixel_frame = numpy.eye( d ) ) ).measures, values )
 
 
 if test( "the_support_of_a_distribution_bounds_the_cells" ):
@@ -1771,7 +2155,13 @@ if test( "the_support_of_a_distribution_bounds_the_cells" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, shape, n = 2, ( 3, 3 ), 7
     rng = numpy.random.default_rng( 908 )
@@ -1798,7 +2188,13 @@ if test( "the_support_intersects_a_given_domain" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, shape, n = 2, ( 4, 4 ), 6
     rng = numpy.random.default_rng( 909 )
@@ -1850,7 +2246,13 @@ if test( "a_smooth_density_integrates_what_a_sampling_says" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 12 ), ( 3, 10 ) ):
         rng = numpy.random.default_rng( 910 + d )
@@ -1881,7 +2283,13 @@ if test( "a_smooth_density_is_exact_on_an_affine_one" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     from math import erf, sqrt
     d, n = 2, 9
@@ -1905,7 +2313,13 @@ if test( "a_smooth_density_leaves_the_derivatives_right" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # THE delegation test. The adjoint goes through three separate responsibilities:
@@ -1934,7 +2348,13 @@ if test( "the_gaussians_carry_their_own_derivatives" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the other half: `d measure / d ( centres, sigmas, weights )`. It does NOT go through the
@@ -2006,7 +2426,13 @@ if test( "the_exact_2d_gaussian_holds_where_a_quadrature_could_not" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     from math import erf, sqrt
     d, n = 2, 6
@@ -2038,7 +2464,13 @@ if test( "the_exact_2d_gaussian_survives_the_awkward_placements" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d = 2
     mi, ma = numpy.zeros( d ), numpy.ones( d )
@@ -2062,7 +2494,13 @@ if test( "the_exact_2d_gaussian_derives_right_too" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # the adjoint of the EXACT path is a completely different code from that of the quadrature: boundary
@@ -2099,7 +2537,13 @@ if test( "the_quadrature_subdivides_until_it_sees_the_density" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     from math import erf, sqrt
     d, n = 3, 8
@@ -2123,7 +2567,13 @@ if test( "the_subdivided_quadrature_derives_right" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # The adjoint of the quadrature path: it must redo EXACTLY the same subdivision as the forward
@@ -2203,7 +2653,13 @@ if test( "the_float_kernel_tiles_the_domain" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     for d, n in ( ( 2, 300 ), ( 3, 120 ) ):
         rng = numpy.random.default_rng( 900 + d )
@@ -2225,7 +2681,13 @@ if test( "the_float_kernel_is_accelerated_the_same" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     d, n = 2, 400
     rng = numpy.random.default_rng( 910 )
@@ -2242,7 +2704,13 @@ if test( "the_float_kernel_derives_well_enough" ):
     import loom
     from loom.testing import need
     from loom.testing import check_grad
-    from sdot import AaBsp, Image, PowerDiagram, SumOfGaussians, Visualizer, Voronoi, box_half_spaces, set_kernel_dtype
+    from sdot.AaBsp import AaBsp
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.viz.Visualizer import Visualizer
+    from sdot.Voronoi import Voronoi
+    from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     need( "grad" )
     d, n = 2, 12
@@ -2257,7 +2725,10 @@ if test( "the_float_kernel_derives_well_enough" ):
 if test( "laplacian_solve_is_the_hessian_solve_and_its_own_adjoint" ):
     import numpy
     from loom.testing import check_grad, need
-    from sdot import PowerDiagram, SumOfGaussians, ot_solve, SumOfDiracs
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.OtProblem import ot_solve
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
     need( "cpu" )
     # `L x = rhs` with the laplacian of the Laguerre graph ( the hessian of the dual ), gauge `x_0 = 0`: compared with a DENSE solve of
     # the matrix that `hessian_rows` delivers. And differentiable with respect to the right-hand side -- `L` being symmetric, the adjoint
@@ -2288,7 +2759,9 @@ if test( "laplacian_solve_is_the_hessian_solve_and_its_own_adjoint" ):
 if test( "moments_of_a_diagram_are_differentiable_like_the_measures" ):
     import numpy
     from loom.testing import check_grad, need
-    from sdot import Mesh, PowerDiagram, SumOfGaussians, box_half_spaces
+    from sdot.distributions.Mesh import Mesh
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
     need( "cpu" )
     # `PowerDiagram.moment( k )`: `int x_k rho`, `int |x|^2 rho`, `int rho` -- the density multiplied by a polynomial, as a density, which
     # the diagram already knows how to differentiate ( `diagram/Moments.h` ). Against `moments` ( closed forms where the density has
@@ -2323,7 +2796,8 @@ if test( "moments_of_a_diagram_are_differentiable_like_the_measures" ):
 if test( "hessian_rows_beyond_3d_are_the_derivatives_of_the_measures" ):
     import numpy
     from loom.testing import need
-    from sdot import PowerDiagram, box_half_spaces, set_kernel_dtype
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.Cell import set_kernel_dtype
     need( "cpu" )
     # beyond 3D the facet measures come from a fan of simplices started on each facet ( `LocalN::for_each_facet` ): the jacobian they
     # assemble must be the one of the measures, by centered finite differences, in the double kernel

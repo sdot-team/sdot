@@ -18,7 +18,14 @@ import loom
 
 
 class SdotPlan1d( Aggregate ):
-    """
+    """THE SOLUTION of a semi-discrete transport in dimension 1: diracs on a line against a density.
+
+    It is exact and has no loop: the diracs are sorted, and the cumulative distribution function of the density is
+    inverted at the cumulated masses of the diracs. It is batched ( one plan per item of a batch of densities, e.g. per
+    angle of a sinogram ) and differentiable end to end. It is requested from an `OtProblem` ( `ot_solve( ... )`,
+    `plan( ... )` ), whose settings are a `Direct`.
+
+    `cost` is `W_2^2`; `barycenters` ( `[ n, 1 ]` ) is stored only with `Direct( with_barycenters = True )`.
     """
 
     # axes
@@ -276,7 +283,9 @@ class SdotPlan1d( Aggregate ):
         return True
 
     def update_outputs_presorted( self, sorted_indices, sorted_pos ):
-        """Sort-free variant of `update_outputs`: `sorted_indices`/`sorted_pos` are ALREADY the sorted
+        """= Internals
+
+        Sort-free variant of `update_outputs`: `sorted_indices`/`sorted_pos` are ALREADY the sorted
         order for this instance's diracs (e.g. from `jnp.argsort`, computed upstream -- one angle at a
         time under an outer `lax.scan`) -- the C++ side skips `sort_diracs` entirely and only runs the
         sweep (`SdotPlan1d.cxx::update_outputs_presorted`/`update_outputs_bwd_presorted`). Evaluates

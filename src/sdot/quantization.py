@@ -39,16 +39,27 @@ import warnings
 
 import loom
 import numpy
-from loom.boundary import _to_framework, export, universe_of
+from loom.boundary import _to_framework, universe_of
 
 from .OtProblem import Direct, Iterative, OtNotConverged, OtProblem
 from .distributions.SumOfDiracs import SumOfDiracs
 
 
-@loom.public
 def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 200, callback = None, verbose = False, ot_tol = None,
                   seed = None, **settings ):
-    """The positions of diracs that QUANTIZE `target` optimally, by Lloyd iterations starting from
+    """Positions of diracs that quantize `target` optimally, by Lloyd iterations: each dirac moves to the barycenter of its
+    cell until the moves are small. Returns the positions, `[ n, d ]`.
+
+    * `positions`: the starting positions `[ n, d ]`, or a number of diracs, then drawn uniformly in the support of
+      `target` ( with `seed` ).
+    * `masses`: the mass of each dirac `[ n ]`, equal by default.
+    * `tol`: stop when the root mean square move is under `tol` times the size of the cells. `max_iter`: at most.
+    * `callback( iteration, positions, plan )`: called after each solve -- to record the iterations.
+    * `ot_tol` and the other keywords: the settings of the solver ( see `Iterative` ).
+
+    = Internals
+
+    The positions of diracs that QUANTIZE `target` optimally, by Lloyd iterations starting from
     `positions` ( `[ n, d ]` ). Returns the final positions, `[ n, d ]`, in the caller's framework.
 
     `positions` can also be a NUMBER of diracs: they then start uniformly at random in the support of
@@ -65,7 +76,6 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
     """
     if isinstance( positions, numbers.Integral ):
         positions = _to_framework( uniform_in_support( target, int( positions ), seed ), universe_of( ( target, masses ) ) )
-    universe = universe_of( ( target, positions, masses ) ) if callback is not None else None
 
     pb = OtProblem( SumOfDiracs( positions, masses ), target )
     nb_diracs = pb.source.nb_diracs.value
@@ -87,7 +97,7 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
             plan = e.solution
             stagnations.append( plan.stats[ "residual" ] )
         if callback is not None:
-            callback( iteration, export( pb.source.positions, universe ), plan )
+            callback( iteration, pb.source.positions, plan )
 
         b = plan.barycenters.value
         ratio = ( float( ( ( b - x ) ** 2 ).sum() ) / nb_diracs / float( plan.cost ) ) ** 0.5
