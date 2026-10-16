@@ -25,6 +25,9 @@ struct SumOfDiracs {
     /// compile-time flag of the member `add_position_grad` would write.
     HD auto position_grad_wanted( auto &&grad_src ) const { return std::bool_constant<DECAYED_TYPE_OF( grad_src.positions )::is_valid>(); }
 
+    /// what `add_position_grad` derives, for loom's `computed_grads` ( `flags`: this source's )
+    static void position_computed_grads( auto &&flags ) { flags.positions = true; }
+
     /// Accumulate d cost / d position(i) into the gradient twin `grad_src`. Guarded at compile time:
     /// an unperturbed input reaches us as a NoneTensor (no `operator=`), so the write must vanish.
     /// A per-angle buffer, so each angle writes its OWN slot -- a plain `=`, no cross-angle race.

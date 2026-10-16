@@ -59,7 +59,11 @@ class Image( Distribution ):
     # call -- previously it was, twice per call, see [[otplan1d-kernel-profile]].
     cell_cum_mass    : ComputedAttribute[ RealTensor[ "num_cell_cum" ], ( "values", "frame", "knots" ) ]
 
-    def __init__( self, values, frame = None, pixel_frame = None, **kwargs ) -> None:
+    # it integrates itself TRANSLATED ( `for_each_piece_shifted`, C++ ): what a periodicity repeats ( `Periodic.h` )
+    translatable = True
+    constant_on_pieces = True                 # ( partial transport: `PowerDiagram( sink_weight = ... )` )
+
+    def __init__( self, values, frame = None, pixel_frame = None, target_mass = 1.0, **kwargs ) -> None:
         """`frame`: the edges of the WHOLE image ( `[ d, d ]`, or `[ d ]` lengths ). `pixel_frame`: those of ONE pixel ( the
         field `frame` ). Neither: the longest side of the image is 1. The copies ( `shape` given ) pass `pixel_frame` as is."""
         if frame is not None and pixel_frame is not None:
@@ -71,19 +75,27 @@ class Image( Distribution ):
             pixel_frame = _pixel_frame( frame, shape )
         if pixel_frame is not None:
             kwargs[ "frame" ] = pixel_frame
-        self.__base_init__( values = values, target_mass = 1.0, **kwargs )
+        self.__base_init__( values = values, target_mass = target_mass, **kwargs )
 
     def _grid_geometry( self ):
         """`( d, frame, origin, lo, hi )` of the grid, on the HOST side -- or `None` if it is not
         readable here (a tracer under `jit`). Bounding is an optimization: we do without it rather than
         make the call fail."""
+        # ( a geometry that is differentiated reads its value through `stop_gradient` -- outside a `jit`; under one, a constant
+        # is read as it is: `stop_gradient` would make it a tracer )
+        from loom import stop_gradient
+        def host( t ):
+            try:
+                return numpy.asarray( t.raw, dtype = float )
+            except ( TypeError, ValueError ):
+                return numpy.asarray( stop_gradient( t ).raw, dtype = float )
         try:
             d = int( self.nb_dims.value )
             shape = numpy.asarray( self.shape.value, dtype = int ).reshape( -1 )
-            frame = numpy.asarray( self.frame, dtype = float ).reshape( d, d ) if self.frame.is_defined else numpy.eye( d )
-            origin = numpy.asarray( self.origin, dtype = float ).reshape( -1 ) if self.origin.is_defined else numpy.zeros( d )
+            frame = host( self.frame ).reshape( d, d ) if self.frame.is_defined else numpy.eye( d )
+            origin = host( self.origin ).reshape( -1 ) if self.origin.is_defined else numpy.zeros( d )
             if self.knots.is_defined:
-                knots = numpy.asarray( self.knots, dtype = float ).reshape( d, -1 )
+                knots = host( self.knots ).reshape( d, -1 )
                 lo = knots[ :, 0 ]
                 hi = numpy.array( [ knots[ a, shape[ a ] ] for a in range( d ) ] )
             else:
@@ -250,6 +262,7 @@ class Image( Distribution ):
                 knots = self.knots,
 
                 current_mass = self.target_mass,
+                target_mass = self.target_mass,
                 batch_axes = self.batch_axes,
             )
 
@@ -262,7 +275,15 @@ class Image( Distribution ):
             FfiCode.per_item( code = "outputs.image.current_mass( batch_index ) = outputs.image( batch_index ).measure();",
                 ),
             FfiCode.per_item( "outputs.image( batch_index ).measure_bwd( grad_of_outputs.image( batch_index ).values, "
-                           "grad_of_outputs.image( batch_index ).current_mass );" ),
+                           "grad_of_outputs.image( batch_index ).current_mass ); "
+                           "outputs.image( batch_index ).measure_frame_bwd( grad_of_outputs.image( batch_index ).frame, "
+                           "grad_of_outputs.image( batch_index ).current_mass );",
+                           # the mass with respect to the pixel values and the frame -- not the knots; and with respect to the origin,
+                           # which it does not depend on: a zero, computed
+                           computed_grads = "computed_grads.from_image_current_mass.image.values = true; "
+                                            "[]( auto &img ) { if constexpr ( requires { img.origin; } ) img.origin = true; "
+                                            "if constexpr ( requires { img.frame; } ) img.frame = true; }"
+                                            "( computed_grads.from_image_current_mass.image );" ),
             image = loom.out( self, writes = ( "current_mass", ) ),
             has_dynamic_capacity = False,
         )

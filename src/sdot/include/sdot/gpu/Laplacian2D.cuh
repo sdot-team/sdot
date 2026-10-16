@@ -21,8 +21,9 @@
 //   * COUNT: one thread per COO entry, an atomic for each of its two rows;
 //   * SCAN: an exclusive prefix sum gives `row` ( written here: CUB's headers do not match the pinned `nvcc` );
 //   * FILL: the same loop, each row's cursor an atomic, THE SAME double on both sides;
-//   * SORT each row by column ( insertion, seven entries ): the CSR is then the same to the bit from one run to the next
-//     despite the atomics, and so is every product with it;
+//   * SORT each row by column ( insertion, seven entries ), two entries of one column by value ( the tree of aggregates sends
+//     several facets onto a root's row: `Newton2D.cuh::tree_facets` ): the CSR is then the same to the bit from one run to the
+//     next despite the atomics, and so is every product with it;
 //   * THE DIAGONAL is summed from the finished row, in its order: `L 1 = 0` to the bit. A row without a neighbour ( an
 //     empty cell ) would make the system singular without saying so: its diagonal is set to one, as on the CPU.
 //
@@ -184,7 +185,7 @@ __global__ void __launch_bounds__( BLOCK ) lap_sort( const TP *row, TC *col, TV 
         for ( int r = 0; r < SORT_R; ++r ) {
 #pragma unroll
             for ( int q = r % 2; q + 1 < SORT_R; q += 2 ) {
-                const bool sw = c[ q ] > c[ q + 1 ];
+                const bool sw = c[ q ] > c[ q + 1 ] || ( c[ q ] == c[ q + 1 ] && v[ q ] > v[ q + 1 ] );   // ( ties by value: see below )
                 const TC c0 = sw ? c[ q + 1 ] : c[ q ], c1 = sw ? c[ q ] : c[ q + 1 ];
                 const TV v0 = sw ? v[ q + 1 ] : v[ q ], v1 = sw ? v[ q ] : v[ q + 1 ];
                 c[ q ] = c0; c[ q + 1 ] = c1; v[ q ] = v0; v[ q + 1 ] = v1;
@@ -203,13 +204,32 @@ __global__ void __launch_bounds__( BLOCK ) lap_sort( const TP *row, TC *col, TV 
             const TC c = col[ p ];
             const TV v = val[ p ];
             TP q = p;
-            for ( ; q > b && col[ q - 1 ] > c; --q ) { col[ q ] = col[ q - 1 ]; val[ q ] = val[ q - 1 ]; }
+            for ( ; q > b && ( col[ q - 1 ] > c || ( col[ q - 1 ] == c && val[ q - 1 ] > v ) ); --q ) { col[ q ] = col[ q - 1 ]; val[ q ] = val[ q - 1 ]; }
             col[ q ] = c; val[ q ] = v;
         }
         for ( TP p = b; p < e; ++p )
             d += val[ p ];
     }
     dia[ i ] = d > 0 ? d : TV( 1 );
+}
+
+/// PERIODICITY: a cell can meet the same neighbour through two of its images ( two facets ), which the sorted row holds as
+/// two entries of the same column. They are MERGED into the first ( the others keep their column and a zero ): the products
+/// and the diagonal are unchanged, and a row has one weight per neighbour.
+template<class TP,class TC,class TV>
+__global__ void __launch_bounds__( BLOCK ) lap_merge( const TP *row, const TC *col, TV *val, SI n ) {
+    const SI i = SI( blockIdx.x ) * blockDim.x + threadIdx.x;
+    if ( i >= n )
+        return;
+    const TP b = row[ i ], e = row[ i + 1 ];
+    TP f = b;
+    for ( TP p = b + 1; p < e; ++p ) {
+        if ( col[ p ] == col[ f ] ) {
+            val[ f ] += val[ p ];
+            val[ p ] = TV( 0 );
+        } else
+            f = p;
+    }
 }
 
 /// what the assembly works in: two arrays of `n + 1` counters and the scan's tiles ( taken once by a solver that
@@ -239,6 +259,9 @@ void assemble_laplacian_in( const CudaQueue &queue, const CardT &card, const Lap
     launch_kernel( queue, &lap_fill<typename CardT::TR,TP,TC,TV>, grid, BLOCK, 0, card.pb.fi, card.pb.fj, card.pb.fc, card.counters, card.pb.fcap, ws.at, col, val );
     constexpr int R = requires { card.pb.seeds; } ? 2 * SORT_R : SORT_R;      // ( a 3D card: `Cell3D.cuh` )
     launch_kernel( queue, &lap_sort<TP,TC,TV,R>, blocks_for( n ), BLOCK, 0, row, col, val, dia, n );
+    if constexpr ( requires { card.pb.nimg; } )
+        if ( card.pb.nimg > 1 )
+            launch_kernel( queue, &lap_merge<TP,TC,TV>, blocks_for( n ), BLOCK, 0, static_cast<const TP *>( row ), static_cast<const TC *>( col ), val, n );
 }
 
 /// the same, its workspace taken from the call's pool; `false` if the pool said no

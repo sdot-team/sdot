@@ -249,7 +249,9 @@ class Cell( Aggregate, Displayable ):
             "measure",
             FfiCode.per_item( code = "inputs.cell( batch_index ).measure( outputs.res( batch_index ), scratch.pool( batch_index ) );" ),
             FfiCode.per_item( "inputs.cell( batch_index ).measure_bwd( outputs.res( batch_index ), grad_of_outputs.res( batch_index ), "
-                              "grad_of_inputs.cell( batch_index ).vertex_positions, scratch.pool( batch_index ) );" ),
+                              "grad_of_inputs.cell( batch_index ).vertex_positions, scratch.pool( batch_index ) );",
+                              # the measure reads the vertices, and nothing else of the cell ( its cuts are not derived )
+                              computed_grads = "computed_grads.from_res.cell.vertex_positions = true;" ),
             cell = self,
             res = loom.out( res ),
             pool = self._call_scratch( max( self._cap_v(), self._cap_c() ) ),
@@ -284,6 +286,23 @@ class Cell( Aggregate, Displayable ):
         if not self.batch_axes:
             return of_item( self._item( 0 ) )
         return [ of_item( it ) for it in self._items() ]
+
+    def moved( self, maps ):
+        """A copy of the cell moved by the affine map `x -> M x + V` -- `maps`: `[ d, d + 1 ]` ( `[ M | V ]` ), or one per item
+        `[ nb_items, d, d + 1 ]`. `M` orthogonal: the cell stays a cell, its topology and cut identifiers unchanged."""
+        d = self.dim
+        maps = np.asarray( maps, dtype = float )
+        n = self.nb_items
+        if maps.ndim == 2:
+            maps = np.broadcast_to( maps, ( n, d, d + 1 ) )
+        res = self._empty_like_me()
+        res._adopt_geometry( self )
+        raw = np.array( np.asarray( self.vertex_positions.raw ), dtype = float, copy = True )
+        flat = raw.reshape( ( -1, ) + raw.shape[ len( self.batch_axes ) : ] )
+        for b in range( n ):
+            flat[ b ] = flat[ b ] @ maps[ b, :, :d ].T + maps[ b, :, d ]
+        res.vertex_positions.set( flat.reshape( raw.shape ) )
+        return res
 
     def vertices( self, item = 0 ):
         """`vertex_positions` of item `item`, in numpy `[ nb_vertices, d ]` -- without the padding
@@ -343,10 +362,11 @@ class Cell( Aggregate, Displayable ):
     # ---- display ----------------------------------------------------------------------------------
 
     def add_to_viz( self, viz, color = None, opacity = 1.0, faces = True, edges = True, points = False,
-                    owners = None, nb_colors = None ):
+                    owners = None, nb_colors = None, frames = True, edge_opacity = 1.0 ):
         """Draws itself into a `Visualizer` ( see `sdot.viz.Visualizer`, and `cell_viz` for what an
         unbounded cell drops ). Each item takes its color from its RANK IN THE BATCH,
         on a block reserved in advance : the color of a cell of a diagram says WHICH seed.
         `owners`: the rank to take the color from, per item, on a block of `nb_colors` -- the
-        pieces of one cell ( `PowerDiagram.support_pieces` ) have its color."""
-        return cell_viz.add_to_viz( self, viz, color, opacity, faces, edges, points, owners, nb_colors )
+        pieces of one cell ( `PowerDiagram.support_pieces` ) have its color. `frames = False`: drawn without counting in the
+        scale of the scene ( the zoom fits what does count ). `edge_opacity`: that of the edges ( `opacity` is the faces' )."""
+        return cell_viz.add_to_viz( self, viz, color, opacity, faces, edges, points, owners, nb_colors, frames, edge_opacity )

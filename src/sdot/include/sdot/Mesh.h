@@ -7,6 +7,7 @@
 #include <loom/support/containers/Matrix.h>
 #include <loom/support/atomic_add.h>
 #include <loom/support/math.h>
+#include <limits>
 
 namespace sdot {
 
@@ -145,6 +146,112 @@ struct MeshElementDensity {
             }
         m2 += base * s2;
     }
+
+    // ---- one moment and its adjoint, exact ( `diagram/Moments.h` ) ------------------------------------
+    // `int p rho = |S| Phi( P, f )`, `f_k = rho( P_k )`, with `Phi` a polynomial of the vertices and of the values at the
+    // vertices ( the closed forms above ). Its adjoint: the volume moves with the vertices, `Phi` with the vertices
+    // directly and through `f_k` ( `d f_k / d P_k = grad rho` ), and the corners' values receive `d Phi / d f_k` times
+    // the barycentric coordinates of `P_k`. Exact, where the quadrature of `PointwiseDensity` refines `|x|^2 rho`.
+
+    static constexpr bool exact_moments = true;
+
+    /// `Phi`, and with `grad` its derivatives: `dP[ q ][ c ] = d Phi / d P_q[ c ]` ( `f` fixed ), `df[ q ] = d Phi / d f_q`
+    template<int K,bool grad>
+    HD static TF moment_phi( const auto &P, const TF *f, TF ( *dP )[ ct_dim ], TF *df ) {
+        constexpr int D = ct_dim;
+        if constexpr ( grad )
+            for ( int q = 0; q <= D; ++q ) {
+                df[ q ] = 0;
+                for ( int c = 0; c < D; ++c )
+                    dP[ q ][ c ] = 0;
+            }
+        TF sf = 0;
+        for ( int k = 0; k <= D; ++k )
+            sf += f[ k ];
+        if constexpr ( K == D + 1 ) {                    // int rho
+            if constexpr ( grad )
+                for ( int q = 0; q <= D; ++q )
+                    df[ q ] = TF( 1 ) / ( D + 1 );
+            return sf / ( D + 1 );
+        } else if constexpr ( K < D ) {                  // int x_K rho
+            const TF c1 = TF( 1 ) / ( ( D + 1 ) * ( D + 2 ) );
+            TF r = 0, sx = 0;
+            for ( int j = 0; j <= D; ++j ) {
+                r += TF( P[ j ][ K ] ) * ( sf + f[ j ] );
+                sx += TF( P[ j ][ K ] );
+            }
+            if constexpr ( grad )
+                for ( int q = 0; q <= D; ++q ) {
+                    dP[ q ][ K ] = c1 * ( sf + f[ q ] );
+                    df[ q ] = c1 * ( sx + TF( P[ q ][ K ] ) );
+                }
+            return c1 * r;
+        } else {                                         // int |x|^2 rho
+            const TF base = factorial( D ) / factorial( D + 3 );
+            TF s2 = 0;
+            for ( int i = 0; i <= D; ++i )
+                for ( int j = 0; j <= D; ++j ) {
+                    TF pij = 0;
+                    for ( int c = 0; c < D; ++c )
+                        pij += TF( P[ i ][ c ] ) * TF( P[ j ][ c ] );
+                    for ( int k = 0; k <= D; ++k ) {
+                        const int same = ( i == j ) + ( j == k ) + ( i == k );
+                        const TF wt = base * ( same == 3 ? TF( 6 ) : same == 1 ? TF( 2 ) : TF( 1 ) );
+                        s2 += wt * pij * f[ k ];
+                        if constexpr ( grad ) {
+                            df[ k ] += wt * pij;
+                            // `pij` is symmetric: `d / d P_i` sees `P_j` once from `( i, j )` and once from `( j, i )`
+                            for ( int c = 0; c < D; ++c )
+                                dP[ i ][ c ] += TF( 2 ) * wt * TF( P[ j ][ c ] ) * f[ k ];
+                        }
+                    }
+                }
+            return s2;
+        }
+    }
+
+    template<int K>
+    HD TF integrate_moment_over_simplex( const auto &P ) const {
+        const TF det = edge_matrix( P ).determinant();
+        TF f[ ct_dim + 1 ];
+        for ( int k = 0; k <= ct_dim; ++k )
+            f[ k ] = value_at( P[ k ] );
+        return ( det < 0 ? -det : det ) / factorial( ct_dim ) * moment_phi<K,false>( P, f, nullptr, nullptr );
+    }
+
+    template<int K>
+    HD void integrate_moment_over_simplex_bwd( const auto &P, TF g, auto &&grad_pts, auto &&grad_dist ) const {
+        constexpr int D = ct_dim;
+        const auto M = edge_matrix( P );
+        const TF det = M.determinant();
+        const TF vol = ( det < 0 ? -det : det ) / factorial( D );
+        TF f[ D + 1 ], df[ D + 1 ], dP[ D + 1 ][ D ];
+        for ( int k = 0; k <= D; ++k )
+            f[ k ] = value_at( P[ k ] );
+        const TF phi = moment_phi<K,true>( P, f, dP, df );
+
+        // the volume
+        const TF gv = ( det < 0 ? -g : g ) * phi / factorial( D );
+        for ( PI r = 0; r < PI( D ); ++r ) {
+            TF row_sum = 0;
+            for ( PI c = 0; c < PI( D ); ++c ) {
+                const TF minor = M.without_row_and_col( r, c ).determinant();
+                const TF cof = ( ( r + c ) % 2 ? -minor : minor ) * gv;
+                grad_pts[ c + 1 ][ r ] += cof;
+                row_sum += cof;
+            }
+            grad_pts[ 0 ][ r ] -= row_sum;
+        }
+
+        // `Phi`, directly and through the values at the vertices
+        const auto gr = gradient_at( P[ 0 ] );
+        const TF gp = g * vol;
+        for ( int q = 0; q <= D; ++q ) {
+            for ( PI c = 0; c < PI( D ); ++c )
+                grad_pts[ q ][ c ] += gp * ( dP[ q ][ c ] + df[ q ] * gr[ c ] );
+            add_value_grad_at( grad_dist, P[ q ], gp * df[ q ] );
+        }
+    }
 };
 
 // A CONTINUOUS PIECEWISE LINEAR density on a mesh of simplices, seen as a density to integrate over a cell.
@@ -161,6 +268,14 @@ struct Mesh {
 
     /// the cell is cut by the facets of the simplices: the integrator reserves a spare cell for it
     static constexpr bool cuts_pieces = true;
+
+    /// what this density's adjoint derives, for loom's `computed_grads` ( `flags`: the distribution's, under one
+    /// output ). The masses are never read by the integration: their derivative is known to be zero.
+    static void computed_grads( auto &&flags ) {
+        flags.values = true;   // `add_value_grad_at` -- not the nodes
+        if constexpr ( requires { flags.current_mass; } ) flags.current_mass = true;
+        if constexpr ( requires { flags.target_mass; } )  flags.target_mass  = true;
+    }
 
     /// the integral of the density on the facets of a cell is computed by cutting the FACETS ( `for_each_facet_mass` ), not read off the
     /// pieces: what `Sweep.h` and `hessian_row` look for ( a plain trait: it resolves the same under every compiler )
@@ -427,12 +542,20 @@ struct Mesh {
             const auto n = Vector<TF,D>::with_func( [&]( PI c ) { return - TF( grads( e, i, c ) ) / gn; } );
             const TF off = ( ( i == 0 ? TF( 1 ) : TF( 0 ) ) - gx0 ) / gn;
             if ( bounded ) {
+                // up to the rounding of the kernel float ( see `Polytope.h` ): a cell that starts from the mesh's boundary, its domain,
+                // has vertices on the outer facets, and cutting there again would leave twins -- flat simplices, whose orientation
+                // the adjoints ( `d|det|` ) cannot read
+                using TK = std::decay_t<decltype( cell.coord( 0, 0 ) )>;
+                const TF tol = TF( 64 ) * TF( std::numeric_limits<TK>::epsilon() );
                 bool crosses = false;
                 for ( SI v = 0; v < nv && ! crosses; ++v ) {
-                    TF s = - off;
-                    for ( int c = 0; c < D; ++c )
-                        s += n[ c ] * TF( cell.coord( int( v ), c ) );
-                    crosses = s > 0;
+                    TF s = - off, scale = off < 0 ? - off : off;
+                    for ( int c = 0; c < D; ++c ) {
+                        const TF t = n[ c ] * TF( cell.coord( int( v ), c ) );
+                        s += t;
+                        scale += t < 0 ? - t : t;
+                    }
+                    crosses = s > tol * scale;
                 }
                 if ( ! crosses )
                     continue;

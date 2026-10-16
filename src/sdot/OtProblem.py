@@ -95,6 +95,9 @@ class Tuning:
                   # the aggregation of near-coincident seeds ( `sdotplan/Aggregation.h` ): a pair is merged when one ulp of its
                   # weights moves more than `tol / aggregation_margin` of mass between them ( `None`: 4 )
                   aggregation_margin = None,
+                  # the AGGREGATES of `duplicates = "split"` ( `groups.find_groups` ): a node of the single-linkage tree of the
+                  # positions is one when its height is at most `aggregation_kappa` times the height at which it joins the rest
+                  aggregation_kappa = 1e-3,
                   # the machine : the spatial accelerator, the neighbour memory ( § 11 ), the scratch ( § 18.2 )
                   accelerator = None, memory = None, scratch_capacity = None,
                   # keep the given starting weights even if they empty a cell ( the stages of a continuation run by the caller )
@@ -124,6 +127,7 @@ class Tuning:
         self.residual_power    = residual_power
         self.residual_switch   = residual_switch
         self.aggregation_margin = aggregation_margin
+        self.aggregation_kappa = float( aggregation_kappa )
         self.keep_start        = bool( keep_start )
         self.accelerator       = accelerator
         self.memory            = memory
@@ -165,6 +169,8 @@ class Iterative:
     * `precision`: the float of the geometry, `"fp64"`, `"fp32"`, or `"mixed"` ( fp32 then fp64, on a GPU ). `"auto"`:
       fp64 on a CPU, mixed on a GPU.
     * `aggregate`: merge the diracs too close for the doubles to separate their cells ( see `SdotPlanNd.clusters` ).
+    * `duplicates`: what the diracs at the same position ( or too close for the doubles ) get: `"split"`, a piece of their
+      merged cell each, of their own mass ( `SdotPlanNd.groups` ), or `"merge"`, the merged cell shared by all of them.
     * `keep_weights`: keep the weights of every step in `history`.
     * `on_failure`: `"raise"` an `OtNotConverged`, or `"ignore"` and read `converged`.
     * `differentiable`: attach the derivatives of the outputs -- `"auto"` when an input is traced ( `jax.grad`... ).
@@ -216,6 +222,19 @@ class Iterative:
     what is left of the full problem ( the floor of the doubles ). Nothing changes, and nothing is paid, on a cloud whose
     pairs the doubles separate. `SdotPlanNd.clusters` says which seeds were merged.
 
+    `duplicates` : THE CONVENTION FOR THE MERGED SEEDS ( `docs/guide/duplicates.md` ). `"split"` ( the default ): the seeds the
+    doubles cannot separate form a TREE OF AGGREGATES of the diagram ( `PowerDiagram( groups = ... )`, `groups.py` ), whose cells
+    their members split among themselves -- each plane computed in the frame of the lowest common aggregate of its two seeds, at
+    its scale, exact duplicates by the bisectors of virtual diracs spread around them. The tree is found once, before the first
+    diagram, from the distances alone ( a separation of scales, `Tuning( aggregation_kappa = ... )`, `groups.find_groups` ), and
+    Newton runs on all the weights of that geometry ( `sdotplan/Groups.h`: the roots' laplacian, then a small block per aggregate,
+    level by level ). On the card, with a periodicity or with `step = "limits"`, the aggregation runs and each cluster is split
+    afterwards ( `SdotPlanNd._split_groups` ). Either way every member gets its OWN mass, to the tolerance ( no floor of the
+    doubles: `residual_full` is `residual` ). The barycenters are those of the pieces, so the cost's gradient `2 m_i ( p_i - b_i )`
+    differs between duplicates and a descent separates them. `"merge"`: the outputs share the merged cell ( `cell_masses` in
+    proportion to the masses, its barycenter for each ), the derivatives those of one merged dirac. Exact duplicates are only seen
+    on readable positions ( not under `jax.jit` ).
+
     `on_failure` : what a solve that did not converge does -- `"raise"` ( the default: an `OtNotConverged`, carrying the solution
     it reached ) or `"ignore"` ( the caller reads `converged` / `stats`; for a descent that tolerates an approximate plan ). Not
     checked under `jax.jit`, where the status is a tracer.
@@ -234,13 +253,16 @@ class Iterative:
 
     def __init__( self, tol = 1e-8, max_iter = 100, ot_plan = None, weights0 = None,
                   continuation = "auto", precision = "auto", aggregate = True, keep_weights = False,
-                  tuning = None, on_failure = "raise", differentiable = "auto" ):
+                  tuning = None, on_failure = "raise", differentiable = "auto", duplicates = "split" ):
         if on_failure not in ( "raise", "ignore" ):
             raise ValueError( f"unknown on_failure : { on_failure !r } ( 'raise' or 'ignore' )" )
         if differentiable not in ( "auto", True, False ):
             raise ValueError( f"unknown differentiable : { differentiable !r } ( 'auto', True or False )" )
         self.on_failure   = on_failure
         self.differentiable = differentiable
+        if duplicates not in ( "split", "merge" ):
+            raise ValueError( f"unknown duplicates : { duplicates !r } ( 'split' or 'merge' )" )
+        self.duplicates   = duplicates
         if precision not in _PRECISIONS:
             raise ValueError( f"unknown precision : { precision !r } ( { ', '.join( _PRECISIONS ) } )" )
         if continuation not in ( "auto", "always", "never" ):
@@ -300,7 +322,7 @@ class OtProblem:
 
     see the module docstring"""
 
-    def __init__( self, source, target ):
+    def __init__( self, source, target, periodicity = None ):
         """`source` : the DISCRETE distribution -- a `SumOfDiracs` ( or a `ProjectedSumOfDiracs` ) ;
         its `weights`, normalized, are the target masses of the cells.
 
@@ -310,10 +332,17 @@ class OtProblem:
         ( `bounding_half_spaces` -- the box of an image, `centers +- 6 sigma` for gaussians ),
         which must be BOUNDED. The diracs have nothing to do with it : their cells can be far from them.
         Their envelope is only used for the STARTING POINT ( the reframing ). This is why `domain` is
-        READ-ONLY -- there is no second place to state it."""
+        READ-ONLY -- there is no second place to state it.
+
+        `periodicity`: transport on the quotient of the space by a group of translations ( a torus, a cylinder: see
+        `sdot.periodicity` ) -- `True` for every side of the box of `target`, one boolean per axis, or the generators. The
+        target is repeated by the group, and the diracs may lie anywhere: they are folded, and the barycenters come back
+        next to them."""
         if target is None:
             raise ValueError( "OtProblem : a target is needed -- it is what gives the domain" )
         self._last = None                                # the last solution returned ( not its weights )
+        #: the periodicity of the space ( `None`: none ), see `sdot.periodicity`
+        self.periodicity = periodicity
         self._source = None
         self._target = None
         self.source = source
@@ -431,6 +460,8 @@ class OtProblem:
                              f"and not a `{ type( settings ).__name__ }` -- see the docstring of `OtProblem`" )
 
         if regime == "direct":
+            if self.periodicity is not None and self.periodicity is not False:
+                raise NotImplementedError( "periodicity in 1D: transport on the circle is another algorithm, not implemented yet" )
             from .SdotPlan1d import SdotPlan1d
             return SdotPlan1d._solve( self, settings, verbose )
 
@@ -453,21 +484,26 @@ class OtProblem:
         return int( dist.nb_diracs.value )
 
     def _bounds( self, dirs, offs, d ):
-        """Do these half-spaces bound ? A box is recognized without building anything ; otherwise we
-        build the polytope to find out ( a few planes, host side )."""
+        """Do these half-spaces bound ? A box is recognized without building anything ; otherwise each coordinate is
+        maximized and minimized over them ( `2 d` small linear programs, host side: no kernel, so it holds under a `jit`
+        too, where the count of a cell built by a kernel cannot be read )."""
         from .PowerDiagram import axis_aligned_box
         if axis_aligned_box( dirs, offs ) is not None:
             return True
-        from .Cell import Cell
-        dom = Cell.make_unbounded( d, kernel_dtype = "FP64" )
-        for k in range( len( offs ) ):
-            dom.cut( dirs[ k ], float( offs[ k ] ) )
-        return bool( dom.is_bounded )
+        from scipy.optimize import linprog
+        for k in range( d ):
+            for sign in ( 1.0, -1.0 ):
+                c = np.zeros( d )
+                c[ k ] = sign
+                res = linprog( c, A_ub = dirs, b_ub = offs, bounds = [ ( None, None ) ] * d )
+                if res.status == 3:                       # unbounded
+                    return False
+        return True
 
 
 # -- THE SHORTCUT ------------------------------------------------------------------------------
 
-def ot_solve( source, target, *, verbose = False, **settings ):
+def ot_solve( source, target, *, periodicity = None, verbose = False, **settings ):
     """The transport plan from `source` to `target`, with the settings of the solver as keywords: those of `Iterative` in
     2D and more ( `tol`, `max_iter`, `ot_plan`... ), of `Direct` in 1D. A name that does not belong to them raises.
 
@@ -506,7 +542,7 @@ def ot_solve( source, target, *, verbose = False, **settings ):
             pb.source = SumOfDiracs( move( pos, sol ) )
 
     `ot_solve` builds a fresh `OtProblem` at each call : without `ot_plan`, it restarts from zero."""
-    pb = OtProblem( source, target )
+    pb = OtProblem( source, target, periodicity = periodicity )
     cls = { "direct": Direct, "iterative": Iterative }[ pb.regime ]
     try:
         solver_settings = cls( **settings )
@@ -519,11 +555,12 @@ def ot_solve( source, target, *, verbose = False, **settings ):
     return pb.solve( solver_settings, verbose )
 
 
-def plan( f, g ):
-    """The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them )"""
-    return OtProblem( f, g ).solve()
+def plan( f, g, periodicity = None ):
+    """The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them ). `periodicity`: on a torus,
+    a cylinder... ( see `OtProblem` )"""
+    return OtProblem( f, g, periodicity = periodicity ).solve()
 
 
-def w2( f, g ):
-    """`W_2^2` between `f` and `g`"""
-    return plan( f, g ).cost
+def w2( f, g, periodicity = None ):
+    """`W_2^2` between `f` and `g` ( on the quotient space with a `periodicity` )"""
+    return plan( f, g, periodicity = periodicity ).cost

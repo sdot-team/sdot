@@ -18,9 +18,11 @@ tensors, and so on:
   inputs were JAX arrays.
 - **Devices**: the computation runs on the device of the inputs. On a CUDA GPU, the whole solve runs on the card for 2D
   problems ( against a box, a polygon, an image, gaussians or a triangle mesh ) and for 3D problems against a uniform
-  density; anything else raises there.
-- **Gradients**: `jax.grad` and `torch.autograd` go through `w2` and the outputs of a plan ( see
-  [Differentiability](./differentiability) ).
+  density, isotropic gaussians or a tetrahedral mesh; anything else raises there.
+- **Gradients**: `jax.grad` and `torch.autograd` go through `w2` and the outputs of a plan, with respect to the diracs and to
+  the parameters of the target ( an image's values, frame and origin, gaussians, a mesh's values... ), on the CPU and on a CUDA
+  GPU, under `jax.jit` and for batches of cotangents ( `jax.jacrev` ). In 1D, the barycenters derive when the plan stores them
+  ( `Direct( with_barycenters = True )` ).
 - **`jax.jit`**: the whole solve is one call inside the compiled program.
 - **Precision**: JAX works in float32 unless `jax_enable_x64` is set; float64 is recommended for gradients.
 

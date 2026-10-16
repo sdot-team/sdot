@@ -6,7 +6,7 @@ export default createContentLoader( 'examples/*.md', {
     const examples = rawData
       .filter( p => !p.url.match( /\/examples\/?$/ ) && !p.frontmatter.draft )
       .map( p => {
-        const slug = p.url.replace( /\/$/, '' ).split( '/' ).pop()
+        const slug = p.url.replace( /\/$/, '' ).replace( /\.html$/, '' ).split( '/' ).pop()
         return {
           title:        p.frontmatter.title        ?? slug,
           description:  p.frontmatter.description  ?? '',

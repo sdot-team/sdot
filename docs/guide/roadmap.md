@@ -4,9 +4,16 @@ What we are working on. Nothing on this page is available yet: names and interfa
 
 ## Ground metrics
 
-- **Periodic metrics**: transport on a torus ( textures, angles... ).
-- **Entropic regularization**: an entropy penalty on the transport cost, for a smoother plan.
-- **Radial kernels**: costs built from radial functions of $\|x - y\|$, e.g. polynomials.
+- **Periodic metrics**, beyond [Ground Metrics](./ground_metrics#periodicity): gaussian and mesh targets, the CUDA solve with rotations
+  and symmetries or a density that is not a constant, 1D ( the circle ).
+- **Partial transport**, beyond [Ground Metrics](./ground_metrics#partial-transport): a source heavier than the target, the
+  penalized variant ( a sink of fixed weight ), 3D, gaussian and mesh targets, a periodicity, the CUDA solve.
+- **Radial kernels**: costs built from radial functions of $\|x - y\|$, e.g. polynomials, piecewise functions...
+
+## Derivatives
+
+- **Aggregates with a periodicity**: [duplicates and close seeds](./duplicates) in a periodic domain.
+- **The frame of a target** through a periodicity or in partial transport, and the nodes of a mesh.
 
 ## Distributions
 
@@ -16,14 +23,13 @@ What we are working on. Nothing on this page is available yet: names and interfa
 
 - **Dask**: problems larger than the memory of a GPU, with the power diagram distributed across workers.
 
-## Performance
+## Norms
 
-- 1D benchmarks.
+- $W_1$, ...
 
 ## Examples in progress
 
 - **Power diagram geometry**: inspect the Laguerre cells ( facets, simplices, distance to the boundaries ).
-- **Periodic metrics**: OT and power diagrams on a torus.
 - **Crowd motion**: congested crowds as a Wasserstein gradient flow.
 - **Incompressible Euler**: geodesics in the space of measure-preserving maps ( Gallouët-Mérigot scheme ).
 - **Fokker-Planck**: Wasserstein gradient flow of entropy plus potential energy.

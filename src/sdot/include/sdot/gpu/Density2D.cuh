@@ -152,18 +152,14 @@ __device__ __forceinline__ double image_edge( const DensImage &im, ImageRefs &re
 
 // ---- the gaussians ( `SumOfGaussians.cxx`, the same formulas ) ------------------------------------------------------------
 
-/// the signed standard normal measure of the triangle `( 0, P, Q )` ( `SumOfGaussians::wedge_measure` )
-__device__ __forceinline__ double gauss_wedge( double Px, double Py, double Qx, double Qy ) {
+/// the signed standard normal measure of the triangle `( 0, P, Q )`, given by the line of `P Q`: `p` its signed distance to `0`
+/// ( positive: `0` on the inner side of the edge, the triangle counterclockwise ), `t0`, `t1` the abscissae of `P`, `Q` along it
+/// from the foot of `0` -- what a face of a 3D cell needs too ( `Density3D.cuh::gauss3_cell` )
+__device__ __forceinline__ double gauss_wedge_pt( double p, double t0, double t1 ) {
     const double two_pi = 6.283185307179586476925286766559, tail_cut = 8;
-    const double dx = Qx - Px, dy = Qy - Py;
-    const double L = sqrt( dx * dx + dy * dy );
-    if ( ! ( L > 0 ) )
-        return 0;
-    const double ux = dx / L, uy = dy / L, nx = uy, ny = -ux;
-    const double p = nx * Px + ny * Py, ap = fabs( p );
+    const double ap = fabs( p );
     if ( ! ( ap > 0 ) )
         return 0;
-    const double t0 = ux * Px + uy * Py, t1 = ux * Qx + uy * Qy;
     double acc = 0;
     if ( ap >= tail_cut ) {
         acc = atan( t1 / ap ) - atan( t0 / ap );
@@ -201,6 +197,16 @@ __device__ __forceinline__ double gauss_wedge( double Px, double Py, double Qx, 
         }
     }
     return ( p < 0 ? -acc : acc ) / two_pi;
+}
+
+/// the signed standard normal measure of the triangle `( 0, P, Q )` ( `SumOfGaussians::wedge_measure` )
+__device__ __forceinline__ double gauss_wedge( double Px, double Py, double Qx, double Qy ) {
+    const double dx = Qx - Px, dy = Qy - Py;
+    const double L = sqrt( dx * dx + dy * dy );
+    if ( ! ( L > 0 ) )
+        return 0;
+    const double ux = dx / L, uy = dy / L, nx = uy, ny = -ux;
+    return gauss_wedge_pt( nx * Px + ny * Py, ux * Px + uy * Py, ux * Qx + uy * Qy );
 }
 
 /// the corners of an edge `a -> b` ( seed's frame, the seed at `( ox, oy )` ): `sum_g w_g wedge_g`, SIGNED ( counterclockwise

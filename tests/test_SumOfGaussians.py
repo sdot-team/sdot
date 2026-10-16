@@ -70,11 +70,10 @@ if test( "the_3d_transport_towards_gaussians_is_solved" ):
     rng = numpy.random.default_rng( 34 )
     n = 40
     dens = SumOfGaussians( positions = rng.uniform( 0.35, 0.65, size = ( 4, 3 ) ), sigmas = [ 0.15, 0.2, 0.18, 0.25 ] )
-    # ( a loose tolerance: the measures of a 3D gaussian come from the adaptive quadrature of `PointwiseDensity`, and Newton stagnates
-    # around a residual of 1e-3 / n -- the facet masses are exact, see above )
-    plan = OtProblem( SumOfDiracs( rng.uniform( 0.2, 0.8, size = ( n, 3 ) ) ), dens ).solve( Iterative( tol = 1e-2 / n ) )
+    # ( the measures of a 3D gaussian are exact too -- `SumOfGaussians::face3` -- so Newton converges as tight as with a constant )
+    plan = OtProblem( SumOfDiracs( rng.uniform( 0.2, 0.8, size = ( n, 3 ) ) ), dens ).solve( Iterative( tol = 1e-10 / n ) )
     m = numpy.asarray( plan.cell_masses ).reshape( -1 )
-    assert plan.converged and numpy.abs( m * n - 1 ).max() < 1e-2, ( plan.stats[ "status" ], numpy.abs( m * n - 1 ).max() )
+    assert plan.converged and numpy.abs( m * n - 1 ).max() < 1e-8, ( plan.stats[ "status" ], numpy.abs( m * n - 1 ).max() )
 
 
 if test( "the_support_follows_traced_parameters" ):

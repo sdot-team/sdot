@@ -46,6 +46,14 @@ struct SdotPlan1d {
     HD void  update_outputs( auto &&sorted_indices, auto &&radix_tmp, auto &&sorted_pos,
                            auto &&group_scan,
                            int local_index, int local_size, auto &&group, auto &&local_scratch, auto &&sub_group );
+    /// what `update_outputs_bwd` ( and its presorted twin ) derives, for loom's `computed_grads` ( `flags`: the
+    /// plan's, under `cost` ): the source's positions ( named by the source ) and weights, the target's values.
+    /// Nothing under `barycenters`: they have no adjoint, a differentiation through them is refused.
+    static void update_outputs_computed_grads( auto &&flags ) {
+        DECAYED_TYPE_OF( src_dist )::position_computed_grads( flags.src_dist );
+        flags.src_dist.weights = true;
+        flags.dst_dist.values  = true;
+    }
     HD void  update_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&radix_tmp, auto &&sorted_pos,
                                auto &&group_scan,
                                int local_index, int local_size, auto &&group, auto &&local_scratch, auto &&sub_group ) const;

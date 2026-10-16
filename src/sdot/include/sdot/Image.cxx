@@ -100,10 +100,14 @@ UTP HD SI DTP::knot_index( SI axis, TF t, SI nb_cells ) const {
 }
 
 UTP HD void DTP::for_each_piece( const auto &cell, auto &&ws, auto &&func ) const {
-    with_defaults( [&]( auto &&img ) { img._for_each_piece( cell, ws, func ); } );
+    with_defaults( [&]( auto &&img ) { img._for_each_piece( cell, ws, func, Matrix<TF,ct_dim>::identity(), Vector<TF,ct_dim>::zeros() ); } );
 }
 
-UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) const {
+UTP HD void DTP::for_each_piece_moved( const auto &cell, auto &&ws, auto &&func, const auto &L, const auto &s ) const {
+    with_defaults( [&]( auto &&img ) { img._for_each_piece( cell, ws, func, L, s ); } );
+}
+
+UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func, const auto &L, const auto &s ) const {
     constexpr int d = ct_dim;
     static_assert( d >= 1 );
 
@@ -115,8 +119,19 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) con
     // and row `a` of `( F^T )^-1` is COLUMN `a` of `F^-1`, i.e. `solve_ge( F, e_a )`.
     // So nothing is inverted: d solves, one per axis, and tile `k` is the intersection of the
     // bands `knots( a, k_a ) <= n_a . ( x - origin ) <= knots( a, k_a + 1 )`.
-    const auto F = Matrix<TF,d>::with_func( [&]( auto r, auto c ) { return TF( frame( r, c ) ); } );
-    const auto og = Vector<TF,d>::with_func( [&]( PI c ) { return TF( origin( c ) ); } );
+    // the image moved by `x -> L x + s`: its pixel edges ( the rows of `F` ) turned by `L`, its origin moved
+    const auto F = Matrix<TF,d>::with_func( [&]( auto r, auto c ) {
+        TF v = 0;
+        for ( PI q = 0; q < PI( d ); ++q )
+            v += TF( frame( r, q ) ) * TF( L( c, q ) );
+        return v;
+    } );
+    const auto og = Vector<TF,d>::with_func( [&]( PI c ) {
+        TF v = TF( s[ c ] );
+        for ( PI q = 0; q < PI( d ); ++q )
+            v += TF( L( c, q ) ) * TF( origin( q ) );
+        return v;
+    } );
 
     Vector<Vector<TF,d>,d> nrm;
     Vector<TF,d> shift;                     // `n_a . origin`, which shifts the plane offset
@@ -161,8 +176,11 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) con
 
         t_lo[ a ] = t_min;
         t_hi[ a ] = t_max;
-        k0[ a ] = knot_index( a, t_min, nb );
-        k1[ a ] = knot_index( a, t_max, nb ) + 1;
+        // ( a tile that the cell enters by a rounding only is not one of its tiles: see the cuts below )
+        using TKc = std::decay_t<decltype( cell.coord( 0, 0 ) )>;
+        const TF tk = TF( 64 ) * TF( std::numeric_limits<TKc>::epsilon() );
+        k0[ a ] = knot_index( a, t_min + tk * ( 1 + ( t_min < 0 ? -t_min : t_min ) ), nb );
+        k1[ a ] = knot_index( a, t_max - tk * ( 1 + ( t_max < 0 ? -t_max : t_max ) ), nb ) + 1;
     }
 
     // ---- one piece per tile. Odometer counter over `[ k0, k1 )`, and 2d cuts per tile.
@@ -177,6 +195,8 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) con
         if ( k0[ a ] >= k1[ a ] )
             return;
 
+    using TK = std::decay_t<decltype( cell.coord( 0, 0 ) )>;
+    const TF tol = TF( 64 ) * TF( std::numeric_limits<TK>::epsilon() );
     while ( true ) {
         // A plane that every vertex already satisfies cuts nothing: it is not made. In the common case
         // of a cell that lies inside its tile ( one tile for the whole domain, and the interior cells ) NO plane is
@@ -190,13 +210,18 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) con
             // those planes carry `PIECE`: they face no seed, and that is exactly what
             // the adjoint reads to know that their share goes nowhere (see
             // `PowerDiagram::scatter_cell_grad`).
-            if ( t_hi[ a ] > tile_hi ) {
+            //
+            // Up to the rounding of the kernel float: a cell that starts from the image ( its domain ) has vertices ON the sides of
+            // the grid, and a frame that is not diagonal puts them a rounding outside -- cutting there again leaves a twin of
+            // each, flat simplices whose orientation the adjoint of a quadrature cannot read ( `d|det|`, the moments )
+            const TF tol_hi = tol * ( 1 + ( tile_hi < 0 ? -tile_hi : tile_hi ) ), tol_lo = tol * ( 1 + ( tile_lo < 0 ? -tile_lo : tile_lo ) );
+            if ( t_hi[ a ] > tile_hi + tol_hi ) {
                 fitted = started ? ws.cut( nrm[ a ], hi ) : ws.start( cell, nrm[ a ], hi );
                 started = true;
                 if ( ! fitted ) break;
                 if ( ws.nb_vertices() == 0 ) { alive = false; break; }
             }
-            if ( t_lo[ a ] < tile_lo ) {
+            if ( t_lo[ a ] < tile_lo - tol_lo ) {
                 fitted = started ? ws.cut( - nrm[ a ], - lo ) : ws.start( cell, - nrm[ a ], - lo );
                 started = true;
                 if ( ! fitted ) break;
@@ -228,6 +253,36 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func ) con
         while ( a < d && ++k[ a ] >= k1[ a ] ) { k[ a ] = k0[ a ]; ++a; }
         if ( a == PI( d ) )
             break;
+    }
+}
+
+UTP HD void DTP::add_affine_grad( auto &&grad_dist, const auto &acc ) const {
+    constexpr int d = ct_dim;
+    if constexpr ( DECAYED_TYPE_OF( grad_dist.frame )::is_valid ) {
+        // `d J / d F = F^-T X^T`: `( F^-T X^T )_ij = sum_k ( F^-1 )_ki X_jk`, the rows of `F^-1` by `d` solves with `F^T`
+        const auto Ft = Matrix<TF,d>::with_func( [&]( auto r, auto c ) { return TF( frame( c, r ) ); } );
+        for ( int k = 0; k < d; ++k ) {
+            const auto col = Matrix<TF,d>::solve_ge( Ft, Vector<TF,d>::with_value_at( k, TF( 1 ) ) );   // ( F^-1 )_{k, .}
+            for ( int i = 0; i < d; ++i )
+                for ( int j = 0; j < d; ++j )
+                    atomic_add( grad_dist.frame( i, j ).ref(), TF( col[ i ] * acc.X[ j ][ k ] ) );
+        }
+    }
+    if constexpr ( DECAYED_TYPE_OF( grad_dist.origin )::is_valid )
+        for ( int a = 0; a < d; ++a )
+            atomic_add( grad_dist.origin( a ).ref(), TF( acc.y[ a ] ) );
+}
+
+UTP HD void DTP::measure_frame_bwd( auto &&grad_frame, auto &&grad_mass ) const {
+    if constexpr ( DECAYED_TYPE_OF( grad_frame )::is_valid && DECAYED_TYPE_OF( frame )::is_valid ) {
+        constexpr int d = ct_dim;
+        const TF gm = TF( grad_mass ) * measure();
+        const auto Ft = Matrix<TF,d>::with_func( [&]( auto r, auto c ) { return TF( frame( c, r ) ); } );
+        for ( int j = 0; j < d; ++j ) {
+            const auto col = Matrix<TF,d>::solve_ge( Ft, Vector<TF,d>::with_value_at( j, TF( 1 ) ) );   // column `j` of `F^-T`
+            for ( int i = 0; i < d; ++i )
+                grad_frame( i, j ) = TF( grad_frame( i, j ) ) + gm * col[ i ];
+        }
     }
 }
 

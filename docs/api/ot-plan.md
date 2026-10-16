@@ -10,23 +10,24 @@ the solver, `OtProblem` to solve again and again. See [Guide: W2, plans and sett
 ## `w2`
 
 ```python
-w2(f, g)
+w2(f, g, periodicity=None)
 ```
 
-`W_2^2` between `f` and `g`
+`W_2^2` between `f` and `g` ( on the quotient space with a `periodicity` )
 
 ## `plan`
 
 ```python
-plan(f, g)
+plan(f, g, periodicity=None)
 ```
 
-The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them )
+The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them ). `periodicity`: on a torus,
+a cylinder... ( see `OtProblem` )
 
 ## `ot_solve`
 
 ```python
-ot_solve(source, target, *, verbose=False, **settings)
+ot_solve(source, target, *, periodicity=None, verbose=False, **settings)
 ```
 
 The transport plan from `source` to `target`, with the settings of the solver as keywords: those of `Iterative` in
@@ -40,7 +41,7 @@ To solve again and again, keep an `OtProblem`.
 ## `OtProblem`
 
 ```python
-OtProblem(source, target)
+OtProblem(source, target, periodicity=None)
 ```
 
 A transport problem, to solve once or again and again.
@@ -59,6 +60,7 @@ problem in a loop ( a descent, Lloyd, a reconstruction ) rather than calling `ot
 | `domain` | The domain of the transport, as half-spaces `( directions, offsets )`: `directions . x <= offsets`. |
 | `nb_dims` | The dimension of the space. |
 | `nb_diracs` | The number of diracs of the source. |
+| `periodicity` | the periodicity of the space ( `None`: none ), see `sdot.periodicity` |
 | `regime` | `"iterative"` ( a Newton method, in 2D and more ) or `"direct"` ( a sort, in 1D ): it follows from the inputs. |
 | `source` | the discrete distribution, normalized |
 | `target` | the target density, normalized -- and what gives the domain |
@@ -71,7 +73,7 @@ ones when `None`. Starts from the last solution of this problem unless `settings
 ## `Iterative`
 
 ```python
-Iterative(tol=1e-08, max_iter=100, ot_plan=None, weights0=None, continuation='auto', precision='auto', aggregate=True, keep_weights=False, tuning=None, on_failure='raise', differentiable='auto')
+Iterative(tol=1e-08, max_iter=100, ot_plan=None, weights0=None, continuation='auto', precision='auto', aggregate=True, keep_weights=False, tuning=None, on_failure='raise', differentiable='auto', duplicates='split')
 ```
 
 The settings of the solver in 2D and more ( a damped Newton method ), for `OtProblem.solve` -- `ot_solve` takes
@@ -87,6 +89,8 @@ the same names as keywords.
 * `precision`: the float of the geometry, `"fp64"`, `"fp32"`, or `"mixed"` ( fp32 then fp64, on a GPU ). `"auto"`:
   fp64 on a CPU, mixed on a GPU.
 * `aggregate`: merge the diracs too close for the doubles to separate their cells ( see `SdotPlanNd.clusters` ).
+* `duplicates`: what the diracs at the same position ( or too close for the doubles ) get: `"split"`, a piece of their
+  merged cell each, of their own mass ( `SdotPlanNd.groups` ), or `"merge"`, the merged cell shared by all of them.
 * `keep_weights`: keep the weights of every step in `history`.
 * `on_failure`: `"raise"` an `OtNotConverged`, or `"ignore"` and read `converged`.
 * `differentiable`: attach the derivatives of the outputs -- `"auto"` when an input is traced ( `jax.grad`... ).
@@ -124,11 +128,12 @@ dirac: the plan sends each cell onto its dirac. `cost` is `W_2^2`, `barycenters`
 
 | Attribute | |
 |---|---|
-| `barycenters` | the barycenter of each cell, `[ n, d ]` ( its dirac if the cell is empty ) |
+| `barycenters` | the barycenter of each cell, `[ n, d ]` ( its dirac if the cell is empty ) -- with a periodicity, next to the dirac as it was given ( the cells are built around the folded diracs: the folding is undone here ) |
 | `cell_masses` | the mass of each cell, `[ n ]` |
 | `clusters` | Which cluster each dirac belongs to ( `[ n ]`, the smallest index of its cluster ) when diracs too close to be separated were merged, else `None`. |
 | `converged` | Whether the tolerance was reached. |
 | `cost` | the transport cost, `W_2^2` |
+| `groups` | The groups of the plan ( `sdot.Groups`: seeds that share a cell and split it, `Iterative( duplicates = "split" )` ), else `None`. |
 | `history` | one dict per Newton step ( the first is the starting point ): `t` the step length, `residual_l2`, `max_abs_residual`, `min_measure`, `nb_diag`... and `weights` with `Iterative( keep_weights = True )` |
 | `problem` | the problem this is the solution of |
 | `stats` | how the solve went, a dict: `status`, `nb_iter`, `residual`, `nb_diag` ( the power diagrams computed ), timings... |
@@ -221,5 +226,14 @@ cell until the moves are small. Returns the positions, `[ n, d ]`.
 * `tol`: stop when the root mean square move is under `tol` times the size of the cells. `max_iter`: at most.
 * `callback( iteration, positions, plan )`: called after each solve -- to record the iterations.
 * `ot_tol` and the other keywords: the settings of the solver ( see `Iterative` ).
+
+## `wrap`
+
+```python
+wrap(positions, periodicity, target=None)
+```
+
+The `positions` brought back onto the support of `target` by the group that `periodicity` describes ( onto the
+parallelepiped of its translations anchored at the origin, without a target ).
 
 :::

@@ -18,6 +18,12 @@
 // ( `diagram::integrate_into` ), and its facets read as `diagram::hessian_row` reads them -- this
 // file adds no geometry, it chains.
 //
+// A SINK ( partial transport, `PowerDiagram( sink_weight = ... )` ): the cell of a seed is integrated inside its ball only
+// ( `diagram::cell_dist` ), and the mass beyond goes to the sink, which Newton sees as ONE MORE SEED, identifier 0 ( the user's seeds
+// move to `1 .. n` ): its mass is what the cells leave of the density, its weight is the gauge ( `w_0 = 0`: the sink weight of the
+// diagram ), and its facet with seed `i` is `c_is = d m_i / d r2_i` -- the sphere inside the cell. The graph stays a Laplacian ( a
+// row sums to zero ), and Newton, its gauge and its linear solvers are those of the balanced transport.
+//
 // A NON-CONSTANT DENSITY on a facet : the distribution must know how to integrate its density on
 // a facet ( `facet_mass( piece, cut )` -- 2D gaussians do it in closed form ) ; failing
 // that the laplacian cannot be assembled and the compilation says so.
@@ -27,6 +33,7 @@
 #include "../diagram/Ops.h"
 #include "../bsp_build_level.h"
 #include "Laplacian.h"
+#include "Groups.h"
 
 #include <algorithm>
 #include <atomic>
@@ -69,12 +76,13 @@ double density_facet_mass( const Dens &dens, const Pc &pc, int cut, double mes )
 /// ONE CELL of the seed of rank `k` : its mass in `mass`, and `facet( j, c_kj )` for each neighbour
 /// `j` ( in ranks ). Returns `false` if the scratch was not enough.
 template<class PD,class Local>
-bool measure_and_facets( const PD &pd, SI k, Local &c, Local &piece, const auto &dom, const auto &dist,
-                         double &mass, auto &&facet, bool with_facets ) {
+bool measure_and_facets( const PD &pd, SI k, Local &c, Local &piece, const auto &dom, const auto &full_dist,
+                         double &mass, auto &&facet, bool with_facets, double *to_sink = nullptr ) {
     using TF = typename PD::TF;
     constexpr int D = PD::ct_dim;
     if ( ! diagram::make_cell( pd, c, k, dom ) )
         return false;
+    const auto &dist = diagram::cell_dist( pd, k, full_dist );
     TF m = 0;
     if ( ! diagram::integrate_into<TF>( m, c, piece, dist ) )
         return false;
@@ -111,7 +119,10 @@ bool measure_and_facets( const PD &pd, SI k, Local &c, Local &piece, const auto 
         // a facet that lies on its side -- is not lost
         dist.for_each_facet_mass( c, plane_of, [&]( int cut, auto part ) { vals[ cut ] += double( part ); } );
     } else {
+        double sk = 0;
         dist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+            if constexpr ( requires { dens.weight_mass( pc ); } )
+                sk += double( dens.weight_mass( pc ) );
             pc.template for_each_facet<TF>( [&]( int cut, TF mes ) {
                 const int id = pc.cid[ cut ];
                 if ( id < 0 )
@@ -124,21 +135,47 @@ bool measure_and_facets( const PD &pd, SI k, Local &c, Local &piece, const auto 
                     }
             } );
         } );
+        if ( to_sink )
+            *to_sink = sk;
     }
     if ( ws.overflow )
         return false;
 
-    const auto p0 = pd.point( k );
-    for ( int q = 0; q < nc; ++q ) {
-        const int id = c.cid[ q ];
-        if ( id < 0 )
-            continue;
-        const auto pj = pd.point( id );
-        double d2 = 0;
-        for ( int d = 0; d < D; ++d )
-            d2 += double( pj[ d ] - p0[ d ] ) * double( pj[ d ] - p0[ d ] );
-        if ( d2 > 0 )
-            facet( id, vals[ q ] / ( 2 * std::sqrt( d2 ) ) );
+    auto coefficient = [&]( int q ) {                    // `c_kj` ( two members of a GROUP: the distance of their virtual diracs in
+        // the frame of their lowest common aggregate, `diagram::group_distance2` -- each facet then speaks of its own weights )
+        const double d2 = double( diagram::group_distance2( pd, k, c.cid[ q ] ) );
+        return d2 > 0 ? vals[ q ] / ( 2 * std::sqrt( d2 ) ) : -1.0;
+    };
+    if constexpr ( is_periodic<PD>() ) {
+        // PERIODIC: a facet with an IMAGE of the cell itself moves with no weight ( both sides carry `w_k` ), and two images of
+        // the same seed are ONE neighbour of the laplacian -- their coefficients are summed into the first, under the seed's rank
+        for ( int q = 0; q < nc; ++q ) {
+            if ( c.cid[ q ] < 0 || pd.seed_of( c.cid[ q ] ) == k ) {
+                vals[ q ] = -1;
+                continue;
+            }
+            vals[ q ] = coefficient( q );
+            if ( vals[ q ] < 0 )
+                continue;
+            const SI sq = pd.seed_of( c.cid[ q ] );
+            for ( int r = 0; r < q; ++r )
+                if ( vals[ r ] >= 0 && pd.seed_of( c.cid[ r ] ) == sq ) {
+                    vals[ r ] += vals[ q ];
+                    vals[ q ] = -1;                       // merged: not a facet of its own
+                    break;
+                }
+        }
+        for ( int q = 0; q < nc; ++q )
+            if ( vals[ q ] >= 0 )
+                facet( pd.seed_of( c.cid[ q ] ), vals[ q ] );
+    } else {
+        for ( int q = 0; q < nc; ++q ) {
+            if ( c.cid[ q ] < 0 )
+                continue;
+            const double cq = coefficient( q );
+            if ( cq >= 0 )
+                facet( c.cid[ q ], cq );
+        }
     }
     return true;
 }
@@ -152,6 +189,9 @@ struct Sweep {
     using Local = typename Dom::template Local<TK>;
     static constexpr int D = PD::ct_dim;
     static constexpr int nbc = diagram::nb_work_cells<Dist>();
+    /// a SINK: one more seed for Newton, identifier 0 ( see the head of the file ); `off` shifts the user's identifiers
+    static constexpr bool sink = diagram::has_sink<PD>();
+    static constexpr SI   off  = sink ? 1 : 0;
 
     const CpuQueue &queue;
     PD             &pd;                                  ///< the weights are written there ( output views )
@@ -162,7 +202,12 @@ struct Sweep {
     SI              words = 0;
     std::vector<std::vector<std::int32_t>> scratch;      ///< one row per thread
     std::vector<std::vector<Facet>>      fa_th;        ///< the facets, per thread
-    std::vector<SI> rank_of;                             ///< the rank of seed `i` ( user order )
+    std::vector<SI> rank_of;                             ///< the rank of seed `i` ( user order; the sink first, rank 0, when there is one )
+    double          total_mass = 0;                      ///< SINK: the mass of the density in the domain ( `domain_mass` )
+    /// GROUPS ( `Groups.h` ): Newton's unknowns are those of the tree of aggregates, and `set_weights` turns them into the
+    /// diagram's outer weights and virtual weights ( which `pd` then carries as writable views, `with_groups` )
+    static constexpr bool groups = has_groups<PD>();
+    GroupStructure  grp;
 
     SI     nb_overflowed = 0;                               ///< scratch doublings, in total
     int    nb_diag    = 0;
@@ -174,10 +219,35 @@ struct Sweep {
         const SI n = pd.nb_seeds();
         scratch.resize( nt );
         fa_th.resize( nt );
-        rank_of.resize( n );
+        rank_of.resize( n + off );
+        if constexpr ( sink )
+            rank_of[ 0 ] = 0;
         for ( SI k = 0; k < n; ++k )
-            rank_of[ pd.user_id( k ) ] = k;
+            rank_of[ off + pd.user_id( k ) ] = off + k;
         resize_scratch();
+        if constexpr ( groups ) {                        // the tree, in Newton's numbering ( the sink alone, first )
+            const SI m = SI( pd.group_agg_parent.shape( 0 ) );
+            grp.n = n + off;
+            grp.m = m;
+            grp.parent.assign( n + off, -1 );
+            grp.sv_init.assign( n + off, 0.0 );
+            for ( SI k = 0; k < n; ++k ) {
+                const SI i = off + pd.user_id( k );
+                grp.parent[ i ] = pd.seed_parent( k );
+                grp.sv_init[ i ] = double( pd_in.group_vweights( k ) );
+            }
+            grp.agg_parent.resize( m );
+            grp.agg_scale.resize( m );
+            grp.agg_outer.resize( m );
+            grp.av_init.resize( m );
+            for ( SI a = 0; a < m; ++a ) {
+                grp.agg_parent[ a ] = pd.agg_parent( a );
+                grp.agg_scale[ a ] = double( pd.agg_scale( a ) );
+                grp.agg_outer[ a ] = double( pd.agg_outer( a ) );
+                grp.av_init[ a ] = double( pd_in.group_agg_vweights( a ) );
+            }
+            grp.build();
+        }
         if constexpr ( requires { PD::has_memo; } ) {
             if constexpr ( PD::has_memo ) {              // the memory : the previous memories, or nothing
                 const SI K = SI( pd.memo_nbrs.shape( 1 ) );
@@ -191,7 +261,25 @@ struct Sweep {
         }
     }
 
-    SI n() const { return pd.nb_seeds(); }
+    /// the seeds Newton sees: those of the diagram, and the sink
+    SI n() const { return pd.nb_seeds() + off; }
+
+    /// SINK: the mass of the density in the domain -- the domain itself integrated, once
+    double domain_mass() {
+        for ( ;; ) {
+            Carver cv{ scratch[ 0 ].data(), words };
+            Local c, piece;
+            c.attach( cv, cap );
+            if constexpr ( nbc > 1 ) piece.attach( cv, cap );
+            else                     piece = c;
+            TF m = 0;
+            if ( c.load( dom ) && diagram::integrate_into<TF>( m, c, piece, *dist ) )
+                return double( m );
+            cap *= 2;
+            grow_scratch();
+            ++nb_overflowed;
+        }
+    }
 
     void resize_scratch() {
         words = diagram::words_for<Local,TF>( cap, nbc, false );
@@ -226,9 +314,26 @@ struct Sweep {
     }
 
     /// THE WEIGHTS `W` ( user order ) set on the storage, and the tree majorants rebuilt
-    void set_weights( const std::vector<double> &W ) {
+    void set_weights( const std::vector<double> &W_all ) {
         const double t0 = now();
-        const SI n = this->n();
+        const SI n = pd.nb_seeds();
+        const double *W = W_all.data() + off;           // ( the sink's weight is the gauge, `0`: the diagram's own )
+        std::vector<double> outer;
+        if constexpr ( groups ) {                        // Newton's unknowns -> the outer weights and the virtual weights of the tree
+            outer.resize( n );
+            queue.run_threads( nt, [&]( int t ) {
+                SI b, e;
+                thread_range( n, t, nt, b, e );
+                for ( SI k = b; k < e; ++k ) {
+                    const SI i = off + pd.user_id( k );
+                    outer[ i - off ] = grp.outer( W_all, i );
+                    pd.group_vweights( k ) = TF( grp.parent[ i ] >= 0 ? grp.value( W_all, i ) : 0.0 );
+                }
+            } );
+            for ( SI a = 0; a < grp.m; ++a )
+                pd.group_agg_vweights( a ) = TF( grp.agg_parent[ a ] >= 0 ? grp.value( W_all, grp.n + a ) : 0.0 );
+            W = outer.data();
+        }
         if constexpr ( requires { pd.sorted_weights; } ) {
             queue.run_threads( nt, [&]( int t ) {
                 SI b, e;
@@ -257,10 +362,11 @@ struct Sweep {
 
     /// THE MEASURES `a` ( user order ) at the current weights, and if `fa` is not null the facets
     /// `c_ij` ( user identifiers ). One sweep, restarted on scratch overflow.
-    void measures( std::vector<double> &a, std::vector<Facet> *fa = nullptr ) {
+    void measures( std::vector<double> &a_all, std::vector<Facet> *fa = nullptr ) {
         const double t0 = now();
-        const SI n = this->n();
-        a.resize( n );
+        const SI n = pd.nb_seeds();
+        a_all.resize( n + off );
+        double *a = a_all.data() + off;
         for ( ;; ) {
             std::atomic<bool> overflowed{ false };
             queue.run_threads( nt, [&]( int t ) {
@@ -273,11 +379,16 @@ struct Sweep {
                 fv.clear();
                 diagram::for_each_seed<PD>( n, t, nt, [&]( SI k ) {
                     const SI i = pd.user_id( k );
+                    double cs = 0;
                     if ( ! measure_and_facets( pd, k, c, piece, dom, *dist, a[ i ],
-                                               [&]( SI j, double cij ) { fv.push_back( Facet{ i, pd.user_id( j ), cij } ); },
-                                               fa != nullptr ) ) {
+                                               [&]( SI j, double cij ) { fv.push_back( Facet{ off + i, off + pd.user_id( j ), cij } ); },
+                                               fa != nullptr, sink ? &cs : nullptr ) ) {
                         overflowed = true;
                         return false;
+                    }
+                    if ( sink && fa != nullptr && cs > 0 ) {     // the facet with the sink, seen from both sides
+                        fv.push_back( Facet{ off + i, 0, cs } );
+                        fv.push_back( Facet{ 0, off + i, cs } );
                     }
                     // the memory ( 3D ) : the neighbours of this cell, proposed first to the next sweep --
                     // even from a rejected trial, a memory stays exact ( it only orders the cuts )
@@ -299,6 +410,11 @@ struct Sweep {
             for ( auto &v : fa_th )
                 fa->insert( fa->end(), v.begin(), v.end() );
         }
+        if constexpr ( sink ) {                          // the sink takes what the cells leave
+            double s = 0;
+            for ( SI i = 0; i < n; ++i ) s += a[ i ];
+            a_all[ 0 ] = total_mass - s;
+        }
         t_diag += now() - t0;
         ++nb_diag;
     }
@@ -317,7 +433,7 @@ struct Sweep {
     /// mass of a cell is the one Newton measured ( `newton.a` ), not this one.
     void moments( std::vector<double> &bary, double &cost ) {
         const double t0 = now();
-        const SI n = this->n();
+        const SI n = pd.nb_seeds();
         std::vector<double> mass( n, 0.0 );
         bary.assign( size_t( n ) * D, 0.0 );
         std::vector<double> cost_th( nt, 0.0 );
@@ -339,7 +455,7 @@ struct Sweep {
                     TF m = 0, m2 = 0;
                     TF mx[ D ];
                     auto first = [&]( int d ) -> TF & { return mx[ d ]; };
-                    if ( ! diagram::integrate_moments_into<TF>( m, first, m2, c, piece, *dist ) ) {
+                    if ( ! diagram::integrate_moments_into<TF>( m, first, m2, c, piece, diagram::cell_dist( pd, k, *dist ) ) ) {
                         overflowed = true;
                         return false;
                     }

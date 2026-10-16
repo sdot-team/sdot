@@ -299,3 +299,22 @@ if test( "joint_position_and_weight_value_grad" ):
                     positions, weights, values )
     finally:
         Cpu.group_size = orig_group_size
+
+
+if test( "the_barycenters_derive" ):
+    import numpy
+    from loom.testing import check_grad, need
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.OtProblem import Direct, OtProblem
+    need( "cpu" )
+    # the barycenters, when stored ( `with_barycenters` ), move with the boundaries of their slices as the cost does
+    # ( `SdotPlan1d.cxx::sweep_outputs_bwd` ): with respect to the masses and the values -- not the positions, only their order
+    rng = numpy.random.default_rng( 0 )
+    pos = numpy.sort( rng.uniform( 0, 1, size = ( 10, 1 ) ), axis = 0 )
+    nu = rng.uniform( 0.5, 1.5, 10 )
+    values = rng.uniform( 0.5, 1.5, 5 )
+    settings = Direct( with_barycenters = True )
+    for output in ( "cost", "barycenters" ):
+        check_grad( lambda p, q, v: getattr( OtProblem( SumOfDiracs( p, weights = q ), Image( v, frame = [ 1.0 ] ) ).solve( settings ), output ),
+                    pos, nu, values, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )

@@ -77,6 +77,14 @@ class Mesh( Distribution ):
 
     cuts_pieces = True
 
+    def __new__( cls, nodes = None, simplices = None, *args, **kwargs ):
+        """simplices with fewer than `d + 1` nodes ( segments, triangles in 3D ): a density carried by them, `CodimMesh`"""
+        if cls is Mesh and "grads" not in kwargs and nodes is not None and simplices is not None and \
+                numpy.ndim( simplices ) == 2 and numpy.ndim( nodes ) == 2 and numpy.shape( simplices )[ 1 ] < numpy.shape( nodes )[ 1 ] + 1:
+            from .CodimMesh import CodimMesh
+            return CodimMesh( nodes, simplices, *args, **kwargs )
+        return super().__new__( cls )
+
     def __init__( self, nodes, simplices, values = None, target_mass = 1.0, **kwargs ):
         """see the class docstring. The other keyword arguments are for the copies that `normalized_version` makes ( the geometry
         already prepared )"""
@@ -465,3 +473,8 @@ def _merge_blocks( blocks, nodes, seam ):
         if not changed:
             return alive
         alive = [ out.get( b, blk ) for b, blk in enumerate( alive ) if b not in used or b in out ]
+
+
+# ( the signature of `Mesh( ... )` is that of `__init__`, not that of the `__new__` that sends lower dimensions to `CodimMesh` )
+import inspect as _inspect
+Mesh.__signature__ = _inspect.signature( Mesh.__init__ ).replace( parameters = list( _inspect.signature( Mesh.__init__ ).parameters.values() )[ 1: ] )

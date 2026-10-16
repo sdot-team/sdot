@@ -4,13 +4,13 @@
  "experiments": [
   {
    "seconds": {
-    "armv8-a": 0.234662
+    "armv8-a": 0.427293
    },
    "weight": 1.0
   }
  ],
  "loom": null,
- "machine": "hugos-macbook-pro20.home",
+ "machine": "Hugos-MacBook-Pro.local",
  "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
  "scores": {
   "armv8-a": 1.0

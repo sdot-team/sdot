@@ -70,6 +70,15 @@ def _engine_unit( dim, seeds ):
                    "}\n" + inst + "} }\n" ) )
 
 
+
+def _on_item( code ):
+    """`code` with every value of the call taken at `batch_index`: `inputs.x` becomes `inputs.x( batch_index )`, and so on for the
+    outputs and the cotangents. A value selects the axes of `batch_index` it has and lets the others through, so without a `vmap`
+    nothing changes -- and under one ( a batch of seeds, of densities, or only of COTANGENTS: `jax.jacrev`, a `vmap` of a `vjp` ),
+    each item reads and writes its own slice, while the work-items of the sweep ( the thread axis ) share them."""
+    import re
+    return re.sub( r"\b(inputs|outputs|grad_of_outputs|grad_of_inputs)\.(\w+)(?!\w|\s*\()", r"\1.\2( batch_index )", code )
+
 class PowerDiagram( Aggregate, Displayable ):
     # ---- what a specialization provides -------------------------------------------------------------
     #
@@ -99,18 +108,50 @@ class PowerDiagram( Aggregate, Displayable ):
     start_vertices : RealTensor[ "num_start", "dim" ]
     start_topo     : IntTensor[ "num_start", "num_topo", dict( size = 32 ) ]     # ( a few hundred vertices: no reason for 64 bits )
 
+    # PERIODICITY ( `periodicity = ...` ): the translations of the seeds' IMAGES, row 0 being zero. Image `t` of seed `j`
+    # is the identifier `j + n t` ( `diagram/Common.h` ). Absent ( `Unbound` ): no images, and nothing of it at compile time.
+    periodic_shifts : RealTensor[ "num_image", "dim" ]
+    # ... and their LINEAR part, when the group has rotations or symmetries: image `t` of `x` is `periodic_linear( t ) x +
+    # periodic_shifts( t )`. Absent: translations only.
+    periodic_linear : RealTensor[ "num_image", "dim", "dir" ]
+
+    # A SINK ( partial transport, `sink_weight = ...` ): the cell of seed `i` is integrated inside the ball `|x - p_i|² <= w_i -
+    # sink_weight` only ( `integration/InBall.h` ). Absent: the whole cell.
+    sink_weight     : RealTensor
+
     num_start      : Axis[ "nb_starts" ]
     num_topo       : Axis[ "nb_topo" ]
     nb_starts      : ShapeVar
     nb_topo        : ShapeVar
+    num_image      : Axis[ "nb_images" ]
+    nb_images      : ShapeVar
 
     num_point      : Axis[ "nb_points" ]
     num_boundary   : Axis[ "nb_boundaries" ]
     dim            : Axis[ "nb_dims" ]
+    dir            : Axis[ "nb_dims" ]
 
     nb_points      : ShapeVar
     nb_boundaries  : ShapeVar
     nb_dims        : CtShapeVar
+
+    # GROUPS ( `groups = ...`, `groups.py` ): a TREE OF AGGREGATES, seeds that share one cell and split it among themselves. Per seed
+    # ( storage order ): the smallest index of its root and the next member ( a cycle, storage ranks ), its aggregate ( or -1 ),
+    # its virtual weight there, its unit direction in an aggregate of duplicates. Per aggregate ( a parent before its children ):
+    # its parent, the centre and the scale of its frame, what its children's weights move outside ( 0: duplicates ), its own
+    # virtual weight. Absent ( `Unbound` ): no group, and nothing of it at compile time.
+    group_rep          : IntTensor[ "num_point", dict( size = 32 ) ]
+    group_next         : IntTensor[ "num_point", dict( size = 32 ) ]
+    group_parent       : IntTensor[ "num_point", dict( size = 32 ) ]
+    group_vweights     : RealTensor[ "num_point" ]
+    group_dirs         : RealTensor[ "num_point", "dim" ]
+    group_agg_parent   : IntTensor[ "num_agg", dict( size = 32 ) ]
+    group_agg_center   : RealTensor[ "num_agg", "dim" ]
+    group_agg_scale    : RealTensor[ "num_agg" ]
+    group_agg_outer    : RealTensor[ "num_agg" ]
+    group_agg_vweights : RealTensor[ "num_agg" ]
+    num_agg            : Axis[ "nb_aggs" ]
+    nb_aggs            : ShapeVar
 
     def __new__( cls, positions = None, weights = None, *args, accelerator = None, **kwargs ):
         if cls is PowerDiagram:
@@ -118,7 +159,8 @@ class PowerDiagram( Aggregate, Displayable ):
         return super().__new__( cls )
 
     def __init__( self, positions, weights = None, boundaries = None, accelerator = None,
-                  distribution = None, kernel_dtype = None, scratch_capacity = None, memory = None ):
+                  distribution = None, kernel_dtype = None, scratch_capacity = None, memory = None, periodicity = None,
+                  sink_weight = None, groups = None ):
         """`positions`: `[ n, d ]`. `weights`: `[ n ]`, or nothing ( the Euclidean case ). The domain:
 
         - `boundaries = ( directions, offsets )` -- the half-spaces `direction . x <= offset`.
@@ -138,6 +180,17 @@ class PowerDiagram( Aggregate, Displayable ):
         cell the scratch of a work-item is sized at the start -- a guess, which loom doubles
         on overflow.
 
+        `periodicity`: the cells of the quotient of the space by a group of isometries ( `periodicity.py`: `True`, one
+        boolean per axis, generators... ). The domain then bounds nothing along the periodic directions: it is the
+        support of the distribution ( or `boundaries` ) that gives the period with `True`, and what the density repeats.
+        The cells are those of the seeds AS GIVEN: `positions`, `cells` and `moments` are the given positions and the cells around
+        them, whole ( not cut to the domain ), possibly outside it. Internally the seeds are folded onto the support, which keeps
+        the images to walk few ( `unfold` takes a point of the frame of a folded seed back to that of its given position ).
+
+        `sink_weight`: a SINK, the transport being PARTIAL. The cell of seed `i` stays its Laguerre cell, but what is integrated over it
+        ( `measures`, `moments`, `hessian_rows` ) is the density inside the ball `|x - p_i|² <= w_i - sink_weight` only: the mass
+        beyond goes to the sink. In 2D, with a density constant on pieces ( `Image`, `Box`, `Polygon`, or none ).
+
         `memory`: with the BSP tree, the diagram REMEMBERS, per seed, the neighbors of its cell
         at the last `measures` and proposes them first to the next one ( `ProviderBsp`, `MEMO` ) --
         which spares the transient cuts, a quarter to a third of the diagram in 3D, and remains
@@ -145,6 +198,16 @@ class PowerDiagram( Aggregate, Displayable ):
         seed ( 32 by default in 3D and above, 0 in 2D where it yields nothing measurable, and 0 in 3D on a CUDA card
         whose dedicated cells take the calls: they do not use it ); a seed that has more neighbors than that simply has
         no memory. `0` to turn it off.
+
+        `groups`: seeds that SHARE ONE CELL and split it among themselves ( `groups.py` ) -- what makes exact duplicates, and
+        seeds closer than the doubles can separate, well posed. A TREE OF AGGREGATES: a `Groups`, nested index lists ( `[ [ 0, 1 ],
+        [ 2, [ 3, 4 ] ] ]` ), or `"auto"`, the separations of scales of the positions ( `groups.find_groups`: an aggregate is much
+        smaller than its distance to the rest, the exact duplicates included -- on readable positions ). Seen from the other seeds, a
+        member is an ordinary seed with its OUTER weight ( that of its site, the smallest index at its exact position: `weights`
+        then reads these outer weights ); inside, two members are split by the bisector of their virtual diracs in the frame of
+        their lowest common aggregate ( their true bisector, computed at the scale of the aggregate; for exact duplicates, unit
+        directions spread by springs ), whose virtual weights come from the weights given ( `groups.virtual_weights` ) or from the
+        tree itself ( a solver's ). Read back with `groups`. Not with a periodicity.
         """
         # the SUPPORT of the distribution bounds the domain, for free and without changing the
         # result: what lies beyond brings no mass. The caller's domain is INTERSECTED
@@ -163,9 +226,22 @@ class PowerDiagram( Aggregate, Displayable ):
                     boundaries = ( np.concatenate( [ np.asarray( boundaries[ 0 ], dtype = float ), support[ 0 ] ] ),
                                    np.concatenate( [ np.asarray( boundaries[ 1 ], dtype = float ), support[ 1 ] ] ) )
 
+        # PERIODICITY: the seeds folded, the walls of the periodic directions replaced by the start box of the unfolded
+        # cells, and the images ( `periodicity.py` )
+        self._periodic = None
+        if periodicity is not None and periodicity is not False:
+            positions, boundaries = self._periodic_setup( positions, boundaries, periodicity )
+
         # no domain -> we do NOT name the two tensors: leaving them `Unbound` ( never
         # allocated, `NoneTensor` C++ side ) is not the same thing as passing them `None`.
         kwargs = {}
+        if sink_weight is not None:
+            self._check_sink( positions, distribution )
+            kwargs[ "sink_weight" ] = RealTensor( getattr( sink_weight, "raw", sink_weight ) ) if loom.is_traced( getattr( sink_weight, "raw", sink_weight ) ) else float( sink_weight )
+        if self._periodic is not None:
+            kwargs[ "periodic_shifts" ] = self._periodic.shifts
+            if self._periodic.linear is not None:
+                kwargs[ "periodic_linear" ] = self._periodic.linear
         if boundaries is not None:
             # WHERE TO START FROM, read off the half-spaces themselves: those a box already expresses leave
             # the list -- they are `2d` of them and would come back on every cell ( 25 %, measured ).
@@ -195,10 +271,18 @@ class PowerDiagram( Aggregate, Displayable ):
             raise ValueError( f"`positions` has to be [ n, d ] ( got { tuple( pos.shape ) } )" )
         n, d = int( pos.shape[ 0 ] ), int( pos.shape[ 1 ] )
 
+        # GROUPS: the outer weights take the place of the weights for everything that does not look inside a group
+        self._groups, group_members = None, None
+        if groups is not None:
+            weights, group_members = self._group_setup( groups, pos, weights, boundaries, distribution, sink_weight )
+
         self._kernel_dtype = kernel_dtype
         self._scratch_capacity = int( scratch_capacity or { 2: 64, 3: 128 }.get( d, 256 ) )
         self._memory = int( self._default_memory( d ) if memory is None else memory )
         self.__base_init__( nb_dims = d, nb_points = n, **self._init_seeds( pos, weights, accelerator ), **kwargs )
+        if group_members is not None:
+            for name, value in self._stored_group_members( group_members ).items():
+                setattr( self, name, value )
 
         # NOT a field: the distribution is a CALL argument, normalized RIGHT HERE rather than at
         # each `measures` -- "the diagram integrates THIS measure" is a property of the object
@@ -208,6 +292,173 @@ class PowerDiagram( Aggregate, Displayable ):
             if dd != d:
                 raise ValueError( f"the distribution lives in { dd }D, this diagram in { d }D" )
             self.distribution = distribution
+
+    def _group_setup( self, groups, pos, weights, boundaries, distribution, sink_weight ):
+        """`( outer weights, members in the user's order )` for `groups` ( `groups.resolve` ), and `self.groups`"""
+        from . import groups as grp
+        if self._periodic is not None:
+            raise NotImplementedError( "groups: not with a periodicity yet" )
+        if isinstance( groups, str ):
+            if groups != "auto":
+                raise ValueError( f"groups: a `Groups`, nested index lists, `'auto'` or `None` ( got { groups !r } )" )
+            if loom.is_traced( getattr( pos, "raw", pos ) ):
+                raise ValueError( "groups = 'auto': the positions must be readable here -- under a trace, give a `Groups`" )
+            groups = grp.find_groups( pos )
+            if groups is None:
+                return weights, None
+        else:
+            groups = grp.as_groups( groups, pos )
+        self._groups = groups
+        outer, members = grp.resolve( groups, pos, weights )
+        self._group_members_user = members               # ( the user's order: the oracle `cell( i )` and the display read them )
+        return outer, members
+
+    @property
+    def groups( self ):
+        """The `Groups` of this diagram ( `groups.py` ), in the user's order -- `None` without groups."""
+        return getattr( self, "_groups", None )
+
+    def _stored_group_members( self, members ):
+        """the group members as the storage lays them out ( the user's order here; `PowerDiagram_Bsp` sorts them )"""
+        return members
+
+    def _given_virtual_weights( self ):
+        """GROUPS: `( seed_v, agg_v )`, the virtual weights the diagram carries ( the seeds in the user's order ): host arrays, or
+        the framework's under a trace ( a solve's outputs under `jax.jit` )"""
+        from loom.tensor.host import to_host
+        sv, av = self._user_order( self.group_vweights.raw ), self.group_agg_vweights.raw
+        if loom.is_traced( sv ) or loom.is_traced( av ):
+            return sv, av
+        return np.asarray( to_host( sv ), dtype = np.float64 ).reshape( -1 ), np.asarray( to_host( av ), dtype = np.float64 ).reshape( -1 )
+
+    def _user_order( self, stored ):
+        """a value per seed in the storage's order, in the user's ( the same here; `PowerDiagram_Bsp` sorts )"""
+        return stored
+
+    def _grad_groups_expr( self ):
+        """the cotangents of the group members, as `diagram::measures_bwd` takes them"""
+        if not self.group_rep.is_defined:
+            return "sdot::diagram::NoGroupGrads()"
+        g = "grad_of_inputs.power_diagram"
+        return f"sdot::diagram::group_grads( { g }.group_vweights, { g }.group_agg_vweights )"
+
+    def _periodic_setup( self, positions, boundaries, periodicity ):
+        """`( folded positions, boundaries )` for a periodic diagram, and `self._periodic` ( `periodicity.PeriodicSetup` )"""
+        from .periodicity import setup_for
+        raw = getattr( positions, "raw", positions )
+        if not hasattr( raw, "shape" ):
+            raw = np.asarray( raw, dtype = float )
+        if len( raw.shape ) != 2:
+            raise ValueError( f"`positions` has to be [ n, d ] ( got { tuple( raw.shape ) } )" )
+        if boundaries is None:
+            raise ValueError( "periodicity: a bounded domain is needed ( the support of the distribution, or `boundaries` ) -- "
+                              "it is what the density repeats, and where the seeds are folded" )
+        ps, folded = setup_for( raw, boundaries, periodicity )
+        if ps is None:
+            return positions, boundaries
+        self._periodic = ps
+        box = box_half_spaces( ps.start_lo, ps.start_hi )
+        return folded, ( np.concatenate( [ ps.boundaries[ 0 ], box[ 0 ] ] ), np.concatenate( [ ps.boundaries[ 1 ], box[ 1 ] ] ) )
+
+    @staticmethod
+    def _check_sink( positions, distribution ):
+        """what a sink ( partial transport ) can integrate today: 2D, a density constant on pieces"""
+        pshape = positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
+        if len( pshape ) != 2 or int( pshape[ 1 ] ) != 2:
+            raise NotImplementedError( "sink_weight ( partial transport ): in 2D only for now" )
+        if distribution is not None and not getattr( distribution, "constant_on_pieces", False ):
+            raise NotImplementedError( f"sink_weight ( partial transport ): a density constant on pieces only for now ( `Image`, `Box`, "
+                                       f"`Polygon` ), not { type( distribution ).__name__ }" )
+
+    # ---- the positions, as given ---------------------------------------------------------------------
+    #
+    # The storage holds the seeds FOLDED by a periodicity ( `_stored_positions` ): what `positions` reads is unfolded back to the
+    # positions as given, what it is set to is folded first.
+
+    def _given_positions( self, stored ):
+        if self._periodic is None:
+            return stored
+        return RealTensor[ self.num_point, self.dim ]( self.unfold( stored.raw ) )
+
+    def _folded_positions( self, positions ):
+        """new positions for the storage: folded by the periodicity, whose folding maps follow ( a group that cannot bring them
+        onto the region its cells were sized for -- a cone, seeds moved far -- needs a new diagram )"""
+        pos = getattr( positions, "raw", positions )
+        if not hasattr( pos, "shape" ):
+            pos = np.asarray( pos, dtype = float )
+        if self._periodic is None:
+            return pos
+        ps = self._periodic
+        folded, M, c = ps.fold( pos )
+        if not loom.is_traced( folded ) and not ps.translation_only:
+            f = np.asarray( folded, dtype = float ).reshape( -1, self.dim_count )
+            if ( ( f.min( axis = 0 ) < ps.region_lo - 1e-12 ) | ( f.max( axis = 0 ) > ps.region_hi + 1e-12 ) ).any():
+                raise ValueError( "periodicity: these positions fold outside the region the cells of this diagram were sized for "
+                                  "( a group without translations in every direction ): build a new `PowerDiagram`" )
+        ps.fold_M, ps.fold_c = M, c
+        return folded
+
+    def _unfold_maps( self ):
+        """`[ n, d, d + 1 ]` ( numpy ): per seed, the map from the frame of its folded seed to that of its given position"""
+        ps = self._periodic
+        n, d = int( self.nb_points.value ), self.dim_count
+        c = np.asarray( ps.fold_c, dtype = float ).reshape( n, d )
+        M = np.broadcast_to( np.eye( d ), ( n, d, d ) ) if ps.fold_M is None else np.asarray( ps.fold_M, dtype = float ).reshape( n, d, d )
+        Mt = np.transpose( M, ( 0, 2, 1 ) )
+        return np.concatenate( [ Mt, - np.einsum( "nij,nj->ni", Mt, c )[ :, :, None ] ], axis = 2 )
+
+    def periodicity_rings( self, nb_rings = 1 ):
+        """The elements of the group of `periodicity` up to the ring `nb_rings`, as affine maps `[ m, d, d + 1 ]` ( `[ M | V ]`, the map
+        `x -> M x + V` ), the identity first: ring 1 holds those whose image of the support touches the support. What a display
+        repeats the cells by ( see `add_to_viz` ); the identity alone without a periodicity."""
+        d = self.dim_count
+        if self._periodic is None:
+            return np.concatenate( [ np.eye( d ), np.zeros( ( d, 1 ) ) ], axis = 1 )[ None ]
+        return self._periodic.ring( nb_rings )
+
+    def _draw_balls( self, viz, cells, first_color, opacity ):
+        """what a sink leaves to each cell: the cell inter its ball, in the cell's color ( see `add_to_viz` )"""
+        pos = np.asarray( self.positions, dtype = float ).reshape( -1, 2 )
+        wt = self.weights
+        w = np.asarray( wt, dtype = float ).reshape( -1 ) if getattr( wt, "is_defined", True ) else np.zeros( len( pos ) )
+        r2 = w - float( np.asarray( self.sink_weight, dtype = float ).reshape( -1 )[ 0 ] )
+        for i in range( len( pos ) ):
+            if not r2[ i ] > 0:
+                continue
+            poly = _disc_in_polygon( cells.vertices( i ), pos[ i ], np.sqrt( r2[ i ] ) )
+            if len( poly ) < 3:
+                continue
+            col = viz.color_at( first_color + i )
+            viz.add_faces( poly, [ list( range( len( poly ) ) ) ], color = col, opacity = opacity )
+            viz.add_edges( poly, color = "#000000", opacity = 0.6, closed = True )
+
+    def domain_outline( self ):
+        """The support of the periodicity ( the domain of a diagram without one ) as half-spaces `( directions, offsets )`: what a
+        display draws dashed ( `add_to_viz` ). `None` for an unbounded diagram."""
+        if self._periodic is not None:
+            return self._periodic.support
+        if not self.bnd_directions.is_defined and not self.box_min.is_defined:
+            return None
+        dirs, offs = [], []
+        if self.box_min.is_defined:
+            bd, bo = box_half_spaces( np.asarray( self.box_min ).reshape( -1 ), np.asarray( self.box_max ).reshape( -1 ) )
+            dirs.append( bd ); offs.append( bo )
+        if self.bnd_directions.is_defined:
+            dirs.append( np.asarray( self.bnd_directions ).reshape( -1, self.dim_count ) )
+            offs.append( np.asarray( self.bnd_offsets ).reshape( -1 ) )
+        return np.concatenate( dirs ), np.concatenate( offs )
+
+    def unfold( self, points ):
+        """`points` ( `[ n, d ]`, one per seed, e.g. the barycenters of the cells ) taken from the frame of the folded seeds
+        ( `positions` ) back to that of the positions as they were given. The identity without a periodicity.
+
+        = Internals
+
+        Each seed was folded by an element of the group, `folded = M given + c` ( `periodicity.PeriodicSetup.fold` ): this is
+        `M^T ( points - c )`, differentiable."""
+        if self._periodic is None:
+            return points
+        return self._periodic.unfold( points, self._periodic.fold_M, self._periodic.fold_c )
 
     def _default_memory( self, d ):
         """the neighbour memories per seed when `memory` is not given ( see `__init__` )"""
@@ -233,7 +484,7 @@ class PowerDiagram( Aggregate, Displayable ):
             ca = m.get( name )
             return ca is not None and getattr( ca, "io_category", None ) is not None and ca.io_category.is_bound
 
-        positions = m[ "sorted_positions" if bsp else "positions" ]
+        positions = m[ "sorted_positions" if bsp else "seed_positions" ]
         tr = "double" if positions.itemsize == 8 else "float"
         weights = int( bound( "sorted_weights" if bsp else "weights" ) )
         if bsp:
@@ -286,6 +537,9 @@ class PowerDiagram( Aggregate, Displayable ):
             expr, grad, kwargs = "inputs.power_diagram.unit_density()", "0", {}
         else:
             expr, grad, kwargs = "inputs.distribution", "grad_of_inputs.distribution", { "distribution": self.distribution }
+            if self._periodic is not None:
+                # the density and its translates ( `Periodic.h` ): the unfolded cells go beyond its support
+                expr = f"sdot::periodic_dist( { expr }, inputs.power_diagram.periodic_shifts, inputs.power_diagram.periodic_linear )"
         if moment is not None:
             expr = f"sdot::diagram::moment_dist<{ int( moment ) }>( { expr } )"
         return expr, grad, kwargs
@@ -304,6 +558,16 @@ class PowerDiagram( Aggregate, Displayable ):
 
     def _measures_on_card( self ):
         """the measures by a kernel written for the device, or `None`: the generic path takes the call"""
+        return None
+
+    def _affine_derivable( self ):
+        """the integration derives the frame and the origin of the distribution ( an `Image`, `diagram::AffineAcc` ): not through a
+        periodicity ( the translates ) nor in the balls of a partial transport"""
+        from .distributions.Image import Image
+        return isinstance( self.distribution, Image ) and self._periodic is None and not self.sink_weight.is_defined
+
+    def _card_laplacian_solve( self, rhs, linear_solver ):
+        """`laplacian_solve` on a card, or `None` when the card does not take this diagram"""
         return None
 
     # ---- the scratch -------------------------------------------------------------------------------
@@ -354,8 +618,8 @@ class PowerDiagram( Aggregate, Displayable ):
 
         DIFFERENTIABLE like `measures`, with respect to the seeds, the weights and the parameters of the density -- the
         moment is a density, and the diagram already knows how to differentiate those ( `diagram/Moments.h` ). The integral
-        is the adaptive quadrature of `PointwiseDensity`, on any density: where a closed form exists ( `moments` ) it agrees
-        with it to a few `1e-6`. What a transport cost and its barycenters are made of ( `SdotPlanNd` )."""
+        and its adjoint are closed forms where the density has them ( constant pieces, a `Mesh`, gaussians in 2D and 3D ), the
+        adaptive quadrature of `PointwiseDensity` elsewhere. What a transport cost and its barycenters are made of ( `SdotPlanNd` )."""
         d = self.dim_count
         if not 0 <= int( k ) <= d + 1:
             raise ValueError( f"moment( { k } ): 0 .. { d - 1 } ( x_k ), { d } ( |x|^2 ) or { d + 1 } ( 1 )" )
@@ -382,20 +646,31 @@ class PowerDiagram( Aggregate, Displayable ):
         dist_expr, grad_dist_expr, dist_kwargs = self._dist_for( moment )
         memo_expr, memo_args, memo_produced = self._memo_for_call()
 
+        # the rank of a work-item in the sweep, read off its OWN axis: `thread_index` / `nb_threads` count every item launched, and
+        # under a `vmap` those are the work-items of all the batch -- each item of which must sweep all the seeds
+        rank = "SI( inputs.thread_rank( batch_index ) ), SI( inputs.thread_rank.shape( 0 ) )"
         kp.ffi_call(
-            FfiCode.per_item( code = "inputs.power_diagram.measures( outputs.res, inputs.dom_cell, scratch.pool( batch_index ), "
-                           f"{ dist_expr }, { memo_expr }, thread_index, nb_threads );",
+            FfiCode.per_item( code = _on_item( "inputs.power_diagram.measures( outputs.res, inputs.dom_cell, scratch.pool( batch_index ), "
+                           f"{ dist_expr }, { memo_expr }, " ) + rank + " );",
                 # the gradients on the seeds are SHARED by all items: each work-item
                 # accumulates into them ( `atomic_add` C++ side ), and the platform zeroes them before the body
                 ),
-            FfiCode.per_item( "inputs.power_diagram.measures_bwd( outputs.res, inputs.dom_cell, grad_of_outputs.res, "
-                           f"{ self._grad_seeds_expr() }, "
-                           f"scratch.pool( batch_index ), { dist_expr }, { grad_dist_expr }, "
-                           "thread_index, nb_threads );" ),
+            FfiCode.per_item( _on_item( "inputs.power_diagram.measures_bwd( outputs.res, inputs.dom_cell, grad_of_outputs.res, "
+                           f"{ self._grad_seeds_expr() }, { self._grad_groups_expr() }, "
+                           f"scratch.pool( batch_index ), { dist_expr }, { grad_dist_expr }, " ) + rank + " );",
+                # what this adjoint derives: the seeds, as the storage names them, and the density's own
+                # parameters, as IT knows them ( loom refuses a differentiation that needs anything else )
+                computed_grads = "inputs.power_diagram.measures_computed_grads( computed_grads.from_res.power_diagram );"
+                    + ( "" if self.distribution is None else
+                        " inputs.distribution.computed_grads( computed_grads.from_res.distribution );" )
+                    # the frame and the origin of an image ( `diagram::AffineAcc` ): not through a periodicity nor in balls
+                    + ( " DECAYED_TYPE_OF( inputs.distribution )::affine_computed_grads( computed_grads.from_res.distribution );"
+                        if self._affine_derivable() else "" ) ),
             power_diagram = self,
             dom_cell = dom,
             res = loom.out( res ),
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, batch_axes = [ num_thread ] ),
+            thread_rank = IntTensor[ num_thread ]( np.arange( nt, dtype = np.int32 ) ),
             **dist_kwargs,
             **memo_args,
         )
@@ -414,12 +689,21 @@ class PowerDiagram( Aggregate, Displayable ):
         It is the one linear solve that the derivative of a transport asks for ( `SdotPlanNd`: the implicit function theorem ),
         and the reason it is here: DIFFERENTIABLE with respect to `rhs` -- `L` being symmetric, its adjoint is the same solve --
         and with respect to NOTHING ELSE: the diagram is a constant of the call ( the derivatives of `L` are not
-        written ). The density must know how to integrate itself on a facet ( see `hessian_rows` ). On the CPU."""
-        if getattr( loom.resolved_device(), "is_cuda_gpu", False ) or not loom.resolved_device().is_cpu:
-            raise NotImplementedError( "laplacian_solve: on the CPU only" )
+        written ). The density must know how to integrate itself on a facet ( see `hessian_rows` ). On a card, the card's diagram,
+        laplacian and linear solver ( `gpu/Newton2D.cuh::laplacian_solve` ), for what the card's solve takes.
+
+        With GROUPS, the laplacian of the ROOTS: the facets between root aggregates, `rhs` summed over each root, `x` the same for
+        all its members -- the outer level of the solve ( `sdotplan/Groups.h` ); the inner levels are `groups.TreeSystem`'s."""
         from .SdotPlanNd import _LIN
         if linear_solver not in _LIN:
             raise ValueError( f"unknown linear_solver: { linear_solver !r } ( { ', '.join( _LIN ) } )" )
+        if getattr( loom.resolved_device(), "is_cuda_gpu", False ) or not loom.resolved_device().is_cpu:
+            # on a card: the card's diagram, laplacian and linear solver ( `PowerDiagram_Bsp._card_laplacian_solve` )
+            res = self._card_laplacian_solve( rhs, linear_solver )
+            if res is None:
+                raise NotImplementedError( "laplacian_solve on a card: the card's cells take a box domain, the BSP tree, a constant, an image, "
+                                           "gaussians or a mesh, and no sink ( partial transport ) nor rotating periodicity -- the CPU for the rest" )
+            return res
         dom = self._domain_cell()
         dist_expr, _, dist_kwargs = self._dist_for()
         tk = "double" if fp_size( dom.kernel_dtype ) == 64 else "float"
@@ -428,7 +712,10 @@ class PowerDiagram( Aggregate, Displayable ):
         code = lambda src, dst, backward = False: FfiCode.inline( includes = [ "sdot/sdotplan/Adjoint.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], code = "\n".join( [
             "auto &inputs = args.inputs; auto &outputs = args.outputs;",
             *( [ "auto &grad_of_inputs = args.grad_of_inputs; auto &grad_of_outputs = args.grad_of_outputs;" ] if backward else [] ),
-            f"sdotplan::laplacian_solve<{ tk }>( queue, inputs.power_diagram, inputs.dom_cell, { dist_expr }, { src }, { _LIN[ linear_solver ] }, { int( self._scratch_capacity ) }, { dst } );" ] ) )
+            # ( `batch_axes`: a `vmap` of the right-hand side -- the diagram is the same for all, and is swept once )
+            f"sdotplan::laplacian_solve<{ tk }>( queue, batch_axes, inputs.power_diagram, inputs.dom_cell, { dist_expr }, { src }, { _LIN[ linear_solver ] }, { int( self._scratch_capacity ) }, { dst } );",
+            # the diagram is a constant of the call: only `rhs` is derived ( loom refuses the rest )
+            *( [ "args.computed_grads.from_x.rhs = true;" ] if backward else [] ) ] ) )
         loom.ffi_call(
             "power_diagram_laplacian_solve",
             code( "inputs.rhs", "outputs.x" ),
@@ -474,9 +761,20 @@ class PowerDiagram( Aggregate, Displayable ):
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, batch_axes = [ num_thread ] ),
             **dist_kwargs,
         )
+        if self._periodic is not None:
+            # around the folded seeds: taken to the frame of the given positions, `x -> M^T ( x - c )`
+            a = self._unfold_maps()
+            m = np.asarray( mass.value, dtype = float ).reshape( -1 )
+            f = np.asarray( first.value, dtype = float ).reshape( len( m ), -1 )
+            q = np.asarray( second.value, dtype = float ).reshape( -1 )
+            d = f.shape[ 1 ]
+            f2 = np.einsum( "nij,nj->ni", a[ :, :, :d ], f ) + m[ :, None ] * a[ :, :, d ]
+            q2 = q + 2 * ( f * np.einsum( "nji,nj->ni", a[ :, :, :d ], a[ :, :, d ] ) ).sum( axis = 1 ) + m * ( a[ :, :, d ] ** 2 ).sum( axis = 1 )
+            first = RealTensor[ self.num_point, self.dim ]( f2 )
+            second = RealTensor[ self.num_point ]( q2 )
         return mass, first, second
 
-    def hessian_rows( self ):
+    def hessian_rows( self, items = None, host = True ):
         """The derivatives of the measures with respect to the weights, row by row: `( nb_nbrs, ids, vals )`, the neighbors of each cell and the coefficients ( host arrays ).
 
         = Internals
@@ -487,10 +785,19 @@ class PowerDiagram( Aggregate, Displayable ):
         to the weights, `d m_i / d w_j = - vals`, `d m_i / d w_i = + sum_j vals`, which is also the
         Hessian of the dual functional of a transport ( `SdotPlanNd`, `objective = "newton"` ).
         Host arrays. A piecewise-constant distribution only. One call batched over the
-        cells, like `cells` ( the number of neighbors per cell has a capacity that loom doubles )."""
-        n, d = int( self.nb_points.value ), self.dim_count
+        cells, like `cells` ( the number of neighbors per cell has a capacity that loom doubles ). `items`: the rows of these
+        seeds only ( user indices, in that order ), the others not built. `host = False`: the backend's arrays instead, `[ n ]`,
+        `[ n, cap ]`, `[ n, cap ]` -- what follows a `jax.jit` ( the entries past `nb_nbrs[ i ]` are to be ignored ).
+
+        With GROUPS, each facet's value is the derivative with respect to ITS OWN weights ( `diagram::hessian_row` ): the outer
+        weights between root aggregates, and between two members of one the weights `V` in the frame of their lowest common
+        aggregate ( `vals = int_{facet} rho / ( 2 | q_i - q_j | / s )`, their virtual diracs `q` in that frame of scale `s` )."""
+        d = self.dim_count
+        all_ranks = np.asarray( self._ranks_of_items() ).reshape( -1 )
+        sel = all_ranks if items is None else all_ranks[ np.asarray( items, dtype = np.int64 ).reshape( -1 ) ]
+        n = len( sel )
         num_cell = new_batch_axis( n, prefix = "cell" )
-        ranks = IntTensor[ num_cell ]( self._ranks_of_items() )
+        ranks = IntTensor[ num_cell ]( sel )
 
         dom = self._domain_cell()
         cap = self._scratch_capacity
@@ -512,6 +819,10 @@ class PowerDiagram( Aggregate, Displayable ):
             nbrs = loom.out( nbrs, capacities = { "nb_nbrs": 16 } ),
             **dist_kwargs,
         )
+        if not host:
+            # ( the raw buffers may hold more rows than the cells: a device rounds its batches up )
+            raw = lambda x: x.reshape( x.shape[ 0 ], -1 )[ :n ]
+            return nbrs.nb_nbrs.as_tensor().raw.reshape( -1 )[ :n ], raw( nbrs.ids.raw ), raw( nbrs.vals.raw )
         counts = np.asarray( nbrs.nb_nbrs.value ).reshape( -1 ).astype( int )
         ids = np.asarray( nbrs.ids ).reshape( n, -1 )
         vals = np.asarray( nbrs.vals ).reshape( n, -1 )
@@ -519,7 +830,9 @@ class PowerDiagram( Aggregate, Displayable ):
 
     @property
     def cells( self ) -> Cell:
-        """All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them.
+        """All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them. With a
+        periodicity, each cell is the whole cell of its seed, around the seed as it was given: it can lie outside the domain,
+        and away from the others ( `add_to_viz` shows its copies by the group too ).
 
         = Internals
 
@@ -551,6 +864,8 @@ class PowerDiagram( Aggregate, Displayable ):
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, nb_threads = nt ),
             cells = loom.out( cells, capacities = { "nb_vertices": cap, "nb_cuts": cap } ),
         )
+        if self._periodic is not None:                   # built around the folded seeds: moved next to the given positions
+            cells = cells.moved( self._unfold_maps() )
         return cells
 
     def support_pieces( self, threshold = 0.0 ):
@@ -604,6 +919,8 @@ class PowerDiagram( Aggregate, Displayable ):
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, nb_threads = nt ),
             pieces = loom.out( pieces, capacities = { "nb_vertices": cap, "nb_cuts": cap + dirs.shape[ 1 ] } ),
         )
+        if self._periodic is not None:
+            pieces = pieces.moved( self._unfold_maps()[ np.asarray( owners ).reshape( -1 ) ] )
         return pieces, owners
 
     def cell( self, i ) -> Cell:
@@ -615,6 +932,8 @@ class PowerDiagram( Aggregate, Displayable ):
         entirely different from the kernel's, hence the tests' ORACLE. It is NOT the display
         path ( `n²` round trips ), see `cells`.
         """
+        if self._periodic is not None:
+            raise NotImplementedError( "cell( i ) is the oracle of a diagram without periodicity: `cells` gives the periodic ones" )
         d = self.dim_count
         pos = np.asarray( self.positions ).reshape( -1, d )
         w = np.asarray( self.weights ).reshape( -1 ) if self.weights.is_defined else None
@@ -626,9 +945,20 @@ class PowerDiagram( Aggregate, Displayable ):
             for b in range( len( bds ) ):
                 res.cut( bds[ b ], float( bos[ b ] ), BOUNDARY )
 
+        # GROUPS: the planes inside a group, the same rules as `diagram/Common.h::group_plane`
+        g = self._groups if self.group_rep.is_defined else None
+        if g is not None:
+            gm = self._group_members_user
+            sv = _host_array( gm[ "group_vweights" ] ).reshape( -1 )
+            av = _host_array( gm[ "group_agg_vweights" ] ).reshape( -1 )
+
         p0 = pos[ i ]
         for j in range( len( pos ) ):
             if j == i:
+                continue
+            if g is not None and g.rep[ j ] == g.rep[ i ]:
+                direction, offset = _group_plane( g, pos, sv, av, i, j )
+                res.cut( direction, offset, j )
                 continue
             direction = pos[ j ] - p0
             offset = float( direction @ ( p0 + pos[ j ] ) / 2 )
@@ -637,23 +967,148 @@ class PowerDiagram( Aggregate, Displayable ):
             res.cut( direction, offset, j )
         return res
 
-    def add_to_viz( self, viz, seeds = True, seed_color = "#000000", support_only = True, threshold = 0.0, **kwargs ):
+    def add_to_viz( self, viz, seeds = True, seed_color = "#000000", support_only = None, threshold = 0.0,
+                    nb_periodicity_rings = 1, opacity_periodicity_rings = 0.25, fit_periodicity_rings = False, domain = None,
+                    domain_color = "#000000", opacity_beyond_balls = 0.2, virtual_seeds = False, virtual_color = "#888888", **kwargs ):
         """Draws itself into a `Visualizer`: all the cells, in one call ( see `cells` ), and the
         seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_to_viz`
         ( `opacity`, `faces`, `edges`, ... ). The quick ways to look at it -- `write_html`,
         `write_pvd`, `show` -- are those of `Displayable`.
 
         `support_only`: the cells only where the distribution has mass ( `support_pieces`, with
-        `threshold` ) -- an image with zero pixels does not show its cells there."""
+        `threshold` ) -- an image with zero pixels does not show its cells there. By default: yes without a periodicity, no with
+        one ( a periodic cell is drawn whole, around its seed ).
+
+        With a periodicity, the cells are drawn again moved by every element of the group up to the ring `nb_periodicity_rings`
+        ( `periodicity_rings` ), fainter ( `opacity_periodicity_rings`; 0 draws no copy ), the same seed in the same color: the
+        copies must glue without a seam. They do not count in the scale of the scene ( the zoom fits the cells themselves ) unless
+        `fit_periodicity_rings`. `domain`: the outline of
+        the domain ( the support that the group repeats ), dashed, and that of its images -- by default with a periodicity only.
+
+        With a sink ( partial transport, `sink_weight` ), the cells are drawn whole, as they are computed, but fainter
+        ( `opacity_beyond_balls` ): what is integrated -- the part of each cell inside its ball -- is drawn on top, in the same
+        color, its arc approximated by a polygon.
+
+        With GROUPS ( `groups` ), the cells drawn are those of the members, which split the cell of their group; `virtual_seeds`
+        adds the virtual diracs of the exact duplicates ( `virtual_color` ), the points their split is the power diagram of."""
+        n, d = int( self.nb_points.value ), self.dim_count
+        if support_only is None:
+            support_only = self._periodic is None
         if support_only:
-            pieces, owners = self.support_pieces( threshold )
-            if pieces is not None:
-                pieces.add_to_viz( viz, owners = owners, nb_colors = int( self.nb_points.value ), **kwargs )
+            shown, owners = self.support_pieces( threshold )
         else:
-            self.cells.add_to_viz( viz, **kwargs )
-        if seeds:
-            viz.add_points( np.asarray( self.positions ).reshape( -1, self.dim_count ), color = seed_color )
+            shown, owners = self.cells, None
+        maps = self.periodicity_rings( nb_periodicity_rings if opacity_periodicity_rings > 0 else 0 )
+        if domain is None:
+            domain = self._periodic is not None
+        outline = self.domain_outline() if domain else None
+        balls = self.sink_weight.is_defined and d == 2 and shown is not None
+        first_color = viz.reserve_colors( 0 )          # ( the cells reserve their colors from there: the balls take the same )
+        if balls:
+            kwargs = dict( kwargs )
+            kwargs[ "opacity" ] = opacity_beyond_balls * kwargs.get( "opacity", 1.0 )
+            kwargs[ "edge_opacity" ] = 0.5 * kwargs.get( "edge_opacity", 1.0 )
+        for k, a in enumerate( maps ):
+            first = k == 0
+            frames = first or fit_periodicity_rings
+            kw = dict( kwargs )
+            if not first:
+                kw[ "opacity" ] = opacity_periodicity_rings * kw.get( "opacity", 1.0 )
+                kw[ "edge_opacity" ] = opacity_periodicity_rings * kw.get( "edge_opacity", 1.0 )
+            if shown is not None:
+                cells = shown if first else shown.moved( a )
+                cells.add_to_viz( viz, owners = np.arange( n ) if owners is None else owners, nb_colors = n, frames = frames, **kw )
+            if balls and first:
+                self._draw_balls( viz, shown, first_color, kwargs.get( "opacity", 1.0 ) / opacity_beyond_balls )
+            if seeds:
+                pos = np.asarray( self.positions, dtype = float ).reshape( -1, d )
+                viz.add_points( pos @ a[ :, :d ].T + a[ :, d ], color = seed_color, opacity = 1.0 if first else opacity_periodicity_rings, frames = frames )
+            if outline is not None and d in ( 2, 3 ):
+                _draw_outline( viz, outline, a, domain_color, 1.0 if first else opacity_periodicity_rings, frames )
+        g = self._groups if self.group_rep.is_defined else None
+        if virtual_seeds and g is not None:
+            shared = np.flatnonzero( ( g.parent >= 0 ) & ( g.outer[ np.maximum( g.parent, 0 ) ] == 0 ) ) if g.nb_aggregates else []
+            if len( shared ):
+                viz.add_points( g.virtual_positions( self.positions )[ shared ], color = virtual_color )
         return viz
+
+
+def _group_plane( g, pos, sv, av, i, j ):
+    """`( direction, offset )` of the plane between members `i` and `j` of a group, on the side of `i` ( host, user order ): the
+    oracle of `diagram/Common.h::group_plane` -- the bisector of their virtual diracs in the frame of their lowest common aggregate"""
+    def chain( k ):
+        res, a = [], g.parent[ k ]
+        while a >= 0:
+            res.append( a )
+            a = g.agg_parent[ a ]
+        return res
+    c0 = chain( i )
+    L = next( a for a in chain( j ) if a in c0 )
+    def frame_weight( k ):
+        V, a = sv[ k ], g.parent[ k ]
+        while a != L:
+            p = g.agg_parent[ a ]
+            V = av[ a ] + ( g.outer[ a ] / g.scale[ p ] ) ** 2 * V
+            a = p
+        return V
+    s, b = g.scale[ L ], g.center[ L ]
+    if g.outer[ L ] == 0:                                # ( the apex follows the site: each member's virtual dirac its own position )
+        b = pos[ i ] + g.apex_shift[ L ]
+        q0, q1 = g.dirs[ i ], g.dirs[ j ] + ( pos[ j ] - pos[ i ] ) / s
+    else:
+        q0, q1 = ( pos[ i ] - b ) / s, ( pos[ j ] - b ) / s
+    direction = q1 - q0
+    offset = float( direction @ b + s * ( ( q1 @ q1 - q0 @ q0 ) / 2 + ( frame_weight( i ) - frame_weight( j ) ) / 2 ) )
+    return direction, offset
+
+
+def _host_array( x ):
+    """a host copy ( float64 ) of a value of any framework"""
+    from loom.tensor.host import to_host
+    return np.asarray( to_host( getattr( x, "raw", x ) ), dtype = np.float64 )
+
+
+def _disc_in_polygon( vertices, center, r, nb = 96 ):
+    """the convex polygon `vertices` inter the disc of center `center` and radius `r` ( a regular `nb`-gon ), as a polygon"""
+    t = 2 * np.pi * np.arange( nb ) / nb
+    poly = center + r * np.stack( [ np.cos( t ), np.sin( t ) ], axis = 1 )
+    v = np.asarray( vertices, dtype = float )
+    if len( v ) < 3:
+        return poly[ :0 ]
+    area = np.sum( v[ :, 0 ] * np.roll( v[ :, 1 ], -1 ) - np.roll( v[ :, 0 ], -1 ) * v[ :, 1 ] )
+    if area < 0:
+        v = v[ ::-1 ]
+    for i in range( len( v ) ):                          # Sutherland-Hodgman: one half-plane per edge
+        a, b = v[ i ], v[ ( i + 1 ) % len( v ) ]
+        nrm = np.array( [ b[ 1 ] - a[ 1 ], a[ 0 ] - b[ 0 ] ] )     # outward
+        s = ( poly - a ) @ nrm
+        out = []
+        for j in range( len( poly ) ):
+            p, q, sp, sq = poly[ j ], poly[ ( j + 1 ) % len( poly ) ], s[ j ], s[ ( j + 1 ) % len( poly ) ]
+            if sp <= 0:
+                out.append( p )
+            if ( sp <= 0 ) != ( sq <= 0 ):
+                out.append( p + ( q - p ) * ( sp / ( sp - sq ) ) )
+        poly = np.asarray( out ).reshape( -1, 2 )
+        if len( poly ) == 0:
+            break
+    return poly
+
+
+def _draw_outline( viz, outline, a, color, opacity, frames = True ):
+    """the edges of the convex polytope `outline` ( half-spaces ) moved by the affine map `a`, dashed"""
+    d = a.shape[ 0 ]
+    dom = Cell.make_unbounded( d, kernel_dtype = "FP64" )
+    for n, o in zip( *outline ):
+        dom.cut( np.asarray( n, dtype = float ), float( o ) )
+    if not dom.is_bounded:
+        return
+    it = dom._item( 0 )
+    edges = dom._edges_of( it )
+    if len( edges ) == 0:
+        return
+    vp = it.vp @ a[ :, :d ].T + a[ :, d ]
+    viz.add_edges( vp, np.asarray( edges ).reshape( -1, 2 ), color = color, opacity = opacity, dashed = True, frames = frames )
 
 
 class Neighbors( Aggregate ):

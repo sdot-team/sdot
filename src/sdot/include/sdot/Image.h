@@ -18,6 +18,39 @@ struct Image {
     /// a spare cell for it in the scratch ( `PowerDiagram::nb_work_cells` )
     static constexpr bool cuts_pieces = true;
 
+    /// what this density's adjoint derives, for loom's `computed_grads` ( `flags`: the distribution's, under one
+    /// output ). The masses are never read by the integration: their derivative is known to be zero.
+    static void computed_grads( auto &&flags ) {
+        flags.values = true;   // the value of each pixel ( `for_each_piece`'s `add_value_grad` ) -- its geometry: `affine_computed_grads`
+        if constexpr ( requires { flags.current_mass; } ) flags.current_mass = true;
+        if constexpr ( requires { flags.target_mass; } )  flags.target_mass  = true;
+    }
+    /// ... and its frame and origin, when the integration knows how ( not with a periodicity nor a sink: decided in Python )
+    static void affine_computed_grads( auto &&flags ) {
+        if constexpr ( requires { flags.frame; } )  flags.frame  = true;
+        if constexpr ( requires { flags.origin; } ) flags.origin = true;
+    }
+
+    // ---- THE FRAME AND THE ORIGIN, differentiated ( `diagram::AffineAcc` ) ---------------------------------------------
+    // The image is the affine image `x = origin + F^T t` of a fixed grid: the integral of a cell moves with `F` and `origin`
+    // as `dJ = tr( X^T dA A^-1 ) + y . d origin`, `A = F^T` -- `X`, `y` accumulated by `diagram::integrate_bwd_into` -- so
+    // `d J / d F = F^-T X^T`, `d J / d origin = y`.
+    static constexpr bool is_affine = true;
+    HD static constexpr bool affine_wanted( const auto &grad_dist ) {
+        if constexpr ( requires { grad_dist.frame; grad_dist.origin; } )
+            return DECAYED_TYPE_OF( grad_dist.frame )::is_valid || DECAYED_TYPE_OF( grad_dist.origin )::is_valid;
+        else
+            return false;
+    }
+    HD void affine_origin( auto *o ) const {
+        for ( int a = 0; a < ct_dim; ++a )
+            o[ a ] = 0;
+        if constexpr ( DECAYED_TYPE_OF( origin )::is_valid )
+            for ( int a = 0; a < ct_dim; ++a )
+                o[ a ] = TF( origin( a ) );
+    }
+    HD void add_affine_grad( auto &&grad_dist, const auto &acc ) const;
+
     // build a FULLY-POPULATED image -- each of `origin` / `frame` / `knots` that is unbound
     // (a `NoneTensor`) replaced by its documented default -- and hand it to `cont`. Lets the
     // methods below be written ONCE against a complete image instead of gating on `is_valid`.
@@ -37,7 +70,10 @@ struct Image {
     // (`PieceWorkspace.h`) -- the original cell is never touched, which makes it possible
     // to open one piece after another without copying it.
     HD void   for_each_piece ( const auto &cell, auto &&ws, auto &&func ) const;
-    HD void   _for_each_piece( const auto &cell, auto &&ws, auto &&func ) const;
+    HD void   _for_each_piece( const auto &cell, auto &&ws, auto &&func, const auto &L, const auto &s ) const;
+
+    // the same against the image MOVED by the isometry `x -> L x + s` ( a `Matrix` and a `Vector`: periodicity, `Periodic.h` )
+    HD void   for_each_piece_moved( const auto &cell, auto &&ws, auto &&func, const auto &L, const auto &s ) const;
 
     // the largest `i` such that `knots( axis, i ) <= t`, clamped to `[ 0, nb_cells - 1 ]` (the
     // knots are increasing, hence a binary search -- a production image has many blocks).
@@ -46,6 +82,9 @@ struct Image {
     // adjoint of `measure` w.r.t. `values`: since mass = Sum_c values(c) * cell_volume(c) is linear
     // in `values`, grad_values(c) = grad_mass * cell_volume(c). `grad_mass` is the scalar cotangent.
     HD void   measure_bwd  ( auto &&grad_values, auto &&grad_mass ) const;
+
+    // ... and w.r.t. the frame: mass = |det F| * ( the rest ), so grad_frame = grad_mass * mass * F^-T
+    HD void   measure_frame_bwd( auto &&grad_frame, auto &&grad_mass ) const;
 
     // unidimension piece
     struct Udp          { SI index; TF pos; TF mass; TF y; };

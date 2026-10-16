@@ -42,6 +42,7 @@ from .SdotPlan1d import SdotPlan1d as SdotPlan1d
 from .SdotPlanNd import SdotPlanNd as SdotPlanNd
 from .PowerDiagram import PowerDiagram as PowerDiagram
 from .PowerDiagram import box_half_spaces as box_half_spaces
+from .groups import Groups as Groups
 from .PowerDiagram_Bsp import PowerDiagram_Bsp as PowerDiagram_Bsp
 from .PowerDiagram_Plain import PowerDiagram_Plain as PowerDiagram_Plain
 from .SpatialAccelerator import SpatialAccelerator as SpatialAccelerator
@@ -53,6 +54,7 @@ from .distributions.ProjectedSumOfDiracs import ProjectedSumOfDiracs as Projecte
 from .distributions.Image import Image as Image
 from .distributions.Box import Box as Box
 from .distributions.Mesh import Mesh as Mesh
+from .distributions.CodimMesh import CodimMesh as CodimMesh
 from .distributions.Polytope import Polytope as Polytope
 from .distributions.Polytope import Polygon as Polygon
 from .distributions.Polytope import Polyhedron as Polyhedron
@@ -66,6 +68,7 @@ from .viz.convergence import write_convergence_html as write_convergence_html
 
 from .OtProblem import plan as plan
 from .OtProblem import w2 as w2
+from .periodicity import wrap as wrap
 
 # the old names, until callers move to `OtProblem` ( see
 # `notes/2026-10-02-sdotplan.md`: `OtPlan1d` did not say it was semi-discrete, and `OtPlan` said

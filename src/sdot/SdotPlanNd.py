@@ -63,9 +63,15 @@ What it does not cost: the TRANSPORT COST is blind to this degeneracy ( § 23.12
 `1.2e-17` ), so anything that is a sum weighted by the masses -- the cost, the total mass, a
 global moment -- need know nothing about it. What stays APPROXIMATE for the members of a cluster:
 their own masses and barycentres ( `cell_masses`, `barycenters`: those of the returned weights,
-within the floor for near-coincident seeds; an exact duplicate's cell is EMPTY, its representative's
-cell holding the mass of both ), hence their part of `cost_and_position_grad` ( exact for the
-cluster as a whole, not split between its members ).
+within the floor for near-coincident seeds ), hence their part of `cost_and_position_grad` ( exact
+for the cluster as a whole, not split between its members ).
+
+EXACT DUPLICATES are a CONVENTION ( the plan is not differentiable there ): a cluster of diracs at
+the same position is ONE dirac of the summed mass. The solver leaves the cell of a duplicate empty
+( its weight `w_rep - gap` ) and the merged cell to its representative; the outputs then share that
+cell: `cell_masses[ i ] = m_c nu_i / nu_c`, `barycenters[ i ]` the merged barycenter, for each
+member -- and the derivatives are those of the merged problem ( `_share_duplicates`,
+`_attach_derivatives` ). Only for duplicates found on the host ( not under `jax.jit` ).
 
 = A single diagram
 
@@ -105,7 +111,7 @@ _STATS = [ "status", "residual", "residual0", "nb_iter", "nb_diag", "nb_backtrac
 _HISTORY = [ "step", "t", "residual_l2", "min_measure", "max_abs_residual", "nb_diag", "nb_evals", "s" ]
 _STATUS = { 0: "running", 1: "converged", 2: "max iterations", 3: "stagnation", 4: "linear solver failure", 5: "card capacity",
             6: "failure", 7: "converged (aggregated)" }
-_START = { 0: "weights0", 1: "voronoi", 2: "similarity" }
+_START = { 0: "weights0", 1: "voronoi", 2: "similarity", 3: "balls" }
 _LIN = { "auto": 0, "cholesky": 1, "amg": 2, "cg": 3, "mg": 4 }
 _AMG_VARIANT = { "auto": -1, "sa_spai0": 0, "sa_gs": 1, "rs_gs": 2 }
 _STEP = { "trials": 0, "limits": 1 }
@@ -121,10 +127,66 @@ _AGGREGATE_MARGIN = 4.0
 _DUPLICATE_GAP = 1e-6
 
 
+#: the outputs whose derivative `_attach_derivatives` attaches
+_DERIVED = ( "weights", "cell_masses", "cost", "barycenters" )
+
+
+def _origin_as_shift( problem ):
+    """THE DERIVATIVE WITH RESPECT TO THE ORIGIN OF THE TARGET ( an `Image`, a `Box` ), by translation: the cost is invariant under a
+    translation of everything, so the target moved by `s` is the diracs moved by `- s` -- same weights, masses and cost, and the
+    barycenters move with the target. The derivative is therefore written with the origin DETACHED and the diracs at `p - s`,
+    `s = o - stop_gradient( o )` ( worth zero, carrying the derivative of `o` ), then `s` is added to the barycenters -- no kernel
+    has to differentiate the geometry of the pixels. `( problem, s )`: the problem to differentiate, and `s`
+    ( a raw array ) -- or `( problem, None )` when the origin is not traced."""
+    dst = problem.target
+    o = getattr( dst, "origin", None )
+    if not isinstance( o, Tensor ) or not o.is_defined or not ( o.storage.traces or loom.is_traced( o.raw ) ):
+        return problem, None
+    from loom import stop_gradient
+    o0 = stop_gradient( o )
+    shift = o.raw - o0.raw
+    target = copy.copy( dst )
+    target.origin = o0
+    source = copy.copy( problem.source )
+    source.positions = RealTensor[ source.num_dirac, source.dim ]( problem.source.positions.raw - shift[ None, : ] )
+    moved = copy.copy( problem )
+    moved._source, moved._target = source, target
+    return moved, shift
+
+
+def _periodicity_of( problem ):
+    """the periodicity of a problem, `None` when there is none"""
+    p = getattr( problem, "periodicity", None )
+    return None if p is False else p
+
+
+def _declared_mass( dist ):
+    """the mass a distribution is normalized to: its `target_mass`, or its own mass when it has none ( `None` when it is only known
+    under a trace )"""
+    tm = getattr( dist, "target_mass", None )
+    v = tm.raw if tm is not None and tm.is_defined else getattr( dist.mass, "raw", dist.mass )
+    if loom.is_traced( v ):
+        return None
+    return float( np.asarray( v ).reshape( -1 )[ 0 ] )
+
+
+def _sink_of( problem ):
+    """`0.0` ( the weight of the sink ) when the transport is PARTIAL -- the source weighs less than the target ( `target_mass` ),
+    and the rest of the target goes to a sink: the cells are capped by balls ( `PowerDiagram( sink_weight = ... )` ) -- `None`
+    when the masses balance. Two equal `target_mass` balance exactly; otherwise up to a relative `1e-12`."""
+    ms, mt = _declared_mass( problem.source ), _declared_mass( problem.target )
+    if ms is None or mt is None or ms == mt or abs( ms - mt ) <= 1e-12 * max( abs( ms ), abs( mt ) ):
+        return None
+    if ms > mt:
+        raise NotImplementedError( f"partial transport: the source ( mass { ms :g} ) weighs more than the target ( { mt :g} ) -- "
+                                   "only the other way round for now ( a lighter source, the rest of the target to a sink )" )
+    return 0.0
+
+
 def exact_duplicates( positions ):
     """THE EXACT DUPLICATES of a cloud `[ n, d ]` ( a host array ): `( dup, rep )`, each duplicate and the smallest index of
     the seeds at the same position ( empty arrays when there is none ). A hash of the coordinates' bits, sorted: 2.8 ms for
-    1e5 seeds, 22 ms for 1e6 ( M-series ); the exact grouping only runs when two hashes collide."""
+    1e5 seeds, 22 ms for 1e6 ( M-series ); the exact grouping only runs on the seeds whose hashes collide."""
     import numpy as np
     P = np.ascontiguousarray( np.asarray( positions, dtype = np.float64 ) ) + 0.0       # ( `+ 0.0`: -0.0 and 0.0 alike )
     n = P.shape[ 0 ]
@@ -136,16 +198,47 @@ def exact_duplicates( positions ):
     for k, mul in zip( range( bits.shape[ 1 ] ), ( 0x9E3779B97F4A7C15, 0xC2B2AE3D27D4EB4F, 0x165667B19E3779F9, 0xD6E8FEB86659FD93 ) ):
         h ^= bits[ :, k ] * np.uint64( mul )
         h ^= h >> np.uint64( 29 )
-    s = np.sort( h )
-    if not ( s[ 1: ] == s[ :-1 ] ).any():
+    order = np.argsort( h )
+    s = h[ order ]
+    eq = s[ 1: ] == s[ :-1 ]
+    if not eq.any():
         return none
-    _, inv = np.unique( P.reshape( n, -1 ), axis = 0, return_inverse = True )
+    cand = np.sort( order[ np.r_[ eq, False ] | np.r_[ False, eq ] ] )       # ( the colliding hashes only )
+    _, inv = np.unique( P.reshape( n, -1 )[ cand ], axis = 0, return_inverse = True )
     inv = inv.reshape( -1 )
     first = np.full( int( inv.max() ) + 1, n, dtype = np.int64 )
-    np.minimum.at( first, inv, np.arange( n, dtype = np.int64 ) )
+    np.minimum.at( first, inv, cand )
     rep = first[ inv ]
-    dup = np.nonzero( rep != np.arange( n ) )[ 0 ]
-    return dup.astype( np.int64 ), rep[ dup ].astype( np.int64 )
+    keep = rep != cand
+    return cand[ keep ].astype( np.int64 ), rep[ keep ].astype( np.int64 )
+
+
+def _duplicate_layout( n, dup, rep ):
+    """THE MERGED CLOUD of a cloud with exact duplicates ( `exact_duplicates` ): `( keep, inv, members )` -- `keep` ( `[ k ]` ) the
+    representative of each cluster ( its smallest index ), `inv` ( `[ n ]` ) the cluster of each seed, `members` ( `[ r, k ]` ) the
+    seeds of each cluster by rank ( `members[ 0 ] == keep` ), `n` where a cluster has fewer than `r` of them ( a zero row, see
+    `_cluster_sum` )."""
+    root = np.arange( n, dtype = np.int64 )
+    root[ dup ] = rep
+    keep = np.nonzero( root == np.arange( n ) )[ 0 ]
+    inv = np.searchsorted( keep, root )
+    order = np.lexsort( ( np.arange( n ), inv ) )
+    start = np.searchsorted( inv[ order ], np.arange( len( keep ) ) )
+    rank = np.empty( n, dtype = np.int64 )
+    rank[ order ] = np.arange( n ) - start[ inv[ order ] ]
+    members = np.full( ( int( rank.max() ) + 1, len( keep ) ), n, dtype = np.int64 )
+    members[ rank, inv ] = np.arange( n )
+    return keep, inv, members
+
+
+def _cluster_sum( raw, members ):
+    """the sum over each cluster of `raw` ( `[ n, ... ]`, any framework, traced or not ) -- gathers only ( no scatter in every
+    framework ), the missing members reading an appended zero row"""
+    ext = loom.ops( raw ).concatenate( [ raw, raw[ :1 ] * 0 ], axis = 0 )
+    out = ext[ members[ 0 ] ]
+    for r in members[ 1: ]:
+        out = out + ext[ r ]
+    return out
 
 
 #: the old arguments of `SdotPlanNd( src, dst, ... )`, and where they live now -- read by the
@@ -199,6 +292,41 @@ _CARD_OPTIONS = [ "tol_abs", "tol_rel", "t_min", "mult_ok", "factor", "maxit", "
                   "lin_maxit", "trace", "mg_float", "mg_smoothed",
                   "continuation", "conv_threshold", "conv_s0", "conv_ratio", "conv_min", "conv_possible", "min_scale",
                   "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny", "agg_margin", "agg_gap", "agg_nb_dups" ]
+
+
+def card_density_call( dens, d ):
+    """= Internals
+
+    how a handler of the card takes the density `dens` ( `PowerDiagram_Bsp._card_solve_density` ): `( C++ expression of the
+    density, its tensors as kwargs of the call )` -- `DensityHost2D.cuh`"""
+    import numpy as np
+    def axis( m, name ):
+        return Axis( ShapeVar( int( m ) ), name = name )
+    if dens[ "kind" ] == "const":
+        rho = dens[ "rho" ]                              # ( a number, or traced: read on the card )
+        return "args.inputs.density", dict( density = RealTensor( np.float64( rho ) if isinstance( rho, ( int, float ) ) else rho ) )
+    if dens[ "kind" ] == "image":
+        nx, ny = int( dens[ "geom" ][ 4 ] ), int( dens[ "geom" ][ 5 ] )
+        return "sdot::gpu2d::image_in( args.inputs.img_values )", dict( img_values = RealTensor[ axis( nx * ny, "num_card_pixel" ) ]( dens[ "values" ] ) )
+    if dens[ "kind" ] == "mesh":
+        # ( 2D: triangles, `Density2D.cuh::DensMesh`; 3D: tetrahedra, `Density3D.cuh::DensMesh3` )
+        ne, nn, nb = int( dens[ "tri" ].shape[ 0 ] ), int( dens[ "nodes" ].shape[ 0 ] ), int( dens[ "lo" ].shape[ 0 ] )
+        expr = ( f"sdot::gpu2d::{ 'mesh_in' if d == 2 else 'mesh3_in' }( args.inputs.m_nodes, args.inputs.m_values, args.inputs.m_tri, "
+                 "args.inputs.m_grad, args.inputs.m_lo, args.inputs.m_hi, args.inputs.m_links )" )
+        return expr, dict(
+            m_nodes = RealTensor[ axis( nn, "num_card_mnode" ), axis( d, "num_card_mdim" ) ]( dens[ "nodes" ] ),
+            m_values = RealTensor[ axis( ne, "num_card_melem_v" ), axis( d + 1, "num_card_mcorner_v" ) ]( dens[ "values" ] ),   # ( DG1 )
+            m_tri = IntTensor[ axis( ne, "num_card_melem" ), axis( d + 1, "num_card_mcorner" ), dict( size = 32 ) ]( dens[ "tri" ] ),
+            m_grad = RealTensor[ axis( ne, "num_card_melem_g" ), axis( d * ( d + 1 ), "num_card_mgrad" ) ]( dens[ "grad" ] ),
+            m_lo = RealTensor[ axis( nb, "num_card_mbnode_l" ), axis( d, "num_card_mdim_l" ) ]( dens[ "lo" ] ),
+            m_hi = RealTensor[ axis( nb, "num_card_mbnode_h" ), axis( d, "num_card_mdim_h" ) ]( dens[ "hi" ] ),
+            m_links = IntTensor[ axis( nb, "num_card_mbnode_k" ), axis( 4, "num_card_mlink" ), dict( size = 32 ) ]( dens[ "links" ] ) )
+    # ( 2D: `Density2D.cuh::DensGauss`; 3D: `Density3D.cuh::DensGauss3` )
+    ng = int( dens[ "sigma" ].shape[ 0 ] )
+    return f"sdot::gpu2d::{ 'gauss_in' if d == 2 else 'gauss3_in' }( args.inputs.g_pos, args.inputs.g_sigma, args.inputs.g_mass )", dict(
+        g_pos = RealTensor[ axis( ng, "num_card_gauss" ), axis( d, "num_card_gdim" ) ]( dens[ "pos" ] ),
+        g_sigma = RealTensor[ axis( ng, "num_card_gauss_s" ) ]( dens[ "sigma" ] ),
+        g_mass = RealTensor[ axis( ng, "num_card_gauss_m" ) ]( dens[ "mass" ] ) )
 
 
 def _card_linear_solves( row, col, val, dia, rhs, method = "mg", tol = 1e-6, smoothed = None, precision = "float", recycle = 2, rebuild = 1,
@@ -310,9 +438,21 @@ class SdotPlanNd( Displayable ):
             # THE SOLVE IS NOT DIFFERENTIATED: it runs on detached inputs, and its outputs get their derivative from the implicit
             # function theorem ( `_attach_derivatives` )
             plan = cls._solve( problem._detached(), settings, verbose, warm )
-            plan._attach_derivatives( problem, settings )
+            solved = { name: getattr( plan, name ) for name in _DERIVED }
+            moved, shift = _origin_as_shift( problem )
+            plan._attach_derivatives( moved, settings )
+            if shift is not None:
+                plan.barycenters = RealTensor[ plan._pd.num_point, plan._pd.dim ]( plan.barycenters.raw + shift[ None, : ] )
+            # THE VALUES ARE THE SOLVER'S, to the bit: what is attached carries the derivative ( its value differs by the rounding of
+            # its own diagrams -- a `jit` that nobody differentiates must give what the eager solve gives )
+            ops = loom.ops()
+            for name, value in solved.items():
+                attached = getattr( plan, name ).raw
+                setattr( plan, name, type( value )( value.raw + ( attached - ops.stop_gradient( attached ) ), axes = value.axes ) )
             return plan
         spreads = cls._spreads( problem, settings )
+        if spreads and _periodicity_of( problem ) is not None:
+            raise NotImplementedError( "periodicity: not with a target that spreads itself ( a `Mesh` ) yet -- an `Image`, a `Box` or a `Polytope`" )
         if spreads:
             k0 = problem.target.spread_start()
             if k0 is not None and ( settings.continuation == "always" or k0 >= cls.SPREAD_DIRECT ):
@@ -466,8 +606,30 @@ class SdotPlanNd( Displayable ):
         # refusal is reported before anything has been allocated.
         problem.domain
 
-        # the limits-based step only exists in 2D ( `sdotplan/Bounds.h` ); elsewhere, trials
-        step = { "auto": "limits" if d == 2 else "trials" }.get( tun.step, tun.step )
+        # the limits-based step only exists in 2D ( `sdotplan/Bounds.h` ); elsewhere, trials. Not with a periodicity: the limits
+        # rebuild the cells from the neighbours of the laplacian, which forgets through which image they are neighbours
+        periodicity = _periodicity_of( problem )
+        # PARTIAL transport ( the source is lighter than the target ): a sink, which takes what the cells' balls leave
+        self._sink = _sink_of( problem )
+        if self._sink is not None and periodicity is not None:
+            raise NotImplementedError( "partial transport with a periodicity: not yet" )
+        if self._sink is not None and on_card:
+            raise NotImplementedError( "partial transport: on the CPU only for now" )
+        # GROUPS ( `duplicates = "split"`, `sdotplan/Groups.h` ): the tree of aggregates, found once, here, on readable positions -- the
+        # Newton of the CPU and of the card ( `gpu/CardGroups.cuh` ) then runs on all the weights of that geometry; a periodicity keeps
+        # the aggregation, then `_split_groups`
+        self._solver_groups = None
+        pos_given = getattr( src_dist.positions, "raw", src_dist.positions )
+        # ( the limits' cells, `sdotplan/Bounds.h`, do not know the groups: an explicit `step = "limits"` takes that path too )
+        if ( getattr( settings, "duplicates", "split" ) == "split" and settings.aggregate and periodicity is None
+             and tun.step != "limits" and not loom.is_traced( pos_given ) ):
+            self._solver_groups = self._groups_for( problem, settings, warm )
+        step = { "auto": "limits" if d == 2 and periodicity is None and self._sink is None and self._solver_groups is None else "trials" }.get( tun.step, tun.step )
+        if step == "limits" and periodicity is not None:
+            raise ValueError( "step = 'limits' is not available with a periodicity: 'trials' or 'auto'" )
+        if step == "limits" and self._sink is not None:
+            raise ValueError( "step = 'limits' is not available for a partial transport: 'trials' or 'auto'" )
+
         if step == "limits" and d != 2:
             raise ValueError( "step = 'limits': 2D only, on the CPU as on the card ( the area polynomials along the direction, "
                               "`sdotplan/Bounds.h`, `gpu/Newton2D.cuh`; in 3D: 'trials' or 'auto' )" )
@@ -511,7 +673,19 @@ class SdotPlanNd( Displayable ):
         import numpy as np
         w_start = np.zeros( int( src_dist.nb_diracs.value ) ) if w0_given is None else w0_given
         from .AaBsp import AaBsp, builds_on_card
-        if accelerator is None and on_card and builds_on_card( pos_raw ):
+        if periodicity is not None and accelerator is None:
+            # the tree is that of the FOLDED seeds ( the diagram folds them the same way: `periodicity.setup_for` )
+            from .periodicity import setup_for
+            pos_raw = setup_for( pos_raw, dst_dist.bounding_half_spaces(), periodicity )[ 1 ]
+        if accelerator is None and on_card and builds_on_card( pos_raw ) and self._solver_groups is not None:
+            # GROUPS: the positions are readable ( the tree of aggregates was read from them ) and the groups need the tree's
+            # order on the host ( `PowerDiagram_Bsp._stored_group_members` ): the card's tree built as a CONSTANT of a trace
+            with loom.concrete_eval():
+                accelerator = AaBsp( pos_raw )
+                if w0_given is None:
+                    accelerator.set_zero_weight_majorants()
+            accelerator._majorant_weights = w_start
+        elif accelerator is None and on_card and builds_on_card( pos_raw ):
             # ON THE CARD the tree is built by the card ( `gpu/Bsp2D.cuh`, one call ), HERE, outside the `concrete_eval`
             # below: under a `jit` it is then a part of the jitted program -- built at every call, from traced positions as
             # well as from constant ones -- and not a constant computed while tracing. The majorants of a cold start ( zero
@@ -530,7 +704,8 @@ class SdotPlanNd( Displayable ):
             self._pd = PowerDiagram( src_dist.positions, w_start,
                                      accelerator = accelerator, kernel_dtype = settings.kernel_dtype,
                                      distribution = dst_dist, memory = tun.memory,
-                                     scratch_capacity = tun.scratch_capacity )
+                                     scratch_capacity = tun.scratch_capacity, periodicity = periodicity, sink_weight = self._sink,
+                                     groups = self._solver_groups )
         pd = self._pd
         n = int( pd.nb_points.value )
 
@@ -567,11 +742,17 @@ class SdotPlanNd( Displayable ):
         cost        = RealTensor()
         clusters    = IntTensor[ pd.num_point ]()
         stats = RealTensor[ Axis( ShapeVar( len( _STATS ) ), name = "num_stat" ) ]()
+        # ( with groups: the outer weights -- the solver takes the virtual ones from the diagram )
         w0 = RealTensor[ pd.num_point ]( pd.weights.raw )
 
         dom = pd._domain_cell()
         dist_expr, _, dist_kwargs = pd._dist_for()
         pd_expr, pd_kwargs, pd_produced = pd._solver_weights_call()
+        groups_produced = None
+        if pd.group_rep.is_defined:                      # the virtual weights of the tree are written by the solver too
+            groups_produced = ( RealTensor[ pd.num_point ](), RealTensor[ pd.num_agg ]() )
+            pd_expr = f"{ pd_expr }.with_groups( outputs.group_vweights_out, outputs.group_agg_vweights_out )"
+            pd_kwargs = dict( pd_kwargs, group_vweights_out = loom.out( groups_produced[ 0 ] ), group_agg_vweights_out = loom.out( groups_produced[ 1 ] ) )
 
         loom.ffi_call(
             "sdotplan_solve",
@@ -633,19 +814,23 @@ class SdotPlanNd( Displayable ):
             **dist_kwargs,
         )
         pd._solver_weights_after( pd_produced )
+        if groups_produced is not None:
+            pd.group_vweights, pd.group_agg_vweights = groups_produced[ 0 ].raw, groups_produced[ 1 ].raw
 
         #: the weights of the power diagram of the plan, `[ n ]` ( defined up to a constant: `weights[ 0 ] == 0` )
         self.weights = weights
         self._weights_fit = weights
         #: the mass of each cell, `[ n ]`
         self.cell_masses = cell_masses
-        #: the barycenter of each cell, `[ n, d ]` ( its dirac if the cell is empty )
-        self.barycenters = barycenters
+        #: the barycenter of each cell, `[ n, d ]` ( its dirac if the cell is empty ) -- with a periodicity, next to the dirac
+        #: as it was given ( the cells are built around the folded diracs: the folding is undone here )
+        self.barycenters = barycenters if pd._periodic is None else RealTensor[ pd.num_point, pd.dim ]( pd.unfold( barycenters.raw ) )
         #: the transport cost, `W_2^2`
         self.cost = cost
         self._clusters = clusters
         self._read_stats( stats, settings )
         self._read_history( history, settings, pd )
+        self._settle_duplicates( settings )
         self._check_converged( settings )
 
     @staticmethod
@@ -665,8 +850,15 @@ class SdotPlanNd( Displayable ):
         import numpy as np
         self._agg_margin, self._agg_gap, self._agg_nb_dups = 0.0, 0.0, 0
         self._dup_note = "not checked ( aggregate = False )"
+        self._exact_dups = None
         dup = rep = np.zeros( 0, dtype = np.int64 )
-        if settings.aggregate:
+        if getattr( self, "_solver_groups", None ) is not None:
+            # GROUPS: the diagram splits what the doubles cannot separate, Newton runs on all its weights -- nothing to merge; the
+            # margin is that of the criterion with which the solver finds the pairs that need to join the groups
+            self._dup_note = "checked ( groups )"
+            margin = getattr( settings.tuning, "aggregation_margin", None )
+            self._agg_margin = float( _AGGREGATE_MARGIN if margin is None else margin )
+        elif settings.aggregate:
             margin = getattr( settings.tuning, "aggregation_margin", None )
             self._agg_margin = float( _AGGREGATE_MARGIN if margin is None else margin )
             if loom.is_traced( pos_raw ):
@@ -674,8 +866,9 @@ class SdotPlanNd( Displayable ):
             else:
                 from loom.tensor.host import to_host     # any framework, any device ( a cupy array refuses `np.asarray` )
                 P = np.asarray( to_host( pos_raw ), dtype = np.float64 ).reshape( n, -1 )
-                dup, rep = exact_duplicates( P )
+                dup, rep = getattr( self, "_dup_hash", None ) or exact_duplicates( P )        # ( the hash of `_groups_for`, if any )
                 self._dup_note = "checked"
+                self._exact_dups = ( dup, rep ) if len( dup ) else None
                 if len( dup ):
                     ext = P.max( axis = 0 ) - P.min( axis = 0 )
                     scale2 = max( float( ( P * P ).sum( axis = 1 ).max() ), float( ( ext * ext ).sum() ) )
@@ -762,17 +955,23 @@ class SdotPlanNd( Displayable ):
         d = pd.dim_count
         if d not in ( 2, 3 ):
             reason = f"the card solves in 2D and 3D ( not { d }D )"
-        elif not pd._card_takes():
+        elif pd._periodic is not None and pd._periodic.linear is not None:
+            reason = "with a periodicity, the card solves for groups of translations ( its cells walk the images; rotations and symmetries: the CPU )"
+        elif not pd._card_takes( solver = True ):
             reason = "the card's cells take a box domain, the BSP tree and no neighbour memory"
         else:
             dens = pd._card_solve_density()
-            if d == 3 and dens is not None and dens[ "kind" ] not in ( "const", "mesh" ):
+            if d == 3 and dens is not None and dens[ "kind" ] not in ( "const", "mesh", "gauss" ):
                 dens = None
-            if dens is None:
+            if pd._periodic is not None and dens is not None and dens[ "kind" ] != "const":
+                dens = None                              # ( the card's images, gaussians and meshes are not repeated by a group )
+                reason = ( "with a periodicity, the card integrates a constant density ( a box, a polytope, an image of equal "
+                           "values ) -- its images, gaussians and meshes are not repeated by the group" )
+            if dens is None and reason is None:
                 reason = ( "the card integrates a constant density, an `Image` on a regular grid ( a diagonal frame, uniform knots, "
                            "covering the box ), isotropic gaussians or a triangle `Mesh` in 2D -- not this distribution" if d == 2 else
                            "in 3D the card integrates a constant density ( Lebesgue on the box, or an `Image` of equal values "
-                           "covering it ) or a tetrahedral `Mesh` -- not this distribution" )
+                           "covering it ), isotropic gaussians or a tetrahedral `Mesh` -- not this distribution" )
         if reason is not None:
             raise NotImplementedError( f"SdotPlanNd on a CUDA device: { reason }. Use the CPU device ( LOOM_DEVICE=cpu ) "
                                        "for this problem." )
@@ -783,12 +982,13 @@ class SdotPlanNd( Displayable ):
         # double, reach the double's residual for a fifth of its time )
         from .PowerDiagram_Bsp import card_variant_for
         nodes = int( pd.tree.nb_bsp_nodes.value )
+        nid = n * ( 1 if pd._periodic is None else len( pd._periodic.shifts ) )    # ( the cuts' identifiers: the images' too )
         if settings.precision in ( "auto", "mixed" ):
-            variant = f"{ card_variant_for( 32, n, nodes, d ) }, { card_variant_for( 64, n, nodes, d ) }"
+            variant = f"{ card_variant_for( 32, nid, nodes, d ) }, { card_variant_for( 64, nid, nodes, d ) }"
         else:
-            variant = card_variant_for( 32 if settings.precision == "fp32" else 64, n, nodes, d )
+            variant = card_variant_for( 32 if settings.precision == "fp32" else 64, nid, nodes, d )
         # the cells' last pass: one budget for every diagram of the solve, sized on the widest kernel it runs
-        overflow_warps = pd._card_overflow_warps( card_variant_for( 32 if settings.precision == "fp32" else 64, n, nodes, d ) )
+        overflow_warps = pd._card_overflow_warps( card_variant_for( 32 if settings.precision == "fp32" else 64, nid, nodes, d ) )
 
         # the linear solver: the card's ( `Linear2D.cuh` ), or a CPU one of `Linear.cpp` on a copy of the laplacian
         lin_name = tun.linear_solver
@@ -824,7 +1024,8 @@ class SdotPlanNd( Displayable ):
         put( "conv_possible", int( dens.get( "conv_possible", True ) ) ); put( "min_scale", dens.get( "min_scale", 0.0 ) )
         for name, v in zip( ( "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny" ), dens.get( "geom", [ 0.0 ] * 6 ) ):
             put( name, v )
-        put( "agg_margin", self._agg_margin ); put( "agg_gap", self._agg_gap ); put( "agg_nb_dups", self._agg_nb_dups )
+        grouped = pd.group_rep.is_defined                # ( the tree of aggregates: no aggregation, `Newton2D.cuh` )
+        put( "agg_margin", 0.0 if grouped else self._agg_margin ); put( "agg_gap", self._agg_gap ); put( "agg_nb_dups", 0 if grouped else self._agg_nb_dups )
         options = RealTensor[ Axis( ShapeVar( len( _CARD_OPTIONS ) ), name = "num_card_opt" ) ]( np.asarray( opts, dtype = np.float64 ) )
 
         weights = RealTensor[ pd.num_point ]()
@@ -840,34 +1041,16 @@ class SdotPlanNd( Displayable ):
         limits = f"{ int( pd.card_max_vertices ) }, { overflow_warps }"
 
         # the density: its tensors, and how the handler hands them over ( `DensityHost2D.cuh` )
-        def axis( m, name ):
-            return Axis( ShapeVar( int( m ) ), name = name )
-        if dens[ "kind" ] == "const":
-            name, dens_expr = "sdotplan_solve_card_2d", "args.inputs.density"
-            dens_args = dict( density = RealTensor( np.float64( dens[ "rho" ] ) ) )
-        elif dens[ "kind" ] == "image":
-            nx, ny = int( dens[ "geom" ][ 4 ] ), int( dens[ "geom" ][ 5 ] )
-            name, dens_expr = "sdotplan_solve_card_2d_image", "sdot::gpu2d::image_in( args.inputs.img_values )"
-            dens_args = dict( img_values = RealTensor[ axis( nx * ny, "num_card_pixel" ) ]( dens[ "values" ] ) )
-        elif dens[ "kind" ] == "mesh":
-            # ( 2D: triangles, `Density2D.cuh::DensMesh`; 3D: tetrahedra, `Density3D.cuh::DensMesh3` )
-            ne, nn, nb = int( dens[ "tri" ].shape[ 0 ] ), int( dens[ "nodes" ].shape[ 0 ] ), int( dens[ "lo" ].shape[ 0 ] )
-            name = f"sdotplan_solve_card_{ d }d_mesh"
-            dens_expr = ( f"sdot::gpu2d::{ 'mesh_in' if d == 2 else 'mesh3_in' }( args.inputs.m_nodes, args.inputs.m_values, args.inputs.m_tri, "
-                          "args.inputs.m_grad, args.inputs.m_lo, args.inputs.m_hi, args.inputs.m_links )" )
-            dens_args = dict( m_nodes = RealTensor[ axis( nn, "num_card_mnode" ), axis( d, "num_card_mdim" ) ]( dens[ "nodes" ] ),
-                              m_values = RealTensor[ axis( ne, "num_card_melem_v" ), axis( d + 1, "num_card_mcorner_v" ) ]( dens[ "values" ] ),   # ( DG1 )
-                              m_tri = IntTensor[ axis( ne, "num_card_melem" ), axis( d + 1, "num_card_mcorner" ), dict( size = 32 ) ]( dens[ "tri" ] ),
-                              m_grad = RealTensor[ axis( ne, "num_card_melem_g" ), axis( d * ( d + 1 ), "num_card_mgrad" ) ]( dens[ "grad" ] ),
-                              m_lo = RealTensor[ axis( nb, "num_card_mbnode_l" ), axis( d, "num_card_mdim_l" ) ]( dens[ "lo" ] ),
-                              m_hi = RealTensor[ axis( nb, "num_card_mbnode_h" ), axis( d, "num_card_mdim_h" ) ]( dens[ "hi" ] ),
-                              m_links = IntTensor[ axis( nb, "num_card_mbnode_k" ), axis( 4, "num_card_mlink" ), dict( size = 32 ) ]( dens[ "links" ] ) )
-        else:
-            ng = int( dens[ "sigma" ].shape[ 0 ] )
-            name, dens_expr = "sdotplan_solve_card_2d_gauss", "sdot::gpu2d::gauss_in( args.inputs.g_pos, args.inputs.g_sigma, args.inputs.g_mass )"
-            dens_args = dict( g_pos = RealTensor[ axis( ng, "num_card_gauss" ), axis( 2, "num_card_gdim" ) ]( dens[ "pos" ] ),
-                              g_sigma = RealTensor[ axis( ng, "num_card_gauss_s" ) ]( dens[ "sigma" ] ),
-                              g_mass = RealTensor[ axis( ng, "num_card_gauss_m" ) ]( dens[ "mass" ] ) )
+        dens_expr, dens_args = card_density_call( dens, d )
+        name = { "const": "sdotplan_solve_card_2d", "image": "sdotplan_solve_card_2d_image", "mesh": f"sdotplan_solve_card_{ d }d_mesh",
+                 "gauss": f"sdotplan_solve_card_{ d }d_gauss" }[ dens[ "kind" ] ]
+
+        # GROUPS: the virtual weights of the tree come out too
+        groups_produced, group_outs, group_kwargs = None, ", sdot::gpu2d::NoOut{}, sdot::gpu2d::NoOut{}", {}
+        if grouped:
+            groups_produced = ( RealTensor[ pd.num_point ](), RealTensor[ pd.num_agg ]() )
+            group_outs = ", args.outputs.group_vweights_out, args.outputs.group_agg_vweights_out"
+            group_kwargs = dict( group_vweights_out = loom.out( groups_produced[ 0 ] ), group_agg_vweights_out = loom.out( groups_produced[ 1 ] ) )
 
         loom.ffi_call(
             name,
@@ -875,7 +1058,7 @@ class SdotPlanNd( Displayable ):
                 f"sdot::gpu2d::solve<{ variant }>( queue, args.inputs.power_diagram, args.inputs.nu, args.inputs.w0, args.inputs.dups, args.inputs.options, "
                 "args.outputs.weights, args.outputs.history, args.outputs.stats, args.outputs.cell_masses, args.outputs.barycenters, "
                 "args.outputs.cost, args.outputs.clusters, args.outputs.sorted_weights_out, args.outputs.node_wa_out, args.outputs.node_wb_out, args.outputs.work, "
-                f"args.errors, args.allocator, { dens_expr }, { limits } );",
+                f"args.errors, args.allocator, { dens_expr }, { limits }{ group_outs } );",
                 includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], allocator = True ),
             failures = pd._card_failures(),
             power_diagram = pd,
@@ -895,16 +1078,20 @@ class SdotPlanNd( Displayable ):
             clusters = loom.out( clusters ),
             work = loom.out( work, capacities = { "nb_facets": card_facet_capacity( n, d ) } ),
             **pd_kwargs,
+            **group_kwargs,
         )
         pd._solver_weights_after( pd_produced )
+        if groups_produced is not None:
+            pd.group_vweights, pd.group_agg_vweights = groups_produced[ 0 ].raw, groups_produced[ 1 ].raw
         self.weights = weights
         self._weights_fit = weights
         self.cell_masses = cell_masses
-        self.barycenters = barycenters
+        self.barycenters = barycenters if pd._periodic is None else RealTensor[ pd.num_point, pd.dim ]( pd.unfold( barycenters.raw ) )
         self.cost = cost
         self._clusters = clusters
         self._read_stats( stats, settings )
         self._read_history( history, settings, pd )
+        self._settle_duplicates( settings )
         self._check_converged( settings )
 
     @staticmethod
@@ -999,6 +1186,18 @@ class SdotPlanNd( Displayable ):
         return self.stats[ "status" ] in ( "converged", "converged (aggregated)" )
 
     @property
+    def groups( self ):
+        """The groups of the plan ( `sdot.Groups`: seeds that share a cell and split it, `Iterative( duplicates = "split" )` ), else `None`.
+
+        = Internals
+
+        The TREE OF AGGREGATES of the solve ( `groups.Groups`: the separations of scales of the positions, or the clusters of the
+        aggregation as `_split_groups` makes them ), with the precise virtual weights it found -- `PowerDiagram( positions,
+        plan.weights, groups = plan.groups )` is the diagram of the plan. `None` without aggregates, with `duplicates = "merge"`,
+        or where the groups could not be made ( traced positions, a periodicity )."""
+        return getattr( self, "_groups", None )
+
+    @property
     def clusters( self ):
         """Which cluster each dirac belongs to ( `[ n ]`, the smallest index of its cluster ) when diracs too close to be separated were merged, else `None`.
 
@@ -1007,9 +1206,12 @@ class SdotPlanNd( Displayable ):
         Which CLUSTER each dirac belongs to -- `[ n ]`, the smallest index of its cluster ( itself when it is alone ) -- or
         `None` when none was merged.
 
-        `None` is the common case and it means "the weights suffice". As soon as there are clusters, the masses of the
-        members are only within the floor of the doubles ( `stats[ "residual_full" ]` ), an exact duplicate's cell being
-        empty -- see the module docstring and README § 23.11."""
+        `None` is the common case and it means "the weights suffice". As soon as there are clusters, the solver's masses of
+        the members are only within the floor of the doubles, an exact duplicate's cell being empty -- see the module docstring
+        and README § 23.11; with `duplicates = "split"` the plan's GROUPS then split them exactly ( `groups`, which supersedes
+        this attribute: kept for what reads it )."""
+        if getattr( self, "_groups", None ) is not None:
+            return self._clusters                        # ( the solver writes the representatives of the groups )
         nb = self.stats[ "nb_clusters" ]
         if not loom.is_traced( nb ) and int( nb ) == 0:
             return None
@@ -1023,6 +1225,8 @@ class SdotPlanNd( Displayable ):
 
         `nu`: the target mass of each cell ( the masses of the diracs, normalized, then rescaled
         to what the domain contains -- see `sdotplan/Solve.h` )"""
+        if getattr( self, "_sink", None ) is not None:     # partial: the masses of the diracs themselves ( the sink takes the rest )
+            return self._masses
         return self._masses * ( self.stats[ "domain_mass" ] / float( self._masses.sum() ) )
 
     def residual( self, weights = None ) -> Tensor:
@@ -1033,8 +1237,178 @@ class SdotPlanNd( Displayable ):
         `measure_i( weights ) - nu_i` -- ZERO at the sought point, DIFFERENTIABLE with respect to
         `weights` ( see `PowerDiagram.measures` ). One more diagram: it is a diagnostic tool, not
         an output of the solve ( `cell_masses` is )."""
-        w = self._weights_fit if weights is None else weights
-        return self.power_diagram( w ).measures - self.target_masses
+        if weights is None:
+            return self.power_diagram().measures - self.target_masses
+        return self.power_diagram( weights ).measures - self.target_masses
+
+    def _groups_for( self, problem, settings, warm ):
+        """THE TREE OF AGGREGATES OF A SOLVE ( `duplicates = "split"`, `groups.py` ): that of the plan it starts from when the positions
+        are the same ( its precise virtual weights with it ), found otherwise ( `groups.find_groups`, `Tuning( aggregation_kappa )`:
+        the separations of scales of the positions, the exact duplicates included ) -- `None` when there is none. The hash of the
+        positions is kept for the aggregation's inputs ( one per solve )."""
+        from . import groups as grp
+        pos = getattr( problem.source.positions, "raw", problem.source.positions )
+        P = grp._host( pos )
+        self._tree_positions = P                         # ( what the tree is read from: a plan's problem may have new positions since )
+        plan = settings.ot_plan if settings.ot_plan is not None else warm
+        if plan is not None and getattr( plan, "groups", None ) is not None:
+            old = getattr( plan, "_tree_positions", None )
+            if old is not None and np.array_equal( old, P ):
+                return plan.groups
+        self._dup_hash = exact_duplicates( P )
+        kappa = getattr( settings.tuning, "aggregation_kappa", grp.KAPPA )
+        return grp.find_groups( P, kappa = kappa, duplicates = self._dup_hash )
+
+    def _settle_duplicates( self, settings ):
+        """THE CONVENTION FOR THE MERGED SEEDS ( `Iterative( duplicates = ... )` ): `"split"`, the groups and their own masses
+        ( solved with them, `sdotplan/Groups.h`, or after the aggregation, `_split_groups` ), or `"merge"`, the merged cell shared
+        ( `_share_duplicates` )"""
+        self._groups, self._group_pd = None, None
+        if getattr( self, "_solver_groups", None ) is not None:
+            self._adopt_solver_groups()
+            return
+        if getattr( settings, "duplicates", "split" ) == "merge":
+            self._share_duplicates()
+        else:
+            self._split_groups( settings )
+
+    def _adopt_solver_groups( self ):
+        """the tree the solver ran on ( `sdotplan/Groups.h` ): the plan's `groups` with the virtual weights it found, its diagram, and
+        the counters of the aggregation said in terms of groups"""
+        g0, pd = self._solver_groups, self._pd
+        self._groups = g0.with_virtual_weights( *pd._given_virtual_weights() )
+        self._group_pd = pd
+        if loom.is_traced( self.stats.get( "status", 0 ) ):
+            return
+        g = self._groups
+        members = np.flatnonzero( g.parent >= 0 )
+        nb = g.nb_groups
+        self.stats.update( nb_clusters = nb, nb_aggregated = len( members ), nb_duplicates = int( ( g.site != np.arange( len( g.site ) ) ).sum() ) )
+        self.stats[ "groups" ] = f"{ nb } groups of { len( members ) } seeds ( { g.nb_aggregates } aggregates, depth { g.depth } ), solved with the diagram"
+        self.stats[ "aggregation" ] = f"{ len( members ) } seeds in { nb } groups ( { self.stats[ 'nb_duplicates' ] } exact duplicates ), solved with their pieces"
+
+    #: the polish of the groups ( `_split_groups` ): its Newton steps at most, and the halvings of a step that does not decrease
+    GROUP_MAX_ITER = 12
+    GROUP_MAX_HALVINGS = 8
+    #: ... and where it stops: the members' residual relative to the largest target ( the rounding of the cells is ~1e-16 )
+    GROUP_RTOL = 1e-13
+
+    def _split_groups( self, settings ):
+        """THE GROUPS OF A CONVERGED SOLVE, each member given its own mass ( `Iterative( duplicates = "split"` ) after the aggregation ).
+
+        The solver merged what the doubles cannot separate ( `clusters`: close pairs and exact duplicates, `sdotplan/Aggregation.h` ):
+        each cluster's mass is right, its members' only to the floor ( an exact duplicate's cell even empty ). Each cluster becomes
+        a ROOT AGGREGATE of a tree ( `groups.Groups.from_rep`: its exact duplicates an aggregate of their own inside it ), whose cell
+        its members split -- each plane in the frame of their lowest common aggregate -- and a Newton on the virtual weights gives
+        every member its mass: the outer weights stay the solver's, and each step is the inner levels of `sdotplan/Groups.h`
+        ( `groups.TreeSystem`: a dense block per aggregate, a level at a time ), from the derivatives of the members' masses
+        ( `PowerDiagram.hessian_rows` with groups ). The fans of the duplicates are centred on the barycentre of their site's cell
+        ( the solver's: the duplicates' cells are empty, the first of a site holds its cell ), inside it whatever the weights.
+
+        After it: `weights` ( `groups.py`'s: the outer weights, and the virtual ones of the duplicates ), `groups` ( with the
+        precise virtual weights: `PowerDiagram( positions, plan.weights, groups = plan.groups )` redraws the plan ), `cell_masses` and
+        `barycenters` per member ( the barycentres of the pieces ), `stats[ "residual_full" ]` the full residual. The cost is the
+        solver's ( that of the merged cells ). Only on readable positions, and not with a periodicity ( its images are not grouped
+        yet ): the floor otherwise, as before."""
+        from . import groups as grp
+        if loom.is_traced( self.stats.get( "nb_clusters", 0 ) ) or not self.converged:
+            return
+        pos = self.problem.source.positions
+        pos_raw = getattr( pos, "raw", pos )
+        w_raw = self._weights_fit.raw
+        if loom.is_traced( pos_raw ) or loom.is_traced( w_raw ) or self._pd._periodic is not None:
+            return
+        cl = self.clusters
+        if cl is None:
+            return
+        P = grp._host( pos_raw )
+        n = P.shape[ 0 ]
+        rep = np.asarray( grp._host( cl ), dtype = np.int64 ).reshape( -1 )
+        # the clusters as roots, the separations of scales inside them as nested aggregates ( `find_groups` )
+        sets = [ np.flatnonzero( rep == r ) for r in np.unique( rep[ rep != np.arange( n ) ] ) ]
+        hashed = getattr( self, "_exact_dups", None ) or ( np.zeros( 0, dtype = np.int64 ), ) * 2     # ( the aggregation's hash )
+        auto = grp.find_groups( P, kappa = getattr( settings.tuning, "aggregation_kappa", grp.KAPPA ), duplicates = hashed )
+        if auto is not None:
+            below = [ [] for _ in range( auto.nb_aggregates ) ]
+            for i in np.flatnonzero( auto.parent >= 0 ):
+                a = auto.parent[ i ]
+                while a >= 0:
+                    below[ a ].append( int( i ) )
+                    a = auto.agg_parent[ a ]
+            sets += [ b for a, b in enumerate( below ) if auto.outer[ a ] > 0 and ( rep[ b ] == rep[ b[ 0 ] ] ).all() ]
+        g = grp.Groups.from_sets( sets, P, apex = grp._host( self.barycenters.raw ) )
+        W = grp._host( w_raw ).reshape( -1 )
+        W = W[ g.site ]                                  # ( the outer weights: a duplicate's is its site's, not the solver's emptied one )
+        nu = grp._host( self.target_masses.raw ).reshape( -1 )
+        members = np.flatnonzero( g.parent >= 0 )
+
+        def diagram( x, ts ):
+            gx = g.with_virtual_weights( *ts.virtual_weights( x ) )
+            return PowerDiagram( pos_raw, W, distribution = self.problem.target, kernel_dtype = settings.kernel_dtype, memory = 0,
+                                 sink_weight = self._sink, groups = gx ), gx
+
+        pd = PowerDiagram( pos_raw, W, distribution = self.problem.target, kernel_dtype = settings.kernel_dtype, memory = 0,
+                           sink_weight = self._sink, groups = g )
+        counts, ids, vals = pd.hessian_rows( items = members )
+        ts = grp.TreeSystem( g, members, counts, ids, vals )
+        x = ts.slots_of( W )                             # ( the virtual weights from the solver's: close doubles, exact differences )
+        pd, gx = diagram( x, ts )
+        m = grp._host( pd.measures.raw ).reshape( -1 )
+        err = np.abs( m - nu )[ members ].max()
+        floor = self.GROUP_RTOL * float( nu.max() )
+        nb_diag = 2
+        for it in range( self.GROUP_MAX_ITER ):
+            if err <= floor:
+                break
+            if it:                                       # ( the jacobian of the current diagram )
+                counts, ids, vals = pd.hessian_rows( items = members )
+                ts = grp.TreeSystem( g, members, counts, ids, vals )
+            D = ts.step( nu - m, np.zeros( n ) )
+            # damped: the step is halved until the members' residual decreases ( a piece must not empty )
+            t = 1.0
+            for _ in range( self.GROUP_MAX_HALVINGS ):
+                x_t = x + t * D
+                pd_t, g_t = diagram( x_t, ts )
+                m_t = grp._host( pd_t.measures.raw ).reshape( -1 )
+                nb_diag += 1
+                err_t = np.abs( m_t - nu )[ members ].max()
+                if err_t < err:
+                    break
+                t /= 2
+            else:
+                break
+            x, pd, gx, m, err = x_t, pd_t, g_t, m_t, err_t
+
+        #: the GROUPS of the plan ( `groups.py` ): the clusters, as the diagram splits them -- `None` without clusters
+        self._groups = gx
+        self._group_pd = pd
+        ax = self._pd.num_point
+        self.weights = RealTensor[ ax ]( ts.weights( x ) )
+        self.cell_masses = RealTensor[ ax ]( m )
+        d = int( pd.dim_count )
+        mass = grp._host( pd.moment( d + 1 ).raw ).reshape( -1 )
+        first = np.stack( [ grp._host( pd.moment( c ).raw ).reshape( -1 ) for c in range( d ) ], axis = 1 )
+        bar = np.where( mass[ :, None ] > 0, first / np.where( mass > 0, mass, 1.0 )[ :, None ], P )
+        self.barycenters = RealTensor[ ax, self._pd.dim ]( bar )
+        self.stats[ "residual_full" ] = float( np.abs( m - nu ).max() )
+        self.stats[ "nb_group_diag" ] = nb_diag
+        self.stats[ "groups" ] = f"{ g.nb_groups } groups of { len( members ) } seeds, split to { err :.1e} in { nb_diag } diagrams"
+
+    def _share_duplicates( self ):
+        """THE CONVENTION FOR EXACT DUPLICATES, on the solver's outputs: the duplicates of a dirac are ONE dirac ( the mass of the
+        cluster, the merged cell ), which each member shares in proportion to its own mass -- `cell_masses[ i ] = M nu_i / sum nu`,
+        `barycenters[ i ]` the barycenter of the merged cell, for every member. The solver itself left the cell of a duplicate empty
+        ( `w_dup = w_rep - gap`, `sdotplan/Aggregation.h` ) and the merged cell to its representative: the weights stay those, the
+        only ones a `PowerDiagram` can draw. Only the duplicates found on the host ( not under `jax.jit` ); see
+        `_attach_derivatives` for the derivatives that go with these values."""
+        found = getattr( self, "_exact_dups", None )
+        if found is None:
+            return
+        keep, inv, members = _duplicate_layout( int( self.cell_masses.shape[ 0 ] ), *found )
+        nu = self._masses.raw
+        mk = _cluster_sum( self.cell_masses.raw, members )
+        self.cell_masses = RealTensor[ self._pd.num_point ]( mk[ inv ] * nu / _cluster_sum( nu, members )[ inv ] )
+        self.barycenters = RealTensor[ self._pd.num_point, self._pd.dim ]( self.barycenters.raw[ keep[ inv ] ] )
 
     # -- the derivative ---------------------------------------------------------------------------
 
@@ -1062,38 +1436,203 @@ class SdotPlanNd( Displayable ):
             therefore gives the ENVELOPE derivative ( `2 m_i ( p_i - b_i )` for the seeds, `w_i` for the masses, `int psi d rho` for the
             density ) without any of it written down, and the live weights' own derivative multiplies zero.
 
-        The values of the cost and of the barycenters are those of the solver ( closed forms where the density has them );
-        their derivatives are those of the quadrature of `PowerDiagram.moment` -- a few `1e-6` apart."""
+        The moments are closed forms where the density has them -- constant pieces, a `Mesh`, gaussians in 2D and 3D, the balls
+        of a partial transport -- and so are their adjoints ( `exact_moments`, `diagram/Moments.h` ): the derivatives are then
+        those of the values the solver returns. Elsewhere ( a pointwise density ) they are those of the adaptive quadrature of
+        `PowerDiagram.moment`.
+
+        EXACT DUPLICATES ( diracs at the very same position ): the plan is NOT differentiable there -- moving one duplicate cuts
+        the merged cell along the direction of the move, so the directional derivative is not linear in it. The CONVENTION
+        ( `_share_duplicates` for the values ): a cluster of duplicates is ONE dirac, at the mean of the positions weighted by
+        the masses ( which IS their position ), of mass `nu_c = sum nu_i`. The diagrams here are built on that merged cloud ( two
+        equal seeds would make the cells and the laplacian degenerate ), and the results go back to the members:
+
+          * `weights`: the cluster's, for each member ( plus the solver's constant gap of a duplicate, `w_dup = w_rep - gap` );
+          * `barycenters`: the merged barycenter `b_c` for each member;
+          * `cell_masses`: `m_c nu_i / nu_c`, the merged cell shared in proportion to the masses;
+          * `cost`: that of the merged problem -- so `d cost / d p_i = ( nu_i / nu_c ) 2 m_c ( p_i - b_c ) = 2 m_i ( p_i - b_c )`
+            ( the envelope formula of `cost_and_position_grad`, member by member ), and `d cost / d nu_i` is the cluster's.
+
+        In other words the derivatives are those of the merged problem, composed with `p_c = sum nu_i p_i / nu_c` and
+        `nu_c = sum nu_i`. The duplicates are those found on the host ( `exact_duplicates` ): positions only known under a trace
+        ( `jax.jit` ) are not checked, and their duplicates keep the degenerate derivative."""
+        if getattr( self, "_groups", None ) is not None:
+            return self._attach_split_derivatives( problem, settings )
         src, dst = problem.source, problem.target
         fit = self._weights_fit
         ax = self._pd.num_point
         kd = settings.kernel_dtype
-        frozen = PowerDiagram( self.problem.source.positions, fit.raw, distribution = self.problem.target, kernel_dtype = kd, memory = 0 )
-        live = PowerDiagram( src.positions, fit.raw, distribution = dst, kernel_dtype = kd, memory = 0 )
-        m = RealTensor[ ax ]( live.measures.raw )
-        nu = RealTensor[ ax ]( src.weights.raw )
-        residual = m - nu * ( m.sum() / nu.sum() )
-        step = RealTensor[ ax ]( frozen.laplacian_solve( residual.raw, linear_solver = settings.tuning.linear_solver ).raw )
-        weights = RealTensor[ ax ]( fit.raw ) - step
-        self.weights = weights
-        at = PowerDiagram( src.positions, weights.raw, distribution = dst, kernel_dtype = kd, memory = 0 )
-        m = RealTensor[ ax ]( at.measures.raw )
-        self.cell_masses = m
+        per = _periodicity_of( problem )
+        sk = self._sink
+        frozen_pos, live_pos, fit_w, nu_raw = self.problem.source.positions.raw, src.positions.raw, fit.raw, src.weights.raw
+
+        # EXACT DUPLICATES: the diagrams are built on the merged cloud ( see the docstring ), `axc` its points
+        layout = None
+        if not loom.is_traced( frozen_pos ):
+            from loom.tensor.host import to_host
+            P = np.asarray( to_host( frozen_pos ), dtype = np.float64 )
+            dup, rep = exact_duplicates( P.reshape( P.shape[ 0 ], -1 ) )
+            if len( dup ):
+                layout = _duplicate_layout( P.shape[ 0 ], dup, rep )
+        axc = ax
+        if layout is not None:
+            keep, inv, members = layout
+            axc = Axis( ShapeVar( len( keep ) ), name = "num_point" )
+            nu_raw = _cluster_sum( nu_raw, members )
+            # `p_c = p_rep + sum_i ( nu_i / nu_c ) ( p_i - p_rep )`: the value of `p_rep` exactly, the derivative of the weighted mean
+            p_rep = live_pos[ keep ]
+            ext_p = loom.ops( live_pos ).concatenate( [ live_pos, live_pos[ :1 ] * 0 ], axis = 0 )
+            ext_nu = loom.ops( src.weights.raw ).concatenate( [ src.weights.raw, src.weights.raw[ :1 ] * 0 ], axis = 0 )
+            for r in members[ 1: ]:
+                p_rep = p_rep + ( ext_nu[ r ] / nu_raw )[ :, None ] * ( ext_p[ r ] - live_pos[ keep ] )
+            gap = fit_w - fit_w[ keep[ inv ] ]       # the solver's constant gap of the duplicates ( zero elsewhere )
+            frozen_pos, live_pos, fit_w = frozen_pos[ keep ], p_rep, fit_w[ keep ]
+
+        on_card = getattr( loom.resolved_device(), "is_cuda_gpu", False )
+        if layout is None and on_card:
+            # on a card, the solver's own diagram at the fitted weights: its tree was built with it -- under a `jit` too, where a
+            # diagram built here on traced seeds would have none, and the card's laplacian solve needs one
+            frozen = self.power_diagram()
+        else:
+            # ( on a card, the merged cloud's tree, built here: the weights may be traced, the card's laplacian solve needs one )
+            from .AaBsp import AaBsp, builds_on_card
+            acc = AaBsp( frozen_pos, fit_w ) if on_card and per is None and builds_on_card( frozen_pos ) else None
+            frozen = PowerDiagram( frozen_pos, fit_w, accelerator = acc, distribution = self.problem.target, kernel_dtype = kd, memory = 0,
+                                   periodicity = per, sink_weight = sk )
+        live = PowerDiagram( live_pos, fit_w, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk )
+        m = RealTensor[ axc ]( live.measures.raw )
+        nu = RealTensor[ axc ]( nu_raw )
+        # ( partial: no rescaling -- the sink takes the rest of the density )
+        residual = m - nu if sk is not None else m - nu * ( m.sum() / nu.sum() )
+        step = RealTensor[ axc ]( frozen.laplacian_solve( residual.raw, linear_solver = settings.tuning.linear_solver ).raw )
+        weights = RealTensor[ axc ]( fit_w ) - step
+        at = PowerDiagram( live_pos, weights.raw, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk )
+        m = RealTensor[ axc ]( at.measures.raw )
 
         # the moments at the live weights: `first_c`, `second`, and the mass by the SAME quadrature
         d = int( at.dim_count )
-        first = [ RealTensor[ ax ]( at.moment( c ).raw ) for c in range( d ) ]
-        second = RealTensor[ ax ]( at.moment( d ).raw )
-        mass = RealTensor[ ax ]( at.moment( d + 1 ).raw )
-        pos = [ RealTensor[ ax ]( src.positions.raw[ :, c ] ) for c in range( d ) ]
+        first = [ RealTensor[ axc ]( at.moment( c ).raw ) for c in range( d ) ]
+        second = RealTensor[ axc ]( at.moment( d ).raw )
+        mass = RealTensor[ axc ]( at.moment( d + 1 ).raw )
+        # the moments are those of the cells around the FOLDED seeds ( periodicity ): the cost reads the same positions
+        folded = live_pos if per is None else at._periodic.fold( live_pos )[ 0 ]
+        pos = [ RealTensor[ axc ]( folded[ :, c ] ) for c in range( d ) ]
         pp = sum( ( p * p for p in pos[ 1: ] ), pos[ 0 ] * pos[ 0 ] )
         px = sum( ( p * f for p, f in zip( pos[ 1: ], first[ 1: ] ) ), pos[ 0 ] * first[ 0 ] )
-        nu_eff = nu * ( m.sum() / nu.sum() )
+        nu_eff = nu if sk is not None else nu * ( m.sum() / nu.sum() )
         self.cost = ( second - 2 * px + pp * mass ).sum() + ( weights * ( nu_eff - m ) ).sum()
 
         # an empty cell keeps its seed as barycenter ( there is nothing else to say )
         full = loom.ops().stack( [ loom.ops().where( mass.raw > 0, f.raw / loom.ops().where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 )
-        self.barycenters = RealTensor[ ax, self._pd.dim ]( full )
+        if per is not None:
+            full = at.unfold( full )
+
+        if layout is None:
+            self.weights = weights
+            self.cell_masses = m
+            self.barycenters = RealTensor[ ax, self._pd.dim ]( full )
+            return
+        # back to the members of the clusters
+        self.weights = RealTensor[ ax ]( weights.raw[ inv ] + gap )
+        self.cell_masses = RealTensor[ ax ]( m.raw[ inv ] * src.weights.raw / nu_raw[ inv ] )
+        self.barycenters = RealTensor[ ax, self._pd.dim ]( full[ inv ] )
+
+    def _attach_split_derivatives( self, problem, settings ):
+        """THE DERIVATIVE OF A PLAN WITH GROUPS ( `duplicates = "split"`: a tree of aggregates ), by the implicit function theorem
+        level by level, as Newton solved it ( `sdotplan/Groups.h` ) -- one Newton step with the jacobian frozen, `x_live = x + J^-1 b`,
+        `b = nu - m` the residual of the LIVE grouped diagram ( each member through its own position ), `x` the solver's slots:
+
+          * THE ROOTS: `PowerDiagram.laplacian_solve` of the grouped diagram, the laplacian of the facets between roots, `b` summed
+            over each root;
+          * THE AGGREGATES, a level at a time: the frozen dense block of each one ( `groups.TreeSystem`, from `hessian_rows` ), on the
+            sums of `b` over its children and the facets out of them at the steps already known. The virtual diracs of the
+            duplicates follow their site, their directions are FROZEN: the derivative is the one along the split chosen.
+
+        Then the outputs on the grouped diagram at the live slots: `cell_masses` and the barycentres of the PIECES, and the cost
+        ( the dual functional of the SITES -- the distinct positions, `Groups.sites` -- plus the members' offsets from their site:
+        see below ), whose derivative with respect to a member's position is `2 m_i ( p_i - b_i )`, the barycentre of its own piece --
+        the duplicates' gradients differ, and a descent separates them. The weights' terms are written on the slots ( `TreeSystem.
+        slot_sum` ): a root's residuals summed before they meet its weight, as the precise planes need. A site moved as a whole is
+        differentiated exactly; one duplicate moved alone sees its neighbours' facets as the mean of the one-sided derivatives
+        ( `diagram::scatter_cell_grad` )."""
+        from . import groups as grp
+        src, dst = problem.source, problem.target
+        g = self._groups
+        gpd = self._group_pd
+        ax = self._pd.num_point
+        kd = settings.kernel_dtype
+        sk = self._sink
+        n = len( g.parent )
+        live_pos = src.positions.raw
+        nu = src.weights.raw
+
+        # the frozen levels, the solver's slots
+        members = np.flatnonzero( g.parent >= 0 )
+        # ( the backend's rows and gathers: the same under a `jit`, where the diagram is known only in the program )
+        ts = grp.TreeSystem.from_rows( g, members, *gpd.hessian_rows( items = members, host = False ) )
+        x0 = ts.slots_of( gpd.weights.raw.reshape( -1 ), g.seed_v, g.agg_v )
+
+        def grouped( x, at_pos = live_pos ):
+            gg = g.with_virtual_weights( *ts.virtual_weights( x ) )
+            return PowerDiagram( at_pos, ts.outer( x ), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, groups = gg )
+
+        # ONE FROZEN NEWTON STEP: the roots, then the aggregates
+        x0f = loom.array( x0 ) if not isinstance( live_pos, np.ndarray ) else x0
+        m0 = grouped( x0f ).measures.raw
+        b = ( nu - m0 ) if sk is not None else ( nu * ( m0.sum() / nu.sum() ) - m0 )
+        D = gpd.laplacian_solve( b, linear_solver = settings.tuning.linear_solver ).raw * grp._arr( m0, ts.root_slot.astype( np.float64 ) )
+        x1 = x0f + ts.step( b, D )
+
+        # THE OUTPUTS, on the grouped diagram at the live slots
+        at = grouped( x1 )
+        m = RealTensor[ ax ]( at.measures.raw )
+        d = int( at.dim_count )
+        first = [ RealTensor[ ax ]( at.moment( c ).raw ) for c in range( d ) ]
+        mass = RealTensor[ ax ]( at.moment( d + 1 ).raw )
+        pos = [ RealTensor[ ax ]( live_pos[ :, c ] ) for c in range( d ) ]
+
+        # THE COST, as the sites' dual functional at the mean `p_s` of their members' positions ( weighted by the masses: the
+        # value of their position ), plus what the members' own positions add, `eps_i = p_i - p_s` ( zero ):
+        # `int_{piece_i} |x - p_i|^2 = int_{piece_i} |x - p_s|^2 - 2 eps_i . ( first_i - m_i p_s ) + |eps_i|^2 m_i`. Its
+        # derivative is the envelope one member by member, `2 m_i ( p_i - b_i )` with the barycentre of the piece -- which the
+        # dual functional of the members alone would only give for a site moved as a whole ( its neighbours see a duplicate's
+        # facets through the mean of the one-sided derivatives )
+        keep, gs = g.sites()
+        dup = np.flatnonzero( g.site != np.arange( n ) )
+        keep_, inv, groups_of = _duplicate_layout( n, dup, g.site[ dup ] )
+        nu_s = _cluster_sum( nu, groups_of )
+        ops = loom.ops( live_pos )
+        nu_ext = ops.concatenate( [ nu, nu[ :1 ] * 0 ], axis = 0 )
+        p_ext = ops.concatenate( [ live_pos, live_pos[ :1 ] * 0 ], axis = 0 )
+        p_site = live_pos[ keep ]
+        for r in groups_of[ 1: ]:
+            p_site = p_site + ( nu_ext[ r ] / nu_s )[ :, None ] * ( p_ext[ r ] - live_pos[ keep ] )
+        axs = Axis( ShapeVar( len( keep ) ), name = "num_point" )
+        sv1, av1 = ts.virtual_weights( x1 )
+        W1 = ts.outer( x1 )
+        if gs is not None:
+            _, gs = g.with_virtual_weights( sv1, av1 ).sites()
+        sd = PowerDiagram( p_site, W1[ keep ], distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, groups = gs )
+        ms = RealTensor[ axs ]( sd.measures.raw )
+        fs = [ RealTensor[ axs ]( sd.moment( c ).raw ) for c in range( d ) ]
+        ss = RealTensor[ axs ]( sd.moment( d ).raw )
+        qs = RealTensor[ axs ]( sd.moment( d + 1 ).raw )
+        ps = [ RealTensor[ axs ]( p_site[ :, c ] ) for c in range( d ) ]
+        nus = RealTensor[ axs ]( nu_s )
+        nus_eff = nus if sk is not None else nus * ( ms.sum() / nus.sum() )
+        pp = sum( ( p * p for p in ps[ 1: ] ), ps[ 0 ] * ps[ 0 ] )
+        px = sum( ( p * f for p, f in zip( ps[ 1: ], fs[ 1: ] ) ), ps[ 0 ] * fs[ 0 ] )
+        dual = ( RealTensor[ ax ]( x1 ) * RealTensor[ ax ]( ts.slot_sum( ( nus_eff - ms ).raw, rows = keep ) ) ).sum()
+        cost = ( ss - 2 * px + pp * qs ).sum() + dual
+        at_site = [ RealTensor[ ax ]( p_site[ inv, c ] ) for c in range( d ) ]
+        for c in range( d ):
+            e = pos[ c ] - at_site[ c ]
+            cost = cost + ( -2 * e * ( first[ c ] - mass * at_site[ c ] ) + e * e * mass ).sum()
+        self.cost = cost
+        self.weights = RealTensor[ ax ]( ts.weights( x1 ) )
+        self.cell_masses = m
+        ops = loom.ops()
+        self.barycenters = RealTensor[ ax, self._pd.dim ]( ops.stack( [ ops.where( mass.raw > 0, f.raw / ops.where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 ) )
 
     def power_diagram( self, weights = None ) -> PowerDiagram:
         """The `PowerDiagram` of the plan, at its weights ( or at `weights` ): to inspect or draw its cells.
@@ -1103,6 +1642,8 @@ class SdotPlanNd( Displayable ):
         THE ON-DEMAND TOOL: the `PowerDiagram` for `weights` ( by default: the FITTED weights )
         -- always the SAME object, on which those weights are set. For drawing, for inspecting, for
         a functional that was not anticipated; nothing in the solve goes through it."""
+        if weights is None and getattr( self, "_group_pd", None ) is not None:
+            return self._group_pd                        # the groups' diagram ( `_split_groups` ): it draws their pieces
         self._pd.weights = self._weights_fit if weights is None else weights
         return self._pd
 
@@ -1120,6 +1661,7 @@ class SdotPlanNd( Displayable ):
             if weights is not None:
                 raise ValueError( "transport = True: the barycenters are those of the fitted weights" )
             d = self.problem.nb_dims
+            # ( the cells are drawn around the given positions, as are the barycenters )
             pos = np.asarray( self._pd.positions ).reshape( -1, d )
             bar = np.asarray( self.barycenters ).reshape( -1, d )
             n = len( pos )

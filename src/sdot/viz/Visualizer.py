@@ -160,7 +160,7 @@ class Visualizer:
     """
 
     def __init__( self, title = "sdot", background = None, frame_axis = "time",
-                  playable = True, fps = 5.0 ):
+                  playable = True, fps = 5.0, frame_value = 0.0 ):
         self.title      = title
         self.background = background      # None -> light/dark according to the system preference
         self.nb_dims    = None            # deduced from the first addition (size of the position vectors)
@@ -196,7 +196,7 @@ class Visualizer:
         # is duplicated, and a frame has no structure of its own to carry.
         self._nb_edges  = 0
         self._nb_points = 0
-        self._frames    = [ self._frame_mark( 0.0 ) ]
+        self._frames    = [ self._frame_mark( frame_value ) ]       # ( `frame_value`: the abscissa of the first frame )
 
     # ---- colors -------------------------------------------------------------------------------
 

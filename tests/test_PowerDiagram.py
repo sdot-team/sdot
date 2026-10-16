@@ -821,8 +821,9 @@ if test( "the_domain_carries_no_gradient" ):
     set_kernel_dtype( "FP64" )
     need( "grad" )
     # a LIMIT, not a property: a domain cut carries `cut_id == BOUNDARY`, which says
-    # "not a seed" without saying WHICH one, so the backward has nowhere to put its share and
-    # leaves it at zero. The test pins it down -- so that it remains a decision and not a surprise.
+    # "not a seed" without saying WHICH one, so the backward has nowhere to put its share. It used to
+    # leave it at zero, silently; the adjoint now says what it derives ( `measures_computed_grads`:
+    # the seeds ), and loom REFUSES a differentiation through the domain instead of a wrong zero.
     # (The gradient with respect to the SEEDS, on the other hand, is complete: a domain facet depends
     # on no seed, its contribution there is truly zero.)
     n = 6
@@ -830,9 +831,15 @@ if test( "the_domain_carries_no_gradient" ):
     pos = rng.uniform( 0.2, 0.8, size = ( n, 2 ) )
     dirs = numpy.array( [ [ 1.0, 0 ], [ 0, 1.0 ], [ -1.0, 0 ], [ 0, -1.0 ] ] )
     offs = numpy.array( [ 1.0, 1.0, 0.0, 0.0 ] )
-    _, pullback = loom.vjp(
-        lambda o: PowerDiagram( pos, boundaries = ( dirs, o ) ).measures.value, offs )
-    assert numpy.abs( numpy.asarray( pullback( numpy.ones( n ) )[ 0 ] ) ).max() == 0
+    try:
+        _, pullback = loom.vjp(
+            lambda o: PowerDiagram( pos, boundaries = ( dirs, o ) ).measures.value, offs )
+        numpy.asarray( pullback( numpy.ones( n ) )[ 0 ] )
+    except Exception as e:
+        assert "the backward does not say it computes" in str( e ), str( e )
+        assert "from_res.power_diagram" in str( e ), str( e )
+    else:
+        raise AssertionError( "a derivative with respect to the domain must be refused" )
 
 
 # -- all the cells at once -----------------------------------------------------------------------
@@ -2776,21 +2783,83 @@ if test( "moments_of_a_diagram_are_differentiable_like_the_measures" ):
     values = numpy.array( [ [ 1, 0.5, 0.2 ], [ 1, 0.2, 0.7 ] ] )
     centers, sigmas, masses = numpy.array( [ [ 0.4, 0.5 ], [ 0.7, 0.3 ] ] ), numpy.array( [ 0.2, 0.15 ] ), numpy.array( [ 1.0, 0.7 ] )
 
-    for name, dist, tol in ( ( "mesh", mesh( values ), 1e-4 ), ( "gaussians", gauss( centers, sigmas, masses ), 1e-3 ) ):
-        pd = PowerDiagram( pos, w, boundaries = box, distribution = dist, memory = 0 )
+    for name, dist in ( ( "mesh", mesh( values ) ), ( "gaussians", gauss( centers, sigmas, masses ) ) ):
+        pd = PowerDiagram( pos, w, boundaries = box, distribution = dist, memory = 0, kernel_dtype = "FP64" )
         mass, first, second = [ numpy.asarray( t ) for t in pd.moments ]
         got = [ numpy.asarray( pd.moment( k ) ).reshape( -1 ) for k in range( 4 ) ]
-        assert numpy.abs( numpy.stack( got[ :2 ], 1 ) - first ).max() < tol * numpy.abs( first ).max(), name
-        assert numpy.abs( got[ 2 ] - second ).max() < tol * second.max(), name
-        assert numpy.abs( got[ 3 ] - mass ).max() < tol * mass.max(), name
+        assert numpy.abs( numpy.stack( got[ :2 ], 1 ) - first ).max() < 1e-12, name
+        assert numpy.abs( got[ 2 ] - second ).max() < 1e-12, name
+        assert numpy.abs( got[ 3 ] - mass ).max() < 1e-12, name
 
-    # the adaptive quadrature of the gaussians flips its subdivisions: its finite differences are only as smooth as its `rtol`
-    # ( see `check_grad` ) -- the floor is absolute
+    # in 2D the moments of both are closed forms, and so are their adjoints ( `MeshElementDensity::integrate_moment_over_simplex_bwd`,
+    # `SumOfGaussians::integrate_moment_over_simplex_bwd` ): smooth, the finite differences hold tight
+    tight = dict( eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
     for k in range( 4 ):
-        check_grad( lambda p, q: PowerDiagram( p, q, boundaries = box, distribution = mesh( values ), memory = 0 ).moment( k ), pos, w, seed = 11 + k )
-        check_grad( lambda v: PowerDiagram( pos, w, boundaries = box, distribution = mesh( v ), memory = 0 ).moment( k ), values, seed = 21 + k )
-        check_grad( lambda c, s, q: PowerDiagram( pos, w, boundaries = box, distribution = gauss( c, s, q ), memory = 0 ).moment( k ),
-                    centers, sigmas, masses, seed = 31 + k, eps = 1e-3, rtol = 1e-2, atol = 2e-4 )
+        check_grad( lambda p, q: PowerDiagram( p, q, boundaries = box, distribution = mesh( values ), memory = 0, kernel_dtype = "FP64" ).moment( k ), pos, w, seed = 11 + k, **tight )
+        check_grad( lambda v: PowerDiagram( pos, w, boundaries = box, distribution = mesh( v ), memory = 0, kernel_dtype = "FP64" ).moment( k ), values, seed = 21 + k, **tight )
+        check_grad( lambda p, q: PowerDiagram( p, q, boundaries = box, distribution = gauss( centers, sigmas, masses ), memory = 0, kernel_dtype = "FP64" ).moment( k ),
+                    pos, w, seed = 41 + k, **tight )
+        check_grad( lambda c, s, q: PowerDiagram( pos, w, boundaries = box, distribution = gauss( c, s, q ), memory = 0, kernel_dtype = "FP64" ).moment( k ),
+                    centers, sigmas, masses, seed = 31 + k, **tight )
+
+    # a polytope that is its own domain: the cells start from it, and it must not cut them again along their own sides -- a twin
+    # vertex at the corner of two parallel planes, and flat simplices whose orientation the quadrature cannot read ( `Polytope.h` )
+    from sdot.distributions.Polytope import Polytope
+    tri = Polytope( [ [ -1, 0 ], [ 0, -1 ], [ 1, 1 ] ], [ 0, 0, 1.2 ] )
+    for k in range( 4 ):
+        check_grad( lambda p, q: PowerDiagram( p, q, distribution = tri, memory = 0, kernel_dtype = "FP64" ).moment( k ), pos * 0.7, w, seed = 51 + k, **tight )
+
+
+if test( "gaussians_in_3d_are_exact_and_differentiable" ):
+    import numpy
+    from scipy import integrate
+    from scipy.stats import norm
+    from loom.testing import check_grad, need
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    need( "cpu" )
+    # in 3D too, the measures, the moments and their adjoints are closed forms up to 1D quadratures ( `SumOfGaussians::face3`: the
+    # cones from the centers, the faces' 2D moments, Reynolds ): the sums over the cells are the box's separable integrals, and
+    # the finite differences hold tight
+    rng = numpy.random.default_rng( 3 )
+    n = 12
+    pos = rng.uniform( 0.1, 0.9, size = ( n, 3 ) )
+    w = rng.normal( size = n ) * 0.01
+    box = box_half_spaces( [ 0, 0, 0 ], [ 1, 1, 1 ] )
+    centers, sigmas, masses = numpy.array( [ [ 0.4, 0.5, 0.45 ], [ 0.7, 0.3, 0.6 ] ] ), numpy.array( [ 0.2, 0.08 ] ), numpy.array( [ 1.0, 0.7 ] )
+    gauss = lambda c, s, q: SumOfGaussians( c, s, weights = q, support_box = ( [ 0, 0, 0 ], [ 1, 1, 1 ] ) )
+
+    def box_integral( f, g, a ):
+        return integrate.quad( lambda x: f( x ) * norm.pdf( ( x - centers[ g, a ] ) / sigmas[ g ] ) / sigmas[ g ], 0, 1, epsabs = 1e-15 )[ 0 ]
+    def exact( k ):
+        tot = 0
+        for g in range( 2 ):
+            one = [ box_integral( lambda x: 1.0, g, a ) for a in range( 3 ) ]
+            rest = lambda a: numpy.prod( [ one[ b ] for b in range( 3 ) if b != a ] )
+            if k < 3:    v = box_integral( lambda x: x, g, k ) * rest( k )
+            elif k == 3: v = sum( box_integral( lambda x: x * x, g, a ) * rest( a ) for a in range( 3 ) )
+            else:        v = numpy.prod( one )
+            tot += masses[ g ] * v
+        return tot / masses.sum()                        # ( the density is normalized )
+    pd = PowerDiagram( pos, w, boundaries = box, distribution = gauss( centers, sigmas, masses ), memory = 0, kernel_dtype = "FP64" )
+    mass, first, second = [ numpy.asarray( t ) for t in pd.moments ]
+    got = [ numpy.asarray( pd.moment( k ) ).reshape( -1 ) for k in range( 5 ) ]
+    for k in range( 5 ):
+        assert abs( got[ k ].sum() / exact( k ) - 1 ) < 1e-12, ( k, got[ k ].sum(), exact( k ) )
+    assert abs( numpy.asarray( pd.measures ).sum() / exact( 4 ) - 1 ) < 1e-12
+    assert numpy.abs( numpy.stack( got[ :3 ], 1 ) - first ).max() < 1e-13 and numpy.abs( got[ 3 ] - second ).max() < 1e-13
+    assert numpy.abs( got[ 4 ] - mass ).max() < 1e-13
+
+    tight = dict( eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+    check_grad( lambda p, q: PowerDiagram( p, q, boundaries = box, distribution = gauss( centers, sigmas, masses ), memory = 0, kernel_dtype = "FP64" ).measures,
+                pos, w, seed = 61, **tight )
+    check_grad( lambda c, s, q: PowerDiagram( pos, w, boundaries = box, distribution = gauss( c, s, q ), memory = 0, kernel_dtype = "FP64" ).measures,
+                centers, sigmas, masses, seed = 62, **tight )
+    for k in range( 5 ):
+        check_grad( lambda p, q: PowerDiagram( p, q, boundaries = box, distribution = gauss( centers, sigmas, masses ), memory = 0, kernel_dtype = "FP64" ).moment( k ),
+                    pos, w, seed = 71 + k, **tight )
+        check_grad( lambda c, s, q: PowerDiagram( pos, w, boundaries = box, distribution = gauss( c, s, q ), memory = 0, kernel_dtype = "FP64" ).moment( k ),
+                    centers, sigmas, masses, seed = 81 + k, **tight )
 
 
 if test( "hessian_rows_beyond_3d_are_the_derivatives_of_the_measures" ):
@@ -2825,3 +2894,24 @@ if test( "hessian_rows_beyond_3d_are_the_derivatives_of_the_measures" ):
             assert numpy.abs( J - F ).max() < 1e-7 * numpy.abs( J ).max(), ( d, numpy.abs( J - F ).max() / numpy.abs( J ).max() )
     finally:
         set_kernel_dtype( previous )
+
+
+if test( "the_scratch_grows_in_the_call_under_jit" ):
+    import numpy
+    import jax
+    import jax.numpy as jnp
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.Image import Image
+    # the cells' scratch is the handler's ( `loom.scratch`, `kernels/ScratchBuffer.h` ): a cell past its capacity makes the handler
+    # grow it and run the sweep again, in the call -- so a `jit` takes cells far larger than the first guess, forward and adjoint
+    rng = numpy.random.default_rng( 5 )
+    n = 40
+    pos = rng.uniform( 0.1, 0.9, size = ( n, 2 ) )
+    w = rng.uniform( 0, 0.01, size = n )
+    img = Image( rng.uniform( 0.5, 1.5, size = ( 4, 4 ) ), frame = [ 1.0, 1.0 ] )
+    f = lambda p, cap: jnp.vdot( jnp.arange( n, dtype = jnp.float64 ),
+                                 PowerDiagram( p, w, distribution = img, kernel_dtype = "FP64", scratch_capacity = cap ).moment( 2 ).raw )
+    ref_v, ref_g = f( pos, 64 ), jax.grad( f )( jnp.asarray( pos ), 64 )
+    v, g = jax.jit( jax.value_and_grad( f ), static_argnums = 1 )( jnp.asarray( pos ), 3 )
+    assert abs( float( v ) - float( ref_v ) ) < 1e-12 * abs( float( ref_v ) ), ( float( v ), float( ref_v ) )
+    assert numpy.abs( numpy.asarray( g ) - numpy.asarray( ref_g ) ).max() < 1e-12 * numpy.abs( numpy.asarray( ref_g ) ).max()

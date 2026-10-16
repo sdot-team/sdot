@@ -16,23 +16,24 @@ pip install -e .
 
 ## Framework
 
-SDOT can work with a lot of different frameworks. Here are the links for the official installation instructions for some of them (one is enough for most of the applications :) ):
+SDOT can work with a lot of different frameworks. 
+
+If you have not installed any (independently of SDOT), here are the links for the official installation instructions for some of them (one is enough):
 
 - [JAX](https://docs.jax.dev/en/latest/installation.html)
 - [PyTorch](https://pytorch.org/get-started/locally/)
 - [CuPy](https://docs.cupy.dev/en/stable/install.html)
 - [NumPy](https://numpy.org/install/)
 
-> **GPU support** — follow the GPU installation instructions of the chosen framework for your platform (CUDA, …). SDOT will automatically use the devices your tensors are on, but some of the frameworks need specific installation instructions.
+> **GPU support** — follow the GPU installation instructions of the chosen framework for your platform (CUDA, …). SDOT will automatically use the devices your tensors are on, but some frameworks need specific installation instructions.
 
 ## Compilers
 
-The kernels of the common cases come precompiled with the package. A more "exotic" case is compiled on first use, which
-needs `ninja`, a C++ compiler, and `nvcc` for NVIDIA GPUs.
+The kernels for the common cases come *precompiled with the package*. Less common cases are compiled on first use. For such a case, you will need `ninja`, a C++ compiler, and `nvcc` for NVIDIA GPUs.
 
 ## Hello, World
 
-Here is a simple program to test if the installation works: the Wasserstein distance between 100 diracs and an image.
+Here is a simple program to test if the installation works: the Wasserstein 2 distance between 100 diracs and an image.
 
 ::: code-group
 
@@ -63,9 +64,8 @@ import { withBase } from 'vitepress'
 
 ## What's Next
 
-- [W2, plans and settings →](./ot-plan): `w2`, `plan`, `ot_solve`
-- [Distributions →](./distributions): the sources and the targets
-- [Differentiability →](./differentiability)
-- [Frameworks and devices →](./backends)
-- [Background →](./background): the mathematics
-- [Examples gallery →](/examples/)
+- [Background →](./background) the mathematics
+- [Examples gallery →](/examples/) use cases
+- [Plans and settings →](./ot-plan) barycenters, moments, ...
+- [Distributions →](./distributions/) the sources and the targets
+- [Frameworks and devices →](./backends) how sdot handles the frameworks

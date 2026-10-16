@@ -304,7 +304,7 @@ class AaBsp( SpatialAccelerator ):
         # `__init__` passes it to the kernel without touching it. A diagram whose seeds are on the GPU
         # therefore builds its tree there without the cloud coming back down -- and it used to come down twice,
         # once through `np.asarray` and once through the re-upload.
-        pos = power_diagram.positions.raw
+        pos = power_diagram._stored_positions().raw         # ( folded by a periodicity: where the cells are built )
         w = power_diagram.weights
         w = w.raw if w.is_defined else None
         return cls( pos, w, max_seeds_per_leaf = max_seeds_per_leaf )

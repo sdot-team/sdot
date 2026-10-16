@@ -11,7 +11,7 @@ import { withBase } from 'vitepress'
 
 # Gaussian Mixture Fit
 
-200 points are drawn from a mixture of 4 Gaussians. We look for the mixture back: the `SumOfGaussians` $\rho_\theta$ that is closest to the point cloud $\mu = \frac{1}{n} \sum_i \delta_{x_i}$ in the Wasserstein sense,
+1000 points are drawn from a mixture of 4 Gaussians. We look for the mixture back: the `SumOfGaussians` $\rho_\theta$ that is closest to the point cloud $\mu = \frac{1}{n} \sum_i \delta_{x_i}$ in the Wasserstein sense,
 
 $$
 \min_\theta \; W_2^2\big( \mu, \; \rho_\theta \big), \qquad \rho_\theta = \frac{1}{\sum_k a_k} \sum_k a_k \, \mathcal{N}( c_k, s_k^2 I ).
@@ -71,7 +71,7 @@ for step in range( 300 ):
 
 :::
 
-W2 goes from 0.25 to 0.0177, and the Gaussians are those of the table below.
+W2 goes from 0.195 to 0.0063, and the Gaussians are close to those of the table below.
 
 ::: tip The Lloyd step
 When the parameters are only the positions $y_i$ of diracs (`SumOfDiracs( y )` against a fixed density), the gradient of $W_2^2$ with respect to $y_i$ is $2 \, m_i \, ( y_i - b_i )$, where $m_i$ is the mass of the dirac and $b_i$ the barycenter of its cell. A step of $1 / ( 2 m_i )$ moves each dirac to its barycenter: that is the Lloyd algorithm of the [Lloyd quantization](./lloyd-quantization) example.
@@ -79,7 +79,7 @@ When the parameters are only the positions $y_i$ of diracs (`SumOfDiracs( y )` a
 
 ## Going faster: L-BFGS
 
-W2 is smooth in $\theta$: a quasi-Newton method needs 10 times fewer iterations. The optimizer is the L-BFGS of SciPy: it only asks for the value and the gradient, which JAX or PyTorch computes, on one flat vector of parameters. Its `bounds` keep the sigmas and the masses positive: a negative mass would make W2 unbounded below.
+W2 is smooth in $\theta$: a quasi-Newton method needs far fewer iterations, 40 instead of 300, for a lower W2 (0.0044). The optimizer is the L-BFGS of SciPy: it only asks for the value and the gradient, which JAX or PyTorch computes, on one flat vector of parameters. Its `bounds` keep the sigmas and the masses positive: a negative mass would make W2 unbounded below.
 
 ```python
 from scipy.optimize import minimize
@@ -131,18 +131,18 @@ res = minimize( fun, theta0, jac = True, method = "L-BFGS-B", bounds = bounds )
 
 `callback = lambda r: ...` gives the iterations ( `r.x`, `r.fun` ): that is how the viewer below was recorded.
 
-Starting from 4 wide Gaussians of equal masses in the middle, both find the mixture the points were drawn from, up to the sampling noise of 200 points, in about 30 iterations:
+Starting from 4 wide Gaussians of equal masses in the middle, both find the mixture the points were drawn from, up to the sampling noise of 1000 points, in 40 iterations:
 
 | | center | sigma | mass |
 |---|---|---|---|
 | drawn | ( -1.00, -0.60 ) | 0.35 | 0.35 |
-| fitted | ( -0.97, -0.71 ) | 0.34 | 0.30 |
+| fitted | ( -1.00, -0.60 ) | 0.34 | 0.31 |
 | drawn | ( 1.10, -0.40 ) | 0.25 | 0.25 |
-| fitted | ( 1.13, -0.42 ) | 0.26 | 0.25 |
+| fitted | ( 1.09, -0.43 ) | 0.25 | 0.27 |
 | drawn | ( 0.20, 1.00 ) | 0.30 | 0.25 |
-| fitted | ( 0.20, 1.02 ) | 0.27 | 0.24 |
+| fitted | ( 0.17, 0.99 ) | 0.30 | 0.27 |
 | drawn | ( -0.90, 0.90 ) | 0.20 | 0.15 |
-| fitted | ( -0.95, 0.90 ) | 0.18 | 0.21 |
+| fitted | ( -0.90, 0.92 ) | 0.20 | 0.15 |
 
 <iframe
   :src="withBase('/examples/gaussian-mixture-fit-torch.html') + '?wheel=0&touch=0'"
@@ -157,7 +157,7 @@ The points in gray, and for each Gaussian its center, its circle at one sigma (s
 
 ## Reproducing the pages
 
-The viewer above is written by [`docs/examples/gaussian_mixture_fit.py`](https://github.com/sdot-team/sdot/blob/main/docs/examples/gaussian_mixture_fit.py), one page per framework:
+The viewer above is written by [`docs/examples/gaussian_mixture_fit.py`](https://github.com/sdot-team/sdot/blob/main/docs/examples/gaussian_mixture_fit.py), one page per framework, with the picture of the gallery:
 
 ```bash
 python docs/examples/gaussian_mixture_fit.py              # JAX

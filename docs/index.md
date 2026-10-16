@@ -31,7 +31,7 @@ features:
     details: 2D, 6D... — the same API and the same convergence behavior.
   - icon: 🚀
     title: Highly optimized
-    details: SIMD on the CPU, CUDA on the GPU, batched 1D plans for data-parallel workloads.
+    details: SIMD on the CPU, CUDA on the GPU, batched plans for data-parallel workloads.
   - icon: ⚡
     title: O(n log n) — not O(n²)
     details: A damped Newton method on power diagrams. Memory efficient.
@@ -51,9 +51,9 @@ The Wasserstein distance between 100 diracs and an image:
 
 :::
 
-`sdot.w2` gives the distance, differentiable with respect to the diracs and the image. `sdot.plan` gives the whole plan
+<!-- `sdot.w2` gives the distance, differentiable with respect to the diracs and the image. `sdot.plan` gives the whole plan
 ( barycenters, cell masses... ), and `sdot.ot_solve` the same with the settings of the solver. See
-[W2, plans and settings](/guide/ot-plan).
+[W2, plans and settings](/guide/ot-plan). -->
 
 ## How it works
 
@@ -69,11 +69,13 @@ linear solve, both almost linear in the number of diracs. On an 8-core CPU, 10�
 > **Reference:** Kitagawa, Mérigot, Thibert —
 > _Convergence of a Newton algorithm for semi-discrete optimal transport_, JEMS 2019.
 
+For the ground metric, SDOT focuses essentially for now on variants of the euclidean norm.
+
 ## What's next
 
 - [Getting started →](/guide/getting-started)
-- [W2, plans and settings →](/guide/ot-plan)
-- [Distributions →](/guide/distributions): images, gaussians, meshes, polytopes...
+- [Plans and settings →](/guide/ot-plan)
+- [Distributions →](/guide/distributions/): images, gaussians, meshes, polytopes...
 - [Background: the mathematics →](/guide/background)
 - [Fitting a Gaussian mixture with gradients →](/examples/gaussian-mixture-fit)
 - [Examples gallery →](/examples/)

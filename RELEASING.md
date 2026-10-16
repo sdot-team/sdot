@@ -29,4 +29,4 @@ To release: bump the version ( `python scripts/wheels.py --version next --no-bui
 TWINE_PASSWORD=<your PyPI token> make publish     # in loom ( loom-ffi first ), then here
 ```
 
-`loom-ffi` is pure Python: `make wheels` in `loom` builds it alone. The sdot wheels pin exactly its version.
+`loom-ffi` is pure Python: `make wheels` in `loom` builds it alone. The sdot wheels require at least its version.

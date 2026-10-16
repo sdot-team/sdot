@@ -347,6 +347,22 @@ UTP HD void DTP::update_outputs_presorted( auto &&sorted_indices, auto &&sorted_
 UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, auto &&group_scan,
                                   int local_index, int local_size, auto &&group ) const {
     const TF g = grad_plan.cost; // scalar cotangent seeding `cost`
+    // the cotangent of the BARYCENTERS ( stored by the forward, `with_barycenters` ): `b_k = Integral_{t_k}^{t_{k+1}} x y dx / w_k` moves with
+    // its two boundaries, and in the same way as the cost: `d b_k = ( t_{k+1} dW_{k+1} - t_k dW_k ) / w_k - b_k dw_k / w_k`, the
+    // `y( t_m )` cancelling as above -- so its share joins the jump `phi_m` of the potential:
+    //   chi_m = gamma_{s(m-1)} t_m / w_{s(m-1)} - gamma_{s(m)} t_m / w_{s(m)},
+    // plus what `b_k` reads directly: `- gamma_k b_k / w_k` for its mass, `gamma_k Integral_piece x dx / w_k` for a value. Not the
+    // positions: a barycenter does not depend on them ( only the ORDER does ).
+    constexpr bool with_bary = DECAYED_TYPE_OF( barycenters )::is_valid && requires { grad_plan.barycenters; }
+                            && [] { if constexpr ( requires { DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid; } ) return bool( DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid ); else return false; }();
+    auto gamma_of = [&]( SI di ) -> TF {
+        if constexpr ( with_bary ) return TF( grad_plan.barycenters( ::num_dirac = di, dim = 0 ) );
+        else return TF( 0 );
+    };
+    auto bary_of = [&]( SI di ) -> TF {
+        if constexpr ( with_bary ) return TF( barycenters( ::num_dirac = di, dim = 0 ) );
+        else return TF( 0 );
+    };
     const SI nb = src_dist.weights.size();
     const SI lo = ( nb * SI( local_index ) ) / local_size;
     const SI hi = ( nb * SI( local_index + 1 ) ) / local_size;
@@ -430,23 +446,31 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
             }
 
             // phase 1: this work-item's chunk phi SUBTOTAL.
+            // ( `phi` carries the cotangents: `g` for the cost, `chi` for the barycenters )
+            const SI di_prev0 = lo > 0 ? SI( sorted_indices( lo - 1 ) ) : SI( 0 );
+            auto chi_prev_of = [&]( SI di, TF t ) -> TF {          // the share of the barycenter of `di` at its bound `t`
+                if constexpr ( with_bary ) return gamma_of( di ) * t / TF( src_dist.weights( ::num_dirac = di ) );
+                else return TF( 0 );
+            };
             TF phi_sub = 0;
             {
                 auto udp = img.udp_at( img.cell_cum_mass, w_lo );
                 TF p_prev = ( lo > 0 ) ? TF( sorted_pos( lo - 1 ) ) : TF( 0 );
+                SI di_prev = di_prev0;
                 for( SI k = lo; k < hi; ++k ) {
                     const SI di = sorted_indices( k );
                     const TF pk = sorted_pos( k );          // streamed (contiguous), not re-projected
                     const TF w = src_dist.weights( ::num_dirac = di );
                     if ( k >= 1 ) { // GLOBAL index check: every dirac except the very first has a boundary
                         const TF t = udp.pos;
-                        phi_sub += ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk );
+                        phi_sub += g * ( ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk ) ) + chi_prev_of( di_prev, t ) - chi_prev_of( di, t );
                     }
                     img.udp_cont( udp, w, []( auto && ) {} );
                     p_prev = pk;
+                    di_prev = di;
                 }
                 if ( hi == nb ) // this work-item owns the last dirac -> also owns phi_n
-                    phi_sub += ( udp.pos - p_prev ) * ( udp.pos - p_prev );
+                    phi_sub += g * ( udp.pos - p_prev ) * ( udp.pos - p_prev ) + chi_prev_of( di_prev, udp.pos );
             }
 
             group_scan( local_index ) = phi_sub;
@@ -468,6 +492,7 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
             // actually writing grad_w (disjoint per dirac, safe) / grad_y (see the atomic note below).
             auto udp = img.udp_at( img.cell_cum_mass, w_lo );
             TF p_prev = ( lo > 0 ) ? TF( sorted_pos( lo - 1 ) ) : TF( 0 );
+            SI di_prev = di_prev0;
             TF pref = pref_lo;
             for( SI k = lo; k < hi; ++k ) {
                 const SI di = sorted_indices( k );
@@ -475,12 +500,13 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
                 const TF w = src_dist.weights( ::num_dirac = di );
                 if ( k >= 1 ) {
                     const TF t = udp.pos;
-                    pref += ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk );
+                    pref += g * ( ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk ) ) + chi_prev_of( di_prev, t ) - chi_prev_of( di, t );
                 }
                 const TF Phi_k = phi_total - pref;
+                const TF gw = gamma_of( di ) / w;            // ( the barycenter's direct share: `b_k` divides by `w_k` )
 
                 if constexpr ( DECAYED_TYPE_OF( grad_plan.src_dist.weights )::is_valid )
-                    grad_plan.src_dist.weights( ::num_dirac = di ) = g * Phi_k;
+                    grad_plan.src_dist.weights( ::num_dirac = di ) = Phi_k - gw * bary_of( di );
 
                 if constexpr ( DECAYED_TYPE_OF( grad_plan.dst_dist.values )::is_valid )
                     // `udp.index` is the cell of the piece being emitted (read before the walker
@@ -490,12 +516,14 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
                     // everywhere else (grad_w, barycenters, add_position_grad) stays disjoint per dirac.
                     img.udp_cont( udp, w, [&]( auto &&item ) {
                         atomic_add( grad_plan.dst_dist.values( udp.index ).ref(),
-                                    TF( g * ( item.second_moment_about( pk ) - Phi_k * ( item.x1 - item.x0 ) ) ) );
+                                    TF( g * item.second_moment_about( pk ) - Phi_k * ( item.x1 - item.x0 )
+                                        + gw * ( item.x1 * item.x1 - item.x0 * item.x0 ) / 2 ) );
                     } );
                 else
                     img.udp_cont( udp, w, []( auto && ) {} );
 
                 p_prev = pk;
+                di_prev = di;
             }
         } );
     }

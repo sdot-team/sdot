@@ -154,6 +154,12 @@ struct Newton {
 
     Newton( Bal &bal, LinearSolver &lin, NewtonOptions o = {} ) : bal( bal ), lin( lin ), o( o ), beta( o.beta0 ) {}
 
+    /// an unknown the gauge moves: an outer weight ( a root's, not a virtual weight of a tree of aggregates )
+    bool level0( SI i ) const {
+        if constexpr ( requires { bal.grp; } ) return bal.grp.level0( i );
+        else return true;
+    }
+
     static double norm2( const std::vector<double> &v ) {
         double s = 0;
         for ( double x : v ) s += x * x;
@@ -250,7 +256,8 @@ struct Newton {
         w = w_init;
         const double gauge = w[ 0 ];
         for ( SI i = 0; i < n; ++i )                     // the gauge, imposed here and maintained by
-            w[ i ] -= gauge;                             // `d[ 0 ] = 0` afterwards
+            if ( level0( i ) )                           // `d[ 0 ] = 0` afterwards ( on the outer weights: a group's gaps stay )
+                w[ i ] -= gauge;
         if ( ! already_measured )
             measures_and_facets( w, a, fa );
         t_last = 1;
@@ -300,25 +307,36 @@ struct Newton {
             const int g0 = bal.nb_diag;
 
             double t0 = now();
-            if ( agg.has_dups() ) {                      // ( the duplicates' rows linked to their representatives )
-                agg.link_duplicates( fa, fa_lin );
-                L.assemble( n, fa_lin );
-            } else
-                L.assemble( n, fa );
-            // the pairs whose plane the doubles can no longer place are merged ( `Aggregation.h` ): the merit then reads
-            // their clusters from this iteration on
-            if ( agg.detect( L, w, nu ) ) {
-                nr = merit( agg.shares( a, nu, ae ) );
-                if ( o.trace )
-                    std::printf( "      aggregation: %d clusters, %d seeds ( |r|_2 %.3e )\n", int( agg.nb_clusters() ), int( agg.nb_aggregated() ), nr );
-            }
-            st.t_asm += now() - t0;
-            t0 = now();
-            const bool solved = lin.solves( L, b, d );
-            st.t_lin += now() - t0;
-            if ( ! solved ) {
-                st.status = NewtonStats::LINEAR_FAILURE;
-                return false;
+            bool grouped = false;
+            if constexpr ( requires { bal.grp; } ) grouped = bal.grp.active;
+            if ( grouped ) {                             // GROUPS ( `Groups.h` ): the root level, then the aggregates' blocks
+                if constexpr ( requires { bal.grp; } ) {
+                    if ( ! bal.grp.direction( fa, b, d, lin, st.t_asm, st.t_lin, &now ) ) {
+                        st.status = NewtonStats::LINEAR_FAILURE;
+                        return false;
+                    }
+                }
+            } else {
+                if ( agg.has_dups() ) {                      // ( the duplicates' rows linked to their representatives )
+                    agg.link_duplicates( fa, fa_lin );
+                    L.assemble( n, fa_lin );
+                } else
+                    L.assemble( n, fa );
+                // the pairs whose plane the doubles can no longer place are merged ( `Aggregation.h` ): the merit then reads
+                // their clusters from this iteration on
+                if ( agg.detect( L, w, nu ) ) {
+                    nr = merit( agg.shares( a, nu, ae ) );
+                    if ( o.trace )
+                        std::printf( "      aggregation: %d clusters, %d seeds ( |r|_2 %.3e )\n", int( agg.nb_clusters() ), int( agg.nb_aggregated() ), nr );
+                }
+                st.t_asm += now() - t0;
+                t0 = now();
+                const bool solved = lin.solves( L, b, d );
+                st.t_lin += now() - t0;
+                if ( ! solved ) {
+                    st.status = NewtonStats::LINEAR_FAILURE;
+                    return false;
+                }
             }
 
             // ---- THE TRIAL THEN THE LOCAL LIMITS: the diagram of the step first, and if some cells

@@ -29,6 +29,10 @@ struct ProjectedSumOfDiracs {
     /// Compile-time: is the position gradient wanted? (here it flows to the ambient `points`).
     HD auto position_grad_wanted( auto &&grad_src ) const { return std::bool_constant<DECAYED_TYPE_OF( grad_src.points )::is_valid>(); }
 
+    /// what `add_position_grad` derives, for loom's `computed_grads` ( `flags`: this source's ): the
+    /// ambient points -- not the projection direction
+    static void position_computed_grads( auto &&flags ) { flags.points = true; }
+
     /// d cost / d position(i) flows to the ambient point: grad_points(i,d) += grad_s * normal(d). The
     /// points gradient is SHARED across the batch (one point, every angle contributes) -> ATOMIC add.
     /// Compile-time no-op when the points gradient is not wanted (a NoneTensor twin, no `ref()`).

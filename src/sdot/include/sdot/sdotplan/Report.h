@@ -19,7 +19,7 @@ enum Stat : int {
     NB_CLUSTERS, NB_AGGREGATED, NB_DUPLICATES, RESIDUAL_FULL, NB_POLISH,
     NB_STATS
 };
-enum Start : int { START_GIVEN = 0, START_VORONOI = 1, START_SIMILARITY = 2 };
+enum Start : int { START_GIVEN = 0, START_VORONOI = 1, START_SIMILARITY = 2, START_BALLS = 3 };
 
 /// what each row of the history carries -- same list on the python side ( `SdotPlanNd._HISTORY` )
 enum Hist : int { H_STEP = 0, H_T, H_RESIDUAL_L2, H_MIN_MASS, H_MAX_RESIDUAL, H_NB_DIAG, H_NB_EVALS, H_S, NB_HIST };

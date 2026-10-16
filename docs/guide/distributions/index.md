@@ -24,6 +24,7 @@ The target also gives the **domain** of the transport: the cells of the power di
 | `Image( values, frame = None, pixel_frame = None, origin = None )` | piecewise constant on a grid of pixels |
 | `SumOfGaussians( positions, sigmas, weights = None )` | a mixture of isotropic gaussians |
 | `Mesh( nodes, simplices, values = None )` | piecewise linear on a mesh of simplices ( triangles in 2D, tetrahedra in 3D ) |
+| `Mesh( nodes, segments_or_triangles, values = None )` | carried by lines ( 2D, 3D ) or surfaces ( 3D ): see [Lines and Surfaces](./codim-mesh) |
 
 ### `Image`
 
@@ -47,4 +48,4 @@ side has length 1, and the proportions are kept. To place it elsewhere:
 ## Dimensions
 
 The dimension comes from the source: `positions` of shape `[ n, d ]`. In 1D, the plan is computed by a sort, exactly
-( see [W2, plans and settings](./ot-plan#ot-solve-the-settings-of-the-solver) ).
+( see [W2, plans and settings](../ot-plan#ot-solve-the-settings-of-the-solver) ).

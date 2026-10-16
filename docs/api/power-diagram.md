@@ -2,7 +2,7 @@
 
 # API — Power Diagrams
 
-The geometry under the plans: power diagrams, their cells, and what speeds them up.
+The geometry under the plans: power diagrams, their cells, and what speeds them up. For seeds at the same position, see [Guide: Duplicates and Close Seeds](/guide/duplicates).
 
 ::: v-pre
 
@@ -41,11 +41,12 @@ would have removed nothing, so the cells are the SAME, up to rounding errors.
 
 | Attribute | |
 |---|---|
-| `cells` | All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them. |
+| `cells` | All the cells, as one `Cell` batched over the seeds ( in the order of `positions` ) -- to draw or inspect them. With a periodicity, each cell is the whole cell of its seed, around the seed as it was given: it can lie outside the domain, and away from the others ( `add_to_viz` shows its copies by the group too ). |
+| `groups` | The `Groups` of this diagram ( `groups.py` ), in the user's order -- `None` without groups. |
 | `measures` | The measure of each cell, `[ n ]` -- its integral against `distribution` when there is one. Differentiable with respect to the positions, the weights and the parameters of the distribution. |
 | `moments` | `( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and `int \|x\|^2 rho`. Not differentiable ( see `moment` ). |
 
-### `.add_to_viz(viz, seeds=True, seed_color='#000000', support_only=True, threshold=0.0, **kwargs)`
+### `.add_to_viz(viz, seeds=True, seed_color='#000000', support_only=None, threshold=0.0, nb_periodicity_rings=1, opacity_periodicity_rings=0.25, fit_periodicity_rings=False, domain=None, domain_color='#000000', opacity_beyond_balls=0.2, virtual_seeds=False, virtual_color='#888888', **kwargs)`
 
 Draws itself into a `Visualizer`: all the cells, in one call ( see `cells` ), and the
 seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_to_viz`
@@ -53,9 +54,28 @@ seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_t
 `write_pvd`, `show` -- are those of `Displayable`.
 
 `support_only`: the cells only where the distribution has mass ( `support_pieces`, with
-`threshold` ) -- an image with zero pixels does not show its cells there.
+`threshold` ) -- an image with zero pixels does not show its cells there. By default: yes without a periodicity, no with
+one ( a periodic cell is drawn whole, around its seed ).
 
-### `.hessian_rows()`
+With a periodicity, the cells are drawn again moved by every element of the group up to the ring `nb_periodicity_rings`
+( `periodicity_rings` ), fainter ( `opacity_periodicity_rings`; 0 draws no copy ), the same seed in the same color: the
+copies must glue without a seam. They do not count in the scale of the scene ( the zoom fits the cells themselves ) unless
+`fit_periodicity_rings`. `domain`: the outline of
+the domain ( the support that the group repeats ), dashed, and that of its images -- by default with a periodicity only.
+
+With a sink ( partial transport, `sink_weight` ), the cells are drawn whole, as they are computed, but fainter
+( `opacity_beyond_balls` ): what is integrated -- the part of each cell inside its ball -- is drawn on top, in the same
+color, its arc approximated by a polygon.
+
+With GROUPS ( `groups` ), the cells drawn are those of the members, which split the cell of their group; `virtual_seeds`
+adds the virtual diracs of the exact duplicates ( `virtual_color` ), the points their split is the power diagram of.
+
+### `.domain_outline()`
+
+The support of the periodicity ( the domain of a diagram without one ) as half-spaces `( directions, offsets )`: what a
+display draws dashed ( `add_to_viz` ). `None` for an unbounded diagram.
+
+### `.hessian_rows(items=None, host=True)`
 
 The derivatives of the measures with respect to the weights, row by row: `( nb_nbrs, ids, vals )`, the neighbors of each cell and the coefficients ( host arrays ).
 
@@ -66,6 +86,12 @@ The solution `x` of `L x = rhs`, `L` being the derivative of the measures with r
 ### `.moment(k)`
 
 `int_{cell_i} p( x ) rho( x ) dx`, `[ n ]`, for `p = x_k` ( `k < d` ), `|x|^2` ( `k == d` ) or `1` ( `k == d + 1` ). Differentiable like `measures`.
+
+### `.periodicity_rings(nb_rings=1)`
+
+The elements of the group of `periodicity` up to the ring `nb_rings`, as affine maps `[ m, d, d + 1 ]` ( `[ M | V ]`, the map
+`x -> M x + V` ), the identity first: ring 1 holds those whose image of the support touches the support. What a display
+repeats the cells by ( see `add_to_viz` ); the identity alone without a periodicity.
 
 ### `.show(filename=None, title=None, height=500, **kwargs)`
 
@@ -80,6 +106,11 @@ path written ( None when nothing was written ).
 A `Visualizer` holding this object ( `viz`, when given: it is then completed ). `title`
 names a NEW scene; `kwargs` are those of `add_to_viz`.
 
+### `.unfold(points)`
+
+`points` ( `[ n, d ]`, one per seed, e.g. the barycenters of the cells ) taken from the frame of the folded seeds
+( `positions` ) back to that of the positions as they were given. The identity without a periodicity.
+
 ### `.write_html(filename, title=None, **kwargs)`
 
 Writes the self-contained HTML page of this object. Returns the path written.
@@ -92,6 +123,78 @@ the entry point one opens. Returns the `.pvd` path.
 ### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
 
 Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `Groups`
+
+```python
+Groups(parent, agg_parent, center, scale, outer, dirs=None, seed_v=None, agg_v=None, positions=None, apex_shift=None)
+```
+
+THE TREE OF AGGREGATES of a diagram, in the user's order. Aggregates are numbered top-down ( a parent before its children ).
+
+Per seed: `parent` ( `[ n ]` ints, the aggregate the seed is a child of, `-1` when it is alone ), `dirs` ( `[ n, d ]`, the unit
+direction of a seed in an aggregate of exact duplicates, zero elsewhere ). Per aggregate: `agg_parent` ( `[ m ]`, `-1` for a root ),
+`center` ( `[ m, d ]`, the origin of its frame -- the barycentre of its diracs, or the apex of a fan of duplicates, which
+follows its site: `apex_shift`, read from `positions` ), `scale`
+( `[ m ]`, the scale of its frame -- `r` for duplicates ), `outer` ( `[ m ]`, what its children's weights move outside: `scale`,
+or 0 for duplicates ). Optional precise virtual weights `seed_v` ( `[ n ]` ) and `agg_v` ( `[ m ]` ), each child's `v` in its
+parent's frame ( a solver's ): without them, they are read from the weights given to the diagram ( `virtual_weights` ).
+
+Host arrays: the tree is a constant of the positions it was built on ( a derivative goes through the positions of the
+seeds, not through the tree ). Built by `find_groups( positions )` ( `groups = "auto"`, the solver ), from nested index lists
+( `Groups.nested`, or the lists themselves as `PowerDiagram( groups = ... )` ), or one level from representatives
+( `Groups.from_rep` ).
+
+| Attribute | |
+|---|---|
+| `apex_shift` | per aggregate of duplicates: its apex minus the position of its site ( the fan follows the site ), zero for the others |
+| `depth` | the largest number of nested aggregates above a seed |
+| `nb_groups` | the ROOT aggregates ( the groups of seeds that share one outer cell ) |
+| `rep` | per seed: the smallest index of its root aggregate ( itself when it is alone ) |
+| `site` | per seed: the smallest index at its exact position ( the first seed of its aggregate of duplicates, or itself ) |
+
+### `.as_lists()`
+
+the tree as nested index lists ( what `Groups.nested` takes ): one list per root aggregate
+
+### `.from_rep(rep, positions, radius=None, dirs=None, apex=None)`
+
+ONE LEVEL: `rep` ( `[ n ]` ) the smallest index of the group of each seed ( itself when alone ) -- a tree of depth one,
+the exact duplicates of a group in an aggregate of their own
+
+### `.from_sets(sets, positions, radius=None, dirs=None, apex=None)`
+
+THE TREE OF A LAMINAR FAMILY of index sets ( two sets nested or disjoint; the ones that cross another are left out ): each
+set an aggregate inside the smallest set holding it
+
+### `.members()`
+
+`{ rep: [ members ] }` for the root aggregates ( `rep` the smallest index )
+
+### `.nested(lists, positions, radius=None, dirs=None, apex=None)`
+
+THE TREE OF NESTED INDEX LISTS: each list an aggregate, an int a seed, a list in a list a nested aggregate --
+`[ [ 0, 1 ], [ 2, [ 3, 4 ] ] ]` makes two roots, the second holding seed 2 and the aggregate `[ 3, 4 ]`. Seeds at the same
+exact position must be in one aggregate of their own ( a list of duplicates only ), or they are put in one ( the
+duplicates among an aggregate's direct seeds ). `radius` / `dirs` ( `[ n, d ]` ): the radius and the unit directions of the
+virtual diracs of duplicates, springs and `VIRTUAL_RADIUS` local spacings by default; `apex` ( `[ n, d ]`, read at each
+site's first seed ): the centres of their fans, when a point inside each site's cell is known ( the barycentre of the cell,
+which a solver has: at the weights of a transport a seed need not lie in its own cell ).
+
+### `.sites()`
+
+`( keep, tree )`: the SITES ( the distinct positions: each aggregate of duplicates replaced by its first seed, which takes its
+place and its virtual weight ) and their tree ( `None` when no aggregate is left ) -- the slots of the solver are the same
+( `x[ keep ]` )
+
+### `.virtual_positions(positions)`
+
+`[ n, d ]` host: the virtual dirac of each member of an aggregate of exact duplicates, `center + scale u` ( the points
+their split is the power diagram of ), the position of the others
+
+### `.with_virtual_weights(seed_v, agg_v)`
+
+the same tree with these precise virtual weights
 
 ## `Voronoi`
 
@@ -118,13 +221,14 @@ A convex polytope, possibly unbounded, possibly batched ( `PowerDiagram.cells` i
 | `is_bounded` | Whether the cell is bounded. |
 | `measure` | The measure of the cell: length, area, volume... Infinite ( the largest float ) for an unbounded cell. Differentiable with respect to the vertices. |
 
-### `.add_to_viz(viz, color=None, opacity=1.0, faces=True, edges=True, points=False, owners=None, nb_colors=None)`
+### `.add_to_viz(viz, color=None, opacity=1.0, faces=True, edges=True, points=False, owners=None, nb_colors=None, frames=True, edge_opacity=1.0)`
 
 Draws itself into a `Visualizer` ( see `sdot.viz.Visualizer`, and `cell_viz` for what an
 unbounded cell drops ). Each item takes its color from its RANK IN THE BATCH,
 on a block reserved in advance : the color of a cell of a diagram says WHICH seed.
 `owners`: the rank to take the color from, per item, on a block of `nb_colors` -- the
-pieces of one cell ( `PowerDiagram.support_pieces` ) have its color.
+pieces of one cell ( `PowerDiagram.support_pieces` ) have its color. `frames = False`: drawn without counting in the
+scale of the scene ( the zoom fits what does count ). `edge_opacity`: that of the edges ( `opacity` is the faces' ).
 
 ### `.cut(direction, offset, cut_id=-1)`
 
@@ -142,6 +246,11 @@ A parallelotope: `origin + sum_j t_j axes[ j ]`, `t` in `[ 0, 1 ]^d` ( the unit 
 ### `.make_unbounded(nb_dims, batch_axes=None, **kwargs)`
 
 The whole space, in dimension `nb_dims`, to cut from.
+
+### `.moved(maps)`
+
+A copy of the cell moved by the affine map `x -> M x + V` -- `maps`: `[ d, d + 1 ]` ( `[ M | V ]` ), or one per item
+`[ nb_items, d, d + 1 ]`. `M` orthogonal: the cell stays a cell, its topology and cut identifiers unchanged.
 
 ### `.show(filename=None, title=None, height=500, **kwargs)`
 

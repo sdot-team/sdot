@@ -60,6 +60,7 @@
 // margin ( `vertex_may_go` ). Diagnosis: `SDOT_CARD_STATS=1` prints how many cells each pass left over.
 // =====================================================================================
 
+#include "CardGroups.cuh"
 #include "Laplacian2D.cuh"
 #include "Density3D.cuh"
 #include <climits>
@@ -146,6 +147,33 @@ __device__ __forceinline__ Plane<double> bisector( const SeedD &f, const SeedD &
     return p;
 }
 
+/// THE BISECTOR WITH AN IMAGE ( periodicity ): the seed `q` translated by `( sx, sy, sz )`, joined to the high parts' difference
+template<bool W>
+__device__ __forceinline__ Plane<float> bisector( const SeedF &f, const SeedF &q, double sx, double sy, double sz ) {
+    Plane<float> p;
+    p.tol = 0;
+    p.dx  = ( ( q.xh - f.xh ) + float( sx ) ) + ( q.xl - f.xl );
+    p.dy  = ( ( q.yh - f.yh ) + float( sy ) ) + ( q.yl - f.yl );
+    p.dz  = ( ( q.zh - f.zh ) + float( sz ) ) + ( q.zl - f.zl );
+    p.off = 0.5f * ( p.dx * p.dx + p.dy * p.dy + p.dz * p.dz );
+    if constexpr ( W )
+        p.off += 0.5f * ( ( f.wh - q.wh ) + ( f.wl - q.wl ) );
+    return p;
+}
+
+template<bool W>
+__device__ __forceinline__ Plane<double> bisector( const SeedD &f, const SeedD &q, double sx, double sy, double sz ) {
+    Plane<double> p;
+    p.tol = 0;
+    p.dx  = ( q.x + sx ) - f.x;
+    p.dy  = ( q.y + sy ) - f.y;
+    p.dz  = ( q.z + sz ) - f.z;
+    p.off = 0.5 * ( p.dx * p.dx + p.dy * p.dy + p.dz * p.dz );
+    if constexpr ( W )
+        p.off += 0.5 * ( f.w - q.w );
+    return p;
+}
+
 /// THE TIES, decided once: a vertex counts as outside only beyond `tol = c eps ( |d| ( |d| + L ) + |off| )`, what the
 /// rounding of `d . v - off` can reach for a vertex of the cell ( `L` the farthest corner of the box: a float vertex is
 /// interpolated from what were once its corners ). A plane through vertices that are on it in exact arithmetic ( a grid:
@@ -174,21 +202,26 @@ struct Box { float lo[ 3 ], hi[ 3 ]; };
 /// a node seen from the seed: its box in the seed's frame, the majorant's slopes and constant `c = w0 - b - a . p0`
 struct CBox { float lo[ 3 ], hi[ 3 ], a[ 3 ], c; };
 
+/// `s`: the translation of an IMAGE of the tree ( periodicity, zero otherwise ), the majorant rewritten for the translated seeds
 template<bool W,class TR>
-__device__ __forceinline__ CBox centred( const Node<W,TR> &nd, const SeedF &f ) {
+__device__ __forceinline__ CBox centred( const Node<W,TR> &nd, const SeedF &f, float sx = 0.f, float sy = 0.f, float sz = 0.f ) {
     CBox B;
-    B.lo[ 0 ] = ( nd.lo[ 0 ] - f.xh ) - f.xl;
-    B.lo[ 1 ] = ( nd.lo[ 1 ] - f.yh ) - f.yl;
-    B.lo[ 2 ] = ( nd.lo[ 2 ] - f.zh ) - f.zl;
-    B.hi[ 0 ] = ( nd.hi[ 0 ] - f.xh ) - f.xl;
-    B.hi[ 1 ] = ( nd.hi[ 1 ] - f.yh ) - f.yl;
-    B.hi[ 2 ] = ( nd.hi[ 2 ] - f.zh ) - f.zl;
+    B.lo[ 0 ] = ( ( nd.lo[ 0 ] - f.xh ) + sx ) - f.xl;
+    B.lo[ 1 ] = ( ( nd.lo[ 1 ] - f.yh ) + sy ) - f.yl;
+    B.lo[ 2 ] = ( ( nd.lo[ 2 ] - f.zh ) + sz ) - f.zl;
+    B.hi[ 0 ] = ( ( nd.hi[ 0 ] - f.xh ) + sx ) - f.xl;
+    B.hi[ 1 ] = ( ( nd.hi[ 1 ] - f.yh ) + sy ) - f.yl;
+    B.hi[ 2 ] = ( ( nd.hi[ 2 ] - f.zh ) + sz ) - f.zl;
+    if ( sx != 0.f || sy != 0.f || sz != 0.f ) {         // ( a translation widens the box by a few ulps of itself )
+        const float m = 4e-7f * ( fabsf( sx ) + fabsf( sy ) + fabsf( sz ) );
+        for ( int d = 0; d < 3; ++d ) { B.lo[ d ] -= m; B.hi[ d ] += m; }
+    }
     if constexpr ( W ) {
         B.a[ 0 ] = nd.a[ 0 ];
         B.a[ 1 ] = nd.a[ 1 ];
         B.a[ 2 ] = nd.a[ 2 ];
         // the margin of `b` ( 1e-6 of the scale ) is far above these roundings
-        B.c = ( ( f.wh - nd.b ) + f.wl ) - ( nd.a[ 0 ] * f.xh + nd.a[ 1 ] * f.yh + nd.a[ 2 ] * f.zh );
+        B.c = ( ( f.wh - nd.b ) + f.wl ) - ( nd.a[ 0 ] * ( f.xh - sx ) + nd.a[ 1 ] * ( f.yh - sy ) + nd.a[ 2 ] * ( f.zh - sz ) );
     } else {
         B.a[ 0 ] = B.a[ 1 ] = B.a[ 2 ] = B.c = 0;
     }
@@ -251,17 +284,17 @@ __device__ __forceinline__ bool vertex_may_go( const CBox &B, double vxd, double
 }
 
 /// the squared distance from the seed to a box: the ORDER of two children, not a test
-__device__ __forceinline__ float proximity( const Box &b, const SeedF &f ) {
-    const float ex = fmaxf( fmaxf( b.lo[ 0 ] - f.xh, f.xh - b.hi[ 0 ] ), 0.f );
-    const float ey = fmaxf( fmaxf( b.lo[ 1 ] - f.yh, f.yh - b.hi[ 1 ] ), 0.f );
-    const float ez = fmaxf( fmaxf( b.lo[ 2 ] - f.zh, f.zh - b.hi[ 2 ] ), 0.f );
+__device__ __forceinline__ float proximity( const Box &b, const SeedF &f, float sx = 0.f, float sy = 0.f, float sz = 0.f ) {
+    const float ex = fmaxf( fmaxf( b.lo[ 0 ] + sx - f.xh, f.xh - b.hi[ 0 ] - sx ), 0.f );
+    const float ey = fmaxf( fmaxf( b.lo[ 1 ] + sy - f.yh, f.yh - b.hi[ 1 ] - sy ), 0.f );
+    const float ez = fmaxf( fmaxf( b.lo[ 2 ] + sz - f.zh, f.zh - b.hi[ 2 ] - sz ), 0.f );
     return ex * ex + ey * ey + ez * ez;
 }
 
 // ---- what a kernel receives ---------------------------------------------------------------------------------------
 
-/// EVERYTHING A CELL READS AND WRITES, by value ( kernel parameters ). `D`: the density, `DensConst` ( `rho` ) or a tetrahedral
-/// mesh ( `Density3D.cuh::DensMesh3` )
+/// EVERYTHING A CELL READS AND WRITES, by value ( kernel parameters ). `D`: the density, `DensConst` ( `rho` ), a tetrahedral
+/// mesh ( `Density3D.cuh::DensMesh3` ) or isotropic gaussians ( `Density3D.cuh::DensGauss3` )
 template<class _V,class TF,class TI,bool _W,unsigned _OUT,class _D = DensConst>
 struct Problem {
     using V     = _V;
@@ -291,6 +324,13 @@ struct Problem {
     bool              user_order;                        ///< per-cell outputs at the user's index ( else at the rank )
     bool              only_global;                       ///< every cell through the global pass ( `SDOT_CARD_GLOBAL_ONLY=1`, a test )
 
+    // ---- GROUPS ( `CardGroups.cuh` ): the tree of aggregates, in ranks ( `grp.on()` false: none )
+    sdot::gpu::CardGroups<TR,3> grp;
+
+    // ---- PERIODICITY: image `t` of the seed of rank `j` is the cut `j + n t`, at `pos( j ) + img( t )` ( `Cell2D.cuh` )
+    Strided<TF,2>     img;
+    int               nimg = 1;
+
     // ---- what the cells write
     StridedOut<TF,1>  res;                               ///< MEASURES
     TR               *fi, *fj;                          ///< FACETS: the COO of the upper facets, in ranks
@@ -305,6 +345,28 @@ struct Problem {
 
     __device__ __forceinline__ double density() const { return rho_dev ? double( *rho_dev ) : rho; }
     __device__ __forceinline__ SI user( TR k ) const { return user_order ? SI( ids( k ) ) : SI( k ); }
+    /// GROUPS: whether the cell of `k` writes its facet with `j` ( `Cell2D.cuh::Problem::writes_facet` )
+    __device__ __forceinline__ bool writes_facet( TR k, TR j ) const {
+        if ( grp.on() ) {
+            const bool mk = grp.member( k ), mj = grp.member( j );
+            if ( mk != mj ) return mk;
+            if ( mk && grp.root[ k ] != grp.root[ j ] ) return j > k;
+        }
+        return j > k;
+    }
+
+    /// the rank of the seed of a cut `c >= 0`, and the translation of its image
+    __device__ __forceinline__ TR seed_of( TR c ) const { return nimg > 1 ? TR( c % n ) : c; }
+    __device__ __forceinline__ double shift( TR c, int d ) const {
+        if ( nimg <= 1 || c < n ) return 0.0;
+        return double( img( SI( c / n ), d ) );
+    }
+    /// the bisector of the cut `c >= 0`, an image or not
+    __device__ __forceinline__ Plane<TK> plane_of( const SeedT &f, TR c ) const {
+        if ( nimg <= 1 || c < n )
+            return bisector<W>( f, seeds[ c ] );
+        return bisector<W>( f, seeds[ c % n ], shift( c, 0 ), shift( c, 1 ), shift( c, 2 ) );
+    }
 };
 
 // ---- warp helpers ( the old campaign's: no `__fns`, no local memory, every slot index a compile-time constant ) --------
@@ -693,11 +755,11 @@ struct RegCell {
     /// A LEAF AT ONCE: the lanes read its seeds together and compute their planes, the cuts take them from the lanes in
     /// rank order. `false` when the walk must stop ( the cell is empty, or overflowed: `state` )
     template<class Pb>
-    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Seed<TK> &f, TR beg, TR end ) {
+    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Seed<TK> &f, TR beg, TR end, TR off = 0 ) {
         for ( TR q0 = beg; q0 < end; q0 += 32 ) {
             Plane<TK> P{};
             if ( q0 + lane < end ) {
-                P = bisector<Pb::W>( f, pb.seeds[ q0 + lane ] );
+                P = off ? pb.plane_of( f, q0 + lane + off ) : bisector<Pb::W>( f, pb.seeds[ q0 + lane ] );
                 widen( P, L );
             }
             const int nq = int( min( TR( 32 ), TR( end - q0 ) ) );
@@ -708,7 +770,7 @@ struct RegCell {
                 pj.dz = __shfl_sync( FULL, P.dz, j );
                 pj.off = __shfl_sync( FULL, P.off, j );
                 pj.tol = __shfl_sync( FULL, P.tol, j );
-                const int r = cut( pj, TR( q0 + j ) );
+                const int r = cut( pj, TR( q0 + j + off ) );
                 if ( r == CUT_EMPTY || r == CUT_OVERFLOW ) {
                     state = r;
                     return false;
@@ -728,6 +790,8 @@ struct RegCell {
 /// outside regions, a face crossed four times ).
 template<class TK,class TR>
 struct MemCell {
+    const TR *skip = nullptr;                            ///< GROUPS: the roots of the ranks, the walk leaving out those of ...
+    TR        skip_root = -1;                            ///< ... this root ( their planes are cut before, `group_pass3` )
     TK     *X[ 2 ], *Y[ 2 ], *Z[ 2 ], *s;
     int    *K[ 2 ], *N[ 2 ], *ren, *aux, *cnt;
     TR     *cid;
@@ -1003,22 +1067,26 @@ struct MemCell {
     }
 
     template<class Pb>
-    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Seed<TK> &f, TR beg, TR end ) {
+    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Seed<TK> &f, TR beg, TR end, TR off = 0 ) {
         for ( TR q0 = beg; q0 < end; q0 += 32 ) {
             Plane<TK> P{};
+            int own = 0;
             if ( q0 + lane < end ) {
-                P = bisector<Pb::W>( f, pb.seeds[ q0 + lane ] );
+                P = off ? pb.plane_of( f, q0 + lane + off ) : bisector<Pb::W>( f, pb.seeds[ q0 + lane ] );
                 widen( P, L );
+                own = skip_root >= 0 && skip[ q0 + lane ] == skip_root;
             }
             const int nq = int( min( TR( 32 ), TR( end - q0 ) ) );
             for ( int j = 0; j < nq; ++j ) {
+                if ( __shfl_sync( FULL, own, j ) )
+                    continue;
                 Plane<TK> pj;
                 pj.dx = __shfl_sync( FULL, P.dx, j );
                 pj.dy = __shfl_sync( FULL, P.dy, j );
                 pj.dz = __shfl_sync( FULL, P.dz, j );
                 pj.off = __shfl_sync( FULL, P.off, j );
                 pj.tol = __shfl_sync( FULL, P.tol, j );
-                const int r = cut( pj, TR( q0 + j ) );
+                const int r = cut( pj, TR( q0 + j + off ) );
                 if ( r == CUT_EMPTY || r == CUT_OVERFLOW || r == CUT_BROKEN ) {
                     state = r;
                     return false;
@@ -1035,25 +1103,35 @@ struct MemCell {
 /// nearest child first, a node pruned when it is reached, the stack indexed by height
 template<class Pb,class Cell>
 __device__ __forceinline__ void walk3( const Pb &pb, const typename Pb::SeedT &f, Cell &cell ) {
+    // PERIODICITY: the tree once per image, its boxes translated, its seeds the cuts `q + n t`
+    for ( int t = 0; t < pb.nimg; ++t )
+        if ( ! walk3_image( pb, f, cell, t ) )
+            return;
+}
+
+template<class Pb,class Cell>
+__device__ __forceinline__ bool walk3_image( const Pb &pb, const typename Pb::SeedT &f, Cell &cell, int t ) {
     using TN   = typename Pb::TN;
     using TR   = typename Pb::TR;
     using Mask = typename Pb::V::Mask;
     const SeedF pf = prune_frame( f );
+    const float sx = t ? float( pb.img( t, 0 ) ) : 0.f, sy = t ? float( pb.img( t, 1 ) ) : 0.f, sz = t ? float( pb.img( t, 2 ) ) : 0.f;
+    const TR off = TR( t ) * pb.n;
     TN   stack[ Pb::V::MAX_HEIGHT ];
     Mask pending = 0;
     TN   n = 0;
     int  h = pb.depth;
     while ( true ) {
         const Node<Pb::W,TR> nd = pb.nodes[ n ];
-        if ( nd.beg < nd.end && cell.template may_be_cut_by<Pb::W>( centred( nd, pf ) ) ) {
+        if ( nd.beg < nd.end && cell.template may_be_cut_by<Pb::W>( centred( nd, pf, sx, sy, sz ) ) ) {
             if ( h <= 1 ) {
-                if ( ! cell.cut_leaf( pb, f, nd.beg, nd.end ) )
-                    return;
+                if ( ! cell.cut_leaf( pb, f, nd.beg, nd.end, off ) )
+                    return false;
             } else {
                 const TN lc = n + 1, rc = n + ( TN( 1 ) << ( h - 1 ) );
                 const Box bl = *reinterpret_cast<const Box *>( pb.nodes + lc );
                 const Box br = *reinterpret_cast<const Box *>( pb.nodes + rc );
-                const bool left_first = proximity( bl, pf ) <= proximity( br, pf );
+                const bool left_first = proximity( bl, pf, sx, sy, sz ) <= proximity( br, pf, sx, sy, sz );
                 --h;
                 stack[ h ] = left_first ? rc : lc;
                 pending |= Mask( 1 ) << h;
@@ -1062,7 +1140,7 @@ __device__ __forceinline__ void walk3( const Pb &pb, const typename Pb::SeedT &f
             }
         }
         if ( ! pending )
-            return;
+            return true;
         if constexpr ( sizeof( Mask ) == 4 ) h = __ffs( int( pending ) ) - 1;
         else                                 h = __ffsll( ( long long ) pending ) - 1;
         pending &= pending - 1;
@@ -1073,7 +1151,7 @@ __device__ __forceinline__ void walk3( const Pb &pb, const typename Pb::SeedT &f
 // ---- the end of a cell ------------------------------------------------------------------------------------------------
 
 /// the seed and the box in double, in the seed's frame: what the re-solve and the finish read
-struct Origin { double x, y, z, w, b0[ 3 ], b1[ 3 ]; };
+struct Origin { double x, y, z, w, b0[ 3 ], b1[ 3 ]; SI k; };
 
 template<class Pb>
 __device__ __forceinline__ Origin origin3( const Pb &pb, typename Pb::TR k ) {
@@ -1087,6 +1165,7 @@ __device__ __forceinline__ Origin origin3( const Pb &pb, typename Pb::TR k ) {
         o.b0[ d ] = double( pb.box_min( d ) ) - p[ d ];
         o.b1[ d ] = double( pb.box_max( d ) ) - p[ d ];
     }
+    o.k = SI( k );
     return o;
 }
 
@@ -1094,11 +1173,20 @@ __device__ __forceinline__ Origin origin3( const Pb &pb, typename Pb::TR k ) {
 /// ( `|n|` the distance of the seeds ), or a side of the box ( a unit normal )
 template<class Pb>
 __device__ __forceinline__ void plane64( const Pb &pb, const Origin &o, typename Pb::TR cid, double *pl ) {
+    if ( cid >= 0 && pb.grp.on() && pb.grp.same( typename Pb::TR( o.k ), cid ) ) {     // GROUPS: the plane of two members
+        const double p0[ 3 ] = { o.x, o.y, o.z }, p1[ 3 ] = { double( pb.pos64( cid, 0 ) ), double( pb.pos64( cid, 1 ) ), double( pb.pos64( cid, 2 ) ) };
+        double d2;
+        pb.grp.plane( typename Pb::TR( o.k ), cid, p0, p1, pl, pl[ 3 ], d2 );
+        return;
+    }
     if ( cid >= 0 ) {
-        const double nx = double( pb.pos64( cid, 0 ) ) - o.x, ny = double( pb.pos64( cid, 1 ) ) - o.y, nz = double( pb.pos64( cid, 2 ) ) - o.z;
+        const typename Pb::TR j = pb.seed_of( cid );    // ( an image: its seed, translated )
+        const double nx = ( double( pb.pos64( j, 0 ) ) + pb.shift( cid, 0 ) ) - o.x;
+        const double ny = ( double( pb.pos64( j, 1 ) ) + pb.shift( cid, 1 ) ) - o.y;
+        const double nz = ( double( pb.pos64( j, 2 ) ) + pb.shift( cid, 2 ) ) - o.z;
         double off = 0.5 * ( nx * nx + ny * ny + nz * nz );
         if constexpr ( Pb::W )
-            off += 0.5 * ( o.w - double( pb.w64( cid ) ) );
+            off += 0.5 * ( o.w - double( pb.w64( j ) ) );
         pl[ 0 ] = nx; pl[ 1 ] = ny; pl[ 2 ] = nz; pl[ 3 ] = off;
         return;
     }
@@ -1222,7 +1310,7 @@ __device__ __forceinline__ void finish_warp( const Pb &pb, typename Pb::TR k, co
         for ( int f = lane; f < c.nc; f += 32 ) {
             int v0, cnt;
             face_of( f, v0, cnt );
-            nup += v0 != INT_MAX && c.cid[ f ] > k;
+            nup += v0 != INT_MAX && c.cid[ f ] >= 0 && pb.writes_facet( k, pb.seed_of( c.cid[ f ] ) );
         }
         int incl = nup;
 #pragma unroll
@@ -1319,7 +1407,61 @@ __device__ __forceinline__ void finish_warp( const Pb &pb, typename Pb::TR k, co
                     }
                 return true;
             };
-            gpu3d::mesh3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, G, c.pl, c.nc, lo, hi, L, lane, dtot, fl, face, has_face );
+            if constexpr ( std::is_same_v<typename Pb::D,gpu3d::DensGauss3> ) {
+                // the edges of face `f`, counterclockwise about its outward normal: the walk of its cycle, turned by the sign of
+                // its Newell normal along the plane's -- or, in several cycles, every edge oriented by its two planes ( as below )
+                auto face_edges = [&]( int f, auto &&cb ) {
+                    int v0, cnt;
+                    face_of( f, v0, cnt );
+                    if ( v0 == INT_MAX )
+                        return;
+                    const double nx = c.pl[ 4 * f ], ny = c.pl[ 4 * f + 1 ], nz = c.pl[ 4 * f + 2 ];
+                    auto emit = [&]( int a, int b ) { cb( c.vx[ a ], c.vy[ a ], c.vz[ a ], c.vx[ b ], c.vy[ b ], c.vz[ b ] ); };
+                    auto walk = [&]( auto &&edge ) {
+                        const int io = cut_slot( c.topo, v0, f );
+                        int prev = v0, at = c.topo.nbr( v0, io == 0 ? 1 : 0 ), seen = 2;
+                        edge( v0, at );
+                        for ( int step = 0; step < c.nv; ++step ) {
+                            const int i1 = cut_slot( c.topo, at, f ), e = nbr_slot( c.topo, at, prev );
+                            const int nxt = c.topo.nbr( at, 3 - i1 - e );
+                            edge( at, nxt );
+                            if ( nxt == v0 )
+                                break;
+                            ++seen;
+                            prev = at;
+                            at = nxt;
+                        }
+                        return seen;
+                    };
+                    double nw = 0;
+                    const int seen = walk( [&]( int a, int b ) {
+                        nw += nx * ( c.vy[ a ] - c.vy[ b ] ) * ( c.vz[ a ] + c.vz[ b ] ) + ny * ( c.vz[ a ] - c.vz[ b ] ) * ( c.vx[ a ] + c.vx[ b ] )
+                            + nz * ( c.vx[ a ] - c.vx[ b ] ) * ( c.vy[ a ] + c.vy[ b ] );
+                    } );
+                    if ( seen == cnt ) {
+                        const bool rev = nw < 0;
+                        walk( [&]( int a, int b ) { if ( rev ) emit( b, a ); else emit( a, b ); } );
+                        return;
+                    }
+                    for ( int a = 0; a < c.nv; ++a ) {
+                        const int ia = cut_slot( c.topo, a, f );
+                        if ( c.topo.cut( a, ia ) != f )
+                            continue;
+                        for ( int j = 0; j < 3; ++j ) {
+                            const int b = c.topo.nbr( a, j );
+                            if ( j == ia || b < a )
+                                continue;
+                            const int gf = c.topo.cut( a, 3 - ia - j );
+                            const double mx = c.pl[ 4 * gf ], my = c.pl[ 4 * gf + 1 ], mz = c.pl[ 4 * gf + 2 ];
+                            const double dx = ny * mz - nz * my, dy = nz * mx - nx * mz, dz = nx * my - ny * mx;
+                            const double dir = ( c.vx[ b ] - c.vx[ a ] ) * dx + ( c.vy[ b ] - c.vy[ a ] ) * dy + ( c.vz[ b ] - c.vz[ a ] ) * dz;
+                            if ( dir >= 0 ) emit( a, b ); else emit( b, a );
+                        }
+                    }
+                };
+                gpu3d::gauss3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, c.pl, c.nc, lo, hi, lane, dtot, fl, face_edges, has_face );
+            } else
+                gpu3d::mesh3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, G, c.pl, c.nc, lo, hi, L, lane, dtot, fl, face, has_face );
         }
         if constexpr ( FAC )
             for ( int j = 0; j < nfl; ++j ) {
@@ -1404,16 +1546,21 @@ __device__ __forceinline__ void finish_warp( const Pb &pb, typename Pb::TR k, co
             m2 += sg * f2;
         }
         if constexpr ( FAC || ADJ ) {
-            const TR j = c.cid[ f ];
-            if ( j >= 0 ) {
+            const TR cj = c.cid[ f ];
+            // ( an image: the facet is its seed's; a facet with an image of the cell itself is no facet of the laplacian, and
+            // moves with nothing )
+            const TR j = cj >= 0 ? pb.seed_of( cj ) : cj;
+            if ( j >= 0 && j != k ) {
                 const double n2 = nx * nx + ny * ny + nz * nz;
                 // rho |facet| / ( 2 |p_k - p_j| ), or with a density `int rho dA / ( 2 |p_k - p_j| )`
-                const double coef = ! ( n2 > 0 ) ? 0.0 : DENS ? ( f < FL ? fabs( fmine[ f >> 5 ] ) : 0.0 ) / ( 2 * sqrt( n2 ) ) : rho * fabs( fw ) / ( 4 * n2 );
+                double coef = ! ( n2 > 0 ) ? 0.0 : DENS ? ( f < FL ? fabs( fmine[ f >> 5 ] ) : 0.0 ) / ( 2 * sqrt( n2 ) ) : rho * fabs( fw ) / ( 4 * n2 );
+                if ( pb.grp.on() && pb.grp.same( k, j ) )  // ( GROUPS: with respect to the frame weights, `CardGroups::scale_between` )
+                    coef *= pb.grp.scale_between( k, j );
                 if constexpr ( FAC ) {
-                    if ( j > k && fok ) {
+                    if ( pb.writes_facet( k, j ) && fok ) {
                         const unsigned long long q = fbase + t++;
-                        pb.fi[ q ] = k;
-                        pb.fj[ q ] = j;
+                        pb.fi[ q ] = k < j ? k : j;      // ( `i < j`: a member writes its facets out of its root both ways )
+                        pb.fj[ q ] = k < j ? j : k;
                         pb.fc[ q ] = coef;
                     }
                 }
@@ -1633,6 +1780,8 @@ __device__ __forceinline__ void reg_cells( const Pb &pb, const typename Pb::TR *
     const unsigned long long gwarp = ( SI( blockIdx.x ) * blockDim.x + threadIdx.x ) >> 5, nwarps = ( SI( gridDim.x ) * blockDim.x ) >> 5;
     for ( unsigned long long i = gwarp; i < count; i += nwarps ) {
         const TR k = list ? list[ i ] : TR( i );
+        if ( pb.grp.member( k ) )                        // ( GROUPS: a member's cell is `group_pass3`'s )
+            continue;
         if ( pb.only_global ) {
             if ( lane == 0 )
                 ovf[ atomicAdd( &pb.counters->ovf[ ovf_counter ], 1ull ) ] = k;
@@ -1692,6 +1841,54 @@ __global__ void __launch_bounds__( BLOCK ) third_pass( Pb pb, const typename Pb:
         cell.init( lane, b );
         if ( start_or_cut3( pb, k, cell ) )
             walk3( pb, f, cell );
+        if ( cell.state == CUT_OVERFLOW || cell.state == CUT_BROKEN ) {
+            if ( lane == 0 ) {
+                failed3( pb, k );
+                if ( atomicAdd( &pb.counters->nb_failed, 1ull ) == 0 )
+                    errors.record( ERROR_KIND_FAILURE, cell.state == CUT_OVERFLOW ? FAIL_TOO_MANY_VERTICES : FAIL_TOPOLOGY, SI( pb.ids( k ) ) );
+            }
+            __syncwarp();
+            continue;
+        }
+        finish_mem( pb, k, cell );
+    }
+}
+
+/// THE GROUP PASS ( `CardGroups.cuh`, `Cell2D.cuh::group_pass` ): the cells of the MEMBERS of the roots, a warp each in the third
+/// pass's slots ( after it ): the domain, the planes of the other members of the root ( in double, in the seed's frame ), then the
+/// walk without them. `list`: the members' ranks, `m` of them.
+template<class Pb,class EB>
+__global__ void __launch_bounds__( BLOCK ) group_pass3( Pb pb, const typename Pb::TR *list, SI m, unsigned char *slots, int capv, int capc, EB errors ) {
+    using TK = typename Pb::TK;
+    using TR = typename Pb::TR;
+    const int lane = threadIdx.x & 31;
+    const SI gwarp = ( SI( blockIdx.x ) * blockDim.x + threadIdx.x ) >> 5, nwarps = ( SI( gridDim.x ) * blockDim.x ) >> 5;
+    unsigned char *mine = slots + gwarp * MemCell<TK,TR>::bytes_for( capv, capc );
+    for ( SI i = gwarp; i < m; i += nwarps ) {
+        const TR k = list[ i ];
+        const typename Pb::SeedT f = pb.seeds[ k ];
+        TK b[ 6 ];
+        start3( pb, k, b );
+        MemCell<TK,TR> cell;
+        cell.attach( mine, capv, capc );
+        cell.init( lane, b );
+        bool alive = start_or_cut3( pb, k, cell );
+        const double p0[ 3 ] = { double( pb.pos64( k, 0 ) ), double( pb.pos64( k, 1 ) ), double( pb.pos64( k, 2 ) ) };
+        for ( TR j = pb.grp.next[ k ]; alive && j != k; j = pb.grp.next[ j ] ) {
+            const double p1[ 3 ] = { double( pb.pos64( j, 0 ) ), double( pb.pos64( j, 1 ) ), double( pb.pos64( j, 2 ) ) };
+            double pl[ 4 ], d2;
+            pb.grp.plane( k, j, p0, p1, pl, pl[ 3 ], d2 );
+            Plane<TK> P;
+            P.dx = TK( pl[ 0 ] ); P.dy = TK( pl[ 1 ] ); P.dz = TK( pl[ 2 ] ); P.off = TK( pl[ 3 ] );
+            widen( P, cell.L );
+            const int r = cell.cut( P, j );
+            if ( r == CUT_EMPTY || r == CUT_OVERFLOW || r == CUT_BROKEN ) { cell.state = r; alive = false; }
+        }
+        if ( alive ) {
+            cell.skip = pb.grp.root;
+            cell.skip_root = pb.grp.root[ k ];
+            walk3( pb, f, cell );
+        }
         if ( cell.state == CUT_OVERFLOW || cell.state == CUT_BROKEN ) {
             if ( lane == 0 ) {
                 failed3( pb, k );
@@ -1820,6 +2017,8 @@ struct Card {
     Counters *counters = nullptr;
     Slots     slots{};
     SI        nb_nodes = 0;
+    const TR *group_members = nullptr;                   ///< GROUPS: the members' ranks ( `pb.grp`, `group_pass3` ) ...
+    SI        nb_group_members = 0;                      ///< ... and their number
 
     /// `false`: the pool said no ( `allocator.failed` is reported )
     bool prepare( const CudaQueue &queue, const auto &pd, auto &allocator, int max_vertices, int overflow_warps ) {
@@ -1863,6 +2062,13 @@ struct Card {
         pb.ids     = strided( pd.tree.seed_indices );
         pb.n       = TR( n );
         pb.depth   = depth;
+        if constexpr ( requires { pd.periodic_shifts.data().raw; } ) {
+            static_assert( ! requires { pd.periodic_linear.data().raw; }, "sdot::gpu3d: the card's cells take translations only ( `PowerDiagram_Bsp._card_takes` )" );
+            pb.img  = strided( pd.periodic_shifts );
+            pb.nimg = int( pd.periodic_shifts.shape( 0 ) );
+            if ( std::is_same_v<TR,int> && n * SI( pb.nimg ) > SI( 0x7fffffff ) - 8 )
+                throw std::runtime_error( "sdot::gpu3d: the variant chosen does not hold the images' identifiers ( see `PowerDiagram_Bsp._card_variant` )" );
+        }
         pb.rho     = 1;
         pb.user_order = true;
         pb.counters = counters;
@@ -1914,6 +2120,9 @@ struct Card {
         static const int grid2 = resident_grid( &second_pass<Pb>, BLOCK, W2 );
         launch_kernel( queue, &second_pass<Pb>, grid2, BLOCK, W2, pb, ( const TR * ) list1, list2 );
         launch_kernel( queue, &third_pass<Pb,EB>, slots.warps * 32 / BLOCK, BLOCK, 0, pb, ( const TR * ) list2, slots.ptr, slots.capv, slots.capc, errors );
+        if ( group_members && nb_group_members > 0 )     // GROUPS: the members' cells, in the same slots
+            launch_kernel( queue, &group_pass3<Pb,EB>, slots.warps * 32 / BLOCK, BLOCK, 0, pb, group_members, nb_group_members,
+                           slots.ptr, slots.capv, slots.capc, errors );
 
         static const bool stats = std::getenv( "SDOT_CARD_STATS" ) && *std::getenv( "SDOT_CARD_STATS" ) != '0';
         if ( stats ) {

@@ -60,6 +60,7 @@ class SumOfDiracs( Distribution ):
                 weights = weights,
 
                 current_mass = self.target_mass,
+                target_mass = self.target_mass,
                 batch_axes = self.batch_axes,
             )
 

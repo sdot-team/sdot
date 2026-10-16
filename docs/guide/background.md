@@ -1,10 +1,8 @@
 # Background
 
-This page builds intuition for what SDOT computes, how the Newton solver works, and what quantities you can extract from an OT plan.
+This page builds intuition for what SDOT computes, how the solvers work, and what quantities you can extract from an OT plan.
 
----
-
-## The Problem
+## The base problem
 
 Given:
 - **f** — a discrete measure: a finite collection of weighted Dirac masses at positions $y_1, \ldots, y_n$ with masses $m_1, \ldots, m_n$ (with $\sum_i m_i = 1$)
@@ -15,6 +13,10 @@ Find the **transport map** $T : \Omega \to \{y_1, \ldots, y_n\}$ that moves $g$ 
 $$W_2^2(f, g) = \min_T \int_\Omega \|x - T(x)\|^2 \, g(x) \, dx \quad \text{s.t.} \quad \int_{T^{-1}(y_i)} g(x) \, dx = m_i \quad \forall i$$
 
 ---
+
+There are variants for the ground metric, notably for periodicity (see [ground metrics](./ground_metrics)).
+
+Non euclidean norms are also planed (see [roadmap](./roadmap))
 
 ## Power Diagrams (Laguerre Cells)
 
@@ -36,38 +38,25 @@ SDOT finds the optimal weights by solving:
 
 $$\int_{C_i(w)} g(x) \, dx = m_i \quad \forall i$$
 
-The weights maximize a concave function, whose gradient is the vector of the mass errors: a damped Newton method converges in a few iterations to a few dozen. The key cost is computing the power diagram and its integrals at each step, which runs in **O(n log n)** time.
+The weights maximize a concave function, whose gradient is the vector of the mass errors: a damped Newton (+ some specific optimizations) method converges in a few iterations to a few dozen. The key cost is computing the power diagram and its integrals at each step, which runs in **O(n log n)** time.
 
 > **Reference:** Kitagawa, Mérigot, Thibert —
 > _Convergence of a Newton algorithm for semi-discrete optimal transport_, JEMS 2019.
 
----
-
 ## Computing a Plan
+
+Functions like `sdot.w2` (for the 2 norm) give only the distance. If you want more information, you can use `sdot.plan` (with some default values)
 
 ```python
 p = sdot.plan( f, g )
 
-p.cost          # W2^2
-p.barycenters   # the barycenter of each cell, [ n, d ]
-p.cell_masses   # the mass of each cell, [ n ]
-p.weights       # the weights w of the power diagram, [ n ]
-p.power_diagram()
+p.cost            # W2^2 (by default)
+p.barycenters     # the barycenter of each cell, [ n, d ]
+p.weights         # the weights w of the power diagram, [ n ]
+p.power_diagram() # the geometry
 ```
 
-See [W2, plans and settings](./ot-plan).
-
----
-
-## The Wasserstein Distance
-
-The cost `p.cost` equals:
-
-$$W_2^2(f, g) = \int_\Omega \|x - T(x)\|^2 \, g(x) \, dx = \sum_i \int_{C_i} \|x - y_i\|^2 \, g(x) \, dx$$
-
-`sdot.w2( f, g )` gives it without keeping the plan.
-
----
+See [plans and settings](./ot-plan).
 
 ## Barycenters and the Lloyd Algorithm
 
@@ -75,27 +64,13 @@ The **barycenters** `p.barycenters[ i ]` are the centroids of each transport cel
 
 $$b_i = \frac{1}{m_i} \int_{C_i(w)} x \, g(x) \, dx$$
 
-Moving each Dirac to its barycenter and repeating gives the **Lloyd algorithm**, which converges to an optimal quantization of $g$:
+Here is an example of use of the barycenter, in a **Lloyd algorithm** : moving each Dirac to its barycenter and repeating gives converges to an optimal quantization of $g$:
 
 <<< @/snippets/ot_problem.py
 
-`sdot.quantization` does it for you: see the [Lloyd quantization](/examples/lloyd-quantization) example.
-
----
-
-## Gradients
-
-At the optimal weights, the derivative of $W_2^2$ with respect to the position $y_i$ of a dirac is
-
-$$\frac{\partial W_2^2}{\partial y_i} = 2 \, m_i \, (y_i - b_i)$$
-
-It points from the barycenter toward the dirac, and vanishes exactly at the fixed points of Lloyd. JAX and PyTorch compute
-it, and the other derivatives, automatically: see [Differentiability](./differentiability).
-
----
+Actually, if you are intersted in optimal quantization, `sdot.quantization` does it for you: see the [Lloyd quantization](/examples/lloyd-quantization) example (the snippet is here to show how to get the barycenters).
 
 ## What's Next
 
-- [Example: Fitting a Gaussian mixture →](/examples/gaussian-mixture-fit)
-- [Example: Lloyd quantization →](/examples/lloyd-quantization)
-- [W2, plans and settings →](./ot-plan)
+- [Examples gallery →](/examples/)
+- [plans and settings →](./ot-plan)

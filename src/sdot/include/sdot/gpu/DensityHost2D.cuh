@@ -58,6 +58,12 @@ Mesh3In<N,V,T,G,L,H,K> mesh3_in( const N &nodes, const V &values, const T &tet, 
     return { nodes, values, tet, grad, lo, hi, links };
 }
 
+/// gaussians in 3D ( `Density3D.cuh::DensGauss3` ): centres `[ nb, 3 ]`, widths `[ nb ]`, masses `[ nb ]`
+template<class P,class S,class M>
+struct Gauss3In { const P &pos; const S &sigma; const M &mass; };
+template<class P,class S,class M>
+Gauss3In<P,S,M> gauss3_in( const P &pos, const S &sigma, const M &mass ) { return { pos, sigma, mass }; }
+
 template<class T> struct IsImageIn : std::false_type {};
 template<class V> struct IsImageIn<ImageIn<V>> : std::true_type {};
 template<class T> struct IsGaussIn : std::false_type {};
@@ -366,10 +372,56 @@ struct Mesh3DensityHost {
     void   at( const CudaQueue &, double, bool ) {}
 };
 
+/// gaussians in 3D: the same as `GaussDensityHost`, the centres `[ nb, 3 ]`
+struct Gauss3DensityHost {
+    using Dev = gpu3d::DensGauss3;
+    Dev     dev{};
+    static constexpr bool possible = true;
+    SI      nb = 0;
+    double *c = nullptr, *sigma = nullptr, *s = nullptr, *w = nullptr;
+    double  cur = -1;
+
+    template<class In>
+    bool prepare( const CudaQueue &queue, auto &allocator, const In &in, const double * ) {
+        nb = SI( in.sigma.shape( 0 ) );
+        auto vec = [&]( SI m ) { return static_cast<double *>( take( allocator, SI( sizeof( double ) ) * std::max<SI>( m, 1 ) ) ); };
+        c = vec( 3 * nb ); sigma = vec( nb ); s = vec( nb ); w = vec( nb );
+        if ( ! c || ! sigma || ! s || ! w )
+            return false;
+        using TP = std::remove_const_t<typename std::decay_t<decltype( in.pos )>::TF>;
+        using TS = std::remove_const_t<typename std::decay_t<decltype( in.sigma )>::TF>;
+        using TM = std::remove_const_t<typename std::decay_t<decltype( in.mass )>::TF>;
+        if ( nb > 0 ) {
+            launch_kernel( queue, &gather_matrix<TP,double>, blocks_for( 3 * nb ), BLOCK, 0, nb, SI( 3 ), strided( in.pos ), c );
+            launch_kernel( queue, &gather_doubles<TS>, blocks_for( nb ), BLOCK, 0, nb, strided( in.sigma ), sigma );
+            launch_kernel( queue, &gather_doubles<TM>, blocks_for( nb ), BLOCK, 0, nb, strided( in.mass ), w );
+        }
+        return true;
+    }
+
+    /// `smallest_sigma / 4` ( one read back of the widths )
+    double min_scale( const CudaQueue &queue ) const {
+        std::vector<double> h( std::max<SI>( nb, 1 ), 0.0 );
+        if ( nb > 0 )
+            read_back( queue, h.data(), ( const double * ) sigma, nb );
+        double r = h[ 0 ];
+        for ( SI i = 1; i < nb; ++i ) r = std::min( r, h[ i ] );
+        return r / 4;
+    }
+
+    void at( const CudaQueue &queue, double sc, bool ) {
+        if ( sc != cur && nb > 0 )
+            launch_kernel( queue, &gauss_widths, blocks_for( nb ), BLOCK, 0, nb, ( const double * ) sigma, sc, s );
+        cur = sc;
+        dev = Dev{ nb, c, s, w };
+    }
+};
+
 /// the host class of what the call hands over: a 0-d tensor ( or a number ) is a constant
 template<class In> struct DensityHostOf { using type = ConstDensityHost; };
 template<class V> struct DensityHostOf<ImageIn<V>> { using type = ImageDensityHost<std::remove_const_t<typename V::TF>>; };
 template<class P,class S,class M> struct DensityHostOf<GaussIn<P,S,M>> { using type = GaussDensityHost; };
+template<class P,class S,class M> struct DensityHostOf<Gauss3In<P,S,M>> { using type = Gauss3DensityHost; };
 template<class N,class V,class T,class G,class L,class H,class K> struct DensityHostOf<MeshIn<N,V,T,G,L,H,K>> { using type = MeshDensityHost; };
 template<class N,class V,class T,class G,class L,class H,class K> struct DensityHostOf<Mesh3In<N,V,T,G,L,H,K>> { using type = Mesh3DensityHost; };
 

@@ -28,7 +28,7 @@ struct PowerDiagram_Bsp {
     SDOT_ATTRIBUTES_OF_PowerDiagram_Bsp
     SDOT_DIAGRAM_COMMON( sorted_positions, sorted_weights )
 
-    HD SI user_id( SI k ) const { return SI( tree.seed_indices( k ) ); }
+    HD SI user_id( SI k ) const { return SI( tree.seed_indices( seed_of( k ) ) ); }
 
     /// the memory ( `memo_nbrs / memo_counts`, see `ProviderBsp` ): named or `Unbound`, at compile time
     static constexpr bool has_memo = DECAYED_TYPE_OF( memo_counts )::is_valid;
@@ -57,15 +57,21 @@ struct PowerDiagram_Bsp {
     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_ ) const {
         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
                                     tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
-        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, nb_starts, nb_topo, nb_points, nb_boundaries, nb_dims,
+        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
                                          tree_, sorted_positions, sorted_weights_, memo_nbrs, memo_counts, nb_memo };
     }
     /// ... and the memory also read elsewhere ( the solver writes it at each sweep )
     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_, auto &&memo_nbrs_, auto &&memo_counts_ ) const {
         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
                                     tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
-        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, nb_starts, nb_topo, nb_points, nb_boundaries, nb_dims,
+        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
                                          tree_, sorted_positions, sorted_weights_, memo_nbrs_, memo_counts_, nb_memo };
+    }
+
+    /// GROUPS: the same diagram, the virtual weights of its aggregates' children read elsewhere ( what the solver writes, `sdotplan/Groups.h` )
+    HD auto with_groups( auto &&vweights_, auto &&agg_vweights_ ) const {
+        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims,
+                                         group_rep, group_next, group_parent, vweights_, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, agg_vweights_, nb_aggs, tree, sorted_positions, sorted_weights, memo_nbrs, memo_counts, nb_memo };
     }
 
     /// what `bsp_refresh_majorant` reads: the seeds in the tree's order

@@ -1,6 +1,7 @@
 """The outputs of `gaussian-mixture-fit.md`: a `SumOfGaussians` fitted to a point cloud by minimizing W2 with L-BFGS, with
-JAX and with PyTorch, and one animated page per framework, the gaussians at each iteration
-( `docs/public/examples/gaussian-mixture-fit-*.html` ).
+JAX and with PyTorch, one animated page per framework, the gaussians at each iteration
+( `docs/public/examples/gaussian-mixture-fit-*.html` ), and the picture of the gallery, the last iteration on a transparent
+background ( `docs/public/examples/img/gaussian-mixture-fit.png` ).
 
     python docs/examples/gaussian_mixture_fit.py [ jax torch ]
 """
@@ -13,9 +14,10 @@ import sdot
 
 OUT = Path( __file__ ).resolve().parents[ 1 ] / "public" / "examples"
 NB_ITER = 40
+NB_POINTS = 1000
 
 
-def samples( n = 200, seed = 0 ):
+def samples( n = NB_POINTS, seed = 0 ):
     """`n` points drawn from a mixture of 4 gaussians -- the data, `[ n, 2 ]`"""
     centers = np.array( [ [ -1.0, -0.6 ], [ 1.1, -0.4 ], [ 0.2, 1.0 ], [ -0.9, 0.9 ] ] )
     sigmas = np.array( [ 0.35, 0.25, 0.3, 0.2 ] )
@@ -132,6 +134,33 @@ def write_page( name, points, history ):
     viz.write_html( OUT / f"gaussian-mixture-fit-{ name }.html" )
 
 
+def write_png( points, history ):
+    """the picture of the gallery: the data and the gaussians of the last iteration, on a transparent background"""
+    import matplotlib
+    matplotlib.use( "Agg" )
+    import matplotlib.pyplot as plt
+
+    centers, sigmas, masses, w2 = history[ -1 ]
+    colors = [ "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728" ]
+    t = np.linspace( 0, 2 * np.pi, 129 )
+
+    # 4:3 like the cards of the gallery, which crop to fill: every point stays in the frame
+    fig = plt.figure( figsize = ( 8, 6 ) )
+    ax = fig.add_axes( ( 0, 0, 1, 1 ) )
+    ax.scatter( points[ :, 0 ], points[ :, 1 ], s = 6, color = "#888888", linewidths = 0 )
+    for c, s, color in zip( centers, sigmas, colors ):
+        ax.plot( c[ 0 ], c[ 1 ], "o", color = color, markersize = 5 )
+        for k, style in ( ( 1, "-" ), ( 2, "--" ) ):
+            ax.plot( c[ 0 ] + k * s * np.cos( t ), c[ 1 ] + k * s * np.sin( t ), style, color = color, linewidth = 2 )
+    lo, hi = points.min( axis = 0 ), points.max( axis = 0 )
+    mid, half = ( lo + hi ) / 2, 0.53 * max( hi[ 0 ] - lo[ 0 ], 4 / 3 * ( hi[ 1 ] - lo[ 1 ] ) )
+    ax.set_xlim( mid[ 0 ] - half, mid[ 0 ] + half )
+    ax.set_ylim( mid[ 1 ] - 3 / 4 * half, mid[ 1 ] + 3 / 4 * half )
+    ax.axis( "off" )
+    fig.savefig( OUT / "img" / "gaussian-mixture-fit.png", dpi = 100, transparent = True )
+    plt.close( fig )
+
+
 CASES = {
     "jax"  : fit_jax,
     "torch": fit_torch,
@@ -147,3 +176,4 @@ if __name__ == "__main__":
         for c, s, m in zip( centers, sigmas, masses ):
             print( f"  center ( { c[ 0 ] :+.3f}, { c[ 1 ] :+.3f} )  sigma { s :.3f}  mass { m :.3f}" )
         write_page( name, points, history )
+    write_png( points, history )

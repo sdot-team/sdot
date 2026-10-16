@@ -41,6 +41,8 @@
 #include "../PieceWorkspace.h"
 #include "../UnitDensity.h"
 #include "Moments.h"
+#include "../Periodic.h"
+#include "../integration/InBall.h"
 
 #include <limits>
 
@@ -93,12 +95,12 @@ HD bool make_cell( const PD &pd, Local &c, SI k0, const auto &dom ) {
 #ifdef SDOT_NO_ENGINE_UNIT      // the engine inlined in every kernel, as it was ( to measure what the unit costs: `bench/engine_unit.py` )
     if constexpr ( false ) {
 #else
-    if constexpr ( PD::on_cpu && requires { pd.engine_seeds(); } && engine::has_unit( PD::ct_dim )
+    if constexpr ( PD::on_cpu && requires { pd.engine_seeds(); } && ! is_periodic<PD>() && ! has_groups<PD>() && engine::has_unit( PD::ct_dim )
                    && std::is_same_v<Local,engine::LocalFor<PD::ct_dim,TK>> ) {
 #endif
         return engine::engine_run( c, pd.engine_seeds(), k0 ) != CutStatus::NO_ROOM;
 #if defined( __CUDACC__ ) && ( defined( SDOT_ENGINE_DEVICE_NOINLINE ) || defined( SDOT_ENGINE_DEVICE_EXTERN ) )
-    } else if constexpr ( ! PD::on_cpu && requires { pd.engine_seeds(); } && engine::has_unit( PD::ct_dim )
+    } else if constexpr ( ! PD::on_cpu && requires { pd.engine_seeds(); } && ! is_periodic<PD>() && ! has_groups<PD>() && engine::has_unit( PD::ct_dim )
                           && std::is_same_v<Local,engine::LocalFor<PD::ct_dim,TK>> ) {
         return engine::engine_run_device( c, pd.engine_seeds(), k0 ) != CutStatus::NO_ROOM;
 #endif
@@ -115,6 +117,15 @@ HD void plane_of( const PD &pd, const auto &cell, SI k0, int k, auto &dir, typen
     using TF = typename PD::TF;
     constexpr int D = PD::ct_dim;
     const int id = cell.cid[ k ];
+    if constexpr ( has_groups<PD>() ) {
+        if ( id >= 0 && pd.same_group( k0, id ) ) {      // a plane of the group ( `group_plane` )
+            TF dg[ D ];
+            pd.group_plane( k0, id, dg, off );
+            for ( int d = 0; d < D; ++d )
+                dir[ d ] = dg[ d ];
+            return;
+        }
+    }
     if ( id >= 0 ) {
         const auto p0 = pd.point( k0 ), p1 = pd.point( id );
         off = ( pd.weight( k0 ) - pd.weight( id ) ) / 2;
@@ -131,6 +142,33 @@ HD void plane_of( const PD &pd, const auto &cell, SI k0, int k, auto &dir, typen
 }
 
 // ---- WHAT we integrate against -------------------------------------------------------------------
+
+/// WHAT IS INTEGRATED over the cell of `k`: the distribution, or -- with a SINK ( partial transport, `sink_weight` ) -- the
+/// distribution inside the ball `|x - p_k|^2 <= w_k - w_s` only ( `integration/InBall.h` ). The cell stays the Laguerre
+/// cell: it is the integration that changes.
+template<class Dens>
+HD constexpr bool depends_on_seed() {
+    if constexpr ( requires { Dens::depends_on_seed; } ) return bool( Dens::depends_on_seed );
+    else return false;
+}
+
+template<class PD>
+HD constexpr bool has_sink() {
+    if constexpr ( requires { PD::has_sink; } ) return PD::has_sink;
+    else return false;
+}
+
+template<class PD>
+HD decltype( auto ) cell_dist( const PD &pd, SI k, const auto &dist ) {
+    if constexpr ( has_sink<PD>() ) {
+        // a moment of the density integrates its polynomial INSIDE the ball: the ball goes under it
+        if constexpr ( requires { DECAYED_TYPE_OF( dist )::moment_order; } )
+            return moment_dist<DECAYED_TYPE_OF( dist )::moment_order>( integration::in_ball( dist.dist, pd.point( k ), pd.weight( k ) - pd.sink() ) );
+        else
+            return integration::in_ball( dist, pd.point( k ), pd.weight( k ) - pd.sink() );
+    } else
+        return ( dist );
+}
 
 /// the `D + 1` vertices of simplex `chain`, as points -- what a density receives
 template<class TF,int D>
@@ -288,7 +326,7 @@ HD void measures( const PD &pd, auto &&res, const auto &dom, auto &&scratch, con
     else                     piece = c;                  // never touched: the density does not split
 
     for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
-        if ( ! make_cell( pd, c, k, dom ) || ! integrate_into<TF>( res( pd.user_id( k ) ), c, piece, dist ) ) {
+        if ( ! make_cell( pd, c, k, dom ) || ! integrate_into<TF>( res( pd.user_id( k ) ), c, piece, cell_dist( pd, k, dist ) ) ) {
             ask_more( scratch, cv );
             return false;
         }
@@ -314,7 +352,7 @@ HD void moments( const PD &pd, auto &&mass, auto &&first, auto &&second, const a
 
     for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
         const SI u = pd.user_id( k );
-        if ( ! make_cell( pd, c, k, dom ) || ! integrate_moments_into<TF>( mass( u ), first( u ), second( u ), c, piece, dist ) ) {
+        if ( ! make_cell( pd, c, k, dom ) || ! integrate_moments_into<TF>( mass( u ), first( u ), second( u ), c, piece, cell_dist( pd, k, dist ) ) ) {
             ask_more( scratch, cv );
             return false;
         }
@@ -329,14 +367,95 @@ HD void moments( const PD &pd, auto &&mass, auto &&first, auto &&second, const a
 // its cotangent back onto its planes ( `scatter_cell_grad` ); a plane is the weighted bisector of
 // two seeds, which differentiates in two lines. Nothing of the forward is kept: the cell is REBUILT.
 
+/// the storage rank of the seed of identifier `k` -- itself, or for an IMAGE ( periodicity ) the seed it is the image of
+template<class PD>
+HD SI seed_rank( const PD &pd, SI k ) {
+    if constexpr ( is_periodic<PD>() ) return pd.seed_of( k );
+    else return k;
+}
+
+/// THE DERIVATIVE WITH RESPECT TO THE FRAME OF A DENSITY that is the affine image of a fixed one ( an `Image`: `x = o + A t`,
+/// `A = F^T` ), accumulated over the pieces of a cell. In the coordinates `t` of the density nothing moves but the facets of the
+/// seeds, so `dJ = tr( A^-1 dA ) J + Int grad p . V rho - sum_{v,r} u_r dir_r . V( x_v )` with `V( x ) = dA A^-1 ( x - o ) + do` --
+/// the last sum over the seed rows of the vertex adjoint ( `scatter_cell_grad` ), `p` the polynomial of a moment. So
+/// `dJ = tr( X^T dA A^-1 ) + y . do`: `X` and `y` are what is accumulated here, and the density turns them into its own cotangents.
+template<class TF,int D>
+struct AffineAcc {
+    TF o[ D ];                                           ///< the origin of the density
+    TF X[ D ][ D ];
+    TF y[ D ];
+};
+
+/// a piece density that gives its share of `AffineAcc` itself ( `MomentDensity` of a constant ): a marker, which nvcc reads where it
+/// does not always read a `requires` on a member
+template<class Dens>
+HD constexpr bool has_affine_terms() {
+    if constexpr ( requires { Dens::has_affine_terms; } ) return bool( Dens::has_affine_terms );
+    else return false;
+}
+
+/// a distribution that is the affine image of a fixed density says so: `affine_origin( o )` ( and `add_affine_grad` )
+template<class Dist>
+HD constexpr bool is_affine() {
+    if constexpr ( requires { Dist::is_affine; } ) return bool( Dist::is_affine );
+    else return false;
+}
+
+/// THE COTANGENTS OF THE GROUP MEMBERS ( `diagram/Common.h`, groups ): the virtual weights of the tree's children, seeds and
+/// aggregates -- `NoGroupGrads` for a diagram without groups. The planes inside a group send their weights' cotangents there, in
+/// the frame of the two seeds' lowest common aggregate, never to the outer weights: summed over a pair `delta` apart, their
+/// terms in `1 / delta` would cancel only to the rounding ( `eps / delta` on the outer weights )
+struct NoGroupGrads {};
+
+template<class GV,class GA>
+struct GroupGrads {
+    GV vweights;
+    GA agg_vweights;
+};
+
+HD auto group_grads( auto &&vweights, auto &&agg_vweights ) {
+    return GroupGrads<DECAYED_TYPE_OF( vweights ),DECAYED_TYPE_OF( agg_vweights )>{ vweights, agg_vweights };
+}
+
+/// nothing to send to the members ( no groups, or no cotangent asked for them )
+HD constexpr bool no_group_grad( const auto &g ) {
+    if constexpr ( requires { g.vweights; g.agg_vweights; } )
+        return DECAYED_TYPE_OF( g.vweights )::surely_null && DECAYED_TYPE_OF( g.agg_vweights )::surely_null;
+    else
+        return true;
+}
+
+/// the cotangent `g` of the weight of seed `k` in the frame of aggregate `L` ( `diagram/Common.h::frame_weight` ) onto the virtual
+/// weights of the nodes between them: `V = v_child + ( o_child / s )^2 V_child`, from the top
+template<class PD>
+HD void scatter_frame_weight( const PD &pd, SI k, SI L, typename PD::TF g, auto &&grad_groups ) {
+    using TF = typename PD::TF;
+    if constexpr ( requires { grad_groups.vweights; grad_groups.agg_vweights; } ) {
+        SI chain[ 64 ];                                  // the aggregates from the parent of `k` up to `L` ( excluded )
+        int nc = 0;
+        for ( SI a = pd.seed_parent( k ); a >= 0 && a != L && nc < 64; a = pd.agg_parent( a ) ) chain[ nc++ ] = a;
+        TF f = g;
+        for ( int c = nc - 1; c >= 0; --c ) {
+            const SI a = chain[ c ];
+            if constexpr ( ! DECAYED_TYPE_OF( grad_groups.agg_vweights )::surely_null )
+                atomic_add( grad_groups.agg_vweights( a ).ref(), f );
+            const TF r = pd.agg_outer( a ) / pd.agg_scale( pd.agg_parent( a ) );
+            f *= r * r;
+        }
+        if constexpr ( ! DECAYED_TYPE_OF( grad_groups.vweights )::surely_null )
+            atomic_add( grad_groups.vweights( k ).ref(), f );
+    }
+}
+
 /// `grad_vp` ( one cotangent per vertex of `cell` ) -> the seeds. Every seed other than the cell
 /// touches receives an atomic add; the share of `k0`, to which EVERY vertex contributes, is
 /// summed in a register and added once.
 template<class PD>
-HD void scatter_cell_grad( const PD &pd, SI k0, const auto &cell, const auto &grad_vp, auto &&grad_positions, auto &&grad_weights ) {
+HD void scatter_cell_grad( const PD &pd, SI k0, const auto &cell, const auto &grad_vp, auto &&grad_positions, auto &&grad_weights,
+                           auto &&grad_groups, AffineAcc<typename PD::TF,PD::ct_dim> *acc = nullptr ) {
     using TF = typename PD::TF;
     constexpr int D = PD::ct_dim;
-    if constexpr ( DECAYED_TYPE_OF( grad_positions )::surely_null && DECAYED_TYPE_OF( grad_weights )::surely_null ) {
+    if ( DECAYED_TYPE_OF( grad_positions )::surely_null && DECAYED_TYPE_OF( grad_weights )::surely_null && no_group_grad( grad_groups ) && ! acc ) {
         return;
     } else {
         if ( ! cell.bounded() || cell.nb_vertices() == 0 )
@@ -379,13 +498,77 @@ HD void scatter_cell_grad( const PD &pd, SI k0, const auto &cell, const auto &gr
                 // the plane of the pair `( k0, k1 )`: `dir = p1 - p0`,
                 // `off = ( |p1|^2 - |p0|^2 ) / 2 + ( w0 - w1 ) / 2`. Both differentiate in place.
                 const TF g_off = u[ r ];
-                const auto p1 = pd.point( k1 );
+                if ( acc )                               // ( the facet moved by `- V`, see `AffineAcc` )
+                    for ( int a = 0; a < D; ++a ) {
+                        acc->y[ a ] -= g_off * At( a, r );
+                        for ( int b = 0; b < D; ++b )
+                            acc->X[ a ][ b ] -= g_off * At( a, r ) * ( x[ b ] - acc->o[ b ] );
+                    }
+                if constexpr ( has_groups<PD>() ) {
+                    if ( pd.same_group( k0, k1 ) ) {
+                        // a plane of the group ( `group_plane` ): the bisector of two virtual diracs divided by the scale `s` of
+                        // their frame -- `u` scales by it. Distinct positions: the TRUE bisector of `( p, W )`, onto the positions and
+                        // the outer weights like any plane; duplicates: that of `a = apex + s u_k` with the weights `s^2 v_k`, onto the
+                        // positions ( the apex follows the site ) and the virtual weights
+                        TF V0, V1;
+                        const SI L = pd.common_aggregate( k0, k1, V0, V1 );
+                        const TF s = pd.agg_scale( L );
+                        const bool dups = pd.agg_of_duplicates( L );
+                        const TF g_true = g_off / s;
+                        const auto p1 = pd.point( k1 );
+                        for ( int d = 0; d < D; ++d ) {
+                            const TF sh = dups ? TF( pd.group_agg_center( L, d ) ) : TF( 0 );     // ( the apex's shift from the site )
+                            const TF a0 = dups ? TF( p0[ d ] ) + sh + s * TF( pd.group_dirs( k0, d ) ) : TF( p0[ d ] );
+                            const TF a1 = dups ? TF( p1[ d ] ) + sh + s * TF( pd.group_dirs( k1, d ) ) : TF( p1[ d ] );
+                            const TF g_dir = - g_true * x[ d ];
+                            atomic_add_to( grad_positions( k1, d ), g_dir + g_true * a1 );
+                            acc_p0[ d ] -= g_dir + g_true * a0;
+                        }
+                        // the weights: `( W0 - W1 ) / 2 = s^2 ( V0 - V1 ) / 2` in the frame of `L` ( the duplicates' too: `s` their radius )
+                        scatter_frame_weight( pd, k0, L, s * s * g_true / 2, grad_groups );
+                        scatter_frame_weight( pd, k1, L, - s * s * g_true / 2, grad_groups );
+                        continue;
+                    }
+                }
+                const auto p1 = pd.point( k1 );          // an image: translated, and its derivative is that of its seed
+                const SI   s1 = seed_rank( pd, k1 );
+                TF g1[ D ];                              // the cotangent on the image point
                 for ( int d = 0; d < D; ++d ) {
                     const TF g_dir = - g_off * x[ d ];
-                    atomic_add_to( grad_positions( k1, d ), g_dir + g_off * p1[ d ] );
+                    g1[ d ] = g_dir + g_off * p1[ d ];
                     acc_p0[ d ] -= g_dir + g_off * p0[ d ];
                 }
-                atomic_add_to( grad_weights( k1 ), - g_off / 2 );
+                if constexpr ( requires { PD::periodic_linear_part; } ) {
+                    if constexpr ( PD::periodic_linear_part ) {
+                        // an image `L p + s`: its cotangent goes back to the seed through `L^T`
+                        const SI t = SI( k1 ) / pd.nb_seeds();
+                        TF g2[ D ];
+                        for ( int c = 0; c < D; ++c ) {
+                            g2[ c ] = 0;
+                            for ( int r = 0; r < D; ++r )
+                                g2[ c ] += pd.image_linear( t, r, c ) * g1[ r ];
+                        }
+                        for ( int d = 0; d < D; ++d )
+                            g1[ d ] = g2[ d ];
+                    }
+                }
+                if constexpr ( has_groups<PD>() ) {
+                    // a SITE of exact duplicates is seen from outside through planes that coincide: the cell keeps one of them, and
+                    // its share goes to all the members alike ( the mean of the one-sided derivatives, what a centred difference sees )
+                    const SI nb = pd.for_each_in_site( s1, []( SI ) {} );
+                    if ( nb > 1 ) {
+                        pd.for_each_in_site( s1, [&]( SI j ) {
+                            for ( int d = 0; d < D; ++d )
+                                atomic_add_to( grad_positions( j, d ), g1[ d ] / TF( nb ) );
+                            atomic_add_to( grad_weights( j ), - g_off / 2 / TF( nb ) );
+                        } );
+                        acc_w0 += g_off / 2;
+                        continue;
+                    }
+                }
+                for ( int d = 0; d < D; ++d )
+                    atomic_add_to( grad_positions( s1, d ), g1[ d ] );
+                atomic_add_to( grad_weights( s1 ), - g_off / 2 );
                 acc_w0 += g_off / 2;
             }
         }
@@ -398,21 +581,42 @@ HD void scatter_cell_grad( const PD &pd, SI k0, const auto &cell, const auto &gr
 
 template<class PD,class Local>
 HD bool integrate_bwd_into( const PD &pd, SI k0, auto &&grad_res, const Local &cell, Local &piece,
-                         GradVp<typename PD::TF> &grad_vp, auto &&grad_positions, auto &&grad_weights,
+                         GradVp<typename PD::TF> &grad_vp, auto &&grad_positions, auto &&grad_weights, auto &&grad_groups,
                          auto &&grad_dist, const auto &dist ) {
     using TF = typename PD::TF;
     constexpr int D = PD::ct_dim;
     PieceWorkspace<Local> ws{ piece };
     const TF g = grad_res;
+
+    // a density that is the affine image of a fixed one ( an `Image` ), asked for the derivative of its frame or origin
+    using Dist = DECAYED_TYPE_OF( dist );
+    AffineAcc<TF,D> acc_store, *acc = nullptr;
+    if constexpr ( is_affine<Dist>() ) {
+        if ( dist.affine_wanted( grad_dist ) ) {
+            acc = &acc_store;
+            dist.affine_origin( acc->o );
+            for ( int a = 0; a < D; ++a ) {
+                acc->y[ a ] = 0;
+                for ( int b = 0; b < D; ++b )
+                    acc->X[ a ][ b ] = 0;
+            }
+        }
+    }
+
     dist.for_each_piece( cell, ws, [&]( const auto &pc, const auto &dens ) {
         if constexpr ( DECAYED_TYPE_OF( dens )::is_constant ) {
             // the DENSITY's share: mass is linear in it, so the derivative with respect to
             // the value carried by this piece IS its volume ( an infinite piece has none )
-            if ( pc.bounded() )
-                dens.add_value_grad( grad_dist, g * pc.template measure<TF>() );
+            if ( pc.bounded() ) {
+                const TF vol = pc.template measure<TF>();
+                dens.add_value_grad( grad_dist, g * vol );
+                if ( acc )                               // ( `tr( A^-1 dA ) J`: the density's own jacobian )
+                    for ( int a = 0; a < D; ++a )
+                        acc->X[ a ][ a ] += g * dens.value * vol;
+            }
             // ... and the GEOMETRY's share, through the usual chain
             pc.template measure_bwd<TF>( g * dens.value, grad_vp );
-            scatter_cell_grad( pd, k0, pc, grad_vp, grad_positions, grad_weights );
+            scatter_cell_grad( pd, k0, pc, grad_vp, grad_positions, grad_weights, grad_groups, acc );
         } else {
             if ( ! pc.bounded() )
                 return;
@@ -422,20 +626,39 @@ HD bool integrate_bwd_into( const PD &pd, SI k0, auto &&grad_res, const Local &c
                     grad_vp( v, c ) = 0;
             pc.for_each_simplex( [&]( const auto &chain ) {
                 auto grad_pts = Vector<Vector<TF,D>,D+1>( Function(), [&]( PI ) { return Vector<TF,D>::zeros(); } );
-                dens.integrate_over_simplex_bwd( simplex_points<TF,D>( pc, chain ), g, grad_pts, grad_dist );
+                const auto pts = simplex_points<TF,D>( pc, chain );
+                dens.integrate_over_simplex_bwd( pts, g, grad_pts, grad_dist );
                 for ( int k = 0; k <= D; ++k )
                     for ( int c = 0; c < D; ++c )
                         grad_vp( int( chain[ k ] ), c ) += grad_pts[ k ][ c ];
+                if constexpr ( has_affine_terms<DECAYED_TYPE_OF( dens )>() )
+                    if ( acc )                           // ( `J` and the moment's polynomial, which stays in `x` )
+                        dens.affine_terms( pts, g, *acc );
             } );
-            scatter_cell_grad( pd, k0, pc, grad_vp, grad_positions, grad_weights );
+            scatter_cell_grad( pd, k0, pc, grad_vp, grad_positions, grad_weights, grad_groups, acc );
+            // an integrand that depends on the seed itself ( the ball of partial transport: its center and its radius )
+            if constexpr ( depends_on_seed<DECAYED_TYPE_OF( dens )>() ) {
+                TF gp[ D ], gw = 0;
+                for ( int c = 0; c < D; ++c )
+                    gp[ c ] = 0;
+                dens.seed_bwd( pc, g, gp, gw );
+                if constexpr ( ! DECAYED_TYPE_OF( grad_positions )::surely_null )
+                    for ( int c = 0; c < D; ++c )
+                        atomic_add( grad_positions( k0, c ).ref(), gp[ c ] );
+                if constexpr ( ! DECAYED_TYPE_OF( grad_weights )::surely_null )
+                    atomic_add( grad_weights( k0 ).ref(), gw );
+            }
         }
     } );
+    if constexpr ( is_affine<Dist>() )
+        if ( acc )
+            dist.add_affine_grad( grad_dist, *acc );
     return ! ws.overflow;
 }
 
 template<class PD>
 HD void measures_bwd( const PD &pd, auto &&res, const auto &dom, auto &&grad_res, auto &&grad_positions, auto &&grad_weights,
-                   auto &&scratch, const auto &dist, auto &&grad_dist, SI thread_index, SI nb_threads ) {
+                   auto &&grad_groups, auto &&scratch, const auto &dist, auto &&grad_dist, SI thread_index, SI nb_threads ) {
     using TF    = typename PD::TF;
     using TK    = KernelType<DECAYED_TYPE_OF( scratch )>;
     using Local = typename DECAYED_TYPE_OF( dom )::template Local<TK>;
@@ -450,7 +673,7 @@ HD void measures_bwd( const PD &pd, auto &&res, const auto &dom, auto &&grad_res
 
     for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
         if ( ! make_cell( pd, c, k, dom )
-          || ! integrate_bwd_into( pd, k, grad_res( pd.user_id( k ) ), c, piece, grad_vp, grad_positions, grad_weights, grad_dist, dist ) ) {
+          || ! integrate_bwd_into( pd, k, grad_res( pd.user_id( k ) ), c, piece, grad_vp, grad_positions, grad_weights, grad_groups, grad_dist, cell_dist( pd, k, dist ) ) ) {
             ask_more( scratch, cv );
             return false;
         }
@@ -542,6 +765,22 @@ HD void build_support_piece( const PD &pd, SI k, SI b, const auto &dirs, const a
     c.store( res );
 }
 
+/// the squared distance that sets how fast the plane between `k` and `id` slides with the weight of `k`: between their points, or
+/// for two members of a group ( `diagram/Common.h::group_distance2` ) in the frame of their lowest common aggregate
+template<class PD>
+HD typename PD::TF group_distance2( const PD &pd, SI k, SI id ) {
+    using TF = typename PD::TF;
+    constexpr int D = PD::ct_dim;
+    if constexpr ( has_groups<PD>() )
+        if ( pd.same_group( k, id ) )
+            return pd.group_distance2( k, id );
+    TF d2 = 0;
+    const auto p0 = pd.point( k ), pj = pd.point( id );
+    for ( int d = 0; d < D; ++d )
+        d2 += ( pj[ d ] - p0[ d ] ) * ( pj[ d ] - p0[ d ] );
+    return d2;
+}
+
 /// ONE ROW OF THE transport HESSIAN, `d m_k / d w_j` for the neighbors `j` of cell `k`:
 /// the bisector `( k, j )` slides by `dw / ( 2 | p_k - p_j | )` when `w_j` goes up by `dw`, and what
 /// it sweeps is the density integrated over the common FACET. So
@@ -552,6 +791,13 @@ HD void build_support_piece( const PD &pd, SI k, SI b, const auto &dirs, const a
 ///
 /// A piecewise-constant density ( `Image`, Lebesgue ): the facet of a piece is flat and the density is a number
 /// there. Otherwise the density integrates itself on the facet ( `facet_mass`: gaussians in 2D, `Mesh` ).
+///
+/// With a SINK ( partial transport ) the row does not sum to zero: the sphere of the ball also moves with `w_k`. One more
+/// slot, LAST, with the cell's own identifier, holds that part of `d m_k / d w_k` ( `weight_mass` ).
+///
+/// With GROUPS ( `diagram/Common.h` ), each facet's value is the derivative with respect to ITS OWN weight gap: the outer weights
+/// for a facet between groups, and for two members of a group their weights `V` in the frame of their lowest common aggregate
+/// ( `group_distance2`: the distance then that of their virtual diracs in that frame ).
 template<class PD>
 HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist ) {
     using TF    = typename PD::TF;
@@ -574,22 +820,19 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
     // the neighbors of the cell are its live cuts: one slot per cut, accumulated piece
     // by piece ( a piece carries the same identifiers, plus those of its tile )
     const int nc = c.nb_cuts();
-    if ( ! res.nb_nbrs.set( nc ) )
+    if ( ! res.nb_nbrs.set( nc + int( has_sink<PD>() ) ) )
         return;                                          // too many neighbors: loom doubles and calls again
     for ( int q = 0; q < nc; ++q ) {
         res.ids( q ) = c.cid[ q ] >= 0 ? int( pd.user_id( c.cid[ q ] ) ) : int( c.cid[ q ] );
         res.vals( q ) = 0;
     }
-    const auto p0 = pd.point( k );
+    if constexpr ( has_sink<PD>() ) {
+        res.ids( nc ) = int( pd.user_id( k ) );
+        res.vals( nc ) = 0;
+    }
+    const auto &cdist = cell_dist( pd, k, dist );
 
     PieceWorkspace<Local> ws{ piece };
-    auto distance = [&]( int id ) {
-        const auto pj = pd.point( id );
-        TF d2 = 0;
-        for ( int d = 0; d < D; ++d )
-            d2 += ( pj[ d ] - p0[ d ] ) * ( pj[ d ] - p0[ d ] );
-        return sdot::sqrt( d2 );
-    };
     auto planes = [&]( int q, auto *dir, auto &off ) {
         TF d[ D ], o;
         plane_of( pd, c, k, q, d, o );
@@ -598,18 +841,18 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
         off = o;
     };
     if constexpr ( requires { DECAYED_TYPE_OF( dist )::cuts_facets; } ) {
+        static_assert( ! has_sink<PD>(), "hessian: a sink ( partial transport ) with a density that cuts the facets ( `Mesh` ) is not written yet" );
         // a density that cuts the FACETS of the cell itself ( `Mesh` ), see `Mesh::for_each_facet_mass`
-        dist.for_each_facet_mass( c, planes, [&]( int cut, auto part ) { res.vals( cut ) += TF( part ) / ( 2 * distance( c.cid[ cut ] ) ); } );
+        dist.for_each_facet_mass( c, planes, [&]( int cut, auto part ) { res.vals( cut ) += TF( part ) / ( 2 * sdot::sqrt( group_distance2( pd, k, c.cid[ cut ] ) ) ); } );
     } else {
-        dist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+        cdist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+            if constexpr ( requires { dens.weight_mass( pc ); } )
+                res.vals( nc ) += dens.weight_mass( pc );
             pc.template for_each_facet<TF>( [&]( int cut, TF mes ) {
                 const int id = pc.cid[ cut ];
                 if ( id < 0 )
                     return;                                  // the domain, or a tile edge: immobile
-                const auto pj = pd.point( id );
-                TF d2 = 0;
-                for ( int d = 0; d < D; ++d )
-                    d2 += ( pj[ d ] - p0[ d ] ) * ( pj[ d ] - p0[ d ] );
+                const TF d2 = group_distance2( pd, k, id );
                 // the density on the facet: a number on a piece of constant density, otherwise what the density says of it
                 TF on_facet;
                 if constexpr ( DECAYED_TYPE_OF( dens )::is_constant )
@@ -629,6 +872,28 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
     }
     if ( ws.overflow )
         ask_more( scratch, cv );
+
+    if constexpr ( is_periodic<PD>() ) {
+        // PERIODIC: a facet with an image of the cell itself does not move with the weights, and two images of the same seed
+        // are one neighbour -- summed into the first; the others are left as a negative id ( "to be ignored" ) and a zero
+        for ( int q = 0; q < nc; ++q ) {
+            const int id = c.cid[ q ];
+            if ( id < 0 )
+                continue;
+            if ( pd.seed_of( id ) == k ) {
+                res.ids( q ) = cell_ids::BOUNDARY;
+                res.vals( q ) = 0;
+                continue;
+            }
+            for ( int r = 0; r < q; ++r )
+                if ( c.cid[ r ] >= 0 && res.ids( r ) == res.ids( q ) ) {
+                    res.vals( r ) += res.vals( q );
+                    res.ids( q ) = cell_ids::BOUNDARY;
+                    res.vals( q ) = 0;
+                    break;
+                }
+        }
+    }
 }
 
 } // namespace diagram

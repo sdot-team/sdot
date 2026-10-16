@@ -27,7 +27,7 @@ The framing follows the same logic: only the real vertices set it.
 import numpy as np
 
 
-def add_to_viz( cell, viz, color, opacity, faces, edges, points, owners = None, nb_colors = None ):
+def add_to_viz( cell, viz, color, opacity, faces, edges, points, owners = None, nb_colors = None, frames = True, edge_opacity = 1.0 ):
     from .Cell import INFINITE, SEAM
 
     nb_dims = cell.dim
@@ -59,7 +59,8 @@ def add_to_viz( cell, viz, color, opacity, faces, edges, points, owners = None, 
         vp = _truncated_rays( it.vp, fake, ev, stub )
         real = vp[ ~fake ] if fake.any() else vp
         bounded = not fake.any()
-        if not bounded:
+        framing = bounded and frames                     # ( `frames = False`: drawn without setting the scale of the scene )
+        if not bounded and frames:
             # this pool no longer FRAMES the scene: the end of a ray is at a chosen distance
             viz.note_bounds( real if len( real ) else vp )
 
@@ -78,19 +79,19 @@ def add_to_viz( cell, viz, color, opacity, faces, edges, points, owners = None, 
             fcs = cell._faces_of( it )
             if nb_dims == 3 and ( it.cid == SEAM ).any():
                 fcs = [ f for f, k in zip( fcs, cell._face_cuts_of( it ) ) if it.cid[ k ] != SEAM ]
-            viz.add_faces( vp, fcs, color = col, opacity = opacity, frames = bounded )
+            viz.add_faces( vp, fcs, color = col, opacity = opacity, frames = framing )
 
         if edges and len( ev ):
             # in dimension > 3 the wireframe is a PROJECTION: it fades behind the slice
-            op = 0.55 if nb_dims > 3 else 1.0
+            op = ( 0.55 if nb_dims > 3 else 1.0 ) * edge_opacity
             solid = ~hide & ~dash
             if solid.any():
-                viz.add_edges( vp, ev[ solid ], color = edge_col, opacity = op, frames = bounded )
+                viz.add_edges( vp, ev[ solid ], color = edge_col, opacity = op, frames = framing )
             if dash.any():
                 viz.add_edges( vp, ev[ dash ], color = edge_col, opacity = op, dashed = True, frames = False )
 
         if points:
-            viz.add_points( real if len( real ) else vp, color = edge_col )
+            viz.add_points( real if len( real ) else vp, color = edge_col, frames = frames )
     return viz
 
 

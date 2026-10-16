@@ -9,7 +9,7 @@ Pages to look at what was computed ( `show`, `write_html` of the objects use the
 ## `Visualizer`
 
 ```python
-Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0)
+Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0, frame_value=0.0)
 ```
 
 Collects geometric primitives; the outputs (`write_html`, ...) come afterwards.

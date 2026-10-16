@@ -35,13 +35,13 @@ def next_version( current, today = None ):
 
 
 def set_version( version, loom ):
-    """Write `version` in the `pyproject.toml` of loom and of sdot, and make sdot depend on exactly that loom: the kernels of an sdot wheel
-    were compiled against the sources loom generated at that version, and are looked up by hash of them."""
+    """Write `version` in the `pyproject.toml` of loom and of sdot, and make sdot depend on that loom at least. A newer loom is fine: the
+    kernels of an sdot wheel are looked up by hash of the sources loom generates, and one it generates otherwise is compiled."""
     for toml in ( loom / "pyproject.toml", ROOT / "pyproject.toml" ):
         text = toml.read_text()
         text = re.sub( r'(?m)^version = "[^"]*"', f'version = "{ version }"', text, count = 1 )
         if toml.parent == ROOT:
-            text = re.sub( r'(?m)^(\s*)"loom-ffi[^"]*",', rf'\1"loom-ffi=={ version }",', text, count = 1 )
+            text = re.sub( r'(?m)^(\s*)"loom-ffi[^"]*",', rf'\1"loom-ffi>={ version }",', text, count = 1 )
         toml.write_text( text )
 
 

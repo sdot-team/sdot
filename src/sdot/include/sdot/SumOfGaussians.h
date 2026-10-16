@@ -65,7 +65,7 @@ struct SumOfGaussians {
     ///
     /// HOW we integrate depends on the dimension, and it is a choice made here, by
     /// composition -- the integrator only sees the contract:
-    ///   * in 2D we KNOW how (see `wedge_measure`), so we pass ourselves;
+    ///   * in 2D and 3D we KNOW how (see `wedge_measure`, `face3`), so we pass ourselves;
     ///   * beyond that we do not, so we declare ourselves a BLACK BOX by wrapping in
     ///     `PointwiseDensity`, which only needs `value_at` / `gradient_at`.
     ///
@@ -86,14 +86,14 @@ struct SumOfGaussians {
             SumOfGaussians local( *this );
             local.terms = buf.data();
             local.nb_local = SI( buf.size() );
-            if constexpr ( ct_dim == 2 )
+            if constexpr ( ct_dim == 2 || ct_dim == 3 )
                 func( cell, local );
             else
                 func( cell, PointwiseDensity{ local } );
             return;
         }
 #endif
-        if constexpr ( ct_dim == 2 )
+        if constexpr ( ct_dim == 2 || ct_dim == 3 )
             func( cell, *this );
         else
             func( cell, PointwiseDensity{ *this } );
@@ -127,14 +127,22 @@ struct SumOfGaussians {
     // sliver).
     static constexpr bool is_constant = false;
 
-    /// the moments ( `diagram::integrate_moments_into` ): the exact reduction does not give them, it is
-    /// the adaptive quadrature of `PointwiseDensity` that accumulates them, in 2D as elsewhere.
+    /// the moments ( `diagram::integrate_moments_into` ): in 2D and 3D the exact ones ( `integrate_moment_over_simplex`, the
+    /// same as those the derivatives of a plan differentiate ), elsewhere the adaptive quadrature of `PointwiseDensity`.
     HD void integrate_moments_over_simplex( const auto &pts, TF &m, auto &mx, TF &m2 ) const {
-        PointwiseDensity{ *this }.integrate_moments_over_simplex( pts, m, mx, m2 );
+        if constexpr ( ct_dim == 2 ) {
+            m += integrate_moment_over_simplex<3>( pts );
+            mx[ 0 ] += integrate_moment_over_simplex<0>( pts );
+            mx[ 1 ] += integrate_moment_over_simplex<1>( pts );
+            m2 += integrate_moment_over_simplex<2>( pts );
+        } else if constexpr ( ct_dim == 3 )
+            moments3( pts, m, mx, m2 );                  // ( one pass over the faces for the three )
+        else
+            PointwiseDensity{ *this }.integrate_moments_over_simplex( pts, m, mx, m2 );
     }
 
     /// `Int_T p_K rho` over the triangle `pts`, EXACT, in 2D -- what `diagram::moment_dist<K>` integrates ( `K < 2`: `x_K`,
-    /// `K == 2`: `|x|^2`, `K == 3`: `1` ). The adaptive quadrature it replaces could miss a gaussian by 10 % on a large
+    /// `K == 2`: `|x|^2`, `K == 3`: `1`; in 3D `K < 3`, `3`, `4`, see `moment3` ). The adaptive quadrature it replaces could miss a gaussian by 10 % on a large
     /// cell, depending on how the cell was cut into triangles. In the standard frame of gaussian `i`, `y = ( x - c ) / s`,
     /// with `phi` the standard normal: `grad phi = - y phi` and `laplacian phi = ( |y|^2 - 2 ) phi`, so by the divergence
     /// theorem
@@ -142,9 +150,44 @@ struct SumOfGaussians {
     ///     Int_T y phi       = - sum_e n_e J_e               ( n_e the outward normal of edge `e`, J_e = Int_e phi ds )
     ///     Int_T |y|^2 phi   = 2 M - sum_e p_e J_e           ( p_e = y . n_e, constant along the edge, M = Int_T phi )
     ///
-    /// -- the edge integrals are the `erf`s of `edge_info`, and `M` the exact reduction. THE FORWARD ONLY: the derivatives
-    /// stay those of the quadrature ( `MomentDensity::integrate_over_simplex_bwd` ).
-    template<int K> HD TF integrate_moment_over_simplex( const auto &pts ) const requires ( ct_dim == 2 );
+    /// -- the edge integrals are the `erf`s of `edge_info`, and `M` the exact reduction.
+    template<int K> HD TF integrate_moment_over_simplex( const auto &pts ) const requires ( ct_dim == 2 || ct_dim == 3 );
+
+    /// its adjoint, exact too ( `diagram/Moments.h` reads `exact_moments` ). Moving a vertex sweeps its two edges
+    /// ( Reynolds ): `d I / d P_k = sum_{e ∋ k} n_e Int_e p rho lambda_k ds`, edge integrals of a polynomial times a
+    /// gaussian, `erf`s and `exp`s ( `edge_moments` ). The parameters follow from invariances, with no other integral:
+    ///   * translating the triangle and the center together: `d I / d c = Int_T grad p rho - sum_k d I / d P_k`;
+    ///   * scaling them about the center: `s d I / d s = Int_T grad p . ( x - c ) rho - sum_k d I / d P_k . ( P_k - c )`;
+    ///   * the weight: `I / w`.
+    static constexpr bool exact_moments = ct_dim == 2 || ct_dim == 3;
+    template<int K> HD void integrate_moment_over_simplex_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const requires ( ct_dim == 2 || ct_dim == 3 );
+
+    // ---- EXACT integration in 3D ------------------------------------------------------------------
+    // A tetrahedron goes to its four faces, in the standard frame `y = ( x - c ) / s` of each gaussian:
+    //
+    //   * the MASS is the sum of the signed cones from the center over the faces ( outward normals ): a face at the distance
+    //     `h` gives `h / 4pi Int_face Phi3( r ) / r^3 dA` ( `Phi3` the law of `|X|` in R^3 ), whose radial integral is closed --
+    //     what is left is one smooth integral along each edge, like the 2D corner ( `detail::g3_cone_edge` );
+    //   * on a face, `phi = phi_1( h ) phi_2( u, v )` ( `y = h n + u e1 + v e2` ): its integrals are 2D moments of the face, from
+    //     its corners ( `wedge_measure` ) and, by `Int u q phi_2 = Int d_u q phi_2 - sum_e n_u Int_e q phi_2`, from `erf`s along its
+    //     edges ( `face3`, up to degree 3 );
+    //   * the MOMENTS by divergence: `Int y phi = - sum_f n_f Int_f phi`, `Int |y|^2 phi = 3 M - sum_f h_f Int_f phi`;
+    //   * the ADJOINT by Reynolds: moving vertex `k` sweeps its three faces, `sum_f n_f Int_f p phi lambda_k dA`; the center and the
+    //     width from the invariances, as in 2D.
+    //
+    // A gaussian farther than `9 s` from the tetrahedron is nothing ( `far3` ).
+    struct Face3 { TF n[ 3 ]; TF e1[ 3 ]; TF e2[ 3 ]; TF h; TF phi1; TF cone; TF M[ 10 ]; TF lam[ 3 ][ 3 ]; int vid[ 3 ]; };
+    HD void face3( const TF ( &Y )[ 4 ][ 3 ], int opp, int deg, Face3 &f ) const;
+    HD void tet3( SI i, const auto &pts, int deg, TF ( &Y )[ 4 ][ 3 ], Face3 ( &F )[ 4 ], TF &Mt, TF ( &Nv )[ 3 ], TF &Y2 ) const;
+    HD bool far3( SI i, const auto &pts ) const;
+    template<int K> HD TF   moment3    ( const auto &pts ) const;
+    HD void                 moments3   ( const auto &pts, TF &m, auto &mx, TF &m2 ) const;
+    template<int K> HD void moment3_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const;
+
+    /// For an edge `A -> B` of the triangle `A, B, C`, in the standard frame: its OUTWARD normal and `y . n`, then
+    /// `Int_e q phi ds` ( `j` ) and `Int_e q phi lambda_A ds` ( `ja` ) for `q = 1, y_0, y_1, |y|^2`.
+    struct EdgeMoments { Vector<TF,2> n; TF p; TF j[ 4 ]; TF ja[ 4 ]; };
+    HD EdgeMoments edge_moments( const auto &A, const auto &B, const auto &C ) const;
 
     static constexpr TF  tail_cut   = 8;    ///< `exp( -t^2/2 ) < 1e-14` beyond: the tail is exact
     static constexpr int nb_panels  = 4;    ///< Gauss-Legendre panels over the core
@@ -156,7 +199,7 @@ struct SumOfGaussians {
     /// The standard normal measure of the triangle `ys` (positive, any orientation).
     HD TF std_triangle_measure( const auto &ys ) const;
 
-    /// `Int_T rho`, exact. `pts`: the 3 vertices.
+    /// `Int_T rho`, exact. `pts`: the 3 vertices ( 4 in 3D ).
     HD TF integrate_over_simplex( const auto &pts ) const;
 
     /// The ELEMENTARY adjoint -- that is the remarkable point: the value requires a special
@@ -199,6 +242,14 @@ struct SumOfGaussians {
     /// cells at once -- and each is guarded by the validity of its target, a non-differentiated
     /// parameter arriving as a `NoneTensor`.
     HD void add_value_grad_at( auto &&grad_dist, const auto &x, TF g ) const;
+
+    /// what this density's adjoint derives, for loom's `computed_grads` ( `flags`: the distribution's, under one
+    /// output ). The masses are never read by the integration: their derivative is known to be zero.
+    static void computed_grads( auto &&flags ) {
+        flags.positions = flags.sigmas = flags.weights = true;   // all three, `add_value_grad_at` / `integrate_over_simplex_bwd`
+        if constexpr ( requires { flags.current_mass; } ) flags.current_mass = true;
+        if constexpr ( requires { flags.target_mass; } )  flags.target_mass  = true;
+    }
 };
 
 }

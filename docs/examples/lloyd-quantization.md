@@ -143,9 +143,29 @@ x = sdot.quantization( target, 4000, seed = 0 )
 ></iframe>
 <p style="text-align: right; margin: 0"><a :href="withBase('/examples/lloyd-potato.html')" target="_blank">Open in a separate page ↗</a></p>
 
+## On a surface
+
+The target can also be carried by a surface in 3D ( or by lines ): `sdot.Mesh( nodes, triangles )`, here a Klein bottle that
+crosses itself. The diracs start on the surface; see [Lines and Surfaces](/guide/distributions/codim-mesh) for the details and the
+script.
+
+```python
+target = sdot.Mesh( nodes, triangles )                  # 2880 triangles in 3D
+x = sdot.quantization( target, 6000, seed = 0 )
+```
+
+<iframe
+  :src="withBase('/guide/codim-mesh-klein.html') + '?wheel=0&touch=0'"
+  title="Lloyd quantization of a Klein bottle"
+  loading="lazy"
+  allowfullscreen
+  style="width: 100%; height: 60vh; min-height: 380px; border: 0; display: block; margin: 1.5rem 0 0.5rem;"
+></iframe>
+<p style="text-align: right; margin: 0"><a :href="withBase('/guide/codim-mesh-klein.html')" target="_blank">Open in a separate page ↗</a></p>
+
 ## Reproducing the pages
 
-The four viewers above are written by [`docs/examples/lloyd_quantization.py`](https://github.com/sdot-team/sdot/blob/main/docs/examples/lloyd_quantization.py):
+The first four viewers above are written by [`docs/examples/lloyd_quantization.py`](https://github.com/sdot-team/sdot/blob/main/docs/examples/lloyd_quantization.py) ( the bottle, by the script of [Lines and Surfaces](/guide/distributions/codim-mesh#reproducing-the-pages) ):
 
 ```bash
 python docs/examples/lloyd_quantization.py                  # all of them

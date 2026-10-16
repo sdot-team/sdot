@@ -213,6 +213,11 @@ class SdotPlan1d( Aggregate ):
                             "scratch.group_scan( group_index ), "
                             "local_index, local_size, group, local_scratch, sub_group );" ),
                     prologue = "outputs.plan.src_dist.zero_position_grad( queue, grad_of_outputs.plan.src_dist );",
+                    computed_grads = "DECAYED_TYPE_OF( outputs.plan )::update_outputs_computed_grads( computed_grads.from_plan_cost.plan ); "
+                                     # the barycenters ( stored: `with_barycenters` ) move with the same boundaries -- and not with the positions,
+                                     # whose derivative is a zero computed
+                                     "[]( auto &cg ) { if constexpr ( requires { cg.from_plan_barycenters; } ) "
+                                     "DECAYED_TYPE_OF( outputs.plan )::update_outputs_computed_grads( cg.from_plan_barycenters.plan ); }( computed_grads );",
                     **cooperative_geometry ),
             plan = loom.out( self, writes = written ),
             # the buffers are transient PER GROUP: the adjoint re-allocates them fresh instead of
@@ -327,6 +332,11 @@ class SdotPlan1d( Aggregate ):
                             "scratch.group_scan( group_index ), "
                             "local_index, local_size, group );" ),
                     prologue = "outputs.plan.src_dist.zero_position_grad( queue, grad_of_outputs.plan.src_dist );",
+                    computed_grads = "DECAYED_TYPE_OF( outputs.plan )::update_outputs_computed_grads( computed_grads.from_plan_cost.plan ); "
+                                     # the barycenters ( stored: `with_barycenters` ) move with the same boundaries -- and not with the positions,
+                                     # whose derivative is a zero computed
+                                     "[]( auto &cg ) { if constexpr ( requires { cg.from_plan_barycenters; } ) "
+                                     "DECAYED_TYPE_OF( outputs.plan )::update_outputs_computed_grads( cg.from_plan_barycenters.plan ); }( computed_grads );",
                     **presorted_geometry ),
             plan = loom.out( self, writes = ( "cost", "nb_diracs" ) ),
             # `Tensor.wrap` only takes axis NAME strings (it mints fresh, detached axes) -- use the SAME

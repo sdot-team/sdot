@@ -137,8 +137,11 @@ class PowerDiagram_Bsp( PowerDiagram ):
                  2: ( "the cell of seed {value} could not be cut consistently in the kernel's float ( a degenerate input: "
                       "coincident or cospherical seeds at the rounding? ); the double kernel ( kernel_dtype = 'FP64' ) may take it" ) }
 
-    def _card_density( self ):
-        """the constant density the card integrates, or `None` when the distribution is not a constant on the box"""
+    def _card_density( self, traced_ok = False ):
+        """the constant density the card integrates, or `None` when the distribution is not a constant on the box. `traced_ok`:
+        a constant that is only known in the program ( a traced one: a polytope's density, an image of ONE pixel -- the target
+        of a solve is normalized by the source's mass, traced under a `jit` ) is returned as it is, for a call that reads it on
+        the card ( the solve: `set_density` ); the measures' kernel is not differentiated with respect to it, so it does not"""
         if self.distribution is None:
             return 1.0
         from .distributions.Image import Image
@@ -150,34 +153,55 @@ class PowerDiagram_Bsp( PowerDiagram ):
             try:
                 return float( np.asarray( dist.density ).reshape( -1 )[ 0 ] )
             except ( TypeError, ValueError, RuntimeError ):     # a traced density: the generic path
-                return None
+                return getattr( dist.density, "raw", dist.density ).reshape( -1 )[ 0 ] if traced_ok else None
         if not isinstance( dist, Image ):
             return None
         try:
-            if int( np.prod( np.asarray( dist.shape.value ) ) ) > 64:     # reading the values is only cheap when they are few
+            nb_pixels = int( np.prod( np.asarray( dist.shape.value ) ) )
+            if nb_pixels > 64:                           # reading the values is only cheap when they are few
                 return None
-            vals = np.asarray( dist.values, dtype = float ).reshape( -1 )
+            try:
+                vals = np.asarray( dist.values, dtype = float ).reshape( -1 )
+            except Exception:
+                if not ( traced_ok and nb_pixels == 1 ):
+                    raise
+                vals = None                              # ( one pixel, traced: a constant whatever its value )
             geo = dist._grid_geometry()
             mi = np.asarray( self.box_min, dtype = float ).reshape( -1 )
             ma = np.asarray( self.box_max, dtype = float ).reshape( -1 )
         except Exception:                                  # a traced or differentiated image: the generic path
             return None
-        if geo is None or vals.size == 0 or not np.all( vals == vals[ 0 ] ):
+        if geo is None or ( vals is not None and ( vals.size == 0 or not np.all( vals == vals[ 0 ] ) ) ):
             return None
+        rho = float( vals[ 0 ] ) if vals is not None else dist.values.raw.reshape( -1 )[ 0 ]
+        if self._periodic is not None:
+            # repeated by the group, a constant image is the same constant wherever the cells go ( the start box is wider than it )
+            return rho
         d, frame, origin, lo, hi = geo
         if not np.array_equal( frame, np.eye( d ) ):
             return None
         scale = max( float( np.abs( np.concatenate( [ mi, ma ] ) ).max() ), 1.0 )
         if np.abs( origin + lo - mi ).max() > 1e-12 * scale or np.abs( origin + hi - ma ).max() > 1e-12 * scale:
             return None
-        return float( vals[ 0 ] )
+        return rho
 
-    def _card_takes( self ):
+    def _card_takes( self, solver = False ):
         """whether the card's cells take this diagram, its density apart: 2D or 3D, a box domain, the BSP tree, no neighbour
-        memory, a CUDA device ( and neither `use_card_cells = False` nor `SDOT_CARD_CELLS=0` )"""
+        memory, a CUDA device ( and neither `use_card_cells = False` nor `SDOT_CARD_CELLS=0` ). GROUPS: in the card's SOLVE
+        and its `laplacian_solve` only ( `solver`: `gpu/CardGroups.cuh`, `Newton2D.cuh` ) -- the diagram's other calls take the
+        generic path ( their adjoint is not written for the card's cells )"""
         if not card_cells_enabled( self.use_card_cells ):
             return False
         if self.dim_count not in ( 2, 3 ) or self.memo_counts.is_defined:
+            return False
+        if self.group_rep.is_defined and not solver:
+            return False
+        # a sink ( partial transport ): the cells integrated in balls are not written for the card
+        if self.sink_weight.is_defined:
+            return False
+        # a periodicity: the card's cells walk the translations of the images ( `Cell2D.cuh`, `Cell3D.cuh`: `Problem::img` );
+        # rotations and symmetries take the generic path ( `diagram/Common.h` )
+        if self._periodic is not None and self._periodic.linear is not None:
             return False
         if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
             return False
@@ -193,7 +217,9 @@ class PowerDiagram_Bsp( PowerDiagram ):
         if rho is None:
             return None
         from .CellScratch import fp_size
-        variant = card_variant_for( fp_size( self._domain_cell().kernel_dtype ), int( self.nb_points.value ),
+        # ( the identifiers of the cuts go up to `n` times the number of images )
+        nb_ids = int( self.nb_points.value ) * ( 1 if self._periodic is None else len( self._periodic.shifts ) )
+        variant = card_variant_for( fp_size( self._domain_cell().kernel_dtype ), nb_ids,
                                     int( self.tree.nb_bsp_nodes.value ), self.dim_count )
         return variant, rho
 
@@ -205,10 +231,10 @@ class PowerDiagram_Bsp( PowerDiagram ):
           * `kind = "image"`: an `Image` with a DIAGONAL frame and UNIFORM knots ( a regular grid ), the domain inside it:
             `values` flattened `j * nx + i` ( `i` along x ), `geom = ( x0, y0, hx, hy, nx, ny )`, `min_scale`
             ( `Convolved< Image >::min_scale` );
-          * `kind = "gauss"`: isotropic `SumOfGaussians`: `pos`, `sigma`, `mass` ( the backend's arrays, traced or not ).
+          * `kind = "gauss"`: isotropic `SumOfGaussians`, 2D or 3D: `pos`, `sigma`, `mass` ( the backend's arrays, traced or not ).
 
         The geometry of an image is read on the host ( it is a constant of the problem ); its values are not."""
-        rho = self._card_density()
+        rho = self._card_density( traced_ok = True )
         dist = self.distribution
         from .distributions.Image import Image
         from .distributions.Mesh import Mesh
@@ -234,7 +260,8 @@ class PowerDiagram_Bsp( PowerDiagram ):
                 res[ "min_scale" ] = min( steps ) / 4
             return res
         if isinstance( dist, SumOfGaussians ):
-            if int( dist.nb_dims.value ) != 2 or len( dist.sigmas.shape ) != 1 or dist.batch_axes:
+            # ( 2D: `Density2D.cuh::DensGauss`; 3D: `Density3D.cuh::DensGauss3` )
+            if int( dist.nb_dims.value ) != self.dim_count or self.dim_count not in ( 2, 3 ) or len( dist.sigmas.shape ) != 1 or dist.batch_axes:
                 return None
             return dict( kind = "gauss", pos = dist.positions.raw, sigma = dist.sigmas.raw, mass = dist.weights.raw )
         if isinstance( dist, Image ):
@@ -299,7 +326,9 @@ class PowerDiagram_Bsp( PowerDiagram ):
             kernels.append( FfiCode.inline(
                 f"{ ns }::measures_vjp<{ variant }>( queue, args.inputs.power_diagram, args.grad_of_outputs.res, "
                 "args.grad_of_inputs.power_diagram.sorted_positions, args.grad_of_inputs.power_diagram.sorted_weights, "
-                f"args.errors, args.allocator, args.inputs.density, { limits } );",
+                f"args.errors, args.allocator, args.inputs.density, { limits } );"
+                # the seeds only: the density of the card is a constant
+                " args.inputs.power_diagram.measures_computed_grads( args.computed_grads.from_res.power_diagram );",
                 includes = includes, allocator = True ) )
         loom.ffi_call( name, *kernels, failures = self._card_failures(), **kwargs )
         return res, lap, mom
@@ -309,6 +338,60 @@ class PowerDiagram_Bsp( PowerDiagram ):
         if v is None:
             return None
         return self._card_call( f"power_diagram_measures_card_{ self.dim_count }d", *v )[ 0 ]
+
+    def _card_laplacian_solve( self, rhs, linear_solver ):
+        """`laplacian_solve` ON THE CARD ( `gpu/Newton2D.cuh::laplacian_solve` ): the diagram at its weights with its facets, the
+        laplacian in ranks, the card's linear solver in double ( `"cholesky"` / `"amg"`: the CPU's on a copy ), the CPU's gauge
+        `x[ 0 ] = 0`. Differentiable with respect to `rhs` ( `L` is symmetric: the backward is the same call ), and a `vmap` of `rhs`
+        is one diagram, one matrix and a solve per item. With groups, the roots' laplacian ( the members' cells by their own pass ).
+        `None` when the card does not take this diagram ( see `_build_card` )."""
+        from .SdotPlanNd import _CARD_OPTIONS, _CARD_MG_PACK, _CardSolveWork, _LIN, card_density_call, card_facet_capacity
+        if not self._card_takes( solver = True ) or self._periodic is not None:
+            return None
+        dens = self._card_solve_density()
+        d = self.dim_count
+        if dens is None or ( d == 3 and dens[ "kind" ] not in ( "const", "mesh", "gauss" ) ):
+            return None
+        n = int( self.nb_points.value )
+        nodes = int( self.tree.nb_bsp_nodes.value )
+        variant = card_variant_for( 64, n, nodes, d )
+        overflow_warps = self._card_overflow_warps( variant )
+        opts = [ 0.0 ] * len( _CARD_OPTIONS )
+        def put( name, v ):
+            opts[ _CARD_OPTIONS.index( name ) ] = float( v )
+        lin_kind = 2 if linear_solver in ( "cholesky", "amg" ) else 0 if linear_solver == "cg" else 1
+        put( "lin", lin_kind ); put( "host_method", _LIN[ linear_solver ] )
+        put( "mg_shift", ( _CARD_MG_PACK[ d ].bit_length() - 1 ) if lin_kind != 2 else 0 )
+        for name, v in zip( ( "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny" ), dens.get( "geom", [ 0.0 ] * 6 ) ):
+            put( name, v )
+        options = RealTensor[ Axis( ShapeVar( len( _CARD_OPTIONS ) ), name = "num_card_opt" ) ]( np.asarray( opts, dtype = np.float64 ) )
+        dens_expr, dens_args = card_density_call( dens, d )
+        limits = f"{ int( self.card_max_vertices ) }, { overflow_warps }"
+        x = RealTensor[ self.num_point ]()
+        b = RealTensor[ self.num_point ]( getattr( rhs, "raw", rhs ) )
+        w = RealTensor[ self.num_point ]( self.weights.raw )
+        code = lambda src, dst, backward = False: FfiCode.inline(
+            "auto &inputs = args.inputs; auto &outputs = args.outputs;\n"
+            + ( "auto &grad_of_inputs = args.grad_of_inputs; auto &grad_of_outputs = args.grad_of_outputs;\n" if backward else "" )
+            + f"sdot::gpu2d::laplacian_solve<{ variant }, { 'false' if backward else 'true' }>( queue, batch_axes, inputs.power_diagram, inputs.w, { src }, inputs.options, { dst }, "
+              f"outputs.work, args.errors, args.allocator, { dens_expr }, { limits } );"
+            + ( "\nargs.computed_grads.from_x.rhs = true;" if backward else "" ),
+            includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], allocator = True )
+        loom.ffi_call(
+            f"power_diagram_card_laplacian_solve_{ d }d_{ dens[ 'kind' ] }",
+            code( "inputs.rhs", "outputs.x" ),
+            # the adjoint of `rhs -> x` is itself ( `L` symmetric )
+            code( "grad_of_outputs.x", "grad_of_inputs.rhs", backward = True ),
+            failures = self._card_failures(),
+            power_diagram = self,
+            w = w,
+            rhs = b,
+            options = options,
+            **dens_args,
+            x = loom.out( x ),
+            work = loom.out( _CardSolveWork(), capacities = { "nb_facets": card_facet_capacity( n, d ) } ),
+        )
+        return x
 
     def _card_cells( self, facets = True, moments = False ):
         """THE CELLS ON THE CARD, and what Newton makes of them ( a test and bench hook; `SdotPlanNd` calls the C++ of
@@ -341,13 +424,18 @@ class PowerDiagram_Bsp( PowerDiagram ):
 
     @property
     def positions( self ):
-        """`[ n, d ]`, in the user's order -- a NEW tensor, gathered from the storage"""
+        """`[ n, d ]`, in the user's order -- a NEW tensor, gathered from the storage ( as given, see `PowerDiagram.positions` )"""
+        return self._given_positions( self._stored_positions() )
+
+    def _stored_positions( self ):
         return RealTensor[ self.num_point, self.dim ]( self._scatter( self.sorted_positions.raw ) )
 
     @positions.setter
     def positions( self, positions ):
         """new positions: the tree is rebuilt on them ( so concrete values are needed )"""
-        pos = positions if hasattr( positions, "shape" ) else np.asarray( positions, dtype = float )
+        if self.group_rep.is_defined:
+            raise NotImplementedError( "positions of a diagram with groups: build a new `PowerDiagram` ( its groups are found for its positions )" )
+        pos = self._folded_positions( positions )
         w = self.sorted_weights.raw[ self._rank_of ] if self.sorted_weights.is_defined else None
         for name, value in self._init_seeds( pos, w, None ).items():
             setattr( self, name, value )
@@ -366,11 +454,37 @@ class PowerDiagram_Bsp( PowerDiagram ):
     def weights( self, weights ):
         """new weights: the seeds do not move, nor does the tree -- only the affine majorant
         of the weights of each node is redone, in one kernel over the nodes"""
+        if self.group_rep.is_defined:
+            raise NotImplementedError( "weights of a diagram with groups: build a new `PowerDiagram` ( the outer and virtual weights come from them )" )
         self.sorted_weights = self._gather( weights )
         self.tree.refresh_weight_majorants( self.sorted_positions, self.sorted_weights )
 
     def _ranks_of_items( self ):
         return self._rank_of
+
+    def _user_order( self, stored ):
+        return self._scatter( stored )
+
+    def _stored_group_members( self, members ):
+        """the group members in the tree's order: the values gathered ( differentiable ), the indices turned into ranks"""
+        rank_of, order = self._rank_of, self._order
+        if not isinstance( rank_of, np.ndarray ):        # ( a tree built on the card: its order read back, once )
+            if loom.is_traced( getattr( rank_of, "raw", rank_of ) ) or loom.is_traced( order ):
+                raise NotImplementedError( "groups: the tree's order is traced ( a tree built on the card under a trace ): build the tree on the host" )
+            from loom.tensor.host import to_host
+            rank_of = np.asarray( to_host( getattr( rank_of, "raw", rank_of ) ) ).reshape( -1 ).astype( np.int64 )
+            order = np.asarray( to_host( order ) ).reshape( -1 ).astype( np.int64 )
+        res = {}
+        for name, value in members.items():
+            if name in ( "group_rep", "group_next" ):
+                res[ name ] = rank_of[ np.asarray( value )[ order ] ].astype( np.int32 )
+            elif name == "group_parent":                 # ( an aggregate number: the aggregates are not sorted )
+                res[ name ] = np.asarray( value )[ order ].astype( np.int32 )
+            elif name.startswith( "group_agg_" ):
+                res[ name ] = value
+            else:
+                res[ name ] = self._gather( value )
+        return res
 
     # ---- what the `SdotPlanNd` solver writes -------------------------------------------------------------
 

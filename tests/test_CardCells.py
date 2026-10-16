@@ -227,8 +227,8 @@ if test( "the_card_takes_a_constant_density" ):
         from sdot.distributions.Image import Image
         rng = numpy.random.default_rng( 5 )
         pos = rng.uniform( 0.001, 0.999, size = ( 3000, 2 ) )
-        img = Image( numpy.full( ( 2, 3 ), 2.5 ) )
-        pos_img = pos * numpy.array( [ 2.0, 3.0 ] )   # the image's frame: pixel units, the box [ 0, 2 ] x [ 0, 3 ]
+        img = Image( numpy.full( ( 2, 3 ), 2.5 ), pixel_frame = numpy.eye( 2 ) )
+        pos_img = pos * numpy.array( [ 2.0, 3.0 ] )   # the image's frame: pixel units ( `pixel_frame` ), the box [ 0, 2 ] x [ 0, 3 ]
         pd = PowerDiagram( pos_img, distribution = img, kernel_dtype = "FP64" )
         gen = PowerDiagram( pos_img, distribution = img, kernel_dtype = "FP64" )
         gen.use_card_cells = False

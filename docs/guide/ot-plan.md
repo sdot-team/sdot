@@ -9,14 +9,14 @@ Three functions, from the most common to the most specific:
 | `sdot.ot_solve( f, g, ... )` | the transport plan | the same, with the settings of the solver |
 
 `f` is the discrete source ( a `SumOfDiracs` ), `g` the continuous target ( an `Image`, a `SumOfGaussians`... see
-[Distributions](./distributions) ). The cost is the squared Euclidean distance.
+[Distributions](./distributions/) ). The cost is the squared Euclidean distance.
 
 ## `w2`: the distance
 
 <<< @/snippets/hello_numpy.py
 
 The result is an array of the framework of the inputs ( numpy here, see [Frameworks and devices](./backends) ), and it is
-differentiable with respect to everything that defines `f` and `g` ( see [Differentiability](./differentiability) ).
+differentiable with respect to everything that defines `f` and `g`.
 
 ## `plan`: what the transport does
 

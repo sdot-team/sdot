@@ -1,6 +1,6 @@
 import numpy
 
-from loom.tensor import Axis, CtShapeVar, RealTensor, ShapeVar
+from loom.tensor import Axis, CtShapeVar, RealTensor, ShapeVar, Tensor
 from loom.util import ComputedAttribute
 
 from .Distribution import Distribution
@@ -73,6 +73,10 @@ class Polytope( Distribution ):
     # the cuts are cut by the cell itself: the integrator reserves a spare cell for the pieces
     cuts_pieces = True
 
+    # it integrates itself TRANSLATED ( `for_each_piece_shifted`, C++ ): what a periodicity repeats ( `Periodic.h` )
+    translatable = True
+    constant_on_pieces = True                 # ( partial transport: `PowerDiagram( sink_weight = ... )` )
+
     def __init__( self, directions, offsets, density = 1.0, target_mass = 1.0, volume = None, **kwargs ):
         """`directions`: `[ nb_cuts, d ]`. `offsets`: `[ nb_cuts ]`: the half-spaces `direction . x <= offset`.
         `density`: the value on the polytope. `volume`: when known ( a copy of a polytope )."""
@@ -86,7 +90,9 @@ class Polytope( Distribution ):
         self._dirs, self._offs = dirs / norm[ :, None ], offs / norm
         self._volume = _volume_of( self._dirs, self._offs ) if volume is None else float( volume )
 
-        if hasattr( density, "reshape" ) and not isinstance( density, numpy.ndarray ):
+        if isinstance( density, Tensor ):
+            pass                                            # ( a copy: `normalized_version` )
+        elif hasattr( density, "reshape" ) and not isinstance( density, numpy.ndarray ):
             density = density.reshape( 1 )                  # a backend array, possibly traced
         else:
             density = numpy.asarray( density, dtype = float ).reshape( 1 )

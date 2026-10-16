@@ -26,6 +26,25 @@
 // Every integral is in the SEED's frame ( the cell's ), the mesh's nodes brought to it at the element: the moments are about
 // the seed, as the cells write them. `int lambda_a lambda_b lambda_c = ( 6, 2, 1 ) V / 120`, `int lambda_a lambda_b =
 // ( 1 + [ a = b ] ) V / 20`.
+//
+// = THE GAUSSIANS ( `DensGauss3`, `gauss3_cell` ): CONES FROM THE CENTRE, CLOSED FORMS ON THE FACES
+//
+// For a gaussian of centre `c`, width `s` ( unit coordinates `( x - c ) / s` below ), the mass of a convex cell is the sum over its
+// faces of the signed cones from `c`: a face at the signed distance `h` ( outward normal ) gives
+//
+//     h / ( 4 pi ) int_face Phi3( r ) / r^3 dA,        Phi3( r ) = P( |X| <= r ) = erf( r / sqrt 2 ) - sqrt( 2 / pi ) r exp( -r^2 / 2 )
+//
+// ( a cone from `c` is a solid angle times the radial law of `|X|` ). In polar coordinates about the foot of `c` on the face, the
+// radial integral is closed: `Psi( R ) = int_h^R Phi3( r ) / r^2 dr = Phi3( h ) / h - Phi3( R ) / R + sqrt( 2 / pi ) ( exp( -h^2 / 2 )
+// - exp( -R^2 / 2 ) )`, and what is left is ONE integral along each edge, `int |p| Psi( R ) / rho^2 dt` ( `p` the distance from the
+// foot to the edge's line, `rho^2 = p^2 + t^2`, `R^2 = h^2 + rho^2` ) -- the 3D sibling of the 2D wedge, by Gauss-Legendre on its
+// core and in closed form where `R >= 8`. `Psi / rho^2` is computed without cancellation near the foot: by its series in `R^2`
+// for `R <= 2`, by a short quadrature of `Phi3 / r^2` on `[ h, R ]` when `R - h` is small.
+//
+// The rest are closed forms, as in 2D: on a face, `phi` is `phi1( h )` times a 2D gaussian, whose measure on the face is the sum
+// of the wedges of its edges ( `Density2D.cuh::gauss_wedge_pt` ) -- the facet; `int ( x - c ) phi = -s^2 sum_f n_f int_f phi`,
+// `int |x - c|^2 phi = 3 s^2 m - s^2 sum_f h_f int_f phi` ( the divergence of `( x - c ) phi` ). The mass of each gaussian is `| sum |`
+// over the faces, as in 2D: a cell far from a narrow bump must not get a negative mass from the rounding of its cones.
 // =====================================================================================
 
 #include "Density2D.cuh"
@@ -47,6 +66,13 @@ struct DensMesh3 {
 /// what a cell accumulates: the mass, `int ( x - p ) rho`, `int |x - p|^2 rho`
 struct DensSums3 {
     double m = 0, mx = 0, my = 0, mz = 0, m2 = 0;
+};
+
+/// a sum of isotropic gaussians ( `SumOfGaussians`, 3D ): `c[ 3 g + a ]` the centres, `s` the widths ( convolved: `sqrt( sigma^2 +
+/// s^2 )` ), `w` the masses ( `gauss3_cell` )
+struct DensGauss3 {
+    SI            nb = 0;
+    const double *c = nullptr, *s = nullptr, *w = nullptr;
 };
 
 
@@ -436,6 +462,186 @@ __device__ __forceinline__ void mesh3_cell( const DensMesh3 &m, const double ( &
         else
             cut.template operator()<32>();
     } );
+}
+
+
+// ---- the gaussians ( see the header ) -------------------------------------------------------------------------------------
+
+constexpr double GAUSS3_S2P = 0.79788456080286535588;   ///< sqrt( 2 / pi )
+
+/// `Phi3( x ) / x`, `x >= 0` ( by its series below 0.5, where `erf` and the exponential cancel )
+__device__ __forceinline__ double gauss3_phi3_over_x( double x ) {
+    if ( x < 0.5 ) {
+        const double y = -x * x / 2;
+        double s = 0, t = 1;
+        for ( int k = 0; k < 30; ++k ) {
+            const double term = t / ( 2 * k + 3 );
+            s += term;
+            if ( fabs( term ) < 1e-18 )
+                break;
+            t *= y / ( k + 1 );
+        }
+        return GAUSS3_S2P * x * x * s;
+    }
+    return ( erf( x * 0.70710678118654752440 ) - GAUSS3_S2P * x * exp( -x * x / 2 ) ) / x;
+}
+
+/// `Psi( R ) / rho^2`, `R^2 = h^2 + rho^2`, `h >= 0` ( see the header )
+__device__ __forceinline__ double gauss3_psi_over_rho2( double h, double rho2 ) {
+    const double R2 = h * h + rho2;
+    if ( R2 <= 4 ) {
+        // `Phi3( r ) / r^2 = sqrt( 2 / pi ) sum_k ( -1 / 2 )^k / k! r^( 2 k + 1 ) / ( 2 k + 3 )`, integrated on `[ h, R ]`:
+        // `( R^( 2 k + 2 ) - h^( 2 k + 2 ) ) / ( 2 k + 2 ) = rho^2 S_k / ( 2 k + 2 )`, `S_k = sum_i R^( 2 i ) h^( 2 ( k - i ) )`
+        const double h2 = h * h;
+        double s = 0, S = 1, h2k = 1, c = 1;
+        for ( int k = 0; k < 60; ++k ) {
+            const double term = c * S / ( ( 2 * k + 3 ) * ( 2 * k + 2 ) );
+            s += term;
+            if ( k > 2 && fabs( term ) < 1e-18 * fabs( s ) )
+                break;
+            c *= -0.5 / ( k + 1 );
+            h2k *= h2;
+            S = R2 * S + h2k;
+        }
+        return GAUSS3_S2P * s;
+    }
+    const double R = sqrt( R2 );
+    if ( rho2 < 0.05 ) {
+        // `R - h = rho^2 / ( R + h )`, small: Gauss-Legendre on `[ h, R ]`, the `rho^2` simplified away
+        const double gx[ 2 ] = { 0.3399810435848563, 0.8611363115940526 }, gw[ 2 ] = { 0.6521451548625461, 0.3478548451374538 };
+        const double d = rho2 / ( R + h );
+        double acc = 0;
+        for ( int q = 0; q < 2; ++q )
+            for ( int sg = -1; sg <= 1; sg += 2 ) {
+                const double r = h + d * ( 1 + sg * gx[ q ] ) / 2;
+                acc += gw[ q ] * gauss3_phi3_over_x( r ) / r;
+            }
+        return acc / ( 2 * ( R + h ) );
+    }
+    return ( gauss3_phi3_over_x( h ) - gauss3_phi3_over_x( R ) + GAUSS3_S2P * ( exp( -h * h / 2 ) - exp( -R2 / 2 ) ) ) / rho2;
+}
+
+/// the edge's share of the cones of a face: `sign( p ) int_t0^t1 |p| Psi( R ) / rho^2 dt` ( unit coordinates, `h >= 0` the
+/// distance from the centre to the face's plane, `p`, `t0`, `t1` as for `gauss_wedge_pt` )
+__device__ __forceinline__ double gauss3_cone_edge( double h, double p, double t0, double t1 ) {
+    const double ap = fabs( p );
+    if ( ! ( ap > 0 ) )
+        return 0;
+    const double q2 = h * h + p * p;
+    // past `R = 8`, `Psi = Psi_inf - 1 / R` to the last bits, and its integral is closed
+    const double inf = gauss3_phi3_over_x( h ) + GAUSS3_S2P * exp( -h * h / 2 );
+    auto T = [&]( double t ) {
+        const double S = sqrt( q2 + t * t );
+        return h > 1e-12 ? atan( h * t / ( ap * S ) ) / h : t / ( ap * S );
+    };
+    auto tail = [&]( double a, double b ) { return inf * ( atan( b / ap ) - atan( a / ap ) ) - T( b ) + T( a ); };
+    const double tc = sqrt( fmax( 64 - q2, 0.0 ) );
+    double acc = 0;
+    if ( t0 < -tc )
+        acc += tail( t0, fmin( t1, -tc ) );
+    if ( t1 > tc )
+        acc += tail( fmax( t0, tc ), t1 );
+    const double c0 = fmax( t0, -tc ), c1 = fmin( t1, tc );
+    if ( c1 > c0 ) {
+        // composite Gauss-Legendre, 8 points per panel of at most one unit, up to 8 panels ( `Psi / rho^2` is smooth at the
+        // scale of the unit: no peak at the foot )
+        const double gx[ 4 ] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
+        const double gw[ 4 ] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
+        const int nc = int( ceil( c1 - c0 ) ), np = nc < 1 ? 1 : ( nc > 8 ? 8 : nc );
+        const double hw = ( c1 - c0 ) / ( 2 * np );
+        for ( int k = 0; k < np; ++k ) {
+            const double m = c0 + ( 2 * k + 1 ) * hw;
+            for ( int q = 0; q < 4; ++q )
+                for ( int sg = -1; sg <= 1; sg += 2 ) {
+                    const double t = m + sg * hw * gx[ q ];
+                    acc += hw * gw[ q ] * ap * gauss3_psi_over_rho2( h, p * p + t * t );
+                }
+        }
+    }
+    return p < 0 ? -acc : acc;
+}
+
+/// A CELL AGAINST THE GAUSSIANS ( see the header ): the planes `pl[ 4 j .. 4 j + 3 ]` ( seed's frame, outward ), the box `[ lo, hi ]`
+/// of the cell ( seed's frame, the same on every lane ), `face_edges( j, f )` visiting the edges of the face on plane `j` as
+/// `f( ax, ay, az, bx, by, bz )`, counterclockwise about its outward normal. The faces are shared by the lanes; the mass and the
+/// moments about the seed go to `acc` of lane 0 ( every gaussian's `| sum |` needs the whole cell ), `int rho dA` on plane `j`
+/// to `fl[ j ]` of the lanes that did it ( `FAC`, `j < FL` ). A gaussian farther than `9 s` from the box is nothing.
+template<bool MOM,bool FAC,int FL,class FaceEdges,class HasFace>
+__device__ __forceinline__ void gauss3_cell( const DensGauss3 &g, const double ( &O )[ 3 ], const double *pl, int nc, const double ( &lo )[ 3 ],
+                                             const double ( &hi )[ 3 ], int lane, DensSums3 &acc, double *fl, const FaceEdges &face_edges,
+                                             const HasFace &has_face ) {
+    constexpr unsigned FULL = 0xffffffffu;
+    constexpr double inv_4pi = 0.079577471545947667884, inv_sqrt_2pi = 0.39894228040143267794;
+    auto wsum = [&]( double v ) {
+        for ( int d = 16; d; d >>= 1 )
+            v += __shfl_xor_sync( FULL, v, d );
+        return v;
+    };
+    for ( SI q = 0; q < g.nb; ++q ) {
+        const double s = g.s[ q ], w = g.w[ q ];
+        const double c[ 3 ] = { g.c[ 3 * q ] - O[ 0 ], g.c[ 3 * q + 1 ] - O[ 1 ], g.c[ 3 * q + 2 ] - O[ 2 ] };
+        double d2 = 0;
+        for ( int a = 0; a < 3; ++a ) {
+            const double e = fmax( fmax( lo[ a ] - c[ a ], c[ a ] - hi[ a ] ), 0.0 );
+            d2 += e * e;
+        }
+        if ( ! ( d2 < 81 * s * s ) || ! ( w != 0 ) )
+            continue;                                    // ( the same on every lane )
+        const double is = 1 / s;
+        double W = 0, Fx = 0, Fy = 0, Fz = 0, H = 0;
+        for ( int j = lane; j < nc; j += 32 ) {
+            if ( ! has_face( j ) )
+                continue;
+            const double nn = sqrt( pl[ 4 * j ] * pl[ 4 * j ] + pl[ 4 * j + 1 ] * pl[ 4 * j + 1 ] + pl[ 4 * j + 2 ] * pl[ 4 * j + 2 ] );
+            if ( ! ( nn > 0 ) )
+                continue;
+            const double nx = pl[ 4 * j ] / nn, ny = pl[ 4 * j + 1 ] / nn, nz = pl[ 4 * j + 2 ] / nn;
+            const double h = ( pl[ 4 * j + 3 ] / nn - nx * c[ 0 ] - ny * c[ 1 ] - nz * c[ 2 ] ) * is;
+            double cone = 0, wed = 0;
+            face_edges( j, [&]( double ax, double ay, double az, double bx, double by, double bz ) {
+                const double Ax = ( ax - c[ 0 ] ) * is, Ay = ( ay - c[ 1 ] ) * is, Az = ( az - c[ 2 ] ) * is;
+                const double Bx = ( bx - c[ 0 ] ) * is, By = ( by - c[ 1 ] ) * is, Bz = ( bz - c[ 2 ] ) * is;
+                const double ex = Bx - Ax, ey = By - Ay, ez = Bz - Az;
+                const double L = sqrt( ex * ex + ey * ey + ez * ez );
+                if ( ! ( L > 0 ) )
+                    return;
+                const double ux = ex / L, uy = ey / L, uz = ez / L;
+                const double mx = uy * nz - uz * ny, my = uz * nx - ux * nz, mz = ux * ny - uy * nx;   // `u x n`: outward in the face
+                const double p = mx * Ax + my * Ay + mz * Az;
+                const double t0 = ux * Ax + uy * Ay + uz * Az, t1 = ux * Bx + uy * By + uz * Bz;
+                if ( h != 0 )
+                    cone += gauss3_cone_edge( fabs( h ), p, t0, t1 );
+                wed += gpu2d::gauss_wedge_pt( p, t0, t1 );
+            } );
+            W += h * inv_4pi * cone;
+            const double ff = w * exp( -h * h / 2 ) * inv_sqrt_2pi * is * wed;     // `int_face w phi dA`
+            if constexpr ( FAC )
+                if ( j < FL )
+                    fl[ j ] += ff;
+            if constexpr ( MOM ) {
+                Fx += nx * ff; Fy += ny * ff; Fz += nz * ff;
+                H += h * s * ff;
+            }
+        }
+        W = wsum( W );
+        if constexpr ( MOM ) {
+            Fx = wsum( Fx ); Fy = wsum( Fy ); Fz = wsum( Fz );
+            H = wsum( H );
+        }
+        if ( lane == 0 ) {
+            const double m = w * fabs( W );
+            acc.m += m;
+            if constexpr ( MOM ) {
+                // about the centre, then about the seed ( `c` in its frame )
+                const double s2 = s * s;
+                const double ux = -s2 * Fx, uy = -s2 * Fy, uz = -s2 * Fz, u2 = 3 * s2 * m - s2 * H;
+                acc.mx += ux + c[ 0 ] * m;
+                acc.my += uy + c[ 1 ] * m;
+                acc.mz += uz + c[ 2 ] * m;
+                acc.m2 += u2 + 2 * ( c[ 0 ] * ux + c[ 1 ] * uy + c[ 2 ] * uz ) + ( c[ 0 ] * c[ 0 ] + c[ 1 ] * c[ 1 ] + c[ 2 ] * c[ 2 ] ) * m;
+            }
+        }
+    }
 }
 
 } // namespace sdot::gpu3d

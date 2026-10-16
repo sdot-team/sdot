@@ -119,8 +119,12 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
 
 def uniform_in_support( target, n, seed = None ):
     """`n` points drawn uniformly at random in the support of `target` ( a host `[ n, d ]` array ): in the
-    polytope of its `bounding_half_spaces`, by rejection in the bounding box of its vertices."""
+    polytope of its `bounding_half_spaces`, by rejection in the bounding box of its vertices -- or by its own
+    `random_points( n, seed )` when it has one ( a density carried by lines or surfaces: the points on them )."""
     from .viz.polytope import vertices_of
+
+    if hasattr( target, "random_points" ):
+        return numpy.asarray( target.random_points( n, seed ), dtype = float )
 
     support = target.bounding_half_spaces()
     if support is None:

@@ -2,7 +2,7 @@
 
 # API — Distributions
 
-The sources ( diracs ) and the targets ( densities ). See [Guide: Distributions](/guide/distributions).
+The sources ( diracs ) and the targets ( densities ). See [Guide: Distributions](/guide/distributions/).
 
 ::: v-pre
 
@@ -16,6 +16,7 @@ Sum of weighted Dirac point masses.
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, color='#d62728', **kwargs)`
@@ -37,6 +38,7 @@ default ). `SumOfDiracs( positions[ :, None ] )` describes the same measure.
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -61,6 +63,7 @@ positions are computed on the fly, never stored.
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -76,7 +79,7 @@ The support of the distribution as half-spaces `( directions, offsets )`, or `No
 ## `Box`
 
 ```python
-Box(origin=None, frame=None, density=1.0, nb_dims=None)
+Box(origin=None, frame=None, density=1.0, nb_dims=None, target_mass=1.0)
 ```
 
 A uniform density on a box: `origin + frame^T [ 0, 1 ]^d`. The rows of `frame` are the edges of the box, or `frame`
@@ -110,6 +113,7 @@ elsewhere. `Polygon( points )` and `Polyhedron( points )` build one from its ver
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 | `volume` | the volume of the polytope ( a host float ) |
 
@@ -126,7 +130,7 @@ the polytope itself
 ## `Image`
 
 ```python
-Image(values, frame=None, pixel_frame=None, **kwargs)
+Image(values, frame=None, pixel_frame=None, target_mass=1.0, **kwargs)
 ```
 
 Piecewise constant function on a grid.
@@ -143,6 +147,7 @@ With `knots`, the pixels are where the knots say: the default frame is the ident
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -169,6 +174,7 @@ standard deviations ( 6 by default ), or the box `support_box = ( lo, hi )`.
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, color='#d62728', **kwargs)`
@@ -197,6 +203,7 @@ continuous density ( one value per node ), or `[ nb_simplices, d + 1 ]` for a de
 
 | Attribute | |
 |---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -223,5 +230,66 @@ target length of the edges ( a number, handed to `pygmsh` for the points of the 
 ### `.with_values(values, current_mass=None)`
 
 the same mesh ( geometry, hierarchy ) with other DG1 values `[ nb_elems, d + 1 ]`, in the order of `self.simplices`
+
+## `CodimMesh`
+
+```python
+CodimMesh(nodes, simplices, values=None, width=None, target_mass=1.0, alpha=15.0, margin=0.25, quadrature=False, smoothed=False, **kwargs)
+```
+
+A measure carried by a mesh M of LOWER dimension: segments in 2D or 3D, triangles in 3D ( `Mesh( nodes, simplices )` with
+fewer than `d + 1` nodes per simplex gives one ). `values` is `rho` at the nodes of M ( P1, ones by default ): the measure is
+`rho` times the length ( area ) on M, and its cells are integrated exactly ( `CodimMeasureDensity` ).
+
+THE WIDTH CONTINUATION of the solver goes through smoothed densities, `rho exp( -d^2 / s^2 )`, `d` the distance to M and `rho` its
+value at the closest point of M, integrated in closed form on the ENVELOPE of M ( `sdot.envelope`: the generalized Voronoi
+diagram of its elements, simplices where `d` and `rho` are affine, in the box of M widened by `margin` times its diagonal ), from
+wide down to `width`, and then the measure itself ( `sdotplan/convolved/CodimMesh.h` ). Default `width`: `DEFAULT_WIDTH` times
+the diagonal of M. `smoothed = True` gives the smoothed density at `width` instead of the measure ( a check, or a
+density of its own ).
+
+`alpha`: the widest angle of the fans of the envelope, in degrees ( `d` is over-estimated by at most `1 / cos( alpha / 2 )`
+around the nodes, and the edges in 3D ). `quadrature = True` integrates the smoothed pieces by `PointwiseDensity` ( a check ).
+
+| Attribute | |
+|---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
+
+### `.add_to_viz(viz, **kwargs)`
+
+What this distribution shows of itself in a `Visualizer` -- NOTHING by default; a
+subclass draws what is meaningful for it ( the centres of the gaussians, ... ) and grows
+with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
+
+### `.bounding_half_spaces()`
+
+the box of the envelope: the density is positive in all of it
+
+### `.element_integrals()`
+
+`int rho exp( -d^2 / width^2 )` over each simplex of the envelope ( host arrays, closed forms ): the smoothed density
+
+### `.inscribed_box()`
+
+the box of M, widened by the width ( flat for a straight line ): the density is positive everywhere, and largest there
+
+### `.m_integrals()`
+
+`int rho` over each simplex of M ( host arrays )
+
+### `.normalized_version(nb_dims=None)`
+
+`rho` and the envelope scaled together, for the measure ( or the smoothed density ) to have the target mass
+
+### `.random_points(n, seed=None)`
+
+`n` points drawn on M ( a host `[ n, d ]` array ): the simplices by their mass, then uniformly in each one -- the start
+of `sdot.quantization`, admissible for the measure on M itself ( drawn in the box, most seeds miss M and the first solve
+goes through the whole continuation )
+
+### `.with_width(width, quadrature=None, smoothed=None)`
+
+the same envelope at another width ( and `quadrature`, `smoothed` )
 
 :::

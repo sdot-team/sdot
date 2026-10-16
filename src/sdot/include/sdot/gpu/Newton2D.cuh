@@ -85,6 +85,9 @@
 #include "../sdotplan/Report.h"
 #include "../sdotplan/Continuation.h"
 #include "../sdotplan/Aggregation.h"
+#include "../sdotplan/Groups.h"
+#include "CardGroups.cuh"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
@@ -502,6 +505,10 @@ __global__ void __launch_bounds__( BLOCK ) write_representatives( SI m, const SI
 
 template<class SV>
 __global__ void set_shape_var( SV sv, SI v ) { sv.set( v ); }
+template<class SV>
+__global__ void get_shape_var( SV sv, SI *v ) { *v = SI( sv ); }
+/// the gauge of `sdotplan/Adjoint.h`: the row of the gauge seed is not an equation, it takes the opposite of the others' sum
+__global__ void gauge_row( double *b, SI r0, const double *sum ) { b[ r0 ] -= *sum; }
 
 // ---- THE AREA POLYNOMIAL OF A CELL ALONG THE DIRECTION ( the step ) --------------------------------------------------------
 
@@ -798,7 +805,257 @@ __global__ void __launch_bounds__( BLOCK ) read_ints( SI n, Strided<T,1> src, SI
     if ( k < n ) dst[ k ] = SI( src( k ) );
 }
 
+// ---- THE TREE OF AGGREGATES ( `sdotplan/Groups.h`, `CardGroups.cuh` ): the host keeps the tree in ranks, the card the arrays
+// the cells read and Newton's unknowns turned into weights ---------------------------------------------------------------------
+
+/// a 2-d input read as doubles, row after row
+template<class TF>
+__global__ void __launch_bounds__( BLOCK ) read_strided2( SI n, int nc, Strided<TF,2> src, double *dst ) {
+    const SI k = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( k < n * nc ) dst[ k ] = double( src( k / nc, int( k % nc ) ) );
+}
+
+/// THE SLOTS INTO THE TREE ( `Groups.h::outer`, `value` ): the outer weight and the virtual weight of each seed ...
+__global__ void __launch_bounds__( BLOCK ) tree_seed_weights( SI n, const double *x, const double *vmask, double *outer, double *v ) {
+    const SI k = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( k >= n ) return;
+    outer[ k ] = x[ k ];
+    v[ k ] = vmask[ k ] * x[ k ];
+}
+/// ... the members' outer weights, `sum coef x[ slot ]` ( `Groups.h::outer_expansion`, `width` terms each ) ...
+template<class TR>
+__global__ void __launch_bounds__( BLOCK ) tree_member_weights( SI nm, int width, const TR *mem, const SI *idx, const double *coef,
+                                                                const double *x, double *outer ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nm ) return;
+    double s = 0;
+    for ( int t = 0; t < width; ++t ) {
+        const SI j = idx[ q * width + t ];
+        if ( j >= 0 ) s += coef[ q * width + t ] * x[ j ];
+    }
+    outer[ mem[ q ] ] = s;
+}
+/// ... and the aggregates' virtual weights
+__global__ void __launch_bounds__( BLOCK ) tree_agg_weights( SI m, const double *x, const SI *first, const double *amask, double *agg_v ) {
+    const SI a = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( a < m ) agg_v[ a ] = amask[ a ] * x[ first[ a ] ];
+}
+
+/// THE ROOT LEVEL'S FACETS ( `Groups.h::aggregated` ): the members' facets copied for the host first ( `Groups.h::blocks`: the
+/// entries with a member, at most `cap`, counted in `count` ), then those inside a root out of the system ( zero ) and those out of
+/// it onto the slots of the roots ( `slot`: per rank, its root's slot, itself when alone ) -- each member linked to its root's
+template<class TR>
+__global__ void __launch_bounds__( BLOCK ) tree_facets( SI nb, TR *fi, TR *fj, double *fc, const TR *root, const TR *slot,
+                                                        TR *oi, TR *oj, double *oc, unsigned long long *count, SI cap ) {
+    const SI e = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( e >= nb ) return;
+    const TR i = fi[ e ], j = fj[ e ];
+    const TR ri = root[ i ], rj = root[ j ];
+    if ( ri < 0 && rj < 0 ) return;
+    const unsigned long long q = atomicAdd( count, 1ull );
+    if ( SI( q ) < cap ) { oi[ q ] = i; oj[ q ] = j; oc[ q ] = fc[ e ]; }
+    if ( ri >= 0 && ri == rj ) { fc[ e ] = 0; return; }
+    const TR si = slot[ i ], sj = slot[ j ];
+    fi[ e ] = si < sj ? si : sj;
+    fj[ e ] = si < sj ? sj : si;
+}
+
+/// THE ROOT LEVEL'S RIGHT-HAND SIDE ( `Adjoint.h`: the members' rows onto their root's ): `s[ k ]` the sum over the cycle of the root
+/// whose slot is `k` ( in the order of the cycle: no atomic, the same sum whatever the launch ) ...
+template<class TR>
+__global__ void __launch_bounds__( BLOCK ) root_sums( SI nm, const TR *mem, const TR *slot, const TR *next, const double *b, double *s ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nm ) return;
+    const TR k = mem[ q ];
+    if ( slot[ k ] != k ) return;
+    double t = 0;
+    TR j = k;
+    do { t += b[ j ]; j = next[ j ]; } while ( j != k );
+    s[ k ] = t;
+}
+/// ... written into the roots' rows, the other members' at zero ...
+template<class TR>
+__global__ void __launch_bounds__( BLOCK ) root_rows( SI nm, const TR *mem, const TR *slot, const double *s, double *b ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nm ) return;
+    const TR k = mem[ q ];
+    b[ k ] = slot[ k ] == k ? s[ k ] : 0.0;
+}
+/// ... and the solution of a member, its root's: `out[ k ] = d[ slot[ k ] ] - g`
+template<class TR>
+__global__ void __launch_bounds__( BLOCK ) root_values( SI n, const TR *slot, const double *d, double g, double *out ) {
+    const SI k = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( k < n ) out[ k ] = d[ slot[ k ] ] - g;
+}
+
+template<class TR,int DIM>
+struct CardTree {
+    bool                on = false;
+    sp::GroupStructure  gs;                              ///< host, in ranks
+    SI                  n = 0, m = 0, nm = 0;
+    std::vector<SI>     members, first_user;             ///< the members' ranks; per root slot, the smallest user index of its root
+    TR                 *root = nullptr, *next = nullptr, *mem = nullptr, *slot = nullptr;
+    int                *parent = nullptr, *agg_parent = nullptr;
+    double             *v = nullptr, *dirs = nullptr, *agg_center = nullptr, *agg_scale = nullptr, *agg_outer = nullptr, *agg_v = nullptr;
+    double             *outer = nullptr;                 ///< the outer weights of the last slots set
+    int                 width = 1;
+    SI                 *exp_idx = nullptr, *agg_first = nullptr, *link_i = nullptr, *link_j = nullptr;
+    double             *exp_coef = nullptr, *vmask = nullptr, *amask = nullptr;
+    SI                  nl = 0;                          ///< the links ( a member to its root, `append_links` )
+    SI                  fcap = 0;                        ///< the members' facets the host reads
+    TR                 *fi = nullptr, *fj = nullptr;
+    double             *fc = nullptr;
+    unsigned long long *fcount = nullptr;
+
+    sdot::gpu::CardGroups<TR,DIM> view() const {
+        if ( ! on ) return {};
+        return { root, next, parent, v, dirs, agg_parent, agg_center, agg_scale, agg_outer, agg_v };
+    }
+    void set_on( auto &c ) const {
+        c.pb.grp = view();
+        if constexpr ( requires { c.group_members; } ) { c.group_members = on ? mem : nullptr; c.nb_group_members = on ? nm : 0; }
+    }
+
+    /// the slots `x` ( card ) into the tree's weights ( `outer`, `v`, `agg_v` )
+    void set_weights( const CudaQueue &queue, const double *x ) const {
+        launch_kernel( queue, &tree_seed_weights, blocks_for( n ), BLOCK, 0, n, x, ( const double * ) vmask, outer, v );
+        if ( nm ) launch_kernel( queue, &tree_member_weights<TR>, blocks_for( nm ), BLOCK, 0, nm, width, ( const TR * ) mem, ( const SI * ) exp_idx,
+                                 ( const double * ) exp_coef, x, outer );
+        if ( m ) launch_kernel( queue, &tree_agg_weights, blocks_for( m ), BLOCK, 0, m, x, ( const SI * ) agg_first, ( const double * ) amask, agg_v );
+    }
+
+    /// the diagram's own virtual weights ( `pd.group_vweights`, `group_agg_vweights`, read by `prepare_tree` ) for its cells
+    void own_weights( const CudaQueue &queue ) const {
+        cuda_check( cudaMemcpyAsync( v, gs.sv_init.data(), sizeof( double ) * n, cudaMemcpyHostToDevice, queue.stream ), "copy of the virtual weights" );
+        if ( m ) cuda_check( cudaMemcpyAsync( agg_v, gs.av_init.data(), sizeof( double ) * m, cudaMemcpyHostToDevice, queue.stream ), "copy of the virtual weights" );
+        cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( virtual weights )" );
+    }
+
+    /// the host's copy of a card vector, and back
+    static void down( const CudaQueue &queue, std::vector<double> &h, const double *d, SI n ) { h.resize( n ); read_back( queue, h.data(), d, n ); }
+    static void up( const CudaQueue &queue, double *d, const std::vector<double> &h ) {
+        cuda_check( cudaMemcpyAsync( d, h.data(), sizeof( double ) * h.size(), cudaMemcpyHostToDevice, queue.stream ), "copy to the card ( groups )" );
+        cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( groups )" );
+    }
+    /// weights given seed by seed ( `groups.py`'s ) into slots, on the card ( `precise`: the diagram's virtual weights )
+    void to_slots( const CudaQueue &queue, double *w, bool precise ) const {
+        std::vector<double> h, x;
+        down( queue, h, w, n );
+        gs.unknowns_of( h, x, precise );
+        up( queue, w, x );
+    }
+    /// the gauge on the roots' slots: `x[ r ] -= x[ r0 ]`
+    void gauge( const CudaQueue &queue, double *x, SI r0 ) const {
+        std::vector<double> h;
+        down( queue, h, x, n );
+        const double g = h[ r0 ];
+        for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) h[ i ] -= g;
+        up( queue, x, h );
+    }
+};
+
+/// THE TREE of the diagram `pd` ( its `group_*` arrays, ranks ), on the host and the card; `false`: the pool said no
+template<class TR,int DIM,class TF,class TI>
+bool prepare_tree( const CudaQueue &queue, const auto &pd, auto &allocator, CardTree<TR,DIM> &t, Strided<TI,1> ids ) {
+    using PD = std::decay_t<decltype( pd )>;
+    if constexpr ( ! PD::has_groups ) {
+        return true;
+    } else {
+        const SI n = SI( pd.nb_seeds() ), m = SI( pd.group_agg_parent.shape( 0 ) );
+        auto take_as = [&]( auto *&p, SI count ) { p = static_cast<std::remove_reference_t<decltype( p )>>( take( allocator, SI( sizeof( *p ) ) * std::max<SI>( count, 1 ) ) ); return p != nullptr; };
+        SI *tmp = nullptr;
+        double *dtmp = nullptr;
+        if ( ! take_as( tmp, std::max( n, m ) ) || ! take_as( dtmp, std::max( n, m ) * DIM ) ) return false;
+        auto ints = [&]( const auto &view, SI count, std::vector<SI> &out ) {
+            launch_kernel( queue, &read_ints<std::remove_const_t<typename std::decay_t<decltype( view )>::TF>>, blocks_for( count ), BLOCK, 0, count, strided( view ), tmp );
+            out.resize( count );
+            read_back( queue, out.data(), ( const SI * ) tmp, count );
+        };
+        auto reals = [&]( const auto &view, SI count, std::vector<double> &out ) {
+            launch_kernel( queue, &read_strided<TF>, blocks_for( count ), BLOCK, 0, count, strided( view ), dtmp );
+            out.resize( count );
+            read_back( queue, out.data(), ( const double * ) dtmp, count );
+        };
+        std::vector<SI> parent, rep, nxt, agg_parent;
+        std::vector<double> v, agg_scale, agg_outer, agg_v;
+        ints( pd.group_parent, n, parent ); ints( pd.group_rep, n, rep ); ints( pd.group_next, n, nxt );
+        reals( pd.group_vweights, n, v );
+        if ( m ) { ints( pd.group_agg_parent, m, agg_parent ); reals( pd.group_agg_scale, m, agg_scale ); reals( pd.group_agg_outer, m, agg_outer ); reals( pd.group_agg_vweights, m, agg_v ); }
+        sp::GroupStructure &gs = t.gs;
+        gs.n = n; gs.m = m;
+        gs.parent = parent; gs.agg_parent = agg_parent; gs.agg_scale = agg_scale; gs.agg_outer = agg_outer;
+        gs.sv_init = v; gs.av_init = agg_v;
+        gs.build();
+        t.on = gs.active;
+        if ( ! t.on ) return true;
+        t.n = n; t.m = m;
+        for ( SI k = 0; k < n; ++k ) if ( parent[ k ] >= 0 ) t.members.push_back( k );
+        t.nm = SI( t.members.size() );
+        // the card's arrays
+        std::vector<TR> root_h( n ), next_h( n ), mem_h( t.members.begin(), t.members.end() ), slot_h( n );
+        for ( SI k = 0; k < n; ++k ) {
+            root_h[ k ] = parent[ k ] >= 0 ? TR( rep[ k ] ) : TR( -1 );
+            next_h[ k ] = TR( nxt[ k ] );
+            slot_h[ k ] = TR( gs.root_of[ k ] );
+        }
+        std::vector<int> parent_i( parent.begin(), parent.end() ), agg_parent_i( agg_parent.begin(), agg_parent.end() );
+        std::vector<SI> exp_idx, agg_first( m ), link_i, link_j;
+        std::vector<double> exp_coef, vmask( n, 0.0 ), amask( m, 0.0 );
+        std::vector<std::vector<SI>> es( t.nm );
+        std::vector<std::vector<double>> ec( t.nm );
+        for ( SI q = 0; q < t.nm; ++q ) {
+            gs.outer_expansion( t.members[ q ], es[ q ], ec[ q ] );
+            t.width = std::max( t.width, int( es[ q ].size() ) );
+        }
+        exp_idx.assign( t.nm * t.width, -1 );
+        exp_coef.assign( t.nm * t.width, 0.0 );
+        for ( SI q = 0; q < t.nm; ++q )
+            for ( size_t r = 0; r < es[ q ].size(); ++r ) { exp_idx[ q * t.width + SI( r ) ] = es[ q ][ r ]; exp_coef[ q * t.width + SI( r ) ] = ec[ q ][ r ]; }
+        for ( SI k : t.members ) {
+            vmask[ k ] = gs.agg_first[ parent[ k ] ] != k ? 1.0 : 0.0;
+            if ( gs.root_of[ k ] != k ) { link_i.push_back( std::min( k, gs.root_of[ k ] ) ); link_j.push_back( std::max( k, gs.root_of[ k ] ) ); }
+        }
+        for ( SI a = 0; a < m; ++a ) {
+            agg_first[ a ] = gs.agg_first[ a ];
+            amask[ a ] = agg_parent[ a ] >= 0 && gs.agg_first[ a ] != gs.agg_first[ agg_parent[ a ] ] ? 1.0 : 0.0;
+        }
+        t.nl = SI( link_i.size() );
+        // the smallest user index of each root ( the clusters' output )
+        std::vector<SI> users( n );
+        {
+            launch_kernel( queue, &read_ints<TI>, blocks_for( n ), BLOCK, 0, n, ids, tmp );
+            read_back( queue, users.data(), ( const SI * ) tmp, n );
+        }
+        t.first_user.assign( n, -1 );
+        for ( SI k = 0; k < n; ++k ) { SI &f = t.first_user[ gs.root_of[ k ] ]; f = f < 0 ? users[ k ] : std::min( f, users[ k ] ); }
+        auto upload = [&]( auto *&dst, const auto &src ) -> bool {
+            if ( ! take_as( dst, SI( src.size() ) ) ) return false;
+            if ( ! src.empty() )
+                cuda_check( cudaMemcpyAsync( dst, src.data(), sizeof( src[ 0 ] ) * src.size(), cudaMemcpyHostToDevice, queue.stream ), "copy of the tree" );
+            return true;
+        };
+        if ( ! upload( t.root, root_h ) || ! upload( t.next, next_h ) || ! upload( t.mem, mem_h ) || ! upload( t.slot, slot_h ) || ! upload( t.parent, parent_i )
+             || ! upload( t.agg_parent, agg_parent_i ) || ! upload( t.exp_idx, exp_idx ) || ! upload( t.exp_coef, exp_coef )
+             || ! upload( t.vmask, vmask ) || ! upload( t.agg_first, agg_first ) || ! upload( t.amask, amask )
+             || ! upload( t.link_i, link_i ) || ! upload( t.link_j, link_j ) || ! upload( t.agg_scale, agg_scale ) || ! upload( t.agg_outer, agg_outer ) )
+            return false;
+        if ( ! take_as( t.v, n ) || ! take_as( t.agg_v, m ) || ! take_as( t.outer, n ) || ! take_as( t.dirs, n * DIM ) || ! take_as( t.agg_center, m * DIM ) )
+            return false;
+        launch_kernel( queue, &read_strided2<TF>, blocks_for( n * DIM ), BLOCK, 0, n, DIM, strided( pd.group_dirs ), t.dirs );
+        if ( m ) launch_kernel( queue, &read_strided2<TF>, blocks_for( m * DIM ), BLOCK, 0, m, DIM, strided( pd.group_agg_center ), t.agg_center );
+        // the members' facets read by the host
+        t.fcap = 64 * t.nm + 64;                         // ( a member has a few dozen facets at most )
+        if ( ! take_as( t.fi, t.fcap ) || ! take_as( t.fj, t.fcap ) || ! take_as( t.fc, t.fcap ) || ! take_as( t.fcount, 1 ) )
+            return false;
+        cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( tree )" );
+        return true;
+    }
+}
+
 // ---- the solver -----------------------------------------------------------------------------------------------------------
+
+/// an output that is not asked for ( the tree's, without groups )
+struct NoOut {};
 
 /// what a diagram writes, twice ( the accepted one and the trial )
 template<class TR>
@@ -837,7 +1094,8 @@ void pack_card_weights( const CudaQueue &queue, C &c, SI n, const double *w ) {
 /// `opts_in`: `NB_OPTS` reals. Outputs as `sdotplan::solve`, plus the diagram's `sorted_weights_out`,
 /// `node_wa_out`, `node_wb_out` and `work` ( the capacity `nb_facets` ). `dens_in`: the density ( a 0-d tensor: a constant;
 /// `image_in( ... )`, `gauss_in( ... )`: `DensityHost2D.cuh` ). `max_vertices`, `overflow_warps`: the cells' fourth pass
-/// ( `Cell2D.cuh::Overflow` ).
+/// ( `Cell2D.cuh::Overflow` ). `group_v_out`, `group_agg_v_out`: with GROUPS ( `PD::has_groups` ), the virtual weights the solve
+/// found ( storage order, aggregates ), `sdotplan/Groups.h`'s Newton on the tree of aggregates.
 ///
 /// THE AGGREGATION ( `sdotplan/Aggregation.h` ): the host keeps the clusters ( in ranks ), the card applies them -- the shares
 /// in the reports' residual, the exact duplicates' targets and tied weights, the detection's scan of the laplacian, the
@@ -847,7 +1105,8 @@ template<class V,class VD = V>
 void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const auto &w0_in, const auto &dups_in, const auto &opts_in,
             auto &&weights, auto &&hist, auto &&stats, auto &&masses, auto &&bary, auto &&cost, auto &&clusters_out,
             auto &&sorted_weights_out, auto &&node_wa_out, auto &&node_wb_out, auto &&work,
-            const auto &errors_, auto &allocator, const auto &dens_in, int max_vertices, int overflow_warps ) {
+            const auto &errors_, auto &allocator, const auto &dens_in, int max_vertices, int overflow_warps,
+            auto &&group_v_out, auto &&group_agg_v_out ) {
     using PD = std::decay_t<decltype( pd )>;
     using TF = TFOf<PD>;
     using TI = TIOf<PD>;
@@ -856,10 +1115,12 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     using DH = typename DensityHostOf<std::decay_t<decltype( dens_in )>>::type;
     using D  = typename DH::Dev;
     constexpr bool CONST = std::is_same_v<D,DensConst>;
-    constexpr int DIM = PD::ct_dim;                      // ( 3D: `Cell3D.cuh`'s cells, a constant or a tetrahedral mesh, the `trials` step )
+    constexpr int DIM = PD::ct_dim;                      // ( 3D: `Cell3D.cuh`'s cells, a constant, a tetrahedral mesh or gaussians, the `trials` step )
     static_assert( DIM == 2 || DIM == 3, "the card's solve is 2D or 3D" );
-    static_assert( DIM == 2 ? ! std::is_same_v<D,gpu3d::DensMesh3> : ( CONST || std::is_same_v<D,gpu3d::DensMesh3> ),
-                   "the card's 2D solve integrates a constant, an image, gaussians or a triangle mesh; its 3D solve a constant or a tetrahedral mesh" );
+    constexpr bool D3 = std::is_same_v<D,gpu3d::DensMesh3> || std::is_same_v<D,gpu3d::DensGauss3>;
+    static_assert( DIM == 2 ? ! D3 : ( CONST || D3 ),
+                   "the card's 2D solve integrates a constant, an image, gaussians or a triangle mesh; its 3D solve a constant, a "
+                   "tetrahedral mesh or gaussians" );
     using CardT = typename SolveCard<DIM,V,MEASURES | FACETS | EDGES,TF,TI,D>::type;
     using CardD = typename SolveCard<DIM,VD,MEASURES | FACETS | EDGES,TF,TI,D>::type;
     using MomT  = typename SolveCard<DIM,VD,MEASURES | MOMENTS,TF,TI,D>::type;
@@ -1117,6 +1378,13 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         cuda_check( cudaMemcpyAsync( gap_dev, agg.dup_gap.data(), sizeof( double ) * agg_nb_dups, cudaMemcpyHostToDevice, queue.stream ), "copy of the gaps" );
         if ( ! upload_clusters() ) return;
     }
+    // ---- THE TREE OF AGGREGATES ( `sdotplan/Groups.h`, `CardGroups.cuh` ): the members' cells, Newton's unknowns by levels
+    CardTree<TR,DIM> tree;
+    if ( ! prepare_tree<TR,DIM,TF,TI>( queue, pd, allocator, tree, ids ) )
+        return;
+    tree.set_on( card );
+    if constexpr ( MIXED ) tree.set_on( cardd );
+
     /// the targets with the duplicates' carried by their representatives, for the current `nu`
     auto duplicate_targets_now = [&]() {
         if ( ! nue ) return;
@@ -1148,11 +1416,13 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             launch_kernel( queue, &tie_duplicates, blocks_for( agg_nb_dups ), BLOCK, 0, agg_nb_dups, ( const SI * ) dup_dev, ( const SI * ) drep_dev,
                            ( const double * ) gap_dev, const_cast<double *>( wt ) );
         tm_maj.start( queue );
-        maj.refresh( queue, pd, wt, node_records( card ) );
+        const double *ww = wt;                           // ( GROUPS: Newton's unknowns are the tree's, the cells read the outer weights )
+        if ( tree.on ) { tree.set_weights( queue, wt ); ww = tree.outer; }
+        maj.refresh( queue, pd, ww, node_records( card ) );
         auto run_on = [&]( auto &c ) {
-            pack_card_weights( queue, c, n, wt );
+            pack_card_weights( queue, c, n, ww );
             tm_maj.stop( queue );
-            c.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( wt ), { SI( sizeof( double ) ) } };
+            c.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( ww ), { SI( sizeof( double ) ) } };
             c.pb.res = StridedOut<TF,1>{ reinterpret_cast<char *>( s.a ), { SI( sizeof( double ) ) } };
             c.pb.fi = s.fi; c.pb.fj = s.fj; c.pb.fc = s.fc;
             c.counters = s.counters; c.pb.counters = s.counters;
@@ -1210,6 +1480,8 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         given = m.m != 0;
     } else
         launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, w, 0.0, n );
+    if ( tree.on )                                       // ( the outer weights given, the diagram's virtual weights kept )
+        tree.to_slots( queue, w, true );
     int start = given ? sp::START_GIVEN : sp::START_VORONOI;
     reduce( queue, n, SumOf{ nu }, red1.partials, red1.out );
     Sum1 snu;
@@ -1255,6 +1527,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         for ( int k = 0; k < DIM; ++k )
             b.v[ k ] = ( box_lo[ k ] + box_hi[ k ] ) / 2 - a * ( ext.lo[ k ] + ext.hi[ k ] ) / 2;
         launch_kernel( queue, &similarity_weights<DIM,TF>, blocks_for( n ), BLOCK, 0, n, pos, a, b, w2 );
+        if ( tree.on ) tree.to_slots( queue, w2, false );
         diagram( w2, *tri );
         if ( tri->rep.d.min_a > cur->rep.d.min_a ) { std::swap( cur, tri ); std::swap( w, w2 ); start = sp::START_SIMILARITY; }
     }
@@ -1265,8 +1538,12 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         set_stage( scales[ 0 ] );
         diagram( w, *cur );
     }
-    launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) w, r0, gauge );
-    launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, w, ( const double * ) gauge, 1.0, n );
+    if ( tree.on )                                       // ( the gauge moves the roots' outer weights only )
+        tree.gauge( queue, w, r0 );
+    else {
+        launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) w, r0, gauge );
+        launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, w, ( const double * ) gauge, 1.0, n );
+    }
 
     /// the scale of a facet's coefficient ( `rho |facet| / 2 delta` ): in 2D `l ~ delta`, the density, or the mean density of
     /// the box; in 3D `|facet| ~ delta^2`, times the spacing of the seeds `( |box| / n )^( 1 / 3 )`
@@ -1509,8 +1786,38 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
 
         int st_status = sp::S_RUNNING;
         double t_last = 1;
+        /// MIXED: the double kernel from here on, the accepted diagram measured again with it; `false` on a capacity or a failure
+        auto to_double = [&]( int it, const char *why ) -> bool {
+            use_double = true;
+            it_double = it;
+            if ( trace ) std::printf( "      switch: kernel float -> double ( %s )\n", why );
+            diagram( w, *cur );
+            if ( stop_all ) return false;
+            // the target, rescaled to the domain's mass as the DOUBLE kernel measures it: the float kernel's sum is off by ~1e-11,
+            // which every cell then carried as a residual the double steps could not remove ( a uniform 3e-11 relative floor under
+            // a tight tolerance )
+            const double dm = cur->rep.d.sum_a;
+            if ( dm > 0 && domain_mass > 0 && dm != domain_mass ) {
+                launch_kernel( queue, &scale_values, blocks_for( n ), BLOCK, 0, n, nu, dm / domain_mass );
+                nu_min *= dm / domain_mass;
+                domain_mass = dm;
+                duplicate_targets_now();
+                tau_min = agg.tau( nu_min );
+            }
+            report( *cur );
+            return true;
+        };
         after_step( 0, 0, 1 );
         for ( int it = 0; it < maxit; ++it ) {
+            if constexpr ( MIXED ) {
+                // CLUSTERS ( the aggregation found seeds the doubles cannot separate ) or a TREE OF AGGREGATES: the float kernel
+                // decides the cuts around them wrongly ( measured: 5e-9 of a cell's mass for a triple 1e-10 apart, 1.5e-8 for a pair
+                // 1e-12 apart in a pair 1e-5 apart ), the double kernel from here on
+                if ( ( agg.any() || tree.on ) && ! use_double && ! to_double( it, agg.any() ? "clusters" : "aggregates" ) ) {
+                    st_status = failed ? sp::S_FAILURE : sp::S_CAPACITY;
+                    break;
+                }
+            }
             const double worst = cur->rep.d.max_abs, worst_rel = cur->rep.d.max_rel;
             if ( switch_residual > 0 && res_cur != RES_LIN && worst_rel <= switch_residual ) {
                 res_cur = RES_LIN;
@@ -1544,16 +1851,45 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             card.counters = cur->counters; card.pb.counters = cur->counters;
             // the duplicates' rows linked to their representatives ( `Aggregation::link_duplicates`; the coefficient: the
             // scale of a facet, `rho`, or the mean density of the box )
-            const bool links = agg_nb_dups > 0 && cur->rep.nb_facets + ( unsigned long long ) agg_nb_dups <= ( unsigned long long ) fcap;
+            // GROUPS ( `Groups.h::aggregated` ): the members' facets read for the host's blocks, those inside a root out of the
+            // system, each member linked to its root's slot
+            std::vector<sp::Facet> fa_mem;
+            if ( tree.on ) {
+                zero_fill( queue, tree.fcount, SI( sizeof( unsigned long long ) ) );
+                launch_kernel( queue, &tree_facets<TR>, blocks_for( SI( cur->rep.nb_facets ) ), BLOCK, 0, SI( cur->rep.nb_facets ), cur->fi,
+                               cur->fj, cur->fc, ( const TR * ) tree.root, ( const TR * ) tree.slot, tree.fi, tree.fj, tree.fc, tree.fcount, tree.fcap );
+                unsigned long long cnt = 0;
+                read_back( queue, &cnt, ( const unsigned long long * ) tree.fcount, 1 );
+                const SI nf = std::min<SI>( SI( cnt ), tree.fcap );
+                if ( SI( cnt ) > tree.fcap )
+                    std::printf( "sdot: the members' facets past their room ( %lld > %lld ): the direction is approximate\n", ( long long ) cnt, ( long long ) tree.fcap );
+                std::vector<TR> hi( nf ), hj( nf );
+                std::vector<double> hc( nf );
+                if ( nf ) {
+                    read_back( queue, hi.data(), ( const TR * ) tree.fi, nf );
+                    read_back( queue, hj.data(), ( const TR * ) tree.fj, nf );
+                    read_back( queue, hc.data(), ( const double * ) tree.fc, nf );
+                }
+                for ( SI q = 0; q < nf; ++q ) {
+                    fa_mem.push_back( sp::Facet{ SI( hi[ q ] ), SI( hj[ q ] ), hc[ q ] } );
+                    fa_mem.push_back( sp::Facet{ SI( hj[ q ] ), SI( hi[ q ] ), hc[ q ] } );
+                }
+                // ( in the order of the ranks: the atomic of the copy gives them in any order, the host's sums must not depend on it )
+                std::sort( fa_mem.begin(), fa_mem.end(), []( const sp::Facet &a, const sp::Facet &b ) {
+                    return a.i != b.i ? a.i < b.i : a.j != b.j ? a.j < b.j : a.c < b.c; } );
+            }
+            const SI nlk = tree.on ? tree.nl : agg_nb_dups;
+            const SI *lki = tree.on ? tree.link_i : dup_dev, *lkj = tree.on ? tree.link_j : drep_dev;
+            const bool links = nlk > 0 && cur->rep.nb_facets + ( unsigned long long ) nlk <= ( unsigned long long ) fcap;
             if ( links ) {
                 const double c_link = c_scale;
-                launch_kernel( queue, &append_links<TR>, blocks_for( agg_nb_dups ), BLOCK, 0, agg_nb_dups, ( const SI * ) dup_dev, ( const SI * ) drep_dev,
+                launch_kernel( queue, &append_links<TR>, blocks_for( nlk ), BLOCK, 0, nlk, lki, lkj,
                                c_link, cur->rep.nb_facets, cur->fi, cur->fj, cur->fc );
-                launch_kernel( queue, &bump_facets, 1, 1, 0, cur->counters, ( long long ) agg_nb_dups );
+                launch_kernel( queue, &bump_facets, 1, 1, 0, cur->counters, ( long long ) nlk );
             }
             assemble_laplacian_in( queue, card, lws, lrow, lcol, lval, ldia );
             if ( links )
-                launch_kernel( queue, &bump_facets, 1, 1, 0, cur->counters, - ( long long ) agg_nb_dups );
+                launch_kernel( queue, &bump_facets, 1, 1, 0, cur->counters, - ( long long ) nlk );
             // the pairs whose plane the doubles can no longer place are merged ( `Aggregation.h` ): the merit reads their
             // clusters from here on ( before `b`, whose room the shares take )
             if ( detect() ) {
@@ -1577,12 +1913,23 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             if ( rows_ok )                               // ( `b` at the members, for the correction after the solve )
                 launch_kernel( queue, &gather_at, blocks_for( SI( rows_dir.all.size() ) ), BLOCK, 0, SI( rows_dir.all.size() ), ( const SI * ) rs_mem,
                                ( const double * ) b, rs_nu );
+            std::vector<double> b_tree;                  // GROUPS: the members' right-hand side, before it is summed onto the roots
+            if ( tree.on ) {
+                CardTree<TR,DIM>::down( queue, b_tree, b, n );
+                std::vector<double> br( n, 0.0 );
+                for ( SI i = 0; i < n; ++i ) br[ tree.gs.root_of[ i ] ] += b_tree[ i ];
+                CardTree<TR,DIM>::up( queue, b, br );
+            }
             tm_asm.stop( queue );
 
             // the direction
             const double tl0 = wall_now();
-            bool solved = lin_kind == LIN_HOST ? host.solve( queue, L, b, d )
-                        : lin_float ? linf.solve( queue, allocator, L, b, d ) : lin.solve( queue, allocator, L, b, d );
+            auto lin_solve = [&]( const double *rhs, double *x ) {
+                double *r = const_cast<double *>( rhs );
+                return lin_kind == LIN_HOST ? host.solve( queue, L, r, x )
+                     : lin_float ? linf.solve( queue, allocator, L, r, x ) : lin.solve( queue, allocator, L, r, x );
+            };
+            bool solved = lin_solve( b, d );
             if ( ! solved && lin_kind != LIN_HOST ) {
                 // THE FALLBACK: the card's solver has limits that a pathological laplacian can pass ( a row of thousands of
                 // entries: a seed facing a long line of seeds ). The CPU solver of `Linear.cpp` takes it, on a copy of the
@@ -1610,8 +1957,40 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                                ( const SI * ) cl_mem_dev, tg, d );
                 correct_direction();
             }
-            launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) d, r0, gauge );
-            launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, d, ( const double * ) gauge, 1.0, n );
+            if ( tree.on ) {
+                // GROUPS ( `Groups.h::direction` ): the roots' slots from the solve, then the aggregates' blocks on the host, and
+                // when the levels are coupled ( distinct positions: `o^2 v` moves the outer weights ) block Gauss-Seidel, each
+                // sweep one more solve of the roots' system for what the inner levels moved
+                const sp::GroupStructure &gs = tree.gs;
+                std::vector<double> dh, flux0( n, 0.0 ), flux, corr( n, 0.0 ), dx;
+                CardTree<TR,DIM>::down( queue, dh, d, n );
+                for ( SI i = 0; i < n; ++i ) if ( ! gs.root_slot[ i ] ) dh[ i ] = 0;
+                sp::GroupStructure::FacetIndex fx;
+                gs.index_facets( fa_mem, fx );
+                const int max_sweeps = gs.coupled ? gs.sweeps : 1;
+                for ( int sweep = 0; sweep < max_sweeps && solved; ++sweep ) {
+                    double change = 0, size = 0;
+                    if ( sweep > 0 ) {
+                        gs.inner_flux( fa_mem, dh, flux );
+                        for ( SI i = 0; i < n; ++i ) corr[ i ] = - ( flux[ i ] - flux0[ i ] );
+                        flux0 = flux;
+                        CardTree<TR,DIM>::up( queue, b, corr );
+                        if ( ! ( solved = lin_solve( b, d ) ) ) break;
+                        CardTree<TR,DIM>::down( queue, dx, d, n );
+                        for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) { dh[ i ] += dx[ i ]; change = std::max( change, std::fabs( dx[ i ] ) ); }
+                    }
+                    for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) size = std::max( size, std::fabs( dh[ i ] ) );
+                    change = std::max( change, gs.blocks( fa_mem, fx, b_tree, dh ) );
+                    if ( sweep > 0 && ! ( change > gs.sweep_rtol * size ) ) break;
+                }
+                const double g = dh[ r0 ];
+                for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) dh[ i ] -= g;
+                CardTree<TR,DIM>::up( queue, d, dh );
+                if ( ! solved ) { st_status = sp::S_LINEAR_FAILURE; break; }
+            } else {
+                launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) d, r0, gauge );
+                launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, d, ( const double * ) gauge, 1.0, n );
+            }
 
             // ---- the step
             double t = std::min( 1.0, mult_ok * t_last );
@@ -1702,23 +2081,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                 if ( ! taken && ! use_double ) {
                     // THE FLOAT KERNEL STAGNATES ( a cut decided in float on a degenerate cloud: its merit stops decreasing ):
                     // the double kernel from here on, the accepted diagram measured again with it, and the iteration done again
-                    use_double = true;
-                    it_double = it;
-                    if ( trace ) std::printf( "      switch: kernel float -> double ( the float step stagnates )\n" );
-                    diagram( w, *cur );
-                    if ( stop_all ) { st_status = failed ? sp::S_FAILURE : sp::S_CAPACITY; break; }
-                    // the target, rescaled to the domain's mass as the DOUBLE kernel measures it: the float kernel's sum is off
-                    // by ~1e-11, which every cell then carried as a residual the double steps could not remove ( a uniform
-                    // 3e-11 relative floor under a tight tolerance )
-                    const double dm = cur->rep.d.sum_a;
-                    if ( dm > 0 && domain_mass > 0 && dm != domain_mass ) {
-                        launch_kernel( queue, &scale_values, blocks_for( n ), BLOCK, 0, n, nu, dm / domain_mass );
-                        nu_min *= dm / domain_mass;
-                        domain_mass = dm;
-                        duplicate_targets_now();
-                        tau_min = agg.tau( nu_min );
-                        report( *cur );
-                    }
+                    if ( ! to_double( it, "the float step stagnates" ) ) { st_status = failed ? sp::S_FAILURE : sp::S_CAPACITY; break; }
                     continue;
                 }
             }
@@ -1780,18 +2143,37 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         }
     }
 
+    // ---- GROUPS: the roots as the clusters, the weights seed by seed ( `groups.py`'s ), the tree's virtual weights
+    const double *w_diag = w;                            // ( the diagram's weights: the outer ones with groups )
+    if ( tree.on ) {
+        using TCl = std::remove_const_t<typename std::decay_t<decltype( clusters_out )>::TF>;
+        std::vector<double> x, wu, reps( n );
+        CardTree<TR,DIM>::down( queue, x, w, n );
+        tree.gs.weights_of( x, wu );
+        for ( SI k = 0; k < n; ++k ) reps[ k ] = double( tree.first_user[ tree.gs.root_of[ k ] ] );
+        CardTree<TR,DIM>::up( queue, w2, wu );
+        CardTree<TR,DIM>::up( queue, b, reps );
+        launch_kernel( queue, &scatter_ranks<TCl,TI>, blocks_for( n ), BLOCK, 0, n, ( const double * ) b, ids, strided_out<TCl,1>( clusters_out ) );
+        tree.set_weights( queue, w );
+        w_diag = tree.outer;
+        if constexpr ( requires { group_v_out.data(); } )
+            launch_kernel( queue, &write_strided<TF>, blocks_for( n ), BLOCK, 0, n, ( const double * ) tree.v, strided_out<TF,1>( group_v_out ) );
+        if constexpr ( requires { group_agg_v_out.data(); } )
+            if ( tree.m ) launch_kernel( queue, &write_strided<TF>, blocks_for( tree.m ), BLOCK, 0, tree.m, ( const double * ) tree.agg_v, strided_out<TF,1>( group_agg_v_out ) );
+    }
+
     // ---- what comes out: the weights and the measures ( user order ), the diagram's weights and majorants
-    launch_kernel( queue, &scatter_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, ( const double * ) w, ids, strided_out<TF,1>( weights ) );
+    launch_kernel( queue, &scatter_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, ( const double * ) ( tree.on ? w2 : w ), ids, strided_out<TF,1>( weights ) );
     launch_kernel( queue, &scatter_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, ( const double * ) cur->a, ids, strided_out<TF,1>( masses ) );
-    launch_kernel( queue, &write_strided<TF>, blocks_for( n ), BLOCK, 0, n, ( const double * ) w, strided_out<TF,1>( sorted_weights_out ) );
-    maj.refresh( queue, pd, w, node_records( card ), strided_out<TF,2>( node_wa_out ), strided_out<TF,1>( node_wb_out ) );
+    launch_kernel( queue, &write_strided<TF>, blocks_for( n ), BLOCK, 0, n, w_diag, strided_out<TF,1>( sorted_weights_out ) );
+    maj.refresh( queue, pd, w_diag, node_records( card ), strided_out<TF,2>( node_wa_out ), strided_out<TF,1>( node_wb_out ) );
     // ---- THE MOMENTS on the TRUE density ( `s = 0`, whatever stage the solve stopped at ) at the fitted weights ( barycentres,
     // the cost ), a last walk -- by the double kernel ( mixed in 2D, or once a 3D mixed solve switched to it ), or by the one
     // kernel of the solve. A 3D mixed solve that the float kernel finished takes them in float: its vertices are re-solved
     // in double like the cells it converged on, and a double 3D walk costs four float ones ( 56 against 12 ms at 1e5 )
     auto moments_on = [&]( auto &cm, auto mom_type ) {
         using M = typename decltype( mom_type )::type;
-        pack_card_weights( queue, cm, n, ( const double * ) w );
+        pack_card_weights( queue, cm, n, w_diag );
         if ( stop_all )
             return;
         // the moments' card borrows the one of its kernel ( nodes, seeds, lists, finish store ), and writes its measures
@@ -1808,7 +2190,8 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         }
         mom.pb.nodes = card.pb.nodes;
         if constexpr ( DIM == 2 ) mom.pb.w = cm.pb.w;     // ( 3D: the seeds, borrowed )
-        mom.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( w ), { SI( sizeof( double ) ) } };
+        mom.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( w_diag ), { SI( sizeof( double ) ) } };
+        tree.set_on( mom );
         mom.pb.user_order = true;
         mom.pb.res = StridedOut<TF,1>{ reinterpret_cast<char *>( mres ), { SI( sizeof( double ) ) } };
         mom.pb.bary = strided_out<TF,2>( bary );
@@ -1864,6 +2247,8 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     st[ sp::NB_CLUSTERS ] = double( agg.nb_clusters() );
     st[ sp::NB_AGGREGATED ] = double( agg.nb_aggregated() );
     st[ sp::NB_DUPLICATES ] = double( agg.dups.size() );
+    if ( tree.on )                                       // ( the tree of aggregates: its roots, their seeds, the duplicates )
+        tree.gs.counts( st[ sp::NB_CLUSTERS ], st[ sp::NB_AGGREGATED ], st[ sp::NB_DUPLICATES ] );
     st[ sp::RESIDUAL_FULL ] = full;
     st[ sp::NB_POLISH ] = double( nb_polish );
     ( void ) t_lim_host;
@@ -1954,6 +2339,219 @@ void linear_solves( const CudaQueue &queue, const auto &row_in, const auto &col_
     cuda_check( cudaMemcpyAsync( hits, its.data(), sizeof( double ) * k, cudaMemcpyHostToDevice, queue.stream ), "copy of the counts" );
     launch_kernel( queue, &write_strided<double>, 1, BLOCK, 0, k, ( const double * ) hits, strided_out<double,1>( its_out ) );
     cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( counts )" );
+}
+
+// ---- the solve of the adjoint ( `PowerDiagram.laplacian_solve` on the card ) ---------------------------------------------------
+
+/// `x = L^+ rhs` ON THE CARD, `L` the laplacian of the diagram `pd` at its weights `w_in` ( user order ) for the density `dens_in`
+/// -- what the derivative of a plan asks for ( `SdotPlanNd._attach_derivatives`: the implicit function theorem ), the CPU's being
+/// `sdotplan/Adjoint.h`. The same pieces as an iteration of `solve`: the diagram with its facets ( `MEASURES | FACETS` ), the
+/// laplacian assembled in ranks, the card's linear solver ( or the CPU's on a copy, `O_LIN == LIN_HOST`, and as a fallback ). The
+/// gauge is the CPU's: `x[ 0 ] = 0` in user order. `batch_axes`: a `vmap` of `rhs` ( `jax.jacrev` ) -- one diagram, one matrix, a
+/// solve per item. `opts_in`: `NB_OPTS` reals, those of `solve` ( the linear solver's and the image's geometry are read ).
+/// `work.nb_facets`: the capacity of the facets ( past it, loom runs the call again -- the forward's: `FWD = false`, the backward,
+/// reads it, the diagram being the same ). A linear solve that fails leaves NaNs.
+template<class V,bool FWD = true>
+void laplacian_solve( const CudaQueue &queue, const auto &batch_axes, const auto &pd, const auto &w_in, const auto &rhs, const auto &opts_in,
+                      auto &&x, auto &&work, const auto &errors_, auto &allocator, const auto &dens_in, int max_vertices, int overflow_warps ) {
+    using PD = std::decay_t<decltype( pd )>;
+    using TF = TFOf<PD>;
+    using TI = TIOf<PD>;
+    using TR = typename V::TR;
+    using TN = typename V::TN;
+    using DH = typename DensityHostOf<std::decay_t<decltype( dens_in )>>::type;
+    using D  = typename DH::Dev;
+    constexpr bool CONST = std::is_same_v<D,DensConst>;
+    constexpr int DIM = PD::ct_dim;
+    static_assert( DIM == 2 || DIM == 3, "the card's laplacian is 2D or 3D" );
+    using CardT = typename SolveCard<DIM,V,MEASURES | FACETS,TF,TI,D>::type;
+
+    const SI n = SI( pd.nb_seeds() );
+    if constexpr ( requires { allocator.why; } )
+        allocator.why = "It was the card's laplacian solve of " + std::to_string( n ) + " seeds ( the derivative of a plan, "
+                        "`PowerDiagram.laplacian_solve`, `gpu/Newton2D.cuh` ). Give XLA more of the card ( XLA_PYTHON_CLIENT_MEM_FRACTION ), "
+                        "or differentiate on the CPU ( LOOM_DEVICE=cpu )";
+    const auto errors = sdot::kernel_form( queue, MutList(), errors_ );
+    const auto ids = strided( pd.tree.seed_indices );
+    auto vec = [&]( SI m ) { return static_cast<double *>( take( allocator, SI( sizeof( double ) ) * std::max<SI>( m, 1 ) ) ); };
+
+    std::vector<double> o( NB_OPTS, 0.0 );
+    {
+        double *tmp = vec( NB_OPTS );
+        if ( ! tmp ) return;
+        launch_kernel( queue, &read_strided<TF>, 1, BLOCK, 0, SI( NB_OPTS ), strided( opts_in ), tmp );
+        read_back( queue, o.data(), ( const double * ) tmp, SI( NB_OPTS ) );
+    }
+
+    // ---- the cells' last pass, the density, the card
+    using Ovf = std::conditional_t<DIM == 2, Overflow, gpu3d::Slots>;
+    Ovf overflow = Ovf::sized( n + start_count( pd ), overflow_warps, max_vertices );
+    overflow.bytes = overflow.template bytes_for<typename V::TK,TR>();
+    unsigned char *ovf_ptr = static_cast<unsigned char *>( take( allocator, overflow.bytes ) );
+    if ( ! ovf_ptr )
+        return;
+    if constexpr ( DIM == 2 ) overflow.slots = ovf_ptr; else overflow.ptr = ovf_ptr;
+    DH dh;
+    if constexpr ( ! CONST )
+        if ( ! dh.prepare( queue, allocator, dens_in, &o[ O_IMG_X0 ] ) )
+            return;
+    CardT card;
+    if ( ! card.prepare( queue, pd, allocator, overflow ) )
+        return;
+    // GROUPS ( `Adjoint.h` ): the ROOT LEVEL -- the members' cells by their own pass at the diagram's virtual weights, the facets
+    // inside a root out of the system, the others onto the roots' slots, each member linked to its root's; `rhs` summed over each
+    // root, `x` its root's for every member
+    CardTree<TR,DIM> tree;
+    if ( ! prepare_tree<TR,DIM,TF,TI>( queue, pd, allocator, tree, ids ) )
+        return;
+    if ( tree.on )
+        tree.own_weights( queue );
+    tree.set_on( card );
+    if constexpr ( CONST )
+        set_density( card.pb, dens_in );
+    else {
+        dh.at( queue, 0, false );                        // ( the true density: no continuation here )
+        card.pb.dens = dh.dev;
+    }
+    card.pb.user_order = false;
+    // the capacity of the facets: the forward's, grown by loom; the backward ( same diagram ) reads the count the forward wrote
+    SI fcap = std::max<SI>( SI( work.nb_facets.max ), 1 );
+    if constexpr ( ! FWD ) {
+        SI *cnt_dev = static_cast<SI *>( take( allocator, SI( sizeof( SI ) ) ) );
+        if ( ! cnt_dev ) return;
+        launch_kernel( queue, &get_shape_var<std::decay_t<decltype( sdot::kernel_form( queue, InpList(), work.nb_facets ) )>>, 1, 1, 0,
+                       sdot::kernel_form( queue, InpList(), work.nb_facets ), cnt_dev );
+        SI c = 0;
+        read_back( queue, &c, ( const SI * ) cnt_dev, 1 );
+        fcap = std::max<SI>( c, 1 );
+    }
+    card.pb.fcap = fcap;
+
+    // ---- the facets ( COO ), the measures, the counters, the laplacian, the vectors
+    const SI coo_bytes = ( SI( sizeof( double ) ) + 2 * SI( sizeof( TR ) ) ) * fcap;
+    auto *coo = static_cast<unsigned char *>( take( allocator, coo_bytes ) );
+    double *a = vec( n ), *w = vec( n ), *b = vec( n ), *d = vec( n ), *one = vec( 1 );
+    Counters *counters = static_cast<Counters *>( take( allocator, SI( sizeof( Counters ) ) ) );
+    SI *r0_dev = static_cast<SI *>( take( allocator, SI( sizeof( SI ) ) ) );
+    const SI nnz_cap = 2 * fcap;
+    SI *lrow = static_cast<SI *>( take( allocator, SI( sizeof( SI ) ) * ( n + 1 ) ) );
+    TR *lcol = static_cast<TR *>( take( allocator, SI( sizeof( TR ) ) * nnz_cap ) );
+    double *lval = vec( nnz_cap ), *ldia = vec( n );
+    LapWork<SI> lws;
+    RedSlot<Sum1> red1;
+    if ( ! coo || ! a || ! w || ! b || ! d || ! one || ! counters || ! r0_dev || ! lrow || ! lcol || ! lval || ! ldia
+         || ! lws.take_from( allocator, n ) || ! red1.take_from( allocator ) )
+        return;
+    double *fc = reinterpret_cast<double *>( coo );
+    TR *fi = reinterpret_cast<TR *>( coo + SI( sizeof( double ) ) * fcap ), *fj = fi + fcap;
+    zero_fill( queue, counters, SI( sizeof( Counters ) ) );
+
+    // ---- the diagram at `w_in` ( ranks ), its majorants first
+    std::conditional_t<DIM == 2, Majorants<TR,TN>, gpu3d::MajorantsN<3,TR,TN>> maj;
+    if ( ! maj.prepare( allocator, pd ) )
+        return;
+    launch_kernel( queue, &gather_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, strided( w_in ), ids, w );
+    maj.refresh( queue, pd, w, node_records( card ) );
+    pack_card_weights( queue, card, n, w );
+    card.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( w ), { SI( sizeof( double ) ) } };
+    card.pb.res = StridedOut<TF,1>{ reinterpret_cast<char *>( a ), { SI( sizeof( double ) ) } };
+    card.pb.fi = fi; card.pb.fj = fj; card.pb.fc = fc;
+    card.counters = counters; card.pb.counters = counters;
+    card.run( queue, errors );
+    Counters cnt;
+    read_back( queue, &cnt, ( const Counters * ) counters, 1 );
+    // the capacity of the facets, the links of the members included ( written into its ShapeVar: past it, loom runs the call again )
+    const unsigned long long nb_coo = cnt.nb_facets + ( unsigned long long ) ( tree.on ? tree.nl : 0 );
+    if constexpr ( FWD )
+        launch_kernel( queue, &set_shape_var<std::decay_t<decltype( sdot::kernel_form( queue, MutList(), work.nb_facets ) )>>, 1, 1, 0,
+                       sdot::kernel_form( queue, MutList(), work.nb_facets ), SI( nb_coo ) );
+    if ( nb_coo > ( unsigned long long ) fcap || cnt.nb_failed > 0 )
+        return;
+    if ( tree.on ) {
+        zero_fill( queue, tree.fcount, SI( sizeof( unsigned long long ) ) );
+        launch_kernel( queue, &tree_facets<TR>, blocks_for( SI( cnt.nb_facets ) ), BLOCK, 0, SI( cnt.nb_facets ), fi, fj, fc,
+                       ( const TR * ) tree.root, ( const TR * ) tree.slot, tree.fi, tree.fj, tree.fc, tree.fcount, SI( 0 ) );
+        if ( tree.nl > 0 ) {
+            // ( the coefficient of a link only weighs on the members' own unknowns, which are not read: the scale of a facet's,
+            // `rho` or the mean density of the box, times the spacing in 3D -- as in `solve` )
+            double lo_h[ DIM ], hi_h[ DIM ], vol = 1, rho = 1;
+            read_back( queue, lo_h, reinterpret_cast<const double *>( pd.box_min.data().raw ), DIM );
+            read_back( queue, hi_h, reinterpret_cast<const double *>( pd.box_max.data().raw ), DIM );
+            for ( int k = 0; k < DIM; ++k ) vol *= hi_h[ k ] - lo_h[ k ];
+            if constexpr ( CONST ) {
+                if constexpr ( requires { dens_in.data().raw; } ) read_back( queue, &rho, reinterpret_cast<const double *>( dens_in.data().raw ), 1 );
+                else rho = double( dens_in );
+            }
+            const double c_link = ( CONST ? rho : 1.0 / std::max( vol, 1e-300 ) ) * ( DIM == 3 ? std::cbrt( vol / double( std::max<SI>( n, 1 ) ) ) : 1.0 );
+            launch_kernel( queue, &append_links<TR>, blocks_for( tree.nl ), BLOCK, 0, tree.nl, ( const SI * ) tree.link_i, ( const SI * ) tree.link_j,
+                           c_link, cnt.nb_facets, fi, fj, fc );
+            launch_kernel( queue, &bump_facets, 1, 1, 0, counters, ( long long ) tree.nl );
+        }
+    }
+    assemble_laplacian_in( queue, card, lws, lrow, lcol, lval, ldia );
+    const CsrView<TR> L{ n, lrow, lcol, lval, ldia };
+
+    // ---- the linear solver: the card's in double ( a derivative wants more than a Newton direction: `1e-10` by default ), or the CPU's
+    LinOptions lo;
+    lo.method = int( o[ O_LIN ] ) == LIN_CG ? 0 : 1;
+    lo.tol = o[ O_LIN_TOL ] > 0 ? o[ O_LIN_TOL ] : 1e-10;
+    if ( o[ O_MG_SHIFT ] > 0 ) lo.shift = int( o[ O_MG_SHIFT ] );
+    if ( o[ O_MG_NU ] > 0 ) lo.nu = int( o[ O_MG_NU ] );
+    CardLinear<TR,double> lin;
+    HostLinear<TR> host;
+    bool on_host = int( o[ O_LIN ] ) == LIN_HOST;
+    auto to_host = [&]() {
+        sp::LinearOptions hl;
+        hl.tol = lo.tol;
+        host.prepare( on_host ? int( o[ O_HOST_METHOD ] ) : int( sp::Lin::AUTO ), n, hl );
+        on_host = true;
+    };
+    if ( on_host )
+        to_host();
+    else if ( ! lin.prepare( allocator, n, nnz_cap, lo, &lws, coo, coo_bytes ) )
+        return;
+
+    // the gauge: the rank of the user's seed 0
+    zero_fill( queue, r0_dev, SI( sizeof( SI ) ) );
+    launch_kernel( queue, &find_rank0<TI>, blocks_for( n ), BLOCK, 0, n, ids, r0_dev );
+    SI r0 = 0;
+    read_back( queue, &r0, ( const SI * ) r0_dev, 1 );
+    if ( tree.on )                                       // ( the gauge on its root's slot )
+        r0 = tree.gs.root_of[ r0 ];
+    double *rs = tree.on ? vec( n ) : nullptr;
+    if ( tree.on && ! rs )
+        return;
+
+    for ( SI item = 0; item < SI( batch_axes.size() ); ++item ) {
+        const auto batch_index = batch_axes[ item ];
+        // the right-hand side in ranks; as on the CPU, the row of the gauge seed is not an equation: it takes the opposite of the
+        // others' sum ( a cotangent sums to anything: `x` must then be the CPU's, `L` restricted to the other rows, `x[ r0 ] = 0` )
+        launch_kernel( queue, &gather_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, strided( rhs( batch_index ) ), ids, b );
+        if ( tree.on && tree.nm ) {
+            launch_kernel( queue, &root_sums<TR>, blocks_for( tree.nm ), BLOCK, 0, tree.nm, ( const TR * ) tree.mem, ( const TR * ) tree.slot,
+                           ( const TR * ) tree.next, ( const double * ) b, rs );
+            launch_kernel( queue, &root_rows<TR>, blocks_for( tree.nm ), BLOCK, 0, tree.nm, ( const TR * ) tree.mem, ( const TR * ) tree.slot,
+                           ( const double * ) rs, b );
+        }
+        reduce( queue, n, SumOf{ b }, red1.partials, red1.out );
+        launch_kernel( queue, &gauge_row, 1, 1, 0, b, r0, reinterpret_cast<const double *>( red1.out ) );
+        bool solved = on_host ? host.solve( queue, L, b, d ) : lin.solve( queue, allocator, L, b, d );
+        if ( ! solved && ! on_host ) {                   // ( the card's solver has limits a pathological laplacian can pass: the CPU's )
+            to_host();
+            solved = host.solve( queue, L, b, d );
+        }
+        double g = std::numeric_limits<double>::quiet_NaN();     // ( `d - d[ r0 ]` )
+        if ( solved ) {
+            launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) d, r0, one );
+            read_back( queue, &g, ( const double * ) one, 1 );
+        }
+        if ( tree.on )
+            launch_kernel( queue, &root_values<TR>, blocks_for( n ), BLOCK, 0, n, ( const TR * ) tree.slot, ( const double * ) d, g, b );
+        else
+            launch_kernel( queue, &shifted_copy, blocks_for( n ), BLOCK, 0, n, ( const double * ) d, g, b );
+        launch_kernel( queue, &scatter_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, ( const double * ) b, ids, strided_out<TF,1>( x( batch_index ) ) );
+    }
+    cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( laplacian solve )" );
 }
 
 } // namespace sdot::gpu2d

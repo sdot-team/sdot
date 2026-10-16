@@ -115,6 +115,11 @@ class Distribution( Aggregate ):
         when `blocks[ p ] < 0`. A cell that has no mass anywhere has no piece. Choosing too many blocks only costs empty pieces."""
         raise NotImplementedError
 
+    @property
+    def domain( self ):
+        """The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets."""
+        return self.bounding_half_spaces()
+
     def bounding_half_spaces( self ):
         """The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
 

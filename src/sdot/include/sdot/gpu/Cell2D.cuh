@@ -66,6 +66,7 @@
 #include <loom/support/kernels/CudaQueue.h>
 #include <loom/support/common_types.h>
 #include "Density2D.cuh"
+#include "CardGroups.cuh"
 #include <loom/support/Ct.h>
 #include <cuda_runtime.h>
 #include <chrono>
@@ -159,6 +160,32 @@ __device__ __forceinline__ Plane<double,TR> bisector( const Frame<double> &f, do
     return p;
 }
 
+/// THE BISECTOR WITH AN IMAGE ( periodicity ): the seed `q` translated by `( sx, sy )`. In float the translation joins the
+/// difference of the high parts ( both are sizes of the domain ), before the low parts.
+template<bool W,class TR>
+__device__ __forceinline__ Plane<float,TR> bisector( const Frame<float> &f, float4 q, float2 wq, TR id, double sx, double sy ) {
+    Plane<float,TR> p;
+    p.dx  = ( ( q.x - f.xh ) + float( sx ) ) + ( q.z - f.xl );
+    p.dy  = ( ( q.y - f.yh ) + float( sy ) ) + ( q.w - f.yl );
+    p.off = 0.5f * ( p.dx * p.dx + p.dy * p.dy );
+    if constexpr ( W )
+        p.off += 0.5f * ( ( f.wh - wq.x ) + ( f.wl - wq.y ) );
+    p.id  = id;
+    return p;
+}
+
+template<bool W,class TR>
+__device__ __forceinline__ Plane<double,TR> bisector( const Frame<double> &f, double2 q, double wq, TR id, double sx, double sy ) {
+    Plane<double,TR> p;
+    p.dx  = ( q.x + sx ) - f.x;
+    p.dy  = ( q.y + sy ) - f.y;
+    p.off = 0.5 * ( p.dx * p.dx + p.dy * p.dy );
+    if constexpr ( W )
+        p.off += 0.5 * ( f.w - wq );
+    p.id  = id;
+    return p;
+}
+
 // ---- the tree, as the kernel reads it --------------------------------------------------------------------
 
 /// ONE NODE, one aligned record in float: the threads of a warp read DIFFERENT nodes ( the walks diverge ), so what
@@ -175,20 +202,26 @@ struct alignas( 16 ) Box { float lo[ 2 ], hi[ 2 ]; };
 /// constant `c = w0 - b - a . p0` of the majorant ( `w( q ) <= a . q + b` )
 struct CBox { float lo[ 2 ], hi[ 2 ], a[ 2 ], c; };
 
+/// `( sx, sy )`: the translation of an IMAGE of the tree ( periodicity, zero otherwise ), with the majorant rewritten for the
+/// translated seeds, `w( q ) <= a . ( q - s ) + b`
 template<bool W,class TR>
-__device__ __forceinline__ CBox centred( const Node<W,TR> &nd, const Frame<float> &f ) {
+__device__ __forceinline__ CBox centred( const Node<W,TR> &nd, const Frame<float> &f, float sx = 0.f, float sy = 0.f ) {
     CBox B;
     // the box is rounded OUTWARD ( `make_nodes` ), and its distance to the seed is taken on both halves of
-    // the seed: an error relative to that distance, not to the coordinates
-    B.lo[ 0 ] = ( nd.lo[ 0 ] - f.xh ) - f.xl;
-    B.lo[ 1 ] = ( nd.lo[ 1 ] - f.yh ) - f.yl;
-    B.hi[ 0 ] = ( nd.hi[ 0 ] - f.xh ) - f.xl;
-    B.hi[ 1 ] = ( nd.hi[ 1 ] - f.yh ) - f.yl;
+    // the seed: an error relative to that distance, not to the coordinates. A translation widens it by a few ulps of itself.
+    B.lo[ 0 ] = ( ( nd.lo[ 0 ] - f.xh ) + sx ) - f.xl;
+    B.lo[ 1 ] = ( ( nd.lo[ 1 ] - f.yh ) + sy ) - f.yl;
+    B.hi[ 0 ] = ( ( nd.hi[ 0 ] - f.xh ) + sx ) - f.xl;
+    B.hi[ 1 ] = ( ( nd.hi[ 1 ] - f.yh ) + sy ) - f.yl;
+    if ( sx != 0.f || sy != 0.f ) {
+        const float m = 4e-7f * ( fabsf( sx ) + fabsf( sy ) );
+        B.lo[ 0 ] -= m; B.lo[ 1 ] -= m; B.hi[ 0 ] += m; B.hi[ 1 ] += m;
+    }
     if constexpr ( W ) {
         B.a[ 0 ] = nd.a[ 0 ];
         B.a[ 1 ] = nd.a[ 1 ];
         // the margin of `b` ( `AaBsp._weight_majorant`, 1e-6 of the scale ) is far above these roundings
-        B.c = ( ( f.wh - nd.b ) + f.wl ) - ( nd.a[ 0 ] * f.xh + nd.a[ 1 ] * f.yh );
+        B.c = ( ( f.wh - nd.b ) + f.wl ) - ( nd.a[ 0 ] * ( f.xh - sx ) + nd.a[ 1 ] * ( f.yh - sy ) );
     } else {
         B.a[ 0 ] = B.a[ 1 ] = B.c = 0;
     }
@@ -252,9 +285,9 @@ __device__ __forceinline__ bool vertex_may_go( const CBox &B, double vxd, double
 }
 
 /// the squared distance from the seed to a box: the ORDER of two children, not a test
-__device__ __forceinline__ float proximity( const Box &b, const Frame<float> &f ) {
-    const float ex = fmaxf( fmaxf( b.lo[ 0 ] - f.xh, f.xh - b.hi[ 0 ] ), 0.f );
-    const float ey = fmaxf( fmaxf( b.lo[ 1 ] - f.yh, f.yh - b.hi[ 1 ] ), 0.f );
+__device__ __forceinline__ float proximity( const Box &b, const Frame<float> &f, float sx = 0.f, float sy = 0.f ) {
+    const float ex = fmaxf( fmaxf( b.lo[ 0 ] + sx - f.xh, f.xh - b.hi[ 0 ] - sx ), 0.f );
+    const float ey = fmaxf( fmaxf( b.lo[ 1 ] + sy - f.yh, f.yh - b.hi[ 1 ] - sy ), 0.f );
     return ex * ex + ey * ey;
 }
 
@@ -399,6 +432,14 @@ struct Problem {
     [[no_unique_address]] D dens;                        ///< ... or a density ( `Density2D.cuh` ), integrated on the edges
     bool              user_order;                        ///< per-cell outputs at the user's index ( else at the rank )
 
+    // ---- GROUPS ( `CardGroups.cuh` ): the tree of aggregates, in ranks ( `grp.on()` false: none )
+    sdot::gpu::CardGroups<TR,2> grp;
+
+    // ---- PERIODICITY ( `diagram/Common.h` ): image `t` of the seed of rank `j` is the cut `j + n t`, at `pos( j ) + img( t )`.
+    // `nimg == 1`: no images ( translations only on the card )
+    Strided<TF,2>     img;
+    int               nimg = 1;
+
     // ---- what the cells write ( see `Out` )
     StridedOut<TF,1>  res;                               ///< MEASURES
     TR               *fi, *fj;                          ///< FACETS: the COO of the upper facets, in ranks
@@ -416,6 +457,31 @@ struct Problem {
     __device__ __forceinline__ double density() const { return rho_dev ? double( *rho_dev ) : rho; }
     __device__ __forceinline__ Wt weight( TR q ) const { if constexpr ( W ) return w[ q ]; else return Wt{}; }
     __device__ __forceinline__ SI user( TR k ) const { return user_order ? SI( ids( k ) ) : SI( k ); }
+    /// GROUPS: whether the cell of `k` writes its facet with the seed of rank `j` ( the upper one, or a member's facet with a seed
+    /// outside its root: the member writes it, see `CardGroups.cuh` )
+    __device__ __forceinline__ bool writes_facet( TR k, TR j ) const {
+        if ( grp.on() ) {
+            const bool mk = grp.member( k ), mj = grp.member( j );
+            if ( mk != mj ) return mk;
+            if ( mk && grp.root[ k ] != grp.root[ j ] ) return j > k;
+        }
+        return j > k;
+    }
+
+    /// the rank of the seed of a cut `c >= 0` ( itself, or the seed an image is the image of ), and the translation of its image
+    __device__ __forceinline__ TR seed_of( TR c ) const { return nimg > 1 ? TR( c % n ) : c; }
+    __device__ __forceinline__ double shift( TR c, int d ) const {
+        if ( nimg <= 1 || c < n ) return 0.0;
+        return double( img( SI( c / n ), d ) );
+    }
+    /// the bisector of the cut `c >= 0`, an image or not
+    template<class FR>
+    __device__ __forceinline__ auto plane_of( const FR &f, TR c ) const {
+        if ( nimg <= 1 || c < n )
+            return bisector<W>( f, pos[ c ], weight( c ), c );
+        const TR j = c % n;
+        return bisector<W>( f, pos[ j ], weight( j ), c, shift( c, 0 ), shift( c, 1 ) );
+    }
 };
 
 // ---- the cell in registers -------------------------------------------------------------------------------
@@ -674,6 +740,8 @@ struct WarpCell {
     TK  *x[ 2 ], *y[ 2 ], *s;
     TR  *c[ 2 ];
     int  cur, cap, nb, lane;
+    const TR *skip = nullptr;                            ///< GROUPS: the roots of the ranks, the walk leaving out those of ...
+    TR   skip_root = -1;                                 ///< ... this root ( the members' planes are cut before, `group_pass` )
 
     __device__ __forceinline__ TK  X( int i ) const { return x[ cur ][ i ]; }
     __device__ __forceinline__ TK  Y( int i ) const { return y[ cur ][ i ]; }
@@ -800,7 +868,13 @@ struct WarpCell {
     /// the other, each a full memory latency for a cell that is alone on its warp ), the cuts take them from
     /// the lanes in rank order. Returns `false` when the walk must stop.
     template<class Pb>
-    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Frame<TK> &f, TR beg, TR end ) {
+    __device__ __forceinline__ bool cut_leaf( const Pb &pb, const Frame<TK> &f, TR beg, TR end, TR t = 0 ) {
+        if ( t ) {                                       // an image of the leaf ( periodicity ): one cut after the other
+            for ( TR q = beg; q < end; ++q )
+                if ( ! cut( pb.plane_of( f, q + t * pb.n ) ) )
+                    return false;
+            return true;
+        }
         for ( TR q0 = beg; q0 < end; q0 += 32 ) {
             typename Pb::Pos P{};
             typename Pb::Wt  Q{};
@@ -809,9 +883,14 @@ struct WarpCell {
                 Q = pb.weight( q0 + lane );
             }
             const int nq = int( min( TR( 32 ), TR( end - q0 ) ) );
+            TR rq = -1;
+            if ( skip_root >= 0 && q0 + lane < end )
+                rq = skip[ q0 + lane ];
             for ( int j = 0; j < nq; ++j ) {
                 const typename Pb::Pos Pj = shfl( P, j );
                 const typename Pb::Wt  Qj = shfl( Q, j );
+                if ( skip_root >= 0 && shfl( rq, j ) == skip_root )
+                    continue;
                 if ( ! cut( bisector<Pb::W>( f, Pj, Qj, TR( q0 + j ) ) ) )
                     return false;
             }
@@ -872,10 +951,21 @@ struct DeferredCell {
 /// but the height itself ( `MAX_HEIGHT` ).
 template<class Pb,class Cell,class EP = NoEdgePlanes>
 __device__ __forceinline__ void walk( const Pb &pb, const Frame<typename Pb::TK> &f, Cell &cell, const EP &edge_plane = {} ) {
+    // PERIODICITY: the tree once per image, its boxes translated, its seeds the cuts `q + n t`
+    for ( int t = 0; t < pb.nimg; ++t )
+        if ( ! walk_image( pb, f, cell, t, edge_plane ) )
+            return;
+}
+
+/// one walk of the tree for the image `t` of the seeds ( `0`: the seeds themselves ); `false` when the cell is done
+template<class Pb,class Cell,class EP>
+__device__ __forceinline__ bool walk_image( const Pb &pb, const Frame<typename Pb::TK> &f, Cell &cell, int t, const EP &edge_plane ) {
     using TN   = typename Pb::TN;
     using TR   = typename Pb::TR;
     using Mask = typename Pb::V::Mask;
     const Frame<float> pf = prune_frame( f );
+    const float sx = t ? float( pb.img( t, 0 ) ) : 0.f, sy = t ? float( pb.img( t, 1 ) ) : 0.f;
+    const TR off = TR( t ) * pb.n;
     TN   stack[ Pb::V::MAX_HEIGHT ];
     Mask pending = 0;
     TN   n = 0;
@@ -883,20 +973,20 @@ __device__ __forceinline__ void walk( const Pb &pb, const Frame<typename Pb::TK>
     while ( true ) {
         const Node<Pb::W,TR> nd = pb.nodes[ n ];
         // an empty slot ( `beg == end` ), or a subtree that can no longer reach the cell
-        if ( nd.beg < nd.end && cell.template may_be_cut_by<Pb::W>( centred( nd, pf ) ) ) {
+        if ( nd.beg < nd.end && cell.template may_be_cut_by<Pb::W>( centred( nd, pf, sx, sy ) ) ) {
             if ( h <= 1 ) {                              // a leaf. No "is it me" test: my plane is `0 <= 0`
-                if constexpr ( requires { cell.cut_leaf( pb, f, TR( 0 ), TR( 0 ) ); } ) {
-                    if ( ! cell.cut_leaf( pb, f, nd.beg, nd.end ) )
-                        return;
+                if constexpr ( requires { cell.cut_leaf( pb, f, TR( 0 ), TR( 0 ), TR( 0 ) ); } ) {
+                    if ( ! cell.cut_leaf( pb, f, nd.beg, nd.end, TR( t ) ) )
+                        return false;
                 } else {
                     for ( TR q = nd.beg; q < nd.end; ++q ) {
-                        const Plane<typename Pb::TK,TR> p = bisector<Pb::W>( f, pb.pos[ q ], pb.weight( q ), q );
+                        const Plane<typename Pb::TK,TR> p = t ? pb.plane_of( f, q + off ) : bisector<Pb::W>( f, pb.pos[ q ], pb.weight( q ), q );
                         if constexpr ( std::is_same_v<EP,NoEdgePlanes> ) {
                             if ( ! cell.cut( p ) )
-                                return;
+                                return false;
                         } else {
                             if ( ! cell.cut( p, edge_plane ) )
-                                return;
+                                return false;
                         }
                     }
                 }
@@ -906,7 +996,7 @@ __device__ __forceinline__ void walk( const Pb &pb, const Frame<typename Pb::TK>
                 const TN lc = n + 1, rc = n + ( TN( 1 ) << ( h - 1 ) );
                 const Box bl = *reinterpret_cast<const Box *>( pb.nodes + lc );
                 const Box br = *reinterpret_cast<const Box *>( pb.nodes + rc );
-                const bool left_first = proximity( bl, pf ) <= proximity( br, pf );
+                const bool left_first = proximity( bl, pf, sx, sy ) <= proximity( br, pf, sx, sy );
                 --h;
                 stack[ h ] = left_first ? rc : lc;
                 pending |= Mask( 1 ) << h;
@@ -915,7 +1005,7 @@ __device__ __forceinline__ void walk( const Pb &pb, const Frame<typename Pb::TK>
             }
         }
         if ( ! pending )
-            return;
+            return true;
         if constexpr ( sizeof( Mask ) == 4 ) h = __ffs( int( pending ) ) - 1;
         else                                 h = __ffsll( ( long long ) pending ) - 1;
         pending &= pending - 1;
@@ -926,7 +1016,7 @@ __device__ __forceinline__ void walk( const Pb &pb, const Frame<typename Pb::TK>
 // ---- the end of a cell: its re-solved edges, and what is made of them -------------------------------------------
 
 /// the seed and the box sides in double, in the seed's frame: what the re-solve reads
-struct Origin { double x, y, w, x0, y0, x1, y1; };
+struct Origin { double x, y, w, x0, y0, x1, y1; SI k; };
 
 template<class Pb>
 __device__ __forceinline__ Origin origin_of( const Pb &pb, typename Pb::TR k ) {
@@ -938,20 +1028,38 @@ __device__ __forceinline__ Origin origin_of( const Pb &pb, typename Pb::TR k ) {
     o.y0 = double( pb.box_min( 1 ) ) - o.y;
     o.x1 = double( pb.box_max( 0 ) ) - o.x;
     o.y1 = double( pb.box_max( 1 ) ) - o.y;
+    o.k = SI( k );
     return o;
 }
 
 /// THE PLANE OF A CUT, RE-READ in double from its identifier: the bisector from the positions as given ( the
-/// rank is the identifier ), or a side of the box. `e`: `|n|^2`, the squared distance of the two seeds for a bisector.
+/// rank is the identifier ), or a side of the box. `e`: `|n|^2`, the squared distance of the two seeds for a bisector. GROUPS: two
+/// members of a root, the plane of their virtual diracs ( `CardGroups::plane` ), and `d2c` the squared distance its coefficient
+/// reads ( `e` elsewhere )
+template<class Pb>
+__device__ __forceinline__ void plane64( const Pb &pb, const Origin &o, typename Pb::TR cid, double &nx, double &ny, double &off, double &e, double &d2c ) {
+    if ( cid >= 0 && pb.grp.on() && pb.grp.same( typename Pb::TR( o.k ), cid ) ) {
+        const double p0[ 2 ] = { o.x, o.y }, p1[ 2 ] = { double( pb.pos64( cid, 0 ) ), double( pb.pos64( cid, 1 ) ) };
+        double dir[ 2 ];
+        pb.grp.plane( typename Pb::TR( o.k ), cid, p0, p1, dir, off, d2c );
+        nx = dir[ 0 ];
+        ny = dir[ 1 ];
+        e = nx * nx + ny * ny;
+        return;
+    }
+    plane64( pb, o, cid, nx, ny, off, e );
+    d2c = e;
+}
 template<class Pb>
 __device__ __forceinline__ void plane64( const Pb &pb, const Origin &o, typename Pb::TR cid, double &nx, double &ny, double &off, double &e ) {
     if ( cid >= 0 ) {
-        nx  = double( pb.pos64( cid, 0 ) ) - o.x;
-        ny  = double( pb.pos64( cid, 1 ) ) - o.y;
+        const typename Pb::TR j = pb.seed_of( cid );    // ( an image: its seed, translated )
+        nx  = ( double( pb.pos64( j, 0 ) ) + pb.shift( cid, 0 ) ) - o.x;
+        ny  = ( double( pb.pos64( j, 1 ) ) + pb.shift( cid, 1 ) ) - o.y;
         e   = nx * nx + ny * ny;
         off = 0.5 * e;
         if constexpr ( Pb::W )
-            off += 0.5 * ( o.w - double( pb.w64( cid ) ) );
+            off += 0.5 * ( o.w - double( pb.w64( j ) ) );
         return;
     }
     if ( cid <= typename Pb::TR( -5 ) ) {                // a cut of the domain
@@ -1005,11 +1113,11 @@ __device__ __forceinline__ void for_each_edge( const Pb &pb, const Origin &o, co
         // once those of the domain box, so it carries `eps L`, `L` the farthest corner of the box from the seed.
         const double L2 = fmax( o.x0 * o.x0, o.x1 * o.x1 ) + fmax( o.y0 * o.y0, o.y1 * o.y1 );
         const double tol2 = 1e-8 * L2;                       // ( 1e3 eps_float L )^2
-        double ax, ay, ao, ea;
-        plane64( pb, o, cell.last_cut(), ax, ay, ao, ea );
+        double ax, ay, ao, ea, da;
+        plane64( pb, o, cell.last_cut(), ax, ay, ao, ea, da );
         cell.for_each_vertex( [&]( int i, float x, float y, TR c ) {
-            double bx, by, bo, eb, vx, vy, det2, e12;
-            plane64( pb, o, c, bx, by, bo, eb );
+            double bx, by, bo, eb, db, vx, vy, det2, e12;
+            plane64( pb, o, c, bx, by, bo, eb, db );
             if ( ! cross( ax, ay, ao, ea, bx, by, bo, eb, vx, vy, det2, e12 ) || ( ( vx - x ) * ( vx - x ) + ( vy - y ) * ( vy - y ) ) * det2 > tol2 * e12 ) {
                 // the float vertex, PROJECTED on the plane of the edge that leaves it: two planes nearly parallel
                 // ( a seed duplicated with another weight ) leave the vertex free ALONG them -- where moving it
@@ -1021,7 +1129,7 @@ __device__ __forceinline__ void for_each_edge( const Pb &pb, const Origin &o, co
             ax = bx; ay = by; ao = bo; ea = eb;
             if ( i == 0 ) { fx = vx; fy = vy; }
             else f( px, py, vx, vy, pc, pe );
-            px = vx; py = vy; pc = c; pe = eb;
+            px = vx; py = vy; pc = c; pe = db;
         } );
     } else {
         cell.for_each_vertex( [&]( int i, double x, double y, TR c ) {
@@ -1029,9 +1137,12 @@ __device__ __forceinline__ void for_each_edge( const Pb &pb, const Origin &o, co
             else f( px, py, x, y, pc, pe );
             px = x; py = y; pc = c;
             if constexpr ( WANT_D2 ) {
-                if ( c >= 0 ) {
-                    const typename Pb::Pos q = pb.pos[ c ];
-                    const double dx = q.x - o.x, dy = q.y - o.y;
+                if ( c >= 0 && pb.grp.on() && pb.grp.same( TR( o.k ), c ) ) {        // ( GROUPS: the frame's distance )
+                    double nx, ny, off, e;
+                    plane64( pb, o, c, nx, ny, off, e, pe );
+                } else if ( c >= 0 ) {
+                    const typename Pb::Pos q = pb.pos[ pb.seed_of( c ) ];
+                    const double dx = ( q.x + pb.shift( c, 0 ) ) - o.x, dy = ( q.y + pb.shift( c, 1 ) ) - o.y;
                     pe = dx * dx + dy * dy;
                 } else
                     pe = 1;
@@ -1078,7 +1189,7 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
     if constexpr ( bool( OUT & FACETS ) ) {
         unsigned nup = 0;
         if ( cell.nb >= 3 )
-            cell.for_each_vertex( [&]( int, auto, auto, TR c ) { nup += c > k; } );
+            cell.for_each_vertex( [&]( int, auto, auto, TR c ) { nup += c >= 0 && pb.writes_facet( k, pb.seed_of( c ) ); } );
         fbase = reserve( &pb.counters->nb_facets, nup );
         fok = fbase + nup <= pb.fcap;                    // else the count says it to loom ( `report_facets` )
     }
@@ -1122,10 +1233,11 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
                 line = ( bool( OUT & FACETS ) || MOM ) ? gauss_lines<MOM>( pb.dens, o.x, o.y, ax, ay, bx, by, acc ) : 0.0;
             }
             if constexpr ( bool( OUT & FACETS ) ) {
-                if ( c > k && fok ) {
+                if ( c >= 0 && pb.writes_facet( k, pb.seed_of( c ) ) && fok ) {
                     const unsigned long long q = fbase + t++;
-                    pb.fi[ q ] = k;
-                    pb.fj[ q ] = c;
+                    const TR sc = pb.seed_of( c );               // ( `i < j`: a member writes its facets out of its root both ways )
+                    pb.fi[ q ] = k < sc ? k : sc;
+                    pb.fj[ q ] = k < sc ? sc : k;
                     pb.fc[ q ] = d2 > 0 ? line / ( 2 * sqrt( d2 ) ) : 0.0;
                 }
             }
@@ -1169,17 +1281,20 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
             if ( c >= 0 ) {
                 const double ex = bx - ax, ey = by - ay;
                 const double coef = d2 > 0 ? rho * sqrt( ex * ex + ey * ey ) / ( 2 * sqrt( d2 ) ) : 0.0;
+                // ( an image: the facet is one of its seed's, which a facet with an image of the cell itself is not: it
+                // moves with no weight and no position, and is no facet of the laplacian )
+                const TR sc = pb.seed_of( c );
                 if constexpr ( bool( OUT & FACETS ) ) {
-                    if ( c > k && fok ) {
+                    if ( pb.writes_facet( k, sc ) && fok ) {
                         const unsigned long long q = fbase + t++;
-                        pb.fi[ q ] = k;
-                        pb.fj[ q ] = c;
+                        pb.fi[ q ] = k < sc ? k : sc;            // ( `i < j`: a member writes its facets out of its root both ways )
+                        pb.fj[ q ] = k < sc ? sc : k;
                         pb.fc[ q ] = coef;
                     }
                 }
                 if constexpr ( bool( OUT & VJP ) ) {
                     // `2 c ( g_k - g_j ) ( x_kj - p_k )`, the middle of the facet in the seed's frame being `( a + b ) / 2`
-                    const double dg = coef * ( gk - double( pb.g( SI( pb.ids( c ) ) ) ) );
+                    const double dg = sc == k ? 0.0 : coef * ( gk - double( pb.g( SI( pb.ids( sc ) ) ) ) );
                     gw  += dg;
                     gpx += dg * ( ax + bx );
                     gpy += dg * ( ay + by );
@@ -1261,7 +1376,7 @@ __device__ __forceinline__ bool cell_in_registers( const Pb &pb, typename Pb::TR
     // `-3` top, `-4` left ) or a cut of the domain ( `-5 - j` )
     auto edge_plane = [&]( TR cid ) {
         if ( cid >= 0 )
-            return bisector<Pb::W>( f, pb.pos[ cid ], pb.weight( cid ), cid );
+            return pb.plane_of( f, cid );
         if ( cid <= TR( -5 ) )
             return domain_plane<TK>( pb, cid, px, py );
         const int s = int( -1 - cid );
@@ -1318,6 +1433,10 @@ template<class Pb>
 __global__ void __launch_bounds__( BLOCK, MINB1 ) first_pass( Pb pb, typename Pb::TR *ovf_list, Deferred<typename Pb::TR> deferred ) {
     using TR = typename Pb::TR;
     const SI k = SI( blockIdx.x ) * blockDim.x + threadIdx.x;
+    if ( k < SI( pb.n ) && pb.grp.member( TR( k ) ) ) {    // ( GROUPS: a member's cell is `group_pass`'s )
+        if constexpr ( deferring<Pb>() ) deferred.nb[ k ] = -1;
+        return;
+    }
     if ( k < SI( pb.n ) && ! cell_in_registers<R1>( pb, TR( k ), deferring<Pb>() ? &deferred : nullptr, k ) )
         ovf_list[ atomicAdd( &pb.counters->ovf[ 0 ], 1ull ) ] = TR( k );
 }
@@ -1328,6 +1447,10 @@ template<class Pb>
 __global__ void __launch_bounds__( BLOCK, MINB1 ) first_pass_chunk( Pb pb, typename Pb::TR *ovf_list, Deferred<typename Pb::TR> deferred, SI k0, SI cnt ) {
     using TR = typename Pb::TR;
     const SI s = SI( blockIdx.x ) * blockDim.x + threadIdx.x;
+    if ( s < cnt && pb.grp.member( TR( k0 + s ) ) ) {        // ( GROUPS: a member's cell is `group_pass`'s )
+        deferred.nb[ s ] = -1;
+        return;
+    }
     if ( s < cnt && ! cell_in_registers<R1>( pb, TR( k0 + s ), &deferred, s ) )
         ovf_list[ atomicAdd( &pb.counters->ovf[ 0 ], 1ull ) ] = TR( k0 + s );
 }
@@ -1450,6 +1573,58 @@ __global__ void __launch_bounds__( BLOCK ) warp_pass( Pb pb, const typename Pb::
                 finish_failed( pb, k );
                 if ( atomicAdd( &pb.counters->nb_failed, 1ull ) == 0 )
                     errors.record( ERROR_KIND_FAILURE, FAIL_TOO_MANY_VERTICES, SI( pb.ids( k ) ) );   // the user's index, whatever the order of the outputs
+            }
+        }
+        __syncwarp();
+    }
+}
+
+/// THE GROUP PASS ( `CardGroups.cuh` ): the cells of the MEMBERS of the roots, one warp each, in the fourth pass's global slots ( a
+/// persistent grid of exactly the slots, after it ): the domain, the planes of the other members of the root ( in double, in the
+/// seed's frame ), then the walk of the tree without them. `list`: the members' ranks, `m` of them.
+template<class Pb,class EB>
+__global__ void __launch_bounds__( BLOCK ) group_pass( Pb pb, const typename Pb::TR *list, SI m, unsigned char *slots, int cap, EB errors ) {
+    using TK = typename Pb::TK;
+    using TR = typename Pb::TR;
+    const int lane = threadIdx.x % 32;
+    const SI  gwarp = ( SI( blockIdx.x ) * blockDim.x + threadIdx.x ) / 32;
+    unsigned char *mine = slots + gwarp * WarpCell<TK,TR>::bytes_for( cap );
+    for ( SI i = gwarp; i < m; i += SI( gridDim.x ) * blockDim.x / 32 ) {
+        const TR k = list[ i ];
+        Frame<TK> f;
+        TK b[ 4 ];
+        start_of( pb, k, f, b );
+        WarpCell<TK,TR> cell;
+        cell.attach( mine, cap );
+        cell.lane = lane;
+        cell.init( b[ 0 ], b[ 1 ], b[ 2 ], b[ 3 ] );
+        const double p0[ 2 ] = { double( pb.pos64( k, 0 ) ), double( pb.pos64( k, 1 ) ) };
+        bool alive = true;
+        if ( pb.cuts.nsv > 0 ) {
+            cell.init_polygon( pb.cuts, p0[ 0 ], p0[ 1 ] );
+            alive = cell.nb > 0;
+        } else {
+            for ( int j = 0; j < pb.cuts.nb && alive; ++j )
+                alive = cell.cut( domain_plane<TK>( pb, TR( -5 - j ), p0[ 0 ], p0[ 1 ] ) );
+        }
+        for ( TR j = pb.grp.next[ k ]; alive && j != k; j = pb.grp.next[ j ] ) {
+            const double p1[ 2 ] = { double( pb.pos64( j, 0 ) ), double( pb.pos64( j, 1 ) ) };
+            double dir[ 2 ], off, d2;
+            pb.grp.plane( k, j, p0, p1, dir, off, d2 );
+            alive = cell.cut( Plane<TK,TR>{ TK( dir[ 0 ] ), TK( dir[ 1 ] ), TK( off ), j } );
+        }
+        if ( alive ) {
+            cell.skip = pb.grp.root;
+            cell.skip_root = pb.grp.root[ k ];
+            walk( pb, f, cell );
+        }
+        if ( lane == 0 ) {
+            if ( cell.nb >= 0 )
+                finish_cell( pb, k, cell );
+            else {                                       // past the per-cell limit, a failure said as such
+                finish_failed( pb, k );
+                if ( atomicAdd( &pb.counters->nb_failed, 1ull ) == 0 )
+                    errors.record( ERROR_KIND_FAILURE, FAIL_TOO_MANY_VERTICES, SI( pb.ids( k ) ) );
             }
         }
         __syncwarp();
@@ -1612,6 +1787,8 @@ struct Card {
     Overflow       overflow{};                           ///< the fourth pass's slots
     SI             nb_nodes = 0;
     SI             defer_cap = defer_cap_default();      ///< the cells the finish store holds ( set before `prepare` )
+    const TR      *group_members = nullptr;              ///< GROUPS: the members' ranks ( `pb.grp`, `group_pass` ) ...
+    SI             nb_group_members = 0;                 ///< ... and their number
 
     /// `overflow`: the slots of the fourth pass, already taken ( shared with another card of the call: they must hold
     /// this card's cells, `bytes_for< TK, TR >` ), or only sized ( `slots == nullptr` ): taken here. `share`: what is
@@ -1672,6 +1849,13 @@ struct Card {
         pb.ids     = strided( pd.tree.seed_indices );
         pb.n       = TR( n );
         pb.depth   = depth;
+        if constexpr ( requires { pd.periodic_shifts.data().raw; } ) {
+            static_assert( ! requires { pd.periodic_linear.data().raw; }, "sdot::gpu2d: the card's cells take translations only ( `PowerDiagram_Bsp._card_takes` )" );
+            pb.img  = strided( pd.periodic_shifts );
+            pb.nimg = int( pd.periodic_shifts.shape( 0 ) );
+            if ( std::is_same_v<TR,int> && n * SI( pb.nimg ) > SI( 0x7fffffff ) - 8 )
+                throw std::runtime_error( "sdot::gpu2d: the variant chosen does not hold the images' identifiers ( see `PowerDiagram_Bsp._card_variant` )" );
+        }
         pb.rho     = 1;
         pb.user_order = true;
         pb.counters = counters;
@@ -1755,6 +1939,11 @@ struct Card {
         // fourth pass, one warp per cell in global memory, a persistent grid of exactly the slots: launched whatever the
         // count ( it reads it ), it costs a launch when there is nothing to do
         launch_kernel( queue, k3, overflow.warps * 32 / BLOCK, BLOCK, 0, pb, list1, 2, list2, overflow.slots, overflow.cap, errors );
+
+        // GROUPS: the members' cells, in the same slots ( `group_pass` )
+        if ( group_members && nb_group_members > 0 )
+            launch_kernel( queue, &group_pass<Pb,EB>, overflow.warps * 32 / BLOCK, BLOCK, 0, pb, ( const TR * ) group_members,
+                           nb_group_members, overflow.slots, overflow.cap, errors );
 
         static const bool stats = std::getenv( "SDOT_CARD_STATS" ) && *std::getenv( "SDOT_CARD_STATS" ) != '0';
         if ( stats ) {                                   // how many cells each pass left over ( a diagnosis: a read back )

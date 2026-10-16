@@ -691,10 +691,11 @@ def _box_target():
     return Image( values = numpy.ones( ( 1, 1 ) ), origin = [ 0.0, 0.0 ], pixel_frame = numpy.eye( 2 ) )
 
 
-def _generic_measures( pos, w ):
-    """the measures of the cells of `( pos, w )` through the generic double path ( not the card's kernel )"""
+def _generic_measures( pos, w, groups = None ):
+    """the measures of the cells of `( pos, w )` through the generic double path ( not the card's kernel ), with the plan's
+    tree of aggregates when it has one ( `plan.groups` )"""
     pd = PowerDiagram( pos, numpy.asarray( w, dtype = float ).reshape( -1 ), boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ),
-                       kernel_dtype = "FP64" )
+                       kernel_dtype = "FP64", groups = groups )
     pd.use_card_cells = False
     return numpy.asarray( pd.measures.value ).reshape( -1 )
 
@@ -771,6 +772,99 @@ def _csr_product( row, col, val, dia, x ):
     nz = numpy.repeat( numpy.arange( n ), numpy.diff( row ) )
     numpy.add.at( off, nz, val * x[ col ] )
     return dia * x - off
+
+
+if test( "the_plan_derives_on_the_card" ):
+    import numpy
+    import jax
+    from loom.testing import check_grad
+    from errand import skip
+    from sdot.distributions.Box import Box
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.OtProblem import Iterative, OtProblem
+    if not _card():
+        skip( "the card's laplacian solve needs a CUDA device" )
+    # the derivative of a plan on the card: its laplacian solve is the card's ( `gpu/Newton2D.cuh::laplacian_solve` ), the
+    # measures and the moments of the live diagrams the generic adjoints -- against the finite differences of the whole solve
+    rng = numpy.random.default_rng( 3 )
+    n = 40
+    pos = rng.uniform( 0.1, 0.9, size = ( n, 2 ) )
+    nu = rng.uniform( 0.5, 1.5, size = n )
+    values = rng.uniform( 0.5, 1.5, size = ( 4, 4 ) )
+    settings = Iterative( tol = 1e-12, max_iter = 200, precision = "fp64" )
+    c, s, m = numpy.array( [ [ 0.4, 0.5 ], [ 0.7, 0.3 ] ] ), numpy.array( [ 0.25, 0.2 ] ), numpy.array( [ 1.0, 0.7 ] )
+    tight = dict( eps = 1e-6, rtol = 1e-5, atol = 1e-8 )
+    for output in ( "weights", "cost", "barycenters" ):
+        check_grad( lambda p, q: getattr( OtProblem( SumOfDiracs( p, weights = q ), Box() ).solve( settings ), output ), pos, nu, seed = 1, **tight )
+        check_grad( lambda p, v: getattr( OtProblem( SumOfDiracs( p ), Image( v, frame = [ 1.0, 1.0 ] ) ).solve( settings ), output ), pos, values, seed = 2, **tight )
+        check_grad( lambda p, c: getattr( OtProblem( SumOfDiracs( p ), SumOfGaussians( c, s, weights = m, support_box = ( [ 0, 0 ], [ 1, 1 ] ) ) ).solve( settings ), output ),
+                    pos, c, seed = 3, **tight )
+    # under a `jit`, the same
+    f = lambda p: OtProblem( SumOfDiracs( p, weights = nu ), Box() ).solve( settings ).cost.raw
+    assert numpy.abs( numpy.asarray( jax.jit( jax.grad( f ) )( pos ) ) - numpy.asarray( jax.grad( f )( pos ) ) ).max() < 1e-9
+
+
+if test( "duplicates_derive_on_the_card" ):
+    import numpy
+    import jax, jax.numpy as jnp
+    from loom.testing import check_grad
+    from errand import skip
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    if not _card():
+        skip( "the card's solver needs a CUDA device" )
+    # the derivative of a plan with aggregates on the card ( `_attach_split_derivatives`: the roots' laplacian solve is the
+    # card's, `gpu/Newton2D.cuh::laplacian_solve` with the tree ): the same checks as `duplicates_split_their_cell_and_derive`
+    rng = numpy.random.default_rng( 0 )
+    n = 14
+    pos = rng.uniform( 0.2, 0.8, size = ( n, 2 ) )
+    nu = rng.uniform( 0.5, 1.5, size = n )
+    pos[ 1 ] = pos[ 0 ]
+    pos[ [ 7, 9 ] ] = pos[ 4 ]
+    pos[ 12 ] = pos[ 11 ] + 1e-9
+    settings = Iterative( tol = 1e-13, max_iter = 200, precision = "fp64" )
+    site = numpy.arange( n )
+    site[ 1 ], site[ [ 7, 9 ] ], site[ 12 ] = 0, 4, 11
+    sites = numpy.unique( site )
+    expand = lambda ps: ps[ numpy.searchsorted( sites, site ) ] + ( pos - pos[ site ] )
+    solve = lambda ps, q: OtProblem( SumOfDiracs( expand( ps ), weights = q ), _box_target() ).solve( settings )
+    plan = solve( pos[ sites ], nu )
+    assert sorted( map( sorted, plan.groups.members().values() ) ) == [ [ 0, 1 ], [ 4, 7, 9 ], [ 11, 12 ] ], plan.groups.members()
+    m = numpy.asarray( plan.cell_masses ).reshape( -1 )
+    b = numpy.asarray( plan.barycenters ).reshape( n, -1 )
+    for output in ( "cost", "barycenters", "cell_masses" ):
+        check_grad( lambda ps, q: getattr( solve( ps, q ), output ), pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+    # ( the weights but those of the exact duplicates past the first: theirs, `W + r^2 v`, read the radius of their fan, which
+    # follows the spacing of the neighbours and is frozen in the derivative -- the split does not depend on it )
+    keep = numpy.array( [ i for i in range( n ) if i not in ( 1, 7, 9 ) ] )
+    check_grad( lambda ps, q: solve( ps, q ).weights.raw.reshape( -1 )[ keep ], pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+    # the envelope, member by member
+    f = lambda p: OtProblem( SumOfDiracs( p, weights = nu ), _box_target() ).solve( settings ).cost.raw
+    g = numpy.asarray( jax.grad( f )( jnp.asarray( pos ) ) )
+    gap = numpy.abs( g - 2 * m[ :, None ] * ( pos - b ) ).max( axis = 1 )
+    assert gap[ [ i for i in range( n ) if i not in ( 11, 12 ) ] ].max() < 1e-11 and gap[ [ 11, 12 ] ].max() < 1e-6, gap
+    assert numpy.linalg.norm( g[ 0 ] - g[ 1 ] ) > 1e-4, g[ [ 0, 1 ] ]
+    # under a `jit` ( the masses traced, the positions constant: the tree is found ), the eager derivatives
+    h = lambda q: ( lambda p: p.cost.raw + ( p.cell_masses.raw.reshape( -1 ) * numpy.arange( n ) ).sum() )( OtProblem( SumOfDiracs( pos, weights = q ), _box_target() ).solve( settings ) )
+    ge, gj = numpy.asarray( jax.grad( h )( jnp.asarray( nu ) ) ), numpy.asarray( jax.jit( jax.grad( h ) )( jnp.asarray( nu ) ) )
+    assert numpy.abs( ge - gj ).max() < 1e-9 * numpy.abs( ge ).max(), numpy.abs( ge - gj ).max()
+    # in 3D ( `Cell3D.cuh::group_pass3` ): a pair of duplicates and a pair `1e-9` apart, moved as wholes
+    n3 = 12
+    p3 = rng.uniform( 0.2, 0.8, size = ( n3, 3 ) )
+    nu3 = rng.uniform( 0.5, 1.5, size = n3 )
+    p3[ 1 ] = p3[ 0 ]
+    p3[ 6 ] = p3[ 5 ] + 1e-9
+    site3 = numpy.arange( n3 )
+    site3[ 1 ], site3[ 6 ] = 0, 5
+    sites3 = numpy.unique( site3 )
+    cube = Image( values = numpy.ones( ( 1, 1, 1 ) ), origin = [ 0.0 ] * 3, pixel_frame = numpy.eye( 3 ) )
+    solve3 = lambda ps, q: OtProblem( SumOfDiracs( ps[ numpy.searchsorted( sites3, site3 ) ] + ( p3 - p3[ site3 ] ), weights = q ), cube ).solve( settings )
+    assert sorted( map( sorted, solve3( p3[ sites3 ], nu3 ).groups.members().values() ) ) == [ [ 0, 1 ], [ 5, 6 ] ]
+    for output in ( "cost", "cell_masses" ):
+        check_grad( lambda ps, q: getattr( solve3( ps, q ), output ), p3[ sites3 ], nu3, seed = 4, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
 
 
 if test( "the_card_linear_solver_solves" ):
@@ -890,7 +984,7 @@ if test( "the_card_solve_runs_under_jit" ):
     nu = rng.uniform( 0.5, 1.5, n )
 
     def solve( masses ):
-        plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = 1e-10 / n, max_iter = 60 ) )
+        plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = 1e-10 / n, max_iter = 60, differentiable = False ) )
         return plan.weights.raw, plan.cell_masses.raw, plan.stats[ "nb_diag" ]
 
     we, me, de = solve( nu )
@@ -929,7 +1023,7 @@ if test( "the_card_solve_builds_its_tree_in_the_jitted_call" ):
     # ( the masses are an argument too: a closure constant would be normalized by XLA's fused reduction under the jit and
     # op by op in eager, 1e-19 apart -- nothing to do with the tree )
     def solve( p, m, start ):
-        plan = OtProblem( SumOfDiracs( p, m ), _box_target() ).solve( Iterative( tol = 1e-10 / n, max_iter = 60, weights0 = start ) )
+        plan = OtProblem( SumOfDiracs( p, m ), _box_target() ).solve( Iterative( tol = 1e-10 / n, max_iter = 60, weights0 = start, differentiable = False ) )
         return plan.weights.raw, plan.stats[ "nb_diag" ], plan.stats[ "status" ]
 
     for start in ( None, w0 ):
@@ -981,7 +1075,7 @@ if test( "the_card_solve_on_rings_in_batches_and_past_the_limit" ):
         bsp.PowerDiagram_Bsp.card_overflow_warps = 4
         for precision in ( "fp64", "fp32" ):
             def solve( masses ):
-                plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = 1e-9 / n, max_iter = 100, precision = precision ) )
+                plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = 1e-9 / n, max_iter = 100, precision = precision, differentiable = False ) )
                 return plan
             plan = solve( numpy.ones( n ) )
             assert plan.converged, ( precision, plan.stats )
@@ -997,7 +1091,7 @@ if test( "the_card_solve_on_rings_in_batches_and_past_the_limit" ):
     original = bsp.PowerDiagram_Bsp.card_max_vertices
     try:
         bsp.PowerDiagram_Bsp.card_max_vertices = 256
-        for run in ( lambda m: OtProblem( SumOfDiracs( pos, m ), _box_target() ).solve( Iterative( tol = 1e-9 / n, max_iter = 100 ) ).weights.raw, ):
+        for run in ( lambda m: OtProblem( SumOfDiracs( pos, m ), _box_target() ).solve( Iterative( tol = 1e-9 / n, max_iter = 100, differentiable = False ) ).weights.raw, ):
             for fn in ( run, jax.jit( run ) ):
                 try:
                     numpy.asarray( fn( numpy.ones( n ) ) )
@@ -1236,7 +1330,7 @@ if test( "the_card_density_solves_run_under_jit" ):
                                               weights = numpy.array( [ 0.6, 0.4 ] ) ) ) }
     for name, target in targets.items():
         def solve( masses ):
-            plan = OtProblem( SumOfDiracs( pos, masses ), _make_target( target ) ).solve( Iterative( tol = 1e-9 / n, max_iter = 100, continuation = "auto" ) )
+            plan = OtProblem( SumOfDiracs( pos, masses ), _make_target( target ) ).solve( Iterative( tol = 1e-9 / n, max_iter = 100, continuation = "auto", differentiable = False ) )
             return plan.weights.raw, plan.cost.raw, plan.stats[ "nb_diag" ], plan.stats[ "status" ], plan.stats[ "nb_continuation_steps" ]
         we, ce, de, se, ke = solve( nu )
         assert se == "converged" and ke > 1, ( name, se, ke )
@@ -1553,8 +1647,9 @@ if p := experiment( "ot 2D newton scattered",
 #
 # Two seeds `delta` apart are split by a plane whose offset is `( w_i - w_j ) / 2 delta`: below some `delta`, no weight
 # vector reaches the tolerance there, and the solve stagnated. Merged, the tests read the mass of the cluster, the plane
-# inside it placed as well as the doubles let it ( `stats[ "residual_full" ]` ). Exact duplicates are merged too, their
-# cells kept empty, their representative carrying their mass.
+# inside it placed as well as the doubles let it. Exact duplicates are merged too, their cells kept empty. Then each cluster
+# becomes a GROUP of the plan ( `duplicates = "split"` ), which gives every member its own mass and piece: no floor left
+# ( `stats[ "residual_full" ]` ).
 
 def _degenerate_clouds( d, seed ):
     """`{ name: ( positions, groups ) }`: a uniform cloud with seeds moved onto others; `groups` the expected clusters
@@ -1568,8 +1663,9 @@ def _degenerate_clouds( d, seed ):
         pos = base.copy()
         groups = []
         for members, offsets in moves:
-            for m, off in zip( members[ 1: ], offsets ):
-                pos[ m ] = pos[ members[ 0 ] ] + off
+            for m, prev, off in zip( members[ 1: ], members[ :-1 ], offsets ):
+                # ( an offset as a row `[ off ]`: from the PREVIOUS member, so that a move nests )
+                pos[ m ] = ( pos[ prev ] + off[ 0 ] ) if off.ndim == 2 else ( pos[ members[ 0 ] ] + off )
             groups.append( ( members, all( not numpy.any( off ) for off in offsets ) ) )
         return pos, groups
     # ( a triple is not ALIGNED here: the middle seed of three aligned 1e-10 apart starts with a Voronoi cell of 5e-9 of its
@@ -1581,12 +1677,16 @@ def _degenerate_clouds( d, seed ):
         "pair at 1e-12":      moved( ( [ 8, 2 ], [ 1e-12 * unit ] ) ),
         "triple at 1e-10":    moved( ( [ 4, 9, 13 ], [ 1e-10 * unit, 2e-10 * side ] ) ),
         "pair and duplicate": moved( ( [ 1, 6 ], [ 3e-10 * unit ] ), ( [ 12, 15, 30 ], [ 0.0 * unit, 2e-10 * side ] ) ),
+        # a pair `1e-12` apart inside a pair `1e-5` apart: an aggregate in an aggregate ( one level of groups hit the floor there )
+        "nested 1e-5 / 1e-12": moved( ( [ 20, 21, 22 ], [ 1e-5 * unit, 1e-12 * side[ None ] ] ) ),
     }
 
 
 def _check_aggregated( name, plan, pos, groups, tol ):
-    """the plan of a cloud whose `groups` the doubles cannot separate: converged ( aggregated, unless only exact duplicates ),
-    the clusters found, each cluster's mass its target, every other cell its own, an exact duplicate's cell empty"""
+    """the plan of a cloud whose `groups` the doubles cannot separate: converged, the clusters found, each member its own mass and its
+    own piece. Two paths: the TREE OF AGGREGATES solved with the diagram ( the CPU's Newton on all the weights, `sdotplan/Groups.h`:
+    converged without aggregation, a few more groups allowed -- pairs much closer than the spacing ), or the AGGREGATION then the
+    groups' split ( the card, `step = "limits"`: converged aggregated, the clusters exactly )"""
     n = len( pos )
     st = plan.stats
     nu = numpy.asarray( plan.target_masses ).reshape( -1 )
@@ -1594,22 +1694,30 @@ def _check_aggregated( name, plan, pos, groups, tol ):
     print( f"  { name }: { st[ 'status' ] }, { st[ 'nb_iter' ] } it / { st[ 'nb_diag' ] } diag, aggregated { st[ 'residual' ] * n :.1e} "
            f"full { st[ 'residual_full' ] * n :.1e} ( relative ), { st[ 'aggregation' ] }" )
     assert plan.converged, ( name, st )
+    solved = "solved with the diagram" in str( st.get( "groups", "" ) )
     only_exact = all( exact for _, exact in groups )
-    assert st[ "status" ] == ( "converged" if only_exact else "converged (aggregated)" ), ( name, st[ "status" ] )
-    assert st[ "residual" ] <= tol, ( name, st[ "residual" ] )
+    assert st[ "status" ] == ( "converged" if solved or only_exact else "converged (aggregated)" ), ( name, st[ "status" ] )
+    assert st[ "residual" ] <= tol and st[ "residual_full" ] <= tol, ( name, st[ "residual" ], st[ "residual_full" ] )
     cl = numpy.asarray( plan.clusters ).reshape( -1 )
     alone = numpy.ones( n, dtype = bool )
+    b = numpy.asarray( plan.barycenters ).reshape( n, -1 )
     for members, exact in groups:
         assert ( cl[ members ] == min( members ) ).all(), ( name, members, cl[ members ] )
         alone[ members ] = False
-        # the cluster's mass is its target ( the test reads each member's SHARE of the cluster's gap: `k` members, `k tol` )
-        assert abs( m[ members ].sum() - nu[ members ].sum() ) <= len( members ) * tol * ( 1 + 1e-9 ), ( name, members, m[ members ].sum() - nu[ members ].sum() )
-        if exact:                                # the duplicates' cells are empty, their representative holds the mass
-            assert ( m[ members[ 1: ] ] == 0 ).all() and ( numpy.asarray( plan.weights ).reshape( -1 )[ members[ 1: ] ] <
-                                                            numpy.asarray( plan.weights ).reshape( -1 )[ members[ 0 ] ] ).all(), name
-    assert ( cl[ alone ] == numpy.arange( n )[ alone ] ).all(), name
+        # the GROUP of the plan: each member its own mass to the precision of the cells ( no floor ), each member its own piece
+        g = plan.groups
+        assert g is not None and ( numpy.asarray( g.rep )[ members ] == min( members ) ).all(), ( name, g )
+        assert numpy.abs( m[ members ] - nu[ members ] ).max() <= tol, ( name, m[ members ] - nu[ members ] )
+        assert len( { tuple( b[ i ] ) for i in members } ) == len( members ), ( name, b[ members ] )
+    h = ( 1 / n ) ** ( 1 / pos.shape[ 1 ] )
+    for i in numpy.flatnonzero( alone & ( cl != numpy.arange( n ) ) ):     # an extra group: much closer than the spacing
+        assert solved and numpy.linalg.norm( pos[ i ] - pos[ cl[ i ] ] ) < 0.5 * h, ( name, i, cl[ i ] )
     assert numpy.abs( m[ alone ] - nu[ alone ] ).max() <= tol, ( name, numpy.abs( m[ alone ] - nu[ alone ] ).max() )
-    assert st[ "nb_clusters" ] == len( groups ) and st[ "nb_aggregated" ] == sum( len( g ) for g, _ in groups ), ( name, st[ "aggregation" ] )
+    if solved:
+        assert st[ "nb_clusters" ] >= len( groups ), ( name, st[ "aggregation" ] )
+    else:
+        assert ( cl[ alone ] == numpy.arange( n )[ alone ] ).all(), name
+        assert st[ "nb_clusters" ] == len( groups ) and st[ "nb_aggregated" ] == sum( len( g ) for g, _ in groups ), ( name, st[ "aggregation" ] )
 
 
 if test( "the_aggregation_merges_what_the_doubles_cannot_separate" ):
@@ -1653,7 +1761,8 @@ if test( "a_refused_log_step_falls_back_on_the_lin_residual" ):
     # three ALIGNED seeds 1e-10 apart: the middle Voronoi cell holds 5e-9 of its target. The log residual asks it for
     # `a ( c - log x )`, 1e-10 next to the others' 1e-3, which the linear solver loses; and at the Voronoi start ( weights 0 )
     # the aggregation cannot see the cluster yet. Its merit refuses every step ( it stagnated in 1 it / 35 diagrams, the merit
-    # flat under the 1e-8 floor of `g( a / nu )` ): the iteration is done again in lin, which converges, aggregated
+    # flat under the 1e-8 floor of `g( a / nu )` ): the iteration is done again in lin, which converges, aggregated ( with
+    # `step = "limits"`; the `trials` take the tree of aggregates, which the log step goes through )
     rng = numpy.random.default_rng( 17 )
     n = 400
     pos = rng.uniform( 0.05, 0.95, size = ( n, 2 ) )
@@ -1667,6 +1776,11 @@ if test( "a_refused_log_step_falls_back_on_the_lin_residual" ):
         _check_aggregated( f"aligned triple { step } log", runs[ "log" ], pos, [ ( [ 4, 9, 13 ], False ) ], tol )
         _check_aggregated( f"aligned triple { step } lin", runs[ "lin" ], pos, [ ( [ 4, 9, 13 ], False ) ], tol )
         log, lin = runs[ "log" ].stats, runs[ "lin" ].stats
+        if step == "trials":
+            # the TREE OF AGGREGATES ( `sdotplan/Groups.h` ): the triple is an aggregate, its blocks at scale one -- the log step is not
+            # refused, no fall back is needed
+            assert log[ "nb_iter" ] <= lin[ "nb_iter" ], ( log[ "nb_iter" ], lin[ "nb_iter" ] )
+            continue
         assert log[ "it_switch" ] == 0, ( step, log[ "it_switch" ] )
         # the same iterations as lin; the refused log trials on top ( a few diagrams with the limits, a few dozen with the trials: how many
         # depends on how much of the tiny residual the linear solver keeps -- 38 with the Cholesky, 26 with the multigrid )
@@ -1722,22 +1836,27 @@ if test( "the_card_aggregates_as_the_cpu" ):
         # ( a pair 1e-12 apart: the card's cells, cut in each seed's frame, place the merged cell to ~5e-11 of its mass -- the
         # CPU's to 5e-14 )
         tol = ( 1e-9 if "1e-12" in name else 1e-11 ) / n
-        for step, precision in ( ( "limits", "fp64" ), ( "trials", "fp64" ), ( "limits", "auto" ) ):
+        for step, precision in ( ( "limits", "fp64" ), ( "trials", "fp64" ), ( "limits", "auto" ), ( "trials", "auto" ) ):
+            if step == "limits" and "nested" in name:
+                # ( the AGGREGATION on the card, which `limits` takes, places a pair 1e-12 apart inside a pair 1e-5 apart to ~5e-9
+                # of a cell's mass and stagnates there: the tree of aggregates, which `trials` takes, is what solves it )
+                continue
             it = Iterative( tol = tol, max_iter = 60, precision = precision, tuning = Tuning( step = step ) )
             plan = OtProblem( SumOfDiracs( pos ), _box_target() ).solve( it )
             _check_aggregated( f"card { name } { step } { precision }", plan, pos, groups, tol )
             # the cells of the card's weights, measured by the generic path: each cluster's mass, every other cell's
-            g = _generic_measures( pos, numpy.asarray( plan.weights ).reshape( -1 ) )
+            g = _generic_measures( pos, numpy.asarray( plan.weights ).reshape( -1 ), plan.groups )
             nu = numpy.asarray( plan.target_masses ).reshape( -1 )
             alone = numpy.ones( n, dtype = bool )
             for members, _ in groups:
                 alone[ members ] = False
                 assert abs( g[ members ].sum() - nu[ members ].sum() ) < 1e-8 / n, ( name, g[ members ].sum() - nu[ members ].sum() )
             assert numpy.abs( g[ alone ] - nu[ alone ] ).max() < 1e-8 / n, name
-        # under `jax.jit` ( the masses traced, the positions constant: the duplicates are still found ): the eager plan
+        # under `jax.jit` ( the masses traced, the positions constant: the duplicates are still found ): the eager plan -- the
+        # solver's weights ( eagerly, the split of the groups writes `weights` afterwards: not under a trace )
         def solve( masses ):
-            plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = tol, max_iter = 60 ) )
-            return plan.weights.raw, plan.stats[ "nb_clusters" ], plan.stats[ "status" ]
+            plan = OtProblem( SumOfDiracs( pos, masses ), _box_target() ).solve( Iterative( tol = tol, max_iter = 60, differentiable = False ) )
+            return plan._weights_fit.raw, plan.stats[ "nb_clusters" ], plan.stats[ "status" ]
         we, ce, se = solve( numpy.ones( n ) )
         wj, cj, sj = jax.jit( solve )( numpy.ones( n ) )
         assert numpy.array_equal( numpy.asarray( wj ), numpy.asarray( we ) ) and float( cj ) == float( ce ) == len( groups ), name
@@ -1784,11 +1903,11 @@ def _planes_cloud( n, rng, nb_planes = 4, sigma = 0.02 ):
     return numpy.clip( P[ :n ], 1e-4, 1 - 1e-4 )
 
 
-def _plain_measures_3d( pos, w ):
+def _plain_measures_3d( pos, w, groups = None ):
     """the measures of the cells of `( pos, w )` in the unit cube, through the PLAIN storage ( every seed cuts every cell:
-    no tree, no card )"""
+    no tree, no card ), with the plan's tree of aggregates when it has one ( `plan.groups` )"""
     pd = PowerDiagram( pos, numpy.asarray( w, dtype = float ).reshape( -1 ), boundaries = box_half_spaces( [ 0 ] * 3, [ 1 ] * 3 ),
-                       kernel_dtype = "FP64", accelerator = "plain" )
+                       kernel_dtype = "FP64", accelerator = "plain", groups = groups )
     pd.use_card_cells = False
     return numpy.asarray( pd.measures.value ).reshape( -1 )
 
@@ -1928,6 +2047,52 @@ if test( "the_card_3d_solve_runs_under_jit" ):
     print( f"  { int( de ) } diagrams, jit == eager" )
 
 
+if test( "the_card_solves_gaussians_in_3d" ):
+    import numpy
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from scipy.special import erf
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from errand import skip
+    if not _card():
+        skip( "the card's solver needs a CUDA device" )
+    # the gaussians' cones and faces ( `Density3D.cuh::gauss3_cell` ): a tight solve, whose cells hold the exact mass of the domain
+    # ( the box of the support: products of `erf`, over the total mass ) -- and the CPU's plan, by the same reduction
+    # ( `SumOfGaussians::face3` ): the same plan, the same cost and barycentres
+    rng = numpy.random.default_rng( 405 )
+    n = 2000
+    c = rng.uniform( 0.35, 0.65, size = ( 3, 3 ) )
+    sig = numpy.array( [ 0.12, 0.2, 0.08 ] )
+    wg = numpy.array( [ 1.0, 2.0, 0.5 ] )
+    target = ( "gauss", dict( positions = c, sigmas = sig, weights = wg ) )
+    pos = rng.uniform( 0.2, 0.8, size = ( n, 3 ) )
+    nu = rng.uniform( 0.5, 1.5, n )
+    nu /= nu.sum()
+    prob = OtProblem( SumOfDiracs( pos, nu ), _make_target( target ) )
+    plan = prob.solve( Iterative( tol = 1e-10 / n, max_iter = 60 ) )
+    st = plan.stats
+    m = numpy.asarray( plan.cell_masses ).reshape( -1 )
+    dirs, offs = ( numpy.asarray( a, dtype = float ) for a in prob.domain )
+    # the domain is the box of the support: `x_a <= hi_a` and `-x_a <= -lo_a`
+    hi = numpy.array( [ offs[ numpy.argmax( dirs[ :, a ] ) ] / dirs[ numpy.argmax( dirs[ :, a ] ), a ] for a in range( 3 ) ] )
+    lo = numpy.array( [ offs[ numpy.argmin( dirs[ :, a ] ) ] / dirs[ numpy.argmin( dirs[ :, a ] ), a ] for a in range( 3 ) ] )
+    box = sum( wg[ g ] * numpy.prod( [ ( erf( ( hi[ a ] - c[ g, a ] ) / ( sig[ g ] * 2 ** 0.5 ) ) - erf( ( lo[ a ] - c[ g, a ] ) / ( sig[ g ] * 2 ** 0.5 ) ) ) / 2
+                                       for a in range( 3 ) ] ) for g in range( 3 ) ) / wg.sum()        # ( the target is normalized )
+    cpu = _cpu_solve( pos, nu, target, dict( tol = 1e-10 / n, max_iter = 60 ), {} )
+    wc = cpu[ "weights" ]
+    w = numpy.asarray( plan.weights ).reshape( -1 )
+    gap = numpy.abs( ( w - w.mean() ) - ( wc - wc.mean() ) ).max() / numpy.abs( wc - wc.mean() ).max()
+    cgap = abs( float( plan.cost ) / cpu[ "cost" ] - 1 )
+    bgap = numpy.abs( numpy.asarray( plan.barycenters ) - cpu[ "bary" ] ).max() * n ** ( 1 / 3 )
+    print( f"  card { st[ 'status' ] } { st[ 'nb_iter' ] } it / { st[ 'nb_diag' ] } diag / { st[ 'nb_continuation_steps' ] } stages, residual "
+           f"{ st[ 'residual' ] * n :.1e}; total mass { m.sum() :.15f} vs the box's { box :.15f} ( domain_mass { st[ 'domain_mass' ] :.15f} ); "
+           f"cpu { cpu[ 'stats' ][ 'status' ] }: weights gap { gap :.1e}, cost gap { cgap :.1e}, barycentres gap { bgap :.1e}" )
+    assert plan.converged, st
+    assert abs( m.sum() / box - 1 ) < 1e-10 and abs( st[ "domain_mass" ] / box - 1 ) < 1e-10, ( m.sum(), st[ "domain_mass" ], box )
+    assert cpu[ "stats" ][ "status" ] == "converged", cpu[ "stats" ]
+    assert gap < 1e-7 and cgap < 1e-9 and bgap < 1e-6, ( gap, cgap, bgap )
+
+
 if test( "the_card_3d_solve_refuses_what_it_does_not_solve" ):
     import numpy
     from loom.testing import need
@@ -1950,9 +2115,8 @@ if test( "the_card_3d_solve_refuses_what_it_does_not_solve" ):
         raise AssertionError( "step = 'limits' must be refused in 3D" )
     except ValueError as e:
         assert "2D only" in str( e ) and "'trials'" in str( e ), str( e )
-    # a density that is not a constant: an image of varied values, gaussians
-    for dst in ( Image( values = 1 + rng.random( ( 4, 4, 4 ) ), origin = [ 0.0 ] * 3, pixel_frame = 0.25 * numpy.eye( 3 ) ),
-                 SumOfGaussians( numpy.full( ( 1, 3 ), 0.5 ), numpy.array( [ 0.2 ] ) ) ):
+    # a density the card does not integrate in 3D: an image of varied values ( gaussians and tetrahedral meshes, it does )
+    for dst in ( Image( values = 1 + rng.random( ( 4, 4, 4 ) ), origin = [ 0.0 ] * 3, pixel_frame = 0.25 * numpy.eye( 3 ) ), ):
         try:
             OtProblem( SumOfDiracs( pos ), dst ).solve()
             raise AssertionError( f"a 3D density { type( dst ).__name__ } must be refused on the card" )
@@ -2032,7 +2196,7 @@ if test( "the_card_aggregates_in_3d_as_the_cpu" ):
         for precision in ( "fp64", "auto" ):
             plan = OtProblem( SumOfDiracs( pos ), _box_target_3d() ).solve( Iterative( tol = tol, max_iter = 60, precision = precision ) )
             _check_aggregated( f"card 3D { name } { precision }", plan, pos, groups, tol )
-            g = _plain_measures_3d( pos, plan.weights )
+            g = _plain_measures_3d( pos, plan.weights, plan.groups )
             nu = numpy.asarray( plan.target_masses ).reshape( -1 )
             alone = numpy.ones( n, dtype = bool )
             for members, _ in groups:
@@ -2324,6 +2488,7 @@ if test( "the_plan_is_differentiable_with_respect_to_all_its_inputs" ):
     from sdot.distributions.Mesh import Mesh
     from sdot.distributions.SumOfDiracs import SumOfDiracs
     from sdot.distributions.SumOfGaussians import SumOfGaussians
+    import jax
     need( "cpu" )
     # `weights`, `cell_masses`, `cost` and `barycenters` against EVERY input -- the positions and the masses of the diracs, the parameters of
     # the target -- by the implicit function theorem ( `SdotPlanNd._attach_derivatives`: the solve itself has no adjoint, it runs on
@@ -2339,21 +2504,191 @@ if test( "the_plan_is_differentiable_with_respect_to_all_its_inputs" ):
     def on_mesh( p, q, v ):
         return OtProblem( SumOfDiracs( p, weights = q ), Mesh( nodes = nodes, simplices = simplices, values = v ) ).solve( settings )
 
-    # a mesh: closed forms, the finite differences are clean
-    for output, tol in ( ( "weights", 1e-5 ), ( "cell_masses", 1e-5 ), ( "cost", 1e-3 ), ( "barycenters", 1e-3 ) ):
-        check_grad( lambda p, q, v: getattr( on_mesh( p, q, v ), output ), pos, nu, values, seed = 3, eps = 1e-5, rtol = tol, atol = tol * 1e-2 )
+    # the moments the cost and the barycenters are made of are closed forms, and so are their adjoints ( `exact_moments`, `diagram/Moments.h` ):
+    # the finite differences of the whole solve hold to `1e-6`
+    outputs = ( "weights", "cell_masses", "cost", "barycenters" )
+    tight = dict( eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
 
-    # gaussians: the support is DECLARED as a box ( a traced parameter has no support to read ), the quadrature of the moments flips its
-    # subdivisions -- the finite differences of the cost and of the barycenters are only as smooth as its `rtol`
+    # a mesh
+    for output in outputs:
+        check_grad( lambda p, q, v: getattr( on_mesh( p, q, v ), output ), pos, nu, values, seed = 3, **tight )
+
+    # gaussians: the support is DECLARED as a box ( a traced parameter has no support to read ). A narrow one, so that cells are nearly empty
     def on_gaussians( p, q, c, s, m ):
         dst = SumOfGaussians( c, s, weights = m, support_box = ( [ 0, 0 ], [ 1, 1 ] ) )
         return OtProblem( SumOfDiracs( p, weights = q ), dst ).solve( settings )
-    c, s, m = numpy.array( [ [ 0.4, 0.5 ], [ 0.7, 0.3 ] ] ), numpy.array( [ 0.25, 0.2 ] ), numpy.array( [ 1.0, 0.7 ] )
-    for output, eps, tol in ( ( "weights", 1e-5, 1e-5 ), ( "cell_masses", 1e-5, 1e-5 ), ( "cost", 1e-4, 5e-3 ), ( "barycenters", 1e-4, 5e-3 ) ):
-        check_grad( lambda p, q, c, s, m: getattr( on_gaussians( p, q, c, s, m ), output ), pos, nu, c, s, m, seed = 4, eps = eps, rtol = tol, atol = tol * 1e-2 )
+    c, s, m = numpy.array( [ [ 0.4, 0.5 ], [ 0.7, 0.3 ] ] ), numpy.array( [ 0.25, 0.08 ] ), numpy.array( [ 1.0, 0.7 ] )
+    for output in outputs:
+        check_grad( lambda p, q, c, s, m: getattr( on_gaussians( p, q, c, s, m ), output ), pos, nu, c, s, m, seed = 4, **tight )
+
+    # a polytope that is its own domain ( the cells start from it ), with a traced density -- normalized away: a zero derivative
+    from sdot.distributions.Polytope import Polytope
+    tri = ( [ [ -1, 0 ], [ 0, -1 ], [ 1, 1 ] ], [ 0, 0, 1.2 ] )
+    def on_polytope( p, q, d ):
+        return OtProblem( SumOfDiracs( p, weights = q ), Polytope( *tri, density = d ) ).solve( settings )
+    for output in outputs:
+        check_grad( lambda p, q, d: getattr( on_polytope( p, q, d ), output ), pos * 0.7, nu, numpy.array( [ 1.3 ] ), seed = 5, **tight )
+
+    # under a `jit` too: the domain of a polytope is checked on the host, without a kernel
+    jitted = jax.jit( jax.grad( lambda p: on_polytope( p, nu, numpy.array( [ 1.0 ] ) ).cost.raw ) )( pos * 0.7 )
+    plain = jax.grad( lambda p: on_polytope( p, nu, numpy.array( [ 1.0 ] ) ).cost.raw )( pos * 0.7 )
+    assert numpy.abs( numpy.asarray( jitted ) - numpy.asarray( plain ) ).max() < 1e-12
+
+    # a batch of cotangents ( `jax.jacrev`: a `vmap` of the `vjp` ): each item sweeps the cells on its own slice ( `_on_item` ), and
+    # the laplacian is assembled once for all of them -- the jacobian is the stack of the `vjp`s
+    import jax.numpy as jnp
+    bar = lambda p: on_mesh( p, nu, values ).barycenters.raw
+    jac = numpy.asarray( jax.jacrev( bar )( jnp.asarray( pos ) ) ).reshape( 2 * n, 2 * n )
+    out, vjp = jax.vjp( bar, jnp.asarray( pos ) )
+    rows = numpy.stack( [ numpy.asarray( vjp( e.reshape( out.shape ) )[ 0 ] ).reshape( -1 ) for e in jnp.eye( 2 * n ) ] )
+    assert numpy.abs( jac - rows ).max() < 1e-12 * numpy.abs( rows ).max()
 
     # and the values are those of the solve: nothing changes when nobody differentiates
     plain = OtProblem( SumOfDiracs( pos, weights = nu ), Mesh( nodes = nodes, simplices = simplices, values = values ) ).solve( settings )
-    import jax
     traced = jax.jit( lambda p: on_mesh( p, nu, values ).cost.raw )( pos )
     assert abs( float( traced ) - float( plain.cost ) ) < 1e-5 * float( plain.cost ), ( float( traced ), float( plain.cost ) )
+
+
+if test( "exact_duplicates_are_differentiated_as_one_merged_dirac" ):
+    import numpy
+    from loom.testing import need
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Box import Box
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    import jax
+    import jax.numpy as jnp
+    need( "cpu" )
+    # diracs at the SAME position: the plan is not differentiable there ( separating them cuts their merged cell along the move ).
+    # The convention ( `SdotPlanNd._attach_derivatives` ): a cluster of duplicates is ONE dirac of the summed mass, at the mean of
+    # the positions weighted by the masses -- so the values and the derivatives are those of that merged problem, composed with
+    # `p_c = sum nu_i p_i / nu_c`, `nu_c = sum nu_i`. A pair and a triple, FP64, `jax.grad` against `jax.grad`.
+    rng = numpy.random.default_rng( 0 )
+    n = 12
+    pos = rng.uniform( 0.2, 0.8, size = ( n, 2 ) )
+    nu = rng.uniform( 0.5, 1.5, size = n )
+    pos[ 1 ] = pos[ 0 ]
+    pos[ 7 ] = pos[ 4 ]
+    pos[ 9 ] = pos[ 4 ]
+    clusters = [ [ 0, 1 ], [ 2 ], [ 3 ], [ 4, 7, 9 ], [ 5 ], [ 6 ], [ 8 ], [ 10 ], [ 11 ] ]
+    inv = numpy.zeros( n, dtype = int )
+    for c, members in enumerate( clusters ):
+        inv[ members ] = c
+    A = numpy.zeros( ( len( clusters ), n ) )
+    A[ inv, numpy.arange( n ) ] = 1.0
+    settings = Iterative( tol = 1e-13, max_iter = 200, duplicates = "merge" )
+
+    def with_duplicates( p, q ):
+        return OtProblem( SumOfDiracs( p, weights = q ), Box() ).solve( settings )
+
+    def merged( p, q ):
+        qc = jnp.asarray( A ) @ q
+        pc = ( jnp.asarray( A ) @ ( q[ :, None ] * p ) ) / qc[ :, None ]
+        return OtProblem( SumOfDiracs( pc, weights = qc ), Box() ).solve( settings ), qc
+
+    # what each output of the merged problem is, member by member
+    outputs = {
+        "cost":        ( lambda pl: pl.cost.raw,        lambda pl, qc, q: pl.cost.raw ),
+        "barycenters": ( lambda pl: pl.barycenters.raw, lambda pl, qc, q: pl.barycenters.raw[ inv ] ),
+        "cell_masses": ( lambda pl: pl.cell_masses.raw, lambda pl, qc, q: pl.cell_masses.raw[ inv ] * q / qc[ inv ] ),
+    }
+    p0, q0 = jnp.asarray( pos ), jnp.asarray( nu )
+    plain = with_duplicates( pos, nu )
+    assert plain.stats[ "duplicates" ] == "checked" and int( plain.stats[ "nb_duplicates" ] ) == 3, plain.stats
+    for name, ( of_dup, of_merged ) in outputs.items():
+        # the VALUES first: the solve without any derivative, the live one, and the merged problem
+        ref = numpy.asarray( of_merged( *merged( p0, q0 ), q0 ) )
+        for got in ( numpy.asarray( getattr( plain, name ) ), numpy.asarray( of_dup( with_duplicates( p0, q0 ) ) ) ):
+            assert numpy.abs( got - ref ).max() < 1e-10, ( name, numpy.abs( got - ref ).max() )
+        # then the derivatives, along a random cotangent
+        w = jnp.asarray( rng.normal( size = ref.shape ) )
+        g_dup = jax.grad( lambda p, q: jnp.vdot( w, of_dup( with_duplicates( p, q ) ) ), argnums = ( 0, 1 ) )( p0, q0 )
+        g_ref = jax.grad( lambda p, q: jnp.vdot( w, of_merged( *merged( p, q ), q ) ), argnums = ( 0, 1 ) )( p0, q0 )
+        for k, ( a, b ) in enumerate( zip( g_dup, g_ref ) ):
+            a, b = numpy.asarray( a ), numpy.asarray( b )
+            assert numpy.isfinite( a ).all(), ( name, k, a )
+            # ( `atol`: the masses do not move with the positions -- a zero derivative, rounding on both sides )
+            err = numpy.abs( a - b ).max() / max( numpy.abs( b ).max(), 1e-6 )
+            print( f"  { name } d/{ 'positions' if k == 0 else 'masses' }: relative gap { err :.1e}" )
+            assert err < 1e-7, ( name, k, err, a, b )
+
+    # the cost's gradient is the envelope formula, member by member: `2 m_i ( p_i - b_c )`
+    g = numpy.asarray( jax.grad( lambda p: with_duplicates( p, q0 ).cost.raw )( p0 ) )
+    _, eg = plain.cost_and_position_grad()
+    assert numpy.abs( g - numpy.asarray( eg ) ).max() < 1e-10, numpy.abs( g - numpy.asarray( eg ) ).max()
+
+
+if test( "duplicates_split_their_cell_and_derive" ):
+    import numpy
+    from loom.testing import check_grad, need, need_autodiff
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.Box import Box
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    need( "cpu" )
+    need_autodiff()
+    import jax, jax.numpy as jnp
+    # `duplicates = "split"` ( the default, `SdotPlanNd._split_groups` ): a pair and a triple of exact duplicates and a pair `1e-9`
+    # apart, each member its OWN mass to the precision of the cells and its own piece. Derived by the implicit function theorem in
+    # two levels ( `_attach_split_derivatives` ): against finite differences of the whole solve, for the masses and for the
+    # positions of the SITES ( a site moved as a whole: the virtual directions are frozen ); and the cost's gradient is the envelope
+    # one member by member, `2 m_i ( p_i - b_i )` with the barycentre of its piece -- different for two duplicates
+    rng = numpy.random.default_rng( 0 )
+    n = 14
+    pos = rng.uniform( 0.2, 0.8, size = ( n, 2 ) )
+    nu = rng.uniform( 0.5, 1.5, size = n )
+    pos[ 1 ] = pos[ 0 ]
+    pos[ [ 7, 9 ] ] = pos[ 4 ]
+    pos[ 12 ] = pos[ 11 ] + 1e-9
+    settings = Iterative( tol = 1e-13, max_iter = 200 )
+    site = numpy.arange( n )
+    site[ 1 ], site[ [ 7, 9 ] ] = 0, 4
+    sites = numpy.unique( site )
+    expand = lambda ps: ps[ numpy.searchsorted( sites, site ) ]
+    solve = lambda ps, q: OtProblem( SumOfDiracs( expand( ps ), weights = q ), Box() ).solve( settings )
+
+    plain = solve( pos[ sites ], nu )
+    m = numpy.asarray( plain.cell_masses ).reshape( -1 )
+    target = numpy.asarray( plain.target_masses ).reshape( -1 )
+    assert numpy.abs( m - target ).max() <= 1e-13 and plain.stats[ "residual_full" ] <= 1e-13, ( numpy.abs( m - target ).max(), plain.stats )
+    assert sorted( map( sorted, plain.groups.members().values() ) ) == [ [ 0, 1 ], [ 4, 7, 9 ], [ 11, 12 ] ], plain.groups.members()
+    b = numpy.asarray( plain.barycenters ).reshape( n, -1 )
+    assert numpy.linalg.norm( b[ 0 ] - b[ 1 ] ) > 1e-3 and numpy.linalg.norm( b[ 4 ] - b[ 7 ] ) > 1e-3, b
+
+    # the derivatives ( `1e-9` is far below the finite differences' step: the close pair is moved as a whole too )
+    site_fd = site.copy()
+    site_fd[ 12 ] = 11
+    sites_fd = numpy.unique( site_fd )
+    expand_fd = lambda ps: ps[ numpy.searchsorted( sites_fd, site_fd ) ] + ( pos - pos[ site_fd ] )
+    solve_fd = lambda ps, q: OtProblem( SumOfDiracs( expand_fd( ps ), weights = q ), Box() ).solve( settings )
+    for output in ( "cost", "barycenters", "cell_masses" ):
+        check_grad( lambda ps, q: getattr( solve_fd( ps, q ), output ), pos[ sites_fd ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+
+    # the envelope, member by member
+    g = numpy.asarray( jax.grad( lambda p: OtProblem( SumOfDiracs( p, weights = nu ), Box() ).solve( settings ).cost.raw )( jnp.asarray( pos ) ) )
+    env = 2 * m[ :, None ] * ( pos - b )
+    gap = numpy.abs( g - env ).max( axis = 1 )
+    # ( the close pair: its true derivative is `1 / delta`, which multiplies the rounding of the masses -- `eps / delta` )
+    assert gap[ [ i for i in range( n ) if i not in ( 11, 12 ) ] ].max() < 1e-12 and gap[ [ 11, 12 ] ].max() < 1e-6, gap
+    assert numpy.linalg.norm( g[ 0 ] - g[ 1 ] ) > 1e-4, g[ [ 0, 1 ] ]
+
+    # under a `jit` ( the masses traced, the positions constant: the tree is found ): the eager derivatives, and the eager plan
+    # ( `TreeSystem.from_rows`: the frozen levels gathered from the backend's rows )
+    h = lambda q: ( lambda p: p.cost.raw + ( p.cell_masses.raw.reshape( -1 ) * numpy.arange( n ) ).sum() )( OtProblem( SumOfDiracs( pos, weights = q ), Box() ).solve( settings ) )
+    ge, gj = numpy.asarray( jax.grad( h )( jnp.asarray( nu ) ) ), numpy.asarray( jax.jit( jax.grad( h ) )( jnp.asarray( nu ) ) )
+    assert numpy.abs( ge - gj ).max() < 1e-9 * numpy.abs( ge ).max(), numpy.abs( ge - gj ).max()
+    bj = numpy.asarray( jax.jit( lambda q: OtProblem( SumOfDiracs( pos, weights = q ), Box() ).solve( settings ).barycenters.raw )( jnp.asarray( nu ) ) )
+    assert numpy.abs( bj.reshape( n, -1 ) - b ).max() < 1e-12, numpy.abs( bj.reshape( n, -1 ) - b ).max()
+
+    # Lloyd on ONE problem ( each solve starts from the last plan ): once the duplicates separate, the tree of the last plan is not
+    # theirs any more -- it is built again ( the plan's problem holds the new positions too: the tree remembers its own )
+    pb = OtProblem( SumOfDiracs( pos, weights = nu ), Box() )
+    x = pos.copy()
+    for it in range( 3 ):
+        pb.source = SumOfDiracs( x, weights = nu )
+        p = pb.solve( settings )
+        x = numpy.asarray( p.barycenters ).reshape( x.shape )
+    assert p.groups is None or p.groups.nb_aggregates < 3, p.groups
+
+    # `duplicates = "merge"` keeps the shared cell
+    merged = OtProblem( SumOfDiracs( pos, weights = nu ), Box() ).solve( Iterative( tol = 1e-13, max_iter = 200, duplicates = "merge" ) )
+    bm = numpy.asarray( merged.barycenters ).reshape( n, -1 )
+    assert merged.groups is None and ( bm[ 0 ] == bm[ 1 ] ).all()

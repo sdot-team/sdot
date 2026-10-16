@@ -54,3 +54,9 @@ if test( "grad_torch" ):
 
 if test( "grad_formula" ):
     _run( "grad_formula.py" )
+
+if test( "duplicates_diagram" ):
+    _run( "duplicates_diagram.py" )
+
+if test( "duplicates_plan" ):
+    _run( "duplicates_plan.py" )

@@ -20,6 +20,13 @@
 // contracted cloud is written as a power diagram of the original cloud, `w_i = |p_i|^2 - |a p_i +
 // b|^2 / a`, and its cells are all fed.
 //
+// = With a sink ( partial transport )
+//
+// The sink is seed 0 of Newton ( `Sweep.h` ): its target is what the density keeps beyond the seeds' masses, its weight the gauge.
+// The start is not the Voronoi -- balls of radius 0 hold nothing -- but BALLS: `w_i = nu_i / ( 2 pi rho )`, `rho` the mean
+// density of the domain ( half of what the cell would hold alone, so that the sink keeps some mass ), each ball whose cell is
+// still empty grown until it meets the density. No continuation, no rescaling of the targets.
+//
 // = The width continuation ( `Continuation.h` )
 //
 // There remains the case where cells have no mass because the DENSITY has none where they are
@@ -120,18 +127,23 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
 
     Convolved<Dist> conv( dist );
     Sweep<PD,DECAYED_TYPE_OF( dom ),Dist,TK> bal( queue, pd, pd_in, dom, dist, o.cap0 );
+    constexpr bool sink = decltype( bal )::sink;
+    constexpr SI off = decltype( bal )::off;            // the user's seeds are `off .. off + n - 1` for Newton ( the sink is 0 )
+    const SI nn = n + off;
+    if constexpr ( sink )
+        bal.total_mass = bal.domain_mass();
     auto lin = linear_solver( o.lin, n, D, o.lin_options );
     lin->order( bal.rank_of );                           // the tree order, for the aggregation of the multigrid
     Newton<decltype( bal )> newton( bal, *lin, o.newton );
     // ---- the aggregation ( `Aggregation.h` ): its settings, the exact duplicates given by the caller
-    newton.agg.init( n );
+    newton.agg.init( nn );
     newton.agg.margin = o.agg_margin;
     newton.agg.gap = o.agg_gap;
     newton.agg.tol_abs = o.newton.tol_abs;
     newton.agg.tol_rel = o.newton.tol_rel;
     if ( o.agg_nb_dups > 0 ) {
         std::vector<SI> dup( o.agg_nb_dups ), rep( o.agg_nb_dups );
-        for ( SI k = 0; k < o.agg_nb_dups; ++k ) { dup[ k ] = SI( dups_in( 2 * k ) ); rep[ k ] = SI( dups_in( 2 * k + 1 ) ); }
+        for ( SI k = 0; k < o.agg_nb_dups; ++k ) { dup[ k ] = off + SI( dups_in( 2 * k ) ); rep[ k ] = off + SI( dups_in( 2 * k + 1 ) ); }
         newton.agg.set_duplicates( dup, rep );
     }
 
@@ -144,7 +156,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         if ( nb_steps >= cap_steps ) return;
         const auto &A = newton.a;
         double mn = A.empty() ? 0 : A[ 0 ], mx = 0, l2 = 0;
-        for ( SI i = 0; i < n; ++i ) {
+        for ( SI i = 0; i < nn; ++i ) {
             mn = std::min( mn, A[ i ] );
             mx = std::max( mx, std::fabs( A[ i ] - newton.nu[ i ] ) );
             l2 += ( A[ i ] - newton.nu[ i ] ) * ( A[ i ] - newton.nu[ i ] );
@@ -159,20 +171,36 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         hist.rows( nb_steps, int( H_S ) ) = s_current;
         if constexpr ( DECAYED_TYPE_OF( hist.weights )::is_valid )
             for ( SI i = 0; i < n; ++i )
-                hist.weights( nb_steps, i ) = newton.w[ i ];
+                hist.weights( nb_steps, i ) = newton.w[ off + i ];
         ++nb_steps;
     };
 
     // ---- the target, and the start ( on the widest density if the continuation is forced )
-    std::vector<double> nu( n ), w( n, 0.0 );
-    for ( SI i = 0; i < n; ++i ) nu[ i ] = double( nu_in( i ) );
+    std::vector<double> nu( nn ), w( nn, 0.0 );
+    for ( SI i = 0; i < n; ++i ) nu[ off + i ] = double( nu_in( i ) );
+    if constexpr ( sink ) {                              // the sink keeps what the seeds do not take
+        double s = 0;
+        for ( SI i = 0; i < n; ++i ) s += nu[ off + i ];
+        nu[ 0 ] = bal.total_mass - s;
+    }
     bool given = false;
     if constexpr ( DECAYED_TYPE_OF( w0_in )::is_valid ) {
-        for ( SI i = 0; i < n; ++i ) { w[ i ] = double( w0_in( i ) ); given |= w[ i ] != 0; }
+        for ( SI i = 0; i < n; ++i ) { w[ off + i ] = double( w0_in( i ) ); given |= w[ off + i ] != 0; }
     }
     int start = given ? START_GIVEN : START_VORONOI;
+    // GROUPS ( `Groups.h` ): the weights seed by seed are turned into Newton's unknowns, the diagram's virtual weights kept as they are
+    auto as_unknowns = [&]( std::vector<double> &W, bool precise ) {
+        if constexpr ( decltype( bal )::groups ) {
+            if ( bal.grp.active ) {
+                std::vector<double> x;
+                bal.grp.unknowns_of( W, x, precise );
+                W.swap( x );
+            }
+        }
+    };
+    as_unknowns( w, true );
     const double gauge = w[ 0 ];
-    for ( SI i = 0; i < n; ++i ) w[ i ] -= gauge;
+    for ( SI i = 0; i < n; ++i ) if ( newton.level0( i ) ) w[ i ] -= gauge;
 
     // the stages of the continuation: the list of widths, `0` last
     double s0 = o.conv_s0;
@@ -192,18 +220,40 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         s0 = 0.5 * std::sqrt( diam2 );
     }
     const double s_min = o.conv_min > 0 ? o.conv_min : conv.min_scale( s0 );
-    std::vector<double> scales = ( o.continuation == SolverOptions::ALWAYS && Convolved<Dist>::possible ) ? continuation_steps( s0, o.conv_ratio, s_min )
-                                                                                                          : std::vector<double>{ 0.0 };
+    std::vector<double> scales = ( ! sink && o.continuation == SolverOptions::ALWAYS && Convolved<Dist>::possible ) ? continuation_steps( s0, o.conv_ratio, s_min )
+                                                                                                                   : std::vector<double>{ 0.0 };
 
     std::vector<double> a;
     std::vector<Facet> fa;
     s_current = scales[ 0 ];
     bal.dist = &conv.at( s_current );
+    if constexpr ( sink ) {
+        if ( ! given ) {                                 // the start by BALLS ( see the head of the file )
+            double area = 1;
+            if constexpr ( DECAYED_TYPE_OF( pd.box_min )::is_valid )
+                for ( int d = 0; d < D; ++d ) area *= std::max( double( pd.box_max( d ) ) - double( pd.box_min( d ) ), 1e-300 );
+            const double rho = bal.total_mass / area;
+            for ( SI i = 0; i < n; ++i ) w[ off + i ] = nu[ off + i ] / ( 2 * M_PI * rho );
+            as_unknowns( w, false );
+            start = START_BALLS;
+        }
+    }
     newton.measures_and_facets( w, a, fa );
+    if constexpr ( sink ) {
+        if ( ! given ) {                                 // an empty cell: its ball grown until it meets the density
+            for ( int round = 0; round < 60; ++round ) {
+                bool grown = false;
+                for ( SI i = 0; i < n; ++i )
+                    if ( ! ( a[ off + i ] > 0 ) ) { w[ off + i ] = 4 * std::max( w[ off + i ], 1e-300 ); grown = true; }
+                if ( ! grown ) break;
+                newton.measures_and_facets( w, a, fa );
+            }
+        }
+    }
     const double nu_min = minimum( nu );
     // ( the smallest masses below leave the exact duplicates out: their cells are empty by construction )
     auto min_mass = [&]( const std::vector<double> &m ) { return newton.agg.floor_min( m ); };
-    if ( given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {      // a warm start that empties a cell: the Voronoi, if it does better
+    if ( ! sink && given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {      // a warm start that empties a cell: the Voronoi, if it does better
         std::vector<double> w0( n, 0.0 ), a0;
         std::vector<Facet> fa0;
         newton.measures_and_facets( w0, a0, fa0 );
@@ -211,7 +261,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         else newton.bal.set_weights( w );
     }
     if constexpr ( DECAYED_TYPE_OF( pd.box_min )::is_valid ) {
-        if ( min_mass( a ) <= 0 && ! ( given && o.keep_start ) ) {   // seeds outside the domain: the similarity
+        if ( ! sink && min_mass( a ) <= 0 && ! ( given && o.keep_start ) ) {   // seeds outside the domain: the similarity
             double lo[ D ], hi[ D ];
             for ( int d = 0; d < D; ++d ) { lo[ d ] = double( pd.box_min( d ) ); hi[ d ] = double( pd.box_max( d ) ); }
             if ( double( start_box_in( 0 ) ) > 0 )       // the density is not positive on all the domain: its inscribed box
@@ -219,6 +269,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
             std::vector<double> w1, a1;
             std::vector<Facet> fa1;
             similarity<D>( pd, lo, hi, w1 );
+            as_unknowns( w1, false );
             newton.measures_and_facets( w1, a1, fa1 );
             if ( min_mass( a1 ) > min_mass( a ) ) { w.swap( w1 ); a.swap( a1 ); fa.swap( fa1 ); start = START_SIMILARITY; }
             else newton.bal.set_weights( w );
@@ -226,12 +277,19 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     }
     const double min_start_mass = min_mass( a );
     // AUTO: the density is missing where cells are -> the continuation, from the same start
-    if ( o.continuation == SolverOptions::AUTO && Convolved<Dist>::possible && scales.size() == 1
+    if ( ! sink && o.continuation == SolverOptions::AUTO && Convolved<Dist>::possible && scales.size() == 1
       && ( min_start_mass < o.continuation_threshold * nu_min ) ) {
         scales = continuation_steps( s0, o.conv_ratio, s_min );
         s_current = scales[ 0 ];
         bal.dist = &conv.at( s_current );
         newton.measures_and_facets( w, a, fa );
+        if ( given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {   // ( a warm start can empty a cell of the widest density too,
+            std::vector<double> w0( n, 0.0 ), a0;                          //   geometrically: the Voronoi, if it does better there )
+            std::vector<Facet> fa0;
+            newton.measures_and_facets( w0, a0, fa0 );
+            if ( min_mass( a0 ) > min_mass( a ) ) { w.swap( w0 ); a.swap( a0 ); fa.swap( fa0 ); start = START_VORONOI; }
+            else newton.bal.set_weights( w );
+        }
     }
 
     // ---- the stages
@@ -251,8 +309,8 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         std::vector<double> nu_s = nu;
         double nu_mass = 0;
         domain_mass = 0;
-        for ( SI i = 0; i < n; ++i ) { domain_mass += a[ i ]; nu_mass += nu[ i ]; }
-        if ( domain_mass > 0 && nu_mass > 0 && domain_mass != nu_mass )
+        for ( SI i = 0; i < nn; ++i ) { domain_mass += a[ i ]; nu_mass += nu[ i ]; }
+        if ( ! sink && domain_mass > 0 && nu_mass > 0 && domain_mass != nu_mass )
             for ( SI i = 0; i < n; ++i ) nu_s[ i ] *= domain_mass / nu_mass;
         newton.nu = nu_s;
         newton.a = a;
@@ -262,7 +320,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
                          int( step + 1 ), int( scales.size() ), s_current, domain_mass, minimum( a ) );
 
         // the step by the limits ( 2D ): the pass is plugged into Newton when it is requested
-        if constexpr ( D == 2 ) {
+        if constexpr ( D == 2 && ! sink ) {
             Bounds2D<decltype( bal )> lim( bal );
             LocalBounds ll;
             ll.alpha_min = [&]( const std::vector<double> &W, const std::vector<double> &Dd, const std::vector<SI> &bad_cells,
@@ -304,11 +362,22 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         if ( total.status == NewtonStats::CONVERGED && ! newton.agg.converged( full, full_rel ) )
             total.status = S_CONVERGED_AGGREGATED;
     }
-    for ( SI i = 0; i < n; ++i )
-        clusters( i ) = newton.agg.any() && newton.agg.cluster_of[ i ] >= 0 ? newton.agg.cl_members[ newton.agg.cl_begin[ newton.agg.cluster_of[ i ] ] ] : i;
+    std::vector<SI> group_reps;                          // ( with groups: the smallest seed of each one's root aggregate )
+    if constexpr ( decltype( bal )::groups )
+        if ( bal.grp.active ) group_reps = bal.grp.root_of;
+    for ( SI i = 0; i < n; ++i ) {
+        const SI j = off + i;
+        SI r = newton.agg.any() && newton.agg.cluster_of[ j ] >= 0 ? newton.agg.cl_members[ newton.agg.cl_begin[ newton.agg.cluster_of[ j ] ] ] : j;
+        if ( ! group_reps.empty() ) r = group_reps[ j ];
+        clusters( i ) = r >= off ? r - off : i;
+    }
 
+    // the weights seed by seed ( with groups: `groups.py`'s weights; the precise virtual weights are in the diagram's views )
+    std::vector<double> w_out = w;
+    if constexpr ( decltype( bal )::groups )
+        bal.grp.weights_of( w, w_out );
     for ( SI i = 0; i < n; ++i )
-        weights( i ) = w[ i ];
+        weights( i ) = w_out[ off + i ];
 
     // the moments sweep below is not a RESIDUAL EVALUATION: the diagram count
     // the caller reads must remain that of the descent, otherwise two versions of the code
@@ -323,7 +392,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     // the MASS of a cell is the one Newton measured -- not that of the moments sweep,
     // which uses quadrature where the measure has a closed form ( see `Sweep::moments` ).
     for ( SI i = 0; i < n; ++i )
-        masses( i ) = a[ i ];
+        masses( i ) = a[ off + i ];
     {
         bal.dist = &conv.at( 0 );
         bal.set_weights( w );
@@ -366,6 +435,13 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     put( NB_CLUSTERS, double( newton.agg.nb_clusters() ) );
     put( NB_AGGREGATED, double( newton.agg.nb_aggregated() ) );
     put( NB_DUPLICATES, double( newton.agg.dups.size() ) );
+    if constexpr ( decltype( bal )::groups ) {          // ( the tree of aggregates: its roots, their seeds, the duplicates )
+        if ( bal.grp.active ) {
+            double r, mm, dd;
+            bal.grp.counts( r, mm, dd );
+            put( NB_CLUSTERS, r ); put( NB_AGGREGATED, mm ); put( NB_DUPLICATES, dd );
+        }
+    }
     put( RESIDUAL_FULL, full );
     put( NB_POLISH, double( total.nb_polish ) );
 }
