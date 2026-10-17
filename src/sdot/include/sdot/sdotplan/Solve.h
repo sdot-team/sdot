@@ -34,7 +34,11 @@
 // and direct Newton stagnates ( README § 9.1 ). We then first solve for the density convolved
 // by a wide gaussian ( positive everywhere ), then narrower and narrower, each step starting from
 // the weights of the previous one. `AUTO` triggers it when the best start still leaves a
-// cell under `continuation_threshold` times the smallest target mass.
+// cell under `continuation_threshold` times the smallest target mass. It then starts at the narrowest width
+// where the start leaves no cell under that threshold ( a start almost admissible needs little smoothing ), and
+// goes down adaptively: to the density itself as soon as the solved weights are admissible for it, by narrower
+// widths otherwise, a width where Newton fails being abandoned for a wider one. `ALWAYS` runs the fixed
+// ladder of widths, from half the diameter of the domain.
 //
 // = The target mass
 //
@@ -276,20 +280,47 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         }
     }
     const double min_start_mass = min_mass( a );
-    // AUTO: the density is missing where cells are -> the continuation, from the same start
+    // AUTO: the density is missing where cells are -> the continuation, from the same start. It starts at the NARROWEST width
+    // where every cell of the start has mass ( a bisection among `s_min 4^k` ), not at the widest one: a start that is almost
+    // admissible ( the barycenters of a Lloyd step, next to a density carried by a surface ) needs little smoothing. And it goes
+    // down ADAPTIVELY ( see the stages below )
+    bool adaptive = false;
+    const double admissible = o.continuation_threshold * nu_min;
     if ( ! sink && o.continuation == SolverOptions::AUTO && Convolved<Dist>::possible && scales.size() == 1
-      && ( min_start_mass < o.continuation_threshold * nu_min ) ) {
-        scales = continuation_steps( s0, o.conv_ratio, s_min );
-        s_current = scales[ 0 ];
-        bal.dist = &conv.at( s_current );
-        newton.measures_and_facets( w, a, fa );
-        if ( given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {   // ( a warm start can empty a cell of the widest density too,
-            std::vector<double> w0( n, 0.0 ), a0;                          //   geometrically: the Voronoi, if it does better there )
+      && ( min_start_mass < admissible ) ) {
+        adaptive = true;
+        std::vector<double> ladder = continuation_steps( s0, 4.0, s_min );     // ( decreasing, 0 last )
+        ladder.pop_back();
+        if ( ladder.empty() ) ladder.push_back( s0 );
+        std::reverse( ladder.begin(), ladder.end() );                         // ( increasing: s_min ... s0 )
+        auto mass_at = [&]( double s, std::vector<double> &W, std::vector<double> &A, std::vector<Facet> &F ) {
+            bal.dist = &conv.at( s );
+            newton.measures_and_facets( W, A, F );
+            return min_mass( A );
+        };
+        // ( a warm start can empty a cell GEOMETRICALLY ( a power cell of no volume, without mass at any width ): measured on the
+        //   widest width, where the density is positive everywhere, the Voronoi instead if it does better there. Without a warm start,
+        //   the widest width is the last resort of the bisection, measured only if it is the one chosen )
+        PI lo = 0, hi = ladder.size() - 1;
+        std::vector<double> a_hi, a_try;
+        std::vector<Facet> fa_hi, fa_try;
+        if ( given && ! o.keep_start && mass_at( ladder[ hi ], w, a_hi, fa_hi ) < admissible ) {
+            std::vector<double> w0( n, 0.0 ), a0;
             std::vector<Facet> fa0;
-            newton.measures_and_facets( w0, a0, fa0 );
-            if ( min_mass( a0 ) > min_mass( a ) ) { w.swap( w0 ); a.swap( a0 ); fa.swap( fa0 ); start = START_VORONOI; }
-            else newton.bal.set_weights( w );
+            if ( mass_at( ladder[ hi ], w0, a0, fa0 ) > min_mass( a_hi ) ) { w.swap( w0 ); a_hi.swap( a0 ); fa_hi.swap( fa0 ); start = START_VORONOI; }
         }
+        while ( lo < hi ) {                              // ( the smallest index whose width is admissible )
+            const PI mid = ( lo + hi ) / 2;
+            if ( mass_at( ladder[ mid ], w, a_try, fa_try ) >= admissible ) { hi = mid; a_hi.swap( a_try ); fa_hi.swap( fa_try ); }
+            else lo = mid + 1;
+        }
+        s_current = ladder[ hi ];
+        if ( a_hi.empty() ) mass_at( s_current, w, a_hi, fa_hi );
+        bal.dist = &conv.at( s_current );
+        newton.bal.set_weights( w );
+        a.swap( a_hi );
+        fa.swap( fa_hi );
+        scales.assign( { s_current } );
     }
 
     // ---- the stages
@@ -299,12 +330,9 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         std::setvbuf( stdout, nullptr, _IOLBF, 0 );
     NewtonStats total;
     double domain_mass = 0;
-    for ( PI step = 0; step < scales.size(); ++step ) {
-        s_current = scales[ step ];
-        if ( step > 0 ) {                               // the next density: the measures of the start have to be redone
-            bal.dist = &conv.at( s_current );
-            newton.measures_and_facets( w, a, fa );
-        }
+    // one stage: Newton at `s_current`, from `w`, whose measures at `s_current` are `a`, `fa`; what it leaves is in `newton`
+    PI nb_stages = 0;
+    auto run_stage = [&]( int nb_planned ) {
         // the target mass, at the scale of what the domain contains of THIS density
         std::vector<double> nu_s = nu;
         double nu_mass = 0;
@@ -315,9 +343,12 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         newton.nu = nu_s;
         newton.a = a;
         newton.fa = fa;
-        if ( o.newton.trace )
+        if ( o.newton.trace && nb_planned > 0 )
             std::printf( "  stage %d / %d : s = %.4e, domain mass %.6f, smallest mass %.3e\n",
-                         int( step + 1 ), int( scales.size() ), s_current, domain_mass, minimum( a ) );
+                         int( nb_stages + 1 ), nb_planned, s_current, domain_mass, minimum( a ) );
+        else if ( o.newton.trace )
+            std::printf( "  stage %d ( adaptive ) : s = %.4e, domain mass %.6f, smallest mass %.3e\n",
+                         int( nb_stages + 1 ), s_current, domain_mass, minimum( a ) );
 
         // the step by the limits ( 2D ): the pass is plugged into Newton when it is requested
         if constexpr ( D == 2 && ! sink ) {
@@ -334,10 +365,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         } else
             newton.solves( w, true );
 
-        // what the stage leaves: its weights, its measures ( for the next stage ), its counters
-        w = newton.w;
-        a = newton.a;
-        fa = newton.fa;
+        // its counters ( a stage tried and abandoned costs as much as an accepted one )
         nb_steps_before = nb_steps > 0 ? int( double( hist.rows( nb_steps - 1, int( H_STEP ) ) ) ) + 1 : 0;
         total.nb_iter += newton.st.nb_iter;
         total.nb_backtracks += newton.st.nb_backtracks;
@@ -346,13 +374,87 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         total.t_asm += newton.st.t_asm;
         total.t_lim += newton.st.t_lim;
         total.nb_polish += newton.st.nb_polish;
-        if ( step == 0 ) { total.residual0 = newton.st.residual0; total.eps = newton.st.eps; total.it_switch = newton.st.it_switch; }
+        if ( nb_stages == 0 ) { total.residual0 = newton.st.residual0; total.eps = newton.st.eps; total.it_switch = newton.st.it_switch; }
         total.status = newton.st.status;
         total.residual = newton.st.residual;
-        if ( newton.st.status == NewtonStats::LINEAR_FAILURE )
-            break;
+        ++nb_stages;
+        const bool ok = newton.st.status == NewtonStats::CONVERGED || newton.st.status == NewtonStats::STAGNATION;
         newton.st = NewtonStats{};
-    }
+        return ok;
+    };
+    auto accept = [&]() { w = newton.w; a = newton.a; fa = newton.fa; };
+
+    if ( ! adaptive ) {
+        // the given widths, one after the other
+        for ( PI step = 0; step < scales.size(); ++step ) {
+            s_current = scales[ step ];
+            if ( step > 0 ) {                           // the next density: the measures of the start have to be redone
+                bal.dist = &conv.at( s_current );
+                newton.measures_and_facets( w, a, fa );
+            }
+            run_stage( int( scales.size() ) );
+            accept();
+            if ( total.status == NewtonStats::LINEAR_FAILURE )
+                break;
+        }
+    } else if ( run_stage( 0 ) ) {
+        // ADAPTIVE: after each solved width `s`, the density itself ( `0` ) if the solved weights are admissible for it, otherwise
+        // `s / r`, `r` taken from the last width that worked and squared after two successes in a row ( at most 16 ), its square
+        // root after a failure ( at least `conv_ratio` ), and never under `s_min` ( a try costs a sweep of the smoothed density ).
+        // At `r = conv_ratio`, the step of the fixed ladder, a width is tried as long as no cell is empty: the threshold only
+        // spares the wider steps a Newton that would fail, and the descent is never worse than the ladder. A width is tried only if the solved weights leave no cell
+        // under the threshold there, and abandoned ( back to the solved weights ) if Newton does not converge on it
+        accept();
+        double r = 16;
+        int nb_ok = 0;
+        auto try_width = [&]( double s, bool forced ) {
+            std::vector<double> a1;
+            std::vector<Facet> fa1;
+            bal.dist = &conv.at( s );
+            newton.measures_and_facets( w, a1, fa1 );
+            if ( forced ? ! ( min_mass( a1 ) > 0 ) : min_mass( a1 ) < admissible ) {
+                if ( o.newton.trace ) std::printf( "  ( s = %.4e: a cell under the threshold, %.3e )\n", s, min_mass( a1 ) );
+                return false;
+            }
+            const double s_prev = s_current;
+            s_current = s;
+            a.swap( a1 );
+            fa.swap( fa1 );
+            if ( run_stage( 0 ) ) { accept(); return true; }
+            if ( o.newton.trace ) std::printf( "  ( s = %.4e: abandoned )\n", s );
+            s_current = s_prev;                         // ( abandoned: the solved weights and their measures again )
+            a.swap( a1 );
+            fa.swap( fa1 );
+            return false;
+        };
+        while ( s_current > 0 ) {
+            // ( from `s_min`, the narrowest width, the density itself is tried even with cells under the threshold, as long as none is
+            //   empty: this is the last stage of the fixed ladder, and Newton passes it -- the layers of cells along M that wider
+            //   widths leave have all crossed it by then )
+            if ( try_width( 0, s_current <= s_min * ( 1 + 1e-12 ) ) )
+                break;
+            bool moved = false;
+            while ( ! moved ) {
+                const double s = std::max( s_current / r, s_min );
+                if ( s < s_current * ( 1 - 1e-12 ) && try_width( s, r <= o.conv_ratio * ( 1 + 1e-12 ) ) ) {
+                    moved = true;
+                    if ( ++nb_ok >= 2 ) { r = std::min( r * r, 16.0 ); nb_ok = 0; }
+                    break;
+                }
+                nb_ok = 0;
+                if ( r <= o.conv_ratio * ( 1 + 1e-12 ) ) break;
+                r = std::max( std::sqrt( r ), o.conv_ratio );
+            }
+            if ( ! moved ) {                            // ( no narrower width works: the solve stops at `s_current`, not on the density )
+                bal.dist = &conv.at( s_current );
+                newton.bal.set_weights( w );
+                total.status = decltype( total.status )( S_FAILURE );
+                break;
+            }
+        }
+    } else
+        accept();
+    scales.resize( nb_stages );                         // ( for the stats: the stages actually run )
     hist.nb_steps.set( nb_steps );
 
     // THE FULL PROBLEM'S RESIDUAL, and the status when only the aggregated problem passed the test

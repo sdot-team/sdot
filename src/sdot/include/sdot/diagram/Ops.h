@@ -186,6 +186,12 @@ HD bool integrate_into( auto &&res, const Local &cell, Local &piece, const auto 
     constexpr int D = Local::ct_dim;
     PieceWorkspace<Local> ws{ piece };
     TF sum = 0;
+    if constexpr ( requires { dist.integrate_cell( cell, ws, sum ); } ) {   // ( a distribution that integrates a cell itself, when it can )
+        if ( dist.integrate_cell( cell, ws, sum ) ) {
+            res = sum;
+            return ! ws.overflow;
+        }
+    }
     dist.for_each_piece( cell, ws, [&]( const auto &pc, const auto &dens ) {
         if constexpr ( DECAYED_TYPE_OF( dens )::is_constant ) {
             sum += dens.value * pc.template measure<TF>();

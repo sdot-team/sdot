@@ -9,7 +9,11 @@
 #include <loom/support/math.h>
 #include <sdot/integration/CodimMeshIntegrals.h>
 #include <sdot/PointwiseDensity.h>
+#include <atomic>
+#include <cmath>
 #include <limits>
+#include <memory>
+#include <vector>
 
 namespace sdot {
 
@@ -500,6 +504,9 @@ struct CodimMesh {
     /// the width of the continuation ( `Convolved<CodimMesh>::at` ): a member APART from the generated attributes, `0` by default,
     /// and then `params( 0 )`
     TF conv_s = 0;
+    /// the integrals of the smoothed density over the WHOLE elements, at `conv_s`: computed the first time an element lies inside a
+    /// cell ( `integrate_cell` ), NaN before -- set by `Convolved<CodimMesh>::at` for each width, none otherwise ( computed each time )
+    std::shared_ptr<std::vector<std::atomic<double>>> whole;
 
     HD TF width() const { return conv_s > 0 ? conv_s : TF( params( 0 ) ); }
     HD bool by_quadrature() const { return SI( params.shape( 0 ) ) > 1 && TF( params( 1 ) ) != 0; }
@@ -598,7 +605,135 @@ struct CodimMesh {
             walk_m( bounded, clo, chi, [&]( SI e ) { func( cell, CodimMeasureDensity<CodimMesh>{ this, e } ); return true; } );
             return;
         }
-        walk( bounded, clo, chi, [&]( SI e ) { return piece_of( e, cell, bounded, clo, chi, ws, func ); } );
+        walk( bounded, clo, chi, [&]( SI e ) { return negligible( e ) || piece_of( e, cell, bounded, clo, chi, ws, func ); } );
+    }
+
+    /// `int rho w exp( -d^2 / width^2 )` over the whole element `e` ( once per width when `whole` is set )
+    TF whole_integral( SI e ) const {
+        constexpr int D = ct_dim;
+        auto value = [&]() {
+            const auto P = Vector<Vector<TF,D>,D+1>( Function(), [&]( PI k ) {
+                return Vector<TF,D>::with_func( [&]( PI c ) { return TF( nodes( SI( simplices( e, SI( k ) ) ), SI( c ) ) ); } );
+            } );
+            return CodimMeshElementDensity<CodimMesh>{ this, e, width() }.integrate_over_simplex( P );
+        };
+        if ( ! whole )
+            return value();
+        double v = ( *whole )[ e ].load( std::memory_order_relaxed );
+        if ( v == v )
+            return TF( v );
+        const TF r = value();
+        ( *whole )[ e ].store( double( r ), std::memory_order_relaxed );   // ( two threads may both compute it: the same value )
+        return r;
+    }
+
+    /// THE MASS OF A CELL, for the smoothed density ( `diagram::integrate_into` calls it when it exists ): the elements of the envelope
+    /// entirely inside the cell -- most of them, small next to the cells -- add their whole integral ( `whole_integral` ), without
+    /// cutting the cell; the others are cut as `for_each_piece` does. `false` when it does not apply ( the measure on M, the
+    /// quadrature, an unbounded cell ): `for_each_piece` then.
+    template<class TI>
+    HD bool integrate_cell( const auto &cell, auto &ws, TI &sum ) const {
+        constexpr int D = ct_dim;
+        if ( exact() || by_quadrature() || cell.nb_vertices() == 0 )
+            return false;
+        TF clo[ D ], chi[ D ];
+        if ( ! box_of( cell, clo, chi ) )
+            return false;
+
+        // the planes of the cell, outwards ( by its centroid ), unit; a cut that bounds nothing gives no plane, and is left out
+        const int nc = cell.nb_cuts();
+        const SI nv = SI( cell.nb_vertices() );
+        TF g[ D ] = {}, scale = 0;
+        for ( SI v = 0; v < nv; ++v )
+            for ( int c = 0; c < D; ++c ) {
+                const TF x = TF( cell.coord( int( v ), c ) );
+                g[ c ] += x / TF( nv );
+                scale = ( x < 0 ? -x : x ) > scale ? ( x < 0 ? -x : x ) : scale;
+            }
+        std::vector<TF> pl;
+        pl.reserve( std::size_t( nc ) * ( D + 1 ) );
+        for ( int q = 0; q < nc; ++q ) {
+            TF dir[ D ], off;
+            cell.plane( q, dir, off );
+            TF l = 0, sg = - off;
+            for ( int c = 0; c < D; ++c ) { l += dir[ c ] * dir[ c ]; sg += dir[ c ] * g[ c ]; }
+            l = sdot::sqrt( l );
+            if ( ! ( l > 0 ) )
+                continue;
+            const TF f = ( sg > 0 ? TF( -1 ) : TF( 1 ) ) / l;
+            for ( int c = 0; c < D; ++c ) pl.push_back( f * dir[ c ] );
+            pl.push_back( f * off );
+        }
+        const TF tol = TF( 1e-10 ) * ( scale > 0 ? scale : TF( 1 ) );
+        // where element `e` is: 1 inside the cell, -1 outside ( a plane of the cell, or a face of the element, separates them ), 0 across
+        auto where = [&]( SI e ) {
+            bool in = true;
+            for ( std::size_t q = 0; q < pl.size(); q += D + 1 ) {
+                bool all_out = true;
+                for ( int i = 0; i <= D; ++i ) {
+                    const SI nd = SI( simplices( e, i ) );
+                    TF s = - pl[ q + D ];
+                    for ( int c = 0; c < D; ++c ) s += pl[ q + c ] * TF( nodes( nd, c ) );
+                    in &= s < - tol;
+                    all_out &= s > tol;
+                }
+                if ( all_out )
+                    return -1;
+            }
+            if ( in )
+                return 1;
+            for ( int i = 0; i <= D; ++i ) {                // ( the faces of the element: `lambda_i >= 0` inside )
+                TF g2 = 0, gx0 = 0;
+                for ( int c = 0; c < D; ++c ) {
+                    const TF gc = TF( grads( e, i, c ) );
+                    g2 += gc * gc;
+                    gx0 += gc * TF( nodes( SI( simplices( e, 0 ) ), c ) );
+                }
+                const TF l0 = ( i == 0 ? TF( 1 ) : TF( 0 ) ) - gx0, eps = tol * sdot::sqrt( g2 );
+                bool all_out = true;
+                for ( SI v = 0; v < nv && all_out; ++v ) {
+                    TF lam = l0;
+                    for ( int c = 0; c < D; ++c ) lam += TF( grads( e, i, c ) ) * TF( cell.coord( int( v ), c ) );
+                    all_out = lam < - eps;
+                }
+                if ( all_out )
+                    return -1;
+            }
+            return 0;
+        };
+
+        TF acc = 0;
+        walk( true, clo, chi, [&]( SI e ) {
+            if ( negligible( e ) )
+                return true;
+            const int w = where( e );
+            if ( w < 0 )
+                return true;
+            if ( w > 0 ) {
+                acc += whole_integral( e );
+                return true;
+            }
+            return piece_of( e, cell, true, clo, chi, ws, [&]( const auto &pc, const auto &dens ) {
+                pc.for_each_simplex( [&]( const auto &chain ) {
+                    const auto P = Vector<Vector<TF,D>,D+1>( Function(), [&]( PI k ) {
+                        return Vector<TF,D>::with_func( [&]( PI c ) { return TF( pc.coord( int( chain[ k ] ), int( c ) ) ); } );
+                    } );
+                    acc += dens.integrate_over_simplex( P );
+                } );
+            } );
+        } );
+        sum = TI( acc );
+        return true;
+    }
+
+    /// an element of the envelope at more than `8 width` from M everywhere: its share of the smoothed density is under `exp( -64 )` of
+    /// its `rho w` volume, and it is left out of the pieces and the facets alike -- at a narrow width, most of the envelope ( the
+    /// sweeps of the continuation cost what is near M only )
+    HD bool negligible( SI e ) const {
+        constexpr int D = ct_dim;
+        TF dmin = TF( dists( e, 0 ) );
+        for ( int i = 1; i <= D; ++i ) dmin = TF( dists( e, i ) ) < dmin ? TF( dists( e, i ) ) : dmin;
+        return dmin > 8 * width();
     }
 
     // ---- the facets ( the Hessian ), cut by the elements: see `Mesh.h`, the same rule for a facet on a side of two elements ----
@@ -623,6 +758,8 @@ struct CodimMesh {
             return;
         }
         walk( true, clo, chi, [&]( SI e ) {
+            if ( negligible( e ) )
+                return true;
             for ( int q = 0; q < nc; ++q )
                 if ( cell.cid[ q ] >= 0 ) {
                     const TF part = facet_part( e, cell, plane_of, q );
@@ -846,6 +983,30 @@ struct CodimMesh {
             started = true;
             if ( ws.nb_vertices() == 0 )
                 return true;
+        }
+
+        // ( the smoothed density beyond `8 width` from M is under `exp( -64 )`: the piece stops there -- far from M, the cells and the
+        //   elements are both large, and what they share would be fanned into many simplices for nothing )
+        if ( ! exact() ) {
+            TF dmax = TF( dists( e, 0 ) ), G[ D ] = {}, gx0 = 0;
+            for ( int i = 1; i <= D; ++i ) dmax = TF( dists( e, i ) ) > dmax ? TF( dists( e, i ) ) : dmax;
+            const TF cap = 8 * width();
+            if ( dmax > cap ) {
+                for ( int i = 0; i <= D; ++i )
+                    for ( int c = 0; c < D; ++c ) G[ c ] += TF( dists( e, i ) ) * TF( grads( e, i, c ) );
+                TF gn = 0;
+                for ( int c = 0; c < D; ++c ) { gn += G[ c ] * G[ c ]; gx0 += G[ c ] * TF( nodes( SI( simplices( e, 0 ) ), c ) ); }
+                gn = sdot::sqrt( gn );
+                if ( gn > 0 ) {                         // ( d = G . ( x - x0 ) + d0: kept where `G . x <= cap - d0 + G . x0` )
+                    const auto n = Vector<TF,D>::with_func( [&]( PI c ) { return G[ c ] / gn; } );
+                    const TF off = ( cap - TF( dists( e, 0 ) ) + gx0 ) / gn;
+                    if ( ! ( started ? ws.cut( n, off ) : ws.start( cell, n, off ) ) )
+                        return false;
+                    started = true;
+                    if ( ws.nb_vertices() == 0 )
+                        return true;
+                }
+            }
         }
 
         const CodimMeshElementDensity<CodimMesh> dens{ this, e, width() };
