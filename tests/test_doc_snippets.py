@@ -13,7 +13,7 @@ def _run( name ):
     import tempfile
     from pathlib import Path
 
-    for framework in ( "jax", "torch" ):
+    for framework in ( "jax", "torch", "cupy" ):
         if framework in name and importlib.util.find_spec( framework ) is None:
             skip( f"{ framework } is not installed" )
     path = Path( __file__ ).resolve().parents[ 1 ] / "docs" / "snippets" / name
@@ -30,6 +30,9 @@ if test( "hello_jax" ):
 
 if test( "hello_torch" ):
     _run( "hello_torch.py" )
+
+if test( "hello_cupy" ):
+    _run( "hello_cupy.py" )
 
 if test( "plan" ):
     _run( "plan.py" )

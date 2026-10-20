@@ -18,8 +18,9 @@
 // The merging is for the stages of a continuation only ( `s > 0` ): at `s = 0` the terms are the gaussians themselves,
 // truncated at `eps_exact`.
 //
-// Host only: `gather` fills a per-thread buffer. The tree is built by `Convolved<SumOfGaussians>` ( the solver ) and
-// hung on the density it hands out ( `SumOfGaussians::tree` ).
+// `gather` is host only: it fills a per-thread buffer. The tree is built by `Convolved<SumOfGaussians>` ( the solver ) and
+// hung on the density it hands out ( `SumOfGaussians::tree` ). The card builds the same tree on the host and walks it on the
+// card, warp by warp ( `gpu/DensityHost2D.cuh::Gauss3DensityHost`, `gpu/Density3D.cuh::gauss3_fill` ): change one, change both.
 // =====================================================================================
 
 #include <algorithm>

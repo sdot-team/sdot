@@ -1,11 +1,11 @@
-# W2, Plans and Settings
+# Plans and Settings
 
 Three functions, from the most common to the most specific:
 
 | | returns | when |
 |---|---|---|
-| `sdot.w2( f, g )` | $W_2^2$, a scalar | a distance, a loss to differentiate |
-| `sdot.plan( f, g )` | the transport plan | barycenters, cell masses, weights, a picture |
+| `sdot.w2( f, g )` | $W_2^2$, a scalar | distance (a loss to differentiate, ...) |
+| `sdot.plan( f, g )` | the transport plan | distance plus barycenters, cell masses, weights, picture |
 | `sdot.ot_solve( f, g, ... )` | the transport plan | the same, with the settings of the solver |
 
 `f` is the discrete source ( a `SumOfDiracs` ), `g` the continuous target ( an `Image`, a `SumOfGaussians`... see

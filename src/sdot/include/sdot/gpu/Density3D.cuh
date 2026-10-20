@@ -45,6 +45,9 @@
 // of the wedges of its edges ( `Density2D.cuh::gauss_wedge_pt` ) -- the facet; `int ( x - c ) phi = -s^2 sum_f n_f int_f phi`,
 // `int |x - c|^2 phi = 3 s^2 m - s^2 sum_f h_f int_f phi` ( the divergence of `( x - c ) phi` ). The mass of each gaussian is `| sum |`
 // over the faces, as in 2D: a cell far from a narrow bump must not get a negative mass from the rounding of its cones.
+//
+// From 16 gaussians on, a cell sees only the terms of the CPU's tree ( `GaussianTree.h` ): the warp walks it ( `gauss3_fill` ), once
+// for the strongest term, once to emit the terms above `eps` times it, 32 at a time -- groups merged at the width of the stage.
 // =====================================================================================
 
 #include "Density2D.cuh"
@@ -69,10 +72,20 @@ struct DensSums3 {
 };
 
 /// a sum of isotropic gaussians ( `SumOfGaussians`, 3D ): `c[ 3 g + a ]` the centres, `s` the widths ( convolved: `sqrt( sigma^2 +
-/// s^2 )` ), `w` the masses ( `gauss3_cell` )
+/// s^2 )` ), `w` the masses ( `gauss3_cell` ).
+///
+/// With `nn > 0`, THE TREE of the CPU ( `GaussianTree.h`, built by the host at `prepare`, the same parameters ): each cell sees only
+/// the terms that weigh on it, groups merged at the continuation width `sqrt( s2 )` -- `c`, `s`, `w` are not read then.
 struct DensGauss3 {
+    static constexpr int ND = 14;                        ///< doubles per node: lo[ 3 ], hi[ 3 ], mu[ 3 ], mass, var, s_min, s_max, radius
     SI            nb = 0;
     const double *c = nullptr, *s = nullptr, *w = nullptr;
+    SI            nn = 0;                                ///< the tree's nodes ( 0: no tree )
+    const double *nd = nullptr;                          ///< `nd[ ND * k + . ]`: node `k`
+    const int    *nl = nullptr;                          ///< `nl[ 4 * k + . ]`: begin, end ( in `it` ), left, right ( `-1`: a leaf )
+    const double *it = nullptr;                          ///< `it[ 5 * i + . ]`: the gaussians in tree order: centre, own width, mass
+    double        s2 = 0;                                ///< the continuation width, squared
+    double        theta = 0.5, rel = 1e-6;               ///< `GaussianTree::theta`; `eps` ( `s2 > 0` ) or `eps_exact`
 };
 
 
@@ -487,7 +500,9 @@ __device__ __forceinline__ double gauss3_phi3_over_x( double x ) {
 }
 
 /// `Psi( R ) / rho^2`, `R^2 = h^2 + rho^2`, `h >= 0` ( see the header )
-__device__ __forceinline__ double gauss3_psi_over_rho2( double h, double rho2 ) {
+/// `inf = Psi( infinity )`, per edge: past the series, `Phi3( R ) / R + sqrt( 2 / pi ) exp( -R^2 / 2 ) = erf( R / sqrt 2 ) / R`, so
+/// `Psi( R ) = inf - erf( R / sqrt 2 ) / R` -- one `erf` per point, the exponentials cancel
+__device__ __forceinline__ double gauss3_psi_over_rho2( double h, double rho2, double inf ) {
     const double R2 = h * h + rho2;
     if ( R2 <= 4 ) {
         // `Phi3( r ) / r^2 = sqrt( 2 / pi ) sum_k ( -1 / 2 )^k / k! r^( 2 k + 1 ) / ( 2 k + 3 )`, integrated on `[ h, R ]`:
@@ -518,7 +533,7 @@ __device__ __forceinline__ double gauss3_psi_over_rho2( double h, double rho2 ) 
             }
         return acc / ( 2 * ( R + h ) );
     }
-    return ( gauss3_phi3_over_x( h ) - gauss3_phi3_over_x( R ) + GAUSS3_S2P * ( exp( -h * h / 2 ) - exp( -R2 / 2 ) ) ) / rho2;
+    return ( inf - erf( R * 0.70710678118654752440 ) / R ) / rho2;
 }
 
 /// the edge's share of the cones of a face: `sign( p ) int_t0^t1 |p| Psi( R ) / rho^2 dt` ( unit coordinates, `h >= 0` the
@@ -543,32 +558,124 @@ __device__ __forceinline__ double gauss3_cone_edge( double h, double p, double t
         acc += tail( fmax( t0, tc ), t1 );
     const double c0 = fmax( t0, -tc ), c1 = fmin( t1, tc );
     if ( c1 > c0 ) {
-        // composite Gauss-Legendre, 8 points per panel of at most one unit, up to 8 panels ( `Psi / rho^2` is smooth at the
-        // scale of the unit: no peak at the foot )
+        // composite Gauss-Legendre, 8 points per panel of at most two units ( `Psi / rho^2` is smooth at the scale of the unit: no
+        // peak at the foot; measured against panels of one unit, 3e-14 relative on the cells -- four units lose 3e-10 )
         const double gx[ 4 ] = { 0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363 };
         const double gw[ 4 ] = { 0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763 };
-        const int nc = int( ceil( c1 - c0 ) ), np = nc < 1 ? 1 : ( nc > 8 ? 8 : nc );
+        const int nc = int( ceil( ( c1 - c0 ) / 2 ) ), np = nc < 1 ? 1 : ( nc > 8 ? 8 : nc );
         const double hw = ( c1 - c0 ) / ( 2 * np );
         for ( int k = 0; k < np; ++k ) {
             const double m = c0 + ( 2 * k + 1 ) * hw;
             for ( int q = 0; q < 4; ++q )
                 for ( int sg = -1; sg <= 1; sg += 2 ) {
                     const double t = m + sg * hw * gx[ q ];
-                    acc += hw * gw[ q ] * ap * gauss3_psi_over_rho2( h, p * p + t * t );
+                    acc += hw * gw[ q ] * ap * gauss3_psi_over_rho2( h, p * p + t * t, inf );
                 }
         }
     }
     return p < 0 ? -acc : acc;
 }
 
+/// where a warp is in the tree of `DensGauss3` ( `gauss3_fill` ): the depth-first stack, ONE SLOT PER LANE ( entry `k` in the
+/// register `stk` of lane `k`, read by a shuffle: no local memory, whose every byte the card reserves for each resident thread ),
+/// and the leaf being read. The host keeps the tree under 31 levels: the stack never holds more than the depth plus one.
+struct Gauss3Walk {
+    int stk = 0, sp = 0, li = 0, le = 0;
+    __device__ __forceinline__ void start() { stk = 0; sp = 1; li = le = 0; }   // the root ( node 0 ), in lane 0's slot
+};
+
+/// THE TERMS OF A CELL, the walk of `GaussianTree::gather` on the card, by the whole warp at once ( the same box `[ lo, hi ]`, global
+/// frame, on every lane: every lane does the same walk ). The nearer child first, a node pruned when its bound is under the cut,
+/// a node narrow against its width ( `s2 > 0` ) emitted as ONE term.
+///
+///   * `EMIT = false`: `best` grows to the largest bound of a term ( pruned by `rel * best` as it grows, as the CPU's walk );
+///   * `EMIT = true`: the terms whose bound is at least `cut` ( `rel` times the final `best`: the CPU's set, which it filters at the
+///     end ), term `k` into `c, s, w` of lane `k`; returns after 32 of them ( or fewer: the walk is over ), to be called again.
+template<bool EMIT>
+__device__ __forceinline__ int gauss3_fill( const DensGauss3 &g, const double ( &lo )[ 3 ], const double ( &hi )[ 3 ], int lane, Gauss3Walk &st,
+                                            double &best, double cut, double ( &c )[ 3 ], double &s, double &w ) {
+    constexpr unsigned FULL = 0xffffffffu;
+    const double s2 = g.s2;
+    auto dist2 = [&]( const double *a, const double *b ) {    // between the boxes `[ a, b ]` and `[ lo, hi ]`
+        double r = 0;
+        for ( int d = 0; d < 3; ++d ) {
+            const double e = fmax( fmax( a[ d ] - hi[ d ], lo[ d ] - b[ d ] ), 0.0 );
+            r += e * e;
+        }
+        return r;
+    };
+    auto peak = [&]( double v ) {                        // `( 2 pi v ) ^ ( -3/2 )`
+        const double r = 1 / sqrt( 6.283185307179586 * v );
+        return r * r * r;
+    };
+    int cnt = 0;
+    auto take = [&]( const double *x, double ts, double tw, double ub ) {
+        if constexpr ( EMIT ) {
+            if ( ub < cut )
+                return;
+            if ( lane == cnt ) {
+                c[ 0 ] = x[ 0 ]; c[ 1 ] = x[ 1 ]; c[ 2 ] = x[ 2 ];
+                s = ts;
+                w = tw;
+            }
+            ++cnt;
+        } else
+            best = fmax( best, ub );
+    };
+    for ( ;; ) {
+        if ( EMIT && cnt == 32 )
+            return cnt;
+        if ( st.li < st.le ) {                           // the rest of a leaf
+            const double *t = g.it + 5 * st.li++;
+            const double v = t[ 3 ] * t[ 3 ] + s2;
+            take( t, sqrt( v ), t[ 4 ], fmax( t[ 4 ], 0.0 ) * exp( - dist2( t, t ) / ( 2 * v ) ) * peak( v ) );
+            continue;
+        }
+        if ( ! st.sp )
+            return cnt;
+        const int id = __shfl_sync( FULL, st.stk, --st.sp );
+        const double *n = g.nd + DensGauss3::ND * id;
+        const double mass = n[ 9 ], var = n[ 10 ], smin = n[ 11 ], smax = n[ 12 ];
+        const double vmax = fmax( smax * smax, var ) + s2, vmin = smin * smin + s2;
+        const double ub = mass * exp( - dist2( n, n + 3 ) / ( 2 * vmax ) ) * peak( vmin );
+        if ( ub < ( EMIT ? cut : g.rel * best ) || ! ( mass > 0 ) )
+            continue;
+        if ( s2 > 0 && n[ 13 ] <= g.theta * sqrt( vmin ) ) {   // one term
+            const double v = var + s2;
+            take( n + 6, sqrt( v ), mass, mass * exp( - dist2( n + 6, n + 6 ) / ( 2 * v ) ) * peak( v ) );
+            continue;
+        }
+        const int *l = g.nl + 4 * id;
+        if ( l[ 2 ] < 0 ) {
+            st.li = l[ 0 ];
+            st.le = l[ 1 ];
+            continue;
+        }
+        // the nearer child pushed last, to be visited first ( `best` grows early, and prunes more )
+        const double *a = g.nd + DensGauss3::ND * l[ 2 ], *b = g.nd + DensGauss3::ND * l[ 3 ];
+        const bool left_nearer = dist2( a, a + 3 ) <= dist2( b, b + 3 );
+        const int far = left_nearer ? l[ 3 ] : l[ 2 ], near = left_nearer ? l[ 2 ] : l[ 3 ];
+        if ( lane == st.sp ) st.stk = far;
+        if ( lane == st.sp + 1 ) st.stk = near;
+        st.sp += 2;
+    }
+}
+
 /// A CELL AGAINST THE GAUSSIANS ( see the header ): the planes `pl[ 4 j .. 4 j + 3 ]` ( seed's frame, outward ), the box `[ lo, hi ]`
 /// of the cell ( seed's frame, the same on every lane ), `face_edges( j, f )` visiting the edges of the face on plane `j` as
-/// `f( ax, ay, az, bx, by, bz )`, counterclockwise about its outward normal. The faces are shared by the lanes; the mass and the
-/// moments about the seed go to `acc` of lane 0 ( every gaussian's `| sum |` needs the whole cell ), `int rho dA` on plane `j`
-/// to `fl[ j ]` of the lanes that did it ( `FAC`, `j < FL` ). A gaussian farther than `9 s` from the box is nothing.
+/// `f( ax, ay, az, bx, by, bz )`, counterclockwise about its outward normal. Without a tree, a gaussian farther than `9 s` from the
+/// box is nothing; with one, the terms are those of `gauss3_fill` ( the CPU's: relative truncation, groups merged ).
+///
+/// THE LANES SHARE THE GAUSSIANS, 32 at a time, each doing all the faces of its own ( every gaussian's `| sum |` needs the whole
+/// cell ): sharing the ~15 faces of a cell instead left half of the warp idle, each lane walking its face's edges alone ( measured on
+/// the trefoil of `docs/guide/distributions/gaussians.md`: 6 times slower ). The mass and the moments about the seed go to `acc` of
+/// each lane, the caller reduces them. `int rho dA` on plane `j` ( `FAC`, `j < FL` ) is reduced over the warp face by face -- the
+/// lanes visit the faces in the same order -- and ADDED to `fm[ j / 32 ]` of lane `j % 32`: no buffer of `FL` doubles per lane, which
+/// was half of the kernel's stack ( the card reserves the stack of every resident thread when it launches the kernel, outside
+/// XLA's pool: ~2 KB a thread was ~130 MB, which a card shared with another process did not have ).
 template<bool MOM,bool FAC,int FL,class FaceEdges,class HasFace>
 __device__ __forceinline__ void gauss3_cell( const DensGauss3 &g, const double ( &O )[ 3 ], const double *pl, int nc, const double ( &lo )[ 3 ],
-                                             const double ( &hi )[ 3 ], int lane, DensSums3 &acc, double *fl, const FaceEdges &face_edges,
+                                             const double ( &hi )[ 3 ], int lane, DensSums3 &acc, double *fm, const FaceEdges &face_edges,
                                              const HasFace &has_face ) {
     constexpr unsigned FULL = 0xffffffffu;
     constexpr double inv_4pi = 0.079577471545947667884, inv_sqrt_2pi = 0.39894228040143267794;
@@ -577,69 +684,107 @@ __device__ __forceinline__ void gauss3_cell( const DensGauss3 &g, const double (
             v += __shfl_xor_sync( FULL, v, d );
         return v;
     };
-    for ( SI q = 0; q < g.nb; ++q ) {
-        const double s = g.s[ q ], w = g.w[ q ];
-        const double c[ 3 ] = { g.c[ 3 * q ] - O[ 0 ], g.c[ 3 * q + 1 ] - O[ 1 ], g.c[ 3 * q + 2 ] - O[ 2 ] };
-        double d2 = 0;
-        for ( int a = 0; a < 3; ++a ) {
-            const double e = fmax( fmax( lo[ a ] - c[ a ], c[ a ] - hi[ a ] ), 0.0 );
-            d2 += e * e;
+    // with a tree: the box in the global frame, then the strongest term of the cell ( the truncation is relative to it )
+    const bool tree = g.nn > 0;
+    double glo[ 3 ], ghi[ 3 ], cut = 0;
+    Gauss3Walk st;
+    if ( tree ) {
+        for ( int a = 0; a < 3; ++a ) { glo[ a ] = lo[ a ] + O[ a ]; ghi[ a ] = hi[ a ] + O[ a ]; }
+        double best = 0, dc[ 3 ], ds, dw;
+        st.start();
+        gauss3_fill<false>( g, glo, ghi, lane, st, best, 0.0, dc, ds, dw );
+        cut = g.rel * best;
+        st.start();
+    }
+    for ( SI q0 = 0; ; q0 += 32 ) {                      // ( the same on every lane )
+        double s = 1, w = 0, c[ 3 ] = { 0, 0, 0 };
+        bool act;
+        if ( tree ) {                                    // the next 32 terms of the cell, one per lane
+            double best = 0, tc[ 3 ] = { 0, 0, 0 }, ts = 1, tw = 0;
+            const int cnt = gauss3_fill<true>( g, glo, ghi, lane, st, best, cut, tc, ts, tw );
+            if ( ! cnt )
+                break;
+            act = lane < cnt && tw != 0;
+            if ( act ) {
+                s = ts;
+                w = tw;
+                for ( int a = 0; a < 3; ++a ) c[ a ] = tc[ a ] - O[ a ];
+            }
+        } else {
+            if ( q0 >= g.nb )
+                break;
+            const SI q = q0 + lane;
+            act = q < g.nb;
+            if ( act ) {
+                s = g.s[ q ];
+                w = g.w[ q ];
+                double d2 = 0;
+                for ( int a = 0; a < 3; ++a ) {
+                    c[ a ] = g.c[ 3 * q + a ] - O[ a ];
+                    const double e = fmax( fmax( lo[ a ] - c[ a ], c[ a ] - hi[ a ] ), 0.0 );
+                    d2 += e * e;
+                }
+                act = d2 < 81 * s * s && w != 0;
+            }
         }
-        if ( ! ( d2 < 81 * s * s ) || ! ( w != 0 ) )
-            continue;                                    // ( the same on every lane )
+        if ( ! __any_sync( FULL, act ) )
+            continue;
         const double is = 1 / s;
         double W = 0, Fx = 0, Fy = 0, Fz = 0, H = 0;
-        for ( int j = lane; j < nc; j += 32 ) {
+        for ( int j = 0; j < nc; ++j ) {
             if ( ! has_face( j ) )
                 continue;
             const double nn = sqrt( pl[ 4 * j ] * pl[ 4 * j ] + pl[ 4 * j + 1 ] * pl[ 4 * j + 1 ] + pl[ 4 * j + 2 ] * pl[ 4 * j + 2 ] );
             if ( ! ( nn > 0 ) )
                 continue;
             const double nx = pl[ 4 * j ] / nn, ny = pl[ 4 * j + 1 ] / nn, nz = pl[ 4 * j + 2 ] / nn;
-            const double h = ( pl[ 4 * j + 3 ] / nn - nx * c[ 0 ] - ny * c[ 1 ] - nz * c[ 2 ] ) * is;
-            double cone = 0, wed = 0;
-            face_edges( j, [&]( double ax, double ay, double az, double bx, double by, double bz ) {
-                const double Ax = ( ax - c[ 0 ] ) * is, Ay = ( ay - c[ 1 ] ) * is, Az = ( az - c[ 2 ] ) * is;
-                const double Bx = ( bx - c[ 0 ] ) * is, By = ( by - c[ 1 ] ) * is, Bz = ( bz - c[ 2 ] ) * is;
-                const double ex = Bx - Ax, ey = By - Ay, ez = Bz - Az;
-                const double L = sqrt( ex * ex + ey * ey + ez * ez );
-                if ( ! ( L > 0 ) )
-                    return;
-                const double ux = ex / L, uy = ey / L, uz = ez / L;
-                const double mx = uy * nz - uz * ny, my = uz * nx - ux * nz, mz = ux * ny - uy * nx;   // `u x n`: outward in the face
-                const double p = mx * Ax + my * Ay + mz * Az;
-                const double t0 = ux * Ax + uy * Ay + uz * Az, t1 = ux * Bx + uy * By + uz * Bz;
-                if ( h != 0 )
-                    cone += gauss3_cone_edge( fabs( h ), p, t0, t1 );
-                wed += gpu2d::gauss_wedge_pt( p, t0, t1 );
-            } );
-            W += h * inv_4pi * cone;
-            const double ff = w * exp( -h * h / 2 ) * inv_sqrt_2pi * is * wed;     // `int_face w phi dA`
+            double ff = 0;                               // `int_face w phi dA`
+            if ( act ) {
+                const double h = ( pl[ 4 * j + 3 ] / nn - nx * c[ 0 ] - ny * c[ 1 ] - nz * c[ 2 ] ) * is;
+                double cone = 0, wed = 0;
+                face_edges( j, [&]( double ax, double ay, double az, double bx, double by, double bz ) {
+                    const double Ax = ( ax - c[ 0 ] ) * is, Ay = ( ay - c[ 1 ] ) * is, Az = ( az - c[ 2 ] ) * is;
+                    const double Bx = ( bx - c[ 0 ] ) * is, By = ( by - c[ 1 ] ) * is, Bz = ( bz - c[ 2 ] ) * is;
+                    const double ex = Bx - Ax, ey = By - Ay, ez = Bz - Az;
+                    const double L = sqrt( ex * ex + ey * ey + ez * ez );
+                    if ( ! ( L > 0 ) )
+                        return;
+                    const double ux = ex / L, uy = ey / L, uz = ez / L;
+                    const double mx = uy * nz - uz * ny, my = uz * nx - ux * nz, mz = ux * ny - uy * nx;   // `u x n`: outward in the face
+                    const double p = mx * Ax + my * Ay + mz * Az;
+                    const double t0 = ux * Ax + uy * Ay + uz * Az, t1 = ux * Bx + uy * By + uz * Bz;
+                    if ( h != 0 )
+                        cone += gauss3_cone_edge( fabs( h ), p, t0, t1 );
+                    if ( FAC || MOM )
+                        wed += gpu2d::gauss_wedge_pt( p, t0, t1 );
+                } );
+                W += h * inv_4pi * cone;
+                if constexpr ( FAC || MOM )
+                    ff = w * exp( -h * h / 2 ) * inv_sqrt_2pi * is * wed;
+                if constexpr ( MOM ) {
+                    Fx += nx * ff; Fy += ny * ff; Fz += nz * ff;
+                    H += h * s * ff;
+                }
+            }
             if constexpr ( FAC )
-                if ( j < FL )
-                    fl[ j ] += ff;
-            if constexpr ( MOM ) {
-                Fx += nx * ff; Fy += ny * ff; Fz += nz * ff;
-                H += h * s * ff;
-            }
+                if ( j < FL ) {
+                    const double v = wsum( ff );
+                    if ( ( j & 31 ) == lane )
+                        fm[ j >> 5 ] += v;
+                }
         }
-        W = wsum( W );
+        if ( ! act )
+            continue;
+        const double m = w * fabs( W );
+        acc.m += m;
         if constexpr ( MOM ) {
-            Fx = wsum( Fx ); Fy = wsum( Fy ); Fz = wsum( Fz );
-            H = wsum( H );
-        }
-        if ( lane == 0 ) {
-            const double m = w * fabs( W );
-            acc.m += m;
-            if constexpr ( MOM ) {
-                // about the centre, then about the seed ( `c` in its frame )
-                const double s2 = s * s;
-                const double ux = -s2 * Fx, uy = -s2 * Fy, uz = -s2 * Fz, u2 = 3 * s2 * m - s2 * H;
-                acc.mx += ux + c[ 0 ] * m;
-                acc.my += uy + c[ 1 ] * m;
-                acc.mz += uz + c[ 2 ] * m;
-                acc.m2 += u2 + 2 * ( c[ 0 ] * ux + c[ 1 ] * uy + c[ 2 ] * uz ) + ( c[ 0 ] * c[ 0 ] + c[ 1 ] * c[ 1 ] + c[ 2 ] * c[ 2 ] ) * m;
-            }
+            // about the centre, then about the seed ( `c` in its frame )
+            const double s2 = s * s;
+            const double ux = -s2 * Fx, uy = -s2 * Fy, uz = -s2 * Fz, u2 = 3 * s2 * m - s2 * H;
+            acc.mx += ux + c[ 0 ] * m;
+            acc.my += uy + c[ 1 ] * m;
+            acc.mz += uz + c[ 2 ] * m;
+            acc.m2 += u2 + 2 * ( c[ 0 ] * ux + c[ 1 ] * uy + c[ 2 ] * uz ) + ( c[ 0 ] * c[ 0 ] + c[ 1 ] * c[ 1 ] + c[ 2 ] * c[ 2 ] ) * m;
         }
     }
 }

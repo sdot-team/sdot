@@ -180,6 +180,17 @@ struct SumOfGaussians {
     HD void face3( const TF ( &Y )[ 4 ][ 3 ], int opp, int deg, Face3 &f ) const;
     HD void tet3( SI i, const auto &pts, int deg, TF ( &Y )[ 4 ][ 3 ], Face3 ( &F )[ 4 ], TF &Mt, TF ( &Nv )[ 3 ], TF &Y2 ) const;
     HD bool far3( SI i, const auto &pts ) const;
+
+    /// THE WHOLE CELL AT ONCE, in 3D ( `diagram::integrate_into` / `integrate_moments_into` call them when they exist ). The cones
+    /// and the face integrals above are additive: over the tetrahedra of a cell, the faces inside the cell cancel two by two, and on a
+    /// face the corners of its fan cancel along the fan's edges. What is left is ONE term per ( edge of the polyhedron, face of the
+    /// edge ): the cone's `g3_cone_edge` ( and the corner's `wedge_measure` for the moments ). A cell of `V` vertices costs `3 V`
+    /// edge integrals per gaussian instead of `12 ( 2 V - 4 )` cone edges and as many corners through `face3` -- the 3D transport spent
+    /// 96 % of its time there. Host only ( `false` on the card, and for an unbounded cell: the simplices then ).
+    template<class TI> HD bool integrate_cell( const auto &cell, auto &ws, TI &sum ) const requires ( ct_dim == 3 );
+    HD bool integrate_moments_cell( const auto &cell, auto &ws, TF &m, auto &mx, TF &m2 ) const requires ( ct_dim == 3 );
+    /// ( one pass for both: `with_moments` adds the corners )
+    template<bool with_moments> bool cell_integrals( const auto &cell, TF &m, TF ( &mx )[ 3 ], TF &m2 ) const;
     template<int K> HD TF   moment3    ( const auto &pts ) const;
     HD void                 moments3   ( const auto &pts, TF &m, auto &mx, TF &m2 ) const;
     template<int K> HD void moment3_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const;

@@ -11,7 +11,7 @@ targets = [
     sdot.Image( rng.random( ( 32, 64 ) ) ),            # [ 0, 0.5 ] x [ 0, 1 ]: the longest side is 1
     sdot.Image( rng.random( ( 32, 64 ) ), frame = [ 1, 1 ] ),           # [ 0, 1 ]^2: `frame`, the edges of the image
     sdot.Image( rng.random( ( 32, 64 ) ), pixel_frame = [ [ 0.1, 0 ], [ 0, 0.1 ] ] ),   # pixels of 0.1
-    sdot.Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 0.5, 1 ] ] ),  # a uniform density on a convex polygon
+    sdot.ConvexHull( [ [ 0, 0 ], [ 1, 0 ], [ 0.5, 1 ] ] ),  # a uniform density on a convex polygon
     sdot.SumOfGaussians( [ [ 0.3, 0.3 ], [ 0.7, 0.6 ] ], sigmas = [ 0.1, 0.2 ], weights = [ 1, 2 ] ),
     sdot.Mesh( [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ], [ 0, 1 ] ], [ [ 0, 1, 2 ], [ 0, 2, 3 ] ],
                values = [ 0, 1, 2, 1 ] ),                # piecewise linear: one value per node

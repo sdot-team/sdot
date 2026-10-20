@@ -12,6 +12,8 @@ tensors, and so on:
 
 <<< @/snippets/hello_torch.py [PyTorch]
 
+<<< @/snippets/hello_cupy.py [CuPy]
+
 :::
 
 - **Objects**: a plan, a distribution... hand back arrays of the same framework: `p.barycenters` is a JAX array when the

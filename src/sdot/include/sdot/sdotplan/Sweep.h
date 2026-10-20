@@ -118,6 +118,16 @@ bool measure_and_facets( const PD &pd, SI k, Local &c, Local &piece, const auto 
         // a density that cuts the FACETS of the cell itself ( `Mesh` ): what the pieces would miss -- an element on the far side of
         // a facet that lies on its side -- is not lost
         dist.for_each_facet_mass( c, plane_of, [&]( int cut, auto part ) { vals[ cut ] += double( part ); } );
+        // ... and in a ball ( a sink ), what the sphere sweeps when the weight grows: read off the pieces
+        if constexpr ( requires { DECAYED_TYPE_OF( dist )::in_ball; } ) {
+            double sk = 0;
+            dist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+                if constexpr ( requires { dens.weight_mass( pc ); } )
+                    sk += double( dens.weight_mass( pc ) );
+            } );
+            if ( to_sink )
+                *to_sink = sk;
+        }
     } else {
         double sk = 0;
         dist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
@@ -191,7 +201,13 @@ struct Sweep {
     static constexpr int nbc = diagram::nb_work_cells<Dist>();
     /// a SINK: one more seed for Newton, identifier 0 ( see the head of the file ); `off` shifts the user's identifiers
     static constexpr bool sink = diagram::has_sink<PD>();
-    static constexpr SI   off  = sink ? 1 : 0;
+    /// a RADIAL integrand ( `PowerDiagram( radial_func = ... )` ): the masses grow with their own weight, beyond the facets
+    /// ( `weight_mass`, `m_i / ( 2 eps )` ). Newton sees it as a sink: a GROUND, node 0 of weight 0, linked to each seed by that
+    /// coefficient. Its target is `total_mass - sum nu = sum nu` and its mass `total_mass - sum a`, `total_mass = 2 sum nu` ( set
+    /// by the caller ): its residual is `- sum_i ( a_i - nu_i )`, and the system of the seeds is `J d = nu - a` exactly
+    static constexpr bool radial = diagram::has_radial<PD>();
+    static constexpr bool ground = sink || radial;
+    static constexpr SI   off  = ground ? 1 : 0;
 
     const CpuQueue &queue;
     PD             &pd;                                  ///< the weights are written there ( output views )
@@ -203,7 +219,7 @@ struct Sweep {
     std::vector<std::vector<std::int32_t>> scratch;      ///< one row per thread
     std::vector<std::vector<Facet>>      fa_th;        ///< the facets, per thread
     std::vector<SI> rank_of;                             ///< the rank of seed `i` ( user order; the sink first, rank 0, when there is one )
-    double          total_mass = 0;                      ///< SINK: the mass of the density in the domain ( `domain_mass` )
+    double          total_mass = 0;                      ///< SINK: the mass of the density in the domain ( `domain_mass` ); RADIAL: `2 sum nu`
     /// GROUPS ( `Groups.h` ): Newton's unknowns are those of the tree of aggregates, and `set_weights` turns them into the
     /// diagram's outer weights and virtual weights ( which `pd` then carries as writable views, `with_groups` )
     static constexpr bool groups = has_groups<PD>();
@@ -220,7 +236,7 @@ struct Sweep {
         scratch.resize( nt );
         fa_th.resize( nt );
         rank_of.resize( n + off );
-        if constexpr ( sink )
+        if constexpr ( ground )
             rank_of[ 0 ] = 0;
         for ( SI k = 0; k < n; ++k )
             rank_of[ off + pd.user_id( k ) ] = off + k;
@@ -382,11 +398,11 @@ struct Sweep {
                     double cs = 0;
                     if ( ! measure_and_facets( pd, k, c, piece, dom, *dist, a[ i ],
                                                [&]( SI j, double cij ) { fv.push_back( Facet{ off + i, off + pd.user_id( j ), cij } ); },
-                                               fa != nullptr, sink ? &cs : nullptr ) ) {
+                                               fa != nullptr, ground ? &cs : nullptr ) ) {
                         overflowed = true;
                         return false;
                     }
-                    if ( sink && fa != nullptr && cs > 0 ) {     // the facet with the sink, seen from both sides
+                    if ( ground && fa != nullptr && cs > 0 ) {   // the facet with the sink ( the ground ), seen from both sides
                         fv.push_back( Facet{ off + i, 0, cs } );
                         fv.push_back( Facet{ 0, off + i, cs } );
                     }
@@ -410,7 +426,7 @@ struct Sweep {
             for ( auto &v : fa_th )
                 fa->insert( fa->end(), v.begin(), v.end() );
         }
-        if constexpr ( sink ) {                          // the sink takes what the cells leave
+        if constexpr ( ground ) {                        // the sink takes what the cells leave ( the ground: see `radial` )
             double s = 0;
             for ( SI i = 0; i < n; ++i ) s += a[ i ];
             a_all[ 0 ] = total_mass - s;

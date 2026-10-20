@@ -11,9 +11,11 @@
 // Voronoi, none of whose cells is empty as long as every seed is in the domain. A warm start
 // that EMPTIES a cell ( weights inherited from other positions ) is worse than the Voronoi: the
 // theory starts from a strictly positive floor, and an empty cell crawls back to it ( its
-// gradient is constant, its hessian row zero ). We then restart from zero if that is better.
-// ( two ways of doing better than the Voronoi were tried, and rejected: only "reviving" the empty
-// cells, and a multiscale start -- both cascade, see `solvers_des_familles` README § 8. )
+// gradient is constant, its hessian row zero ). The cells it empties are first REPAIRED ( `WarmRepair.h`:
+// near-coincident pairs, each emptied cell searching its own weight at the scale of the pair ), and
+// we restart from zero if the warm start still does worse than it.
+// ( reviving the empty cells by steps sized on the spacing, and a multiscale start, were tried and
+// rejected -- both cascade, see `solvers_des_familles` README § 8 and `WarmRepair.h`. )
 //
 // And the Voronoi itself can leave empty cells ( seeds OUTSIDE the domain ): then the
 // weights of a SIMILITUDE that brings the cloud back into the domain -- the Voronoi of the translated and
@@ -24,8 +26,17 @@
 //
 // The sink is seed 0 of Newton ( `Sweep.h` ): its target is what the density keeps beyond the seeds' masses, its weight the gauge.
 // The start is not the Voronoi -- balls of radius 0 hold nothing -- but BALLS: `w_i = nu_i / ( 2 pi rho )`, `rho` the mean
-// density of the domain ( half of what the cell would hold alone, so that the sink keeps some mass ), each ball whose cell is
-// still empty grown until it meets the density. No continuation, no rescaling of the targets.
+// density of the domain ( half of what the cell would hold alone, so that the sink keeps some mass ). A light seed in the ball of
+// a heavy one has an empty cell: the radii are then drawn towards their mean ( `w_i = m + t ( b_i - m )`, `t` halved until no
+// cell is under a tenth of its target; at `t = 0` the diagram is the Voronoi, every cell of which holds its seed ), and if a cell
+// is still empty ( no density around its seed ), every radius^2 grown by the same amount, which leaves the diagram as it is. No
+// continuation, no rescaling of the targets.
+//
+// = With a radial integrand ( `PowerDiagram( radial_func = ... )` )
+//
+// A ground for Newton, as the sink ( `Sweep.h` ). The masses are no longer a partition of the density: no rescaling of the targets,
+// no width continuation. Every start is RAISED -- the same constant added to all the weights -- so that the integrand weighs the
+// targets.
 //
 // = The width continuation ( `Continuation.h` )
 //
@@ -34,7 +45,8 @@
 // and direct Newton stagnates ( README § 9.1 ). We then first solve for the density convolved
 // by a wide gaussian ( positive everywhere ), then narrower and narrower, each step starting from
 // the weights of the previous one. `AUTO` triggers it when the best start still leaves a
-// cell under `continuation_threshold` times the smallest target mass. It then starts at the narrowest width
+// cell under `continuation_threshold` times the smallest target mass, or, from that same start, when the plain Newton
+// fails ( a start that passes the threshold and cells that lose their mass on the way ). It then starts at the narrowest width
 // where the start leaves no cell under that threshold ( a start almost admissible needs little smoothing ), and
 // goes down adaptively: to the density itself as soon as the solved weights are admissible for it, by narrower
 // widths otherwise, a width where Newton fails being abandoned for a wider one. `ALWAYS` runs the fixed
@@ -53,6 +65,7 @@
 #include "Bounds.h"
 #include "Newton.h"
 #include "Report.h"
+#include "WarmRepair.h"
 
 namespace sdot {
 namespace sdotplan {
@@ -132,6 +145,8 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     Convolved<Dist> conv( dist );
     Sweep<PD,DECAYED_TYPE_OF( dom ),Dist,TK> bal( queue, pd, pd_in, dom, dist, o.cap0 );
     constexpr bool sink = decltype( bal )::sink;
+    constexpr bool radial = decltype( bal )::radial;     // ( a radial integrand: a ground for Newton, as a sink -- `Sweep.h` )
+    constexpr bool ground = decltype( bal )::ground;
     constexpr SI off = decltype( bal )::off;            // the user's seeds are `off .. off + n - 1` for Newton ( the sink is 0 )
     const SI nn = n + off;
     if constexpr ( sink )
@@ -182,9 +197,11 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     // ---- the target, and the start ( on the widest density if the continuation is forced )
     std::vector<double> nu( nn ), w( nn, 0.0 );
     for ( SI i = 0; i < n; ++i ) nu[ off + i ] = double( nu_in( i ) );
-    if constexpr ( sink ) {                              // the sink keeps what the seeds do not take
+    if constexpr ( ground ) {                            // the sink keeps what the seeds do not take ( the ground: `Sweep::radial` )
         double s = 0;
         for ( SI i = 0; i < n; ++i ) s += nu[ off + i ];
+        if constexpr ( radial )
+            bal.total_mass = 2 * s;
         nu[ 0 ] = bal.total_mass - s;
     }
     bool given = false;
@@ -224,7 +241,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         s0 = 0.5 * std::sqrt( diam2 );
     }
     const double s_min = o.conv_min > 0 ? o.conv_min : conv.min_scale( s0 );
-    std::vector<double> scales = ( ! sink && o.continuation == SolverOptions::ALWAYS && Convolved<Dist>::possible ) ? continuation_steps( s0, o.conv_ratio, s_min )
+    std::vector<double> scales = ( ! ground && o.continuation == SolverOptions::ALWAYS && Convolved<Dist>::possible ) ? continuation_steps( s0, o.conv_ratio, s_min )
                                                                                                                    : std::vector<double>{ 0.0 };
 
     std::vector<double> a;
@@ -237,30 +254,97 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
             if constexpr ( DECAYED_TYPE_OF( pd.box_min )::is_valid )
                 for ( int d = 0; d < D; ++d ) area *= std::max( double( pd.box_max( d ) ) - double( pd.box_min( d ) ), 1e-300 );
             const double rho = bal.total_mass / area;
-            for ( SI i = 0; i < n; ++i ) w[ off + i ] = nu[ off + i ] / ( 2 * M_PI * rho );
-            as_unknowns( w, false );
+            std::vector<double> balls( nn, 0.0 );
+            double mean = 0;
+            for ( SI i = 0; i < n; ++i ) {
+                // half the squared radius of the ball of mass `nu`: `nu / ( 2 pi rho )` in 2D, `( 3 nu / ( 4 pi rho ) )^( 2 / 3 ) / 2` in 3D
+                if constexpr ( D == 2 ) balls[ off + i ] = nu[ off + i ] / ( 2 * M_PI * rho );
+                else                    balls[ off + i ] = std::pow( 3 * nu[ off + i ] / ( 4 * M_PI * rho ), 2.0 / 3 ) / 2;
+                mean += balls[ off + i ] / n;
+            }
+            // `t` from the balls ( 1 ) to equal radii ( 0 ), `shift` added to every radius^2 ( which leaves the diagram as it is )
+            auto ball_start = [&]( double t, double shift ) {
+                for ( SI i = 0; i < n; ++i ) w[ off + i ] = mean + t * ( balls[ off + i ] - mean ) + shift;
+                as_unknowns( w, false );
+                newton.measures_and_facets( w, a, fa );
+            };
+            // ( the smallest ratio cell mass / target, the exact duplicates left out )
+            auto worst = [&]() { double r = 1e300; for ( SI i = 0; i < n; ++i ) if ( ! newton.agg.is_dup( off + i ) ) r = std::min( r, a[ off + i ] / nu[ off + i ] ); return r; };
+            // a light seed in the ball of a heavy one has an EMPTY cell: the radii are then drawn towards their mean -- equal
+            // radii make the Voronoi, every cell of which holds its seed. ( growing the emptied balls instead cascades: each one
+            // grown empties its neighbors )
+            double t = 1, best_t = 1, best = -1;
+            for ( int k = 0; ; ++k, t *= 0.5 ) {
+                if ( k == 6 ) t = 0;
+                ball_start( t, 0 );
+                const double r = worst();
+                if ( r > best ) { best = r; best_t = t; }
+                if ( r >= 0.1 || t == 0 ) break;
+            }
+            if ( best_t != t ) ball_start( best_t, 0 );
+            // still an empty cell ( no density around its seed ): every ball grown by the same `radius^2`, until each meets the density
+            for ( double shift = mean; ! ( worst() > 0 ) && shift < 1e300; shift *= 4 )
+                ball_start( best_t, shift );
             start = START_BALLS;
         }
     }
-    newton.measures_and_facets( w, a, fa );
-    if constexpr ( sink ) {
-        if ( ! given ) {                                 // an empty cell: its ball grown until it meets the density
-            for ( int round = 0; round < 60; ++round ) {
-                bool grown = false;
-                for ( SI i = 0; i < n; ++i )
-                    if ( ! ( a[ off + i ] > 0 ) ) { w[ off + i ] = 4 * std::max( w[ off + i ], 1e-300 ); grown = true; }
-                if ( ! grown ) break;
-                newton.measures_and_facets( w, a, fa );
+    // RADIAL: a start RAISED so that the integrand weighs the targets -- the same constant added to every weight multiplies it by
+    // `exp( c / ( 2 eps ) )` and leaves the cells as they are ( the ground keeps its weight: the gauge )
+    auto raised = [&]( std::vector<double> &W, std::vector<double> &A, std::vector<Facet> &F ) {
+        if constexpr ( radial ) {
+            double sa = 0, sn = 0;
+            for ( SI i = 0; i < n; ++i ) { sa += A[ off + i ]; sn += nu[ off + i ]; }
+            if ( sa > 0 && sn > 0 && sa != sn ) {
+                const double c = - 2 * double( pd.radial() ) * std::log( sa / sn );
+                for ( SI i = 0; i < n; ++i ) W[ off + i ] += c;
+                newton.measures_and_facets( W, A, F );
             }
         }
+    };
+    if ( ! ( sink && ! given ) ) {
+        newton.measures_and_facets( w, a, fa );
+        raised( w, a, fa );
     }
     const double nu_min = minimum( nu );
     // ( the smallest masses below leave the exact duplicates out: their cells are empty by construction )
     auto min_mass = [&]( const std::vector<double> &m ) { return newton.agg.floor_min( m ); };
-    if ( ! sink && given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {      // a warm start that empties a cell: the Voronoi, if it does better
+    bool groups_on = false;
+    if constexpr ( decltype( bal )::groups ) groups_on = bal.grp.active;
+    if ( ! sink && given && ! o.keep_start && ! groups_on && min_mass( a ) < 1e-3 * nu_min ) {   // a warm start that empties a cell: its repair ( `WarmRepair.h` )
+        double vol = 1;                                  // ( the squared spacing of the seeds, `( |box| / n )^( 2 / D )` )
+        if constexpr ( DECAYED_TYPE_OF( pd.box_min )::is_valid ) {
+            for ( int d = 0; d < D; ++d ) vol *= std::max( double( pd.box_max( d ) ) - double( pd.box_min( d ) ), 1e-300 );
+        } else {
+            double lo[ D ], hi[ D ];
+            for ( int d = 0; d < D; ++d ) { lo[ d ] = 1e300; hi[ d ] = -1e300; }
+            for ( SI k = 0; k < n; ++k ) {
+                const auto p = pd.point( k );
+                for ( int d = 0; d < D; ++d ) { lo[ d ] = std::min( lo[ d ], double( p[ d ] ) ); hi[ d ] = std::max( hi[ d ], double( p[ d ] ) ); }
+            }
+            for ( int d = 0; d < D; ++d ) vol *= std::max( hi[ d ] - lo[ d ], 1e-300 );
+        }
+        const double l2 = std::pow( vol / double( std::max<SI>( n, 1 ) ), 2.0 / D );
+        std::vector<double> w1( w ), a1( a ), lo( nn ), hi( nn ), step( nn ), touched( nn );
+        std::vector<Facet> fa1;
+        for ( SI i = 0; i < nn; ++i )
+            warm_repair_init( lo[ i ], hi[ i ], step[ i ], touched[ i ], l2, newton.agg.is_dup( i ) );
+        SI nb_small = 0;
+        for ( SI i = 0; i < nn; ++i ) nb_small += touched[ i ] >= 0 && a1[ i ] < WarmRepair::LO * nu[ i ];
+        for ( int round = 0; round < WarmRepair::MAX_ROUNDS && WarmRepair::worth( nb_small, n ); ++round ) {
+            bool moved = false;
+            for ( SI i = 0; i < nn; ++i )
+                moved |= warm_repair_cell( a1[ i ], nu[ i ], w1[ i ], lo[ i ], hi[ i ], step[ i ], touched[ i ], l2 );
+            if ( ! moved ) break;
+            newton.measures_and_facets( w1, a1, fa1 );
+        }
+        if ( min_mass( a1 ) > min_mass( a ) ) { w.swap( w1 ); a.swap( a1 ); fa.swap( fa1 ); }
+        else newton.bal.set_weights( w );
+    }
+    if ( ! sink && given && ! o.keep_start && min_mass( a ) < 1e-3 * nu_min ) {      // a warm start still empty somewhere: the Voronoi, if it does better
         std::vector<double> w0( n, 0.0 ), a0;
         std::vector<Facet> fa0;
         newton.measures_and_facets( w0, a0, fa0 );
+        raised( w0, a0, fa0 );
         if ( min_mass( a0 ) > min_mass( a ) ) { w.swap( w0 ); a.swap( a0 ); fa.swap( fa0 ); start = START_VORONOI; }
         else newton.bal.set_weights( w );
     }
@@ -275,6 +359,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
             similarity<D>( pd, lo, hi, w1 );
             as_unknowns( w1, false );
             newton.measures_and_facets( w1, a1, fa1 );
+            raised( w1, a1, fa1 );
             if ( min_mass( a1 ) > min_mass( a ) ) { w.swap( w1 ); a.swap( a1 ); fa.swap( fa1 ); start = START_SIMILARITY; }
             else newton.bal.set_weights( w );
         }
@@ -286,8 +371,10 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     // down ADAPTIVELY ( see the stages below )
     bool adaptive = false;
     const double admissible = o.continuation_threshold * nu_min;
-    if ( ! sink && o.continuation == SolverOptions::AUTO && Convolved<Dist>::possible && scales.size() == 1
-      && ( min_start_mass < admissible ) ) {
+    // ( and when the start passes but the plain Newton fails on it -- cells that keep a little mass at the start and lose it on the
+    //   way, a density with deep valleys -- the continuation runs from the same start after it, see the stages below )
+    const bool can_continue = ! ground && o.continuation == SolverOptions::AUTO && Convolved<Dist>::possible && scales.size() == 1;
+    auto enter_continuation = [&]() {
         adaptive = true;
         std::vector<double> ladder = continuation_steps( s0, 4.0, s_min );     // ( decreasing, 0 last )
         ladder.pop_back();
@@ -321,7 +408,10 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         a.swap( a_hi );
         fa.swap( fa_hi );
         scales.assign( { s_current } );
-    }
+    };
+    if ( can_continue && min_start_mass < admissible )
+        enter_continuation();
+    const std::vector<double> w_start = can_continue && ! adaptive ? w : std::vector<double>{};
 
     // ---- the stages
     // a trace is read WHILE the solve runs ( and above all when it hangs ): the C stdio of a pipe or a file is block-buffered, and
@@ -338,7 +428,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         double nu_mass = 0;
         domain_mass = 0;
         for ( SI i = 0; i < nn; ++i ) { domain_mass += a[ i ]; nu_mass += nu[ i ]; }
-        if ( ! sink && domain_mass > 0 && nu_mass > 0 && domain_mass != nu_mass )
+        if ( ! ground && domain_mass > 0 && nu_mass > 0 && domain_mass != nu_mass )
             for ( SI i = 0; i < n; ++i ) nu_s[ i ] *= domain_mass / nu_mass;
         newton.nu = nu_s;
         newton.a = a;
@@ -351,7 +441,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
                          int( nb_stages + 1 ), s_current, domain_mass, minimum( a ) );
 
         // the step by the limits ( 2D ): the pass is plugged into Newton when it is requested
-        if constexpr ( D == 2 && ! sink ) {
+        if constexpr ( D == 2 && ! ground ) {
             Bounds2D<decltype( bal )> lim( bal );
             LocalBounds ll;
             ll.alpha_min = [&]( const std::vector<double> &W, const std::vector<double> &Dd, const std::vector<SI> &bad_cells,
@@ -384,76 +474,87 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     };
     auto accept = [&]() { w = newton.w; a = newton.a; fa = newton.fa; };
 
+    auto run_adaptive = [&]() {
+        if ( run_stage( 0 ) ) {
+            // ADAPTIVE: after each solved width `s`, the density itself ( `0` ) if the solved weights are admissible for it, otherwise
+            // `s / r`, `r` taken from the last width that worked and squared after two successes in a row ( at most 16 ), its square
+            // root after a failure ( at least `conv_ratio` ), and never under `s_min` ( a try costs a sweep of the smoothed density ).
+            // At `r = conv_ratio`, the step of the fixed ladder, a width is tried as long as no cell is empty: the threshold only
+            // spares the wider steps a Newton that would fail, and the descent is never worse than the ladder. A width is tried only if the solved weights leave no cell
+            // under the threshold there, and abandoned ( back to the solved weights ) if Newton does not converge on it
+            accept();
+            double r = 16;
+            int nb_ok = 0;
+            auto try_width = [&]( double s, bool forced ) {
+                std::vector<double> a1;
+                std::vector<Facet> fa1;
+                bal.dist = &conv.at( s );
+                newton.measures_and_facets( w, a1, fa1 );
+                if ( forced ? ! ( min_mass( a1 ) > 0 ) : min_mass( a1 ) < admissible ) {
+                    if ( o.newton.trace ) std::printf( "  ( s = %.4e: a cell under the threshold, %.3e )\n", s, min_mass( a1 ) );
+                    return false;
+                }
+                const double s_prev = s_current;
+                s_current = s;
+                a.swap( a1 );
+                fa.swap( fa1 );
+                if ( run_stage( 0 ) ) { accept(); return true; }
+                if ( o.newton.trace ) std::printf( "  ( s = %.4e: abandoned )\n", s );
+                s_current = s_prev;                         // ( abandoned: the solved weights and their measures again )
+                a.swap( a1 );
+                fa.swap( fa1 );
+                return false;
+            };
+            while ( s_current > 0 ) {
+                // ( from `s_min`, the narrowest width, the density itself is tried even with cells under the threshold, as long as none is
+                //   empty: this is the last stage of the fixed ladder, and Newton passes it -- the layers of cells along M that wider
+                //   widths leave have all crossed it by then )
+                if ( try_width( 0, s_current <= s_min * ( 1 + 1e-12 ) ) )
+                    break;
+                bool moved = false;
+                while ( ! moved ) {
+                    const double s = std::max( s_current / r, s_min );
+                    if ( s < s_current * ( 1 - 1e-12 ) && try_width( s, r <= o.conv_ratio * ( 1 + 1e-12 ) ) ) {
+                        moved = true;
+                        if ( ++nb_ok >= 2 ) { r = std::min( r * r, 16.0 ); nb_ok = 0; }
+                        break;
+                    }
+                    nb_ok = 0;
+                    if ( r <= o.conv_ratio * ( 1 + 1e-12 ) ) break;
+                    r = std::max( std::sqrt( r ), o.conv_ratio );
+                }
+                if ( ! moved ) {                            // ( no narrower width works: the solve stops at `s_current`, not on the density )
+                    bal.dist = &conv.at( s_current );
+                    newton.bal.set_weights( w );
+                    total.status = decltype( total.status )( S_FAILURE );
+                    break;
+                }
+            }
+        } else
+            accept();
+    };
     if ( ! adaptive ) {
         // the given widths, one after the other
+        bool ok = true;
         for ( PI step = 0; step < scales.size(); ++step ) {
             s_current = scales[ step ];
             if ( step > 0 ) {                           // the next density: the measures of the start have to be redone
                 bal.dist = &conv.at( s_current );
                 newton.measures_and_facets( w, a, fa );
             }
-            run_stage( int( scales.size() ) );
+            ok = run_stage( int( scales.size() ) );
             accept();
             if ( total.status == NewtonStats::LINEAR_FAILURE )
                 break;
         }
-    } else if ( run_stage( 0 ) ) {
-        // ADAPTIVE: after each solved width `s`, the density itself ( `0` ) if the solved weights are admissible for it, otherwise
-        // `s / r`, `r` taken from the last width that worked and squared after two successes in a row ( at most 16 ), its square
-        // root after a failure ( at least `conv_ratio` ), and never under `s_min` ( a try costs a sweep of the smoothed density ).
-        // At `r = conv_ratio`, the step of the fixed ladder, a width is tried as long as no cell is empty: the threshold only
-        // spares the wider steps a Newton that would fail, and the descent is never worse than the ladder. A width is tried only if the solved weights leave no cell
-        // under the threshold there, and abandoned ( back to the solved weights ) if Newton does not converge on it
-        accept();
-        double r = 16;
-        int nb_ok = 0;
-        auto try_width = [&]( double s, bool forced ) {
-            std::vector<double> a1;
-            std::vector<Facet> fa1;
-            bal.dist = &conv.at( s );
-            newton.measures_and_facets( w, a1, fa1 );
-            if ( forced ? ! ( min_mass( a1 ) > 0 ) : min_mass( a1 ) < admissible ) {
-                if ( o.newton.trace ) std::printf( "  ( s = %.4e: a cell under the threshold, %.3e )\n", s, min_mass( a1 ) );
-                return false;
-            }
-            const double s_prev = s_current;
-            s_current = s;
-            a.swap( a1 );
-            fa.swap( fa1 );
-            if ( run_stage( 0 ) ) { accept(); return true; }
-            if ( o.newton.trace ) std::printf( "  ( s = %.4e: abandoned )\n", s );
-            s_current = s_prev;                         // ( abandoned: the solved weights and their measures again )
-            a.swap( a1 );
-            fa.swap( fa1 );
-            return false;
-        };
-        while ( s_current > 0 ) {
-            // ( from `s_min`, the narrowest width, the density itself is tried even with cells under the threshold, as long as none is
-            //   empty: this is the last stage of the fixed ladder, and Newton passes it -- the layers of cells along M that wider
-            //   widths leave have all crossed it by then )
-            if ( try_width( 0, s_current <= s_min * ( 1 + 1e-12 ) ) )
-                break;
-            bool moved = false;
-            while ( ! moved ) {
-                const double s = std::max( s_current / r, s_min );
-                if ( s < s_current * ( 1 - 1e-12 ) && try_width( s, r <= o.conv_ratio * ( 1 + 1e-12 ) ) ) {
-                    moved = true;
-                    if ( ++nb_ok >= 2 ) { r = std::min( r * r, 16.0 ); nb_ok = 0; }
-                    break;
-                }
-                nb_ok = 0;
-                if ( r <= o.conv_ratio * ( 1 + 1e-12 ) ) break;
-                r = std::max( std::sqrt( r ), o.conv_ratio );
-            }
-            if ( ! moved ) {                            // ( no narrower width works: the solve stops at `s_current`, not on the density )
-                bal.dist = &conv.at( s_current );
-                newton.bal.set_weights( w );
-                total.status = decltype( total.status )( S_FAILURE );
-                break;
-            }
+        if ( ! ok && can_continue ) {                   // AUTO, the plain Newton failed: the continuation, from the same start
+            if ( o.newton.trace ) std::printf( "  the plain Newton did not converge: width continuation from the start\n" );
+            w = w_start;
+            enter_continuation();
+            run_adaptive();
         }
     } else
-        accept();
+        run_adaptive();
     scales.resize( nb_stages );                         // ( for the stats: the stages actually run )
     hist.nb_steps.set( nb_steps );
 

@@ -32,11 +32,11 @@ struct PowerDiagram_Plain {
     /// of the members is that of `PowerDiagram.py` + `PowerDiagram_Plain.py`
     /// GROUPS: the same diagram, the virtual weights of its aggregates' children read elsewhere ( what the solver writes, `sdotplan/Groups.h` )
     HD auto with_groups( auto &&vweights_, auto &&agg_vweights_ ) const {
-        return ::sdot::PowerDiagram_Plain{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, vweights_, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, agg_vweights_, nb_aggs, seed_positions, weights };
+        return ::sdot::PowerDiagram_Plain{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, vweights_, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, agg_vweights_, nb_aggs, seed_positions, weights };
     }
 
     HD auto with_weights( auto &&weights_ ) const {
-        return ::sdot::PowerDiagram_Plain{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs, seed_positions, weights_ };
+        return ::sdot::PowerDiagram_Plain{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs, seed_positions, weights_ };
     }
 };
 

@@ -32,7 +32,7 @@ The same solve, in ONE ffi call too, whose handler drives the Newton loop on the
 run on the card, and the host only reads back the scalars it decides on -- so the solve runs under `jax.jit` as well. The
 tree itself is one more card call just before ( `gpu/Bsp2D.cuh`, `AaBsp._init_on_card` ): under `jax.jit` it is part of
 the jitted program, built at every call, from traced positions as well as from constant ones. It
-takes 2D problems against a constant density ( a box, or a convex polygon the cells start from: `Polytope`, `Polygon` ), an
+takes 2D problems against a constant density ( a box, or a convex polygon the cells start from: `Polytope`, `ConvexHull` ), an
 `Image` on a regular grid, isotropic gaussians or a triangle `Mesh`, with the width continuation of the CPU where there is one
 ( not for a polytope; for a mesh, the spreading runs its stages, see `_solve_by_spreading` ), and 3D problems against a constant density ( a box or a convex polyhedron; the step `trials`,
 as on the CPU; the cells of `gpu/Cell3D.cuh` ); anything else raises on a card ( the CPU solves it ).
@@ -167,7 +167,8 @@ def _declared_mass( dist ):
     v = tm.raw if tm is not None and tm.is_defined else getattr( dist.mass, "raw", dist.mass )
     if loom.is_traced( v ):
         return None
-    return float( np.asarray( v ).reshape( -1 )[ 0 ] )
+    from loom.tensor.host import to_host     # a cupy array refuses `np.asarray`
+    return float( np.asarray( to_host( v ) ).reshape( -1 )[ 0 ] )
 
 
 def _sink_of( problem ):
@@ -291,7 +292,7 @@ _CARD_OPTIONS = [ "tol_abs", "tol_rel", "t_min", "mult_ok", "factor", "maxit", "
                   "lin", "host_method", "lin_tol", "amg_variant", "mg_shift", "mg_recycle", "mg_rebuild", "mg_stop", "mg_nu", "mg_kcycle",
                   "lin_maxit", "trace", "mg_float", "mg_smoothed",
                   "continuation", "conv_threshold", "conv_s0", "conv_ratio", "conv_min", "conv_possible", "min_scale",
-                  "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny", "agg_margin", "agg_gap", "agg_nb_dups" ]
+                  "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny", "agg_margin", "agg_gap", "agg_nb_dups", "sink", "sink_w" ]
 
 
 def card_density_call( dens, d ):
@@ -423,8 +424,8 @@ class SdotPlanNd( Displayable ):
     SPREAD_MIN_RATIO = 1.05
     SPREAD_STAGE_ITER = 60
     #: `continuation = "auto"` on a target that spreads: from this `spread_start()` on ( a density far from flat, whose max is still
-    #: over 3 times its mean after so many averages ), the continuation runs at once -- the plain Newton was measured to fail there,
-    #: and trying it first was about half of the time of the solve
+    #: over 3 times its mean after so many averages ), the continuation runs at once without a warm start -- the plain Newton from
+    #: scratch was measured to fail there, and trying it first was about half of the time of the solve
     SPREAD_DIRECT = 16
 
     # -- how to get one -----------------------------------------------------------------------
@@ -451,11 +452,12 @@ class SdotPlanNd( Displayable ):
                 setattr( plan, name, type( value )( value.raw + ( attached - ops.stop_gradient( attached ) ), axes = value.axes ) )
             return plan
         spreads = cls._spreads( problem, settings )
-        if spreads and _periodicity_of( problem ) is not None:
-            raise NotImplementedError( "periodicity: not with a target that spreads itself ( a `Mesh` ) yet -- an `Image`, a `Box` or a `Polytope`" )
         if spreads:
             k0 = problem.target.spread_start()
-            if k0 is not None and ( settings.continuation == "always" or k0 >= cls.SPREAD_DIRECT ):
+            # a warm start ( the previous solution, `weights0` ) is usually close enough for the plain solve, even on a target far
+            # from flat: tried first ( a Lloyd step replayed the whole continuation without it ), the spreading if it fails
+            started = warm is not None or settings.weights0 is not None
+            if k0 is not None and ( settings.continuation == "always" or ( k0 >= cls.SPREAD_DIRECT and not started ) ):
                 if verbose and settings.continuation != "always":
                     print( f"  the target is far from flat ( spread_start = { k0 } ): width continuation by its spreading at once" )
                 return cls._solve_by_spreading( problem, settings, verbose, k0 = k0 )
@@ -534,7 +536,7 @@ class SdotPlanNd( Displayable ):
                 stage.tol = max( settings.tol, 1e-2 / n )
                 stage.max_iter = min( settings.max_iter, cls.SPREAD_STAGE_ITER )
                 try:
-                    sol = OtProblem( problem.source, target.spread( k ) ).solve( stage, verbose )
+                    sol = OtProblem( problem.source, target.spread( k ), periodicity = _periodicity_of( problem ) ).solve( stage, verbose )
                 except RuntimeError:                       # ( a stage that the solver could not run: a failed stage )
                     sol = None
             ok = sol is not None and sol.converged
@@ -609,12 +611,10 @@ class SdotPlanNd( Displayable ):
         # the limits-based step only exists in 2D ( `sdotplan/Bounds.h` ); elsewhere, trials. Not with a periodicity: the limits
         # rebuild the cells from the neighbours of the laplacian, which forgets through which image they are neighbours
         periodicity = _periodicity_of( problem )
+        # A RADIAL integrand ( `OtProblem( radial_func = ... )` ): the masses are the diracs', the target's density a factor
+        self._radial = getattr( problem, "radial_func", None )
         # PARTIAL transport ( the source is lighter than the target ): a sink, which takes what the cells' balls leave
-        self._sink = _sink_of( problem )
-        if self._sink is not None and periodicity is not None:
-            raise NotImplementedError( "partial transport with a periodicity: not yet" )
-        if self._sink is not None and on_card:
-            raise NotImplementedError( "partial transport: on the CPU only for now" )
+        self._sink = _sink_of( problem ) if self._radial is None else None
         # GROUPS ( `duplicates = "split"`, `sdotplan/Groups.h` ): the tree of aggregates, found once, here, on readable positions -- the
         # Newton of the CPU and of the card ( `gpu/CardGroups.cuh` ) then runs on all the weights of that geometry; a periodicity keeps
         # the aggregation, then `_split_groups`
@@ -624,11 +624,22 @@ class SdotPlanNd( Displayable ):
         if ( getattr( settings, "duplicates", "split" ) == "split" and settings.aggregate and periodicity is None
              and tun.step != "limits" and not loom.is_traced( pos_given ) ):
             self._solver_groups = self._groups_for( problem, settings, warm )
-        step = { "auto": "limits" if d == 2 and periodicity is None and self._sink is None and self._solver_groups is None else "trials" }.get( tun.step, tun.step )
+        if self._sink is not None and on_card:
+            self._solver_groups = None                   # ( the card's sink: no tree of aggregates, no aggregation -- `_build_card` )
+        if self._radial is not None:
+            if on_card:
+                raise NotImplementedError( "radial_func: the CPU solves it, not the card yet ( `JAX_PLATFORMS=cpu`, `LOOM_DEVICE=cpu` )" )
+            if periodicity is not None:
+                raise NotImplementedError( "radial_func with a periodicity: not written yet" )
+            self._solver_groups = None                   # ( the tree of aggregates does not know the radial factor )
+        step = { "auto": "limits" if d == 2 and periodicity is None and self._sink is None and self._radial is None and self._solver_groups is None
+                 else "trials" }.get( tun.step, tun.step )
         if step == "limits" and periodicity is not None:
             raise ValueError( "step = 'limits' is not available with a periodicity: 'trials' or 'auto'" )
         if step == "limits" and self._sink is not None:
             raise ValueError( "step = 'limits' is not available for a partial transport: 'trials' or 'auto'" )
+        if step == "limits" and self._radial is not None:
+            raise ValueError( "step = 'limits' is not available with a radial integrand: 'trials' or 'auto'" )
 
         if step == "limits" and d != 2:
             raise ValueError( "step = 'limits': 2D only, on the CPU as on the card ( the area polynomials along the direction, "
@@ -676,7 +687,7 @@ class SdotPlanNd( Displayable ):
         if periodicity is not None and accelerator is None:
             # the tree is that of the FOLDED seeds ( the diagram folds them the same way: `periodicity.setup_for` )
             from .periodicity import setup_for
-            pos_raw = setup_for( pos_raw, dst_dist.bounding_half_spaces(), periodicity )[ 1 ]
+            pos_raw = setup_for( pos_raw, dst_dist.periodic_support(), periodicity )[ 1 ]
         if accelerator is None and on_card and builds_on_card( pos_raw ) and self._solver_groups is not None:
             # GROUPS: the positions are readable ( the tree of aggregates was read from them ) and the groups need the tree's
             # order on the host ( `PowerDiagram_Bsp._stored_group_members` ): the card's tree built as a CONSTANT of a trace
@@ -704,7 +715,7 @@ class SdotPlanNd( Displayable ):
             self._pd = PowerDiagram( src_dist.positions, w_start,
                                      accelerator = accelerator, kernel_dtype = settings.kernel_dtype,
                                      distribution = dst_dist, memory = tun.memory,
-                                     scratch_capacity = tun.scratch_capacity, periodicity = periodicity, sink_weight = self._sink,
+                                     scratch_capacity = tun.scratch_capacity, periodicity = periodicity, sink_weight = self._sink, radial_func = self._radial,
                                      groups = self._solver_groups )
         pd = self._pd
         n = int( pd.nb_points.value )
@@ -963,10 +974,15 @@ class SdotPlanNd( Displayable ):
             dens = pd._card_solve_density()
             if d == 3 and dens is not None and dens[ "kind" ] not in ( "const", "mesh", "gauss" ):
                 dens = None
-            if pd._periodic is not None and dens is not None and dens[ "kind" ] != "const":
-                dens = None                              # ( the card's images, gaussians and meshes are not repeated by a group )
+            if self._sink is not None and dens is not None and ( d != 2 or dens[ "kind" ] not in ( "const", "mesh" ) ):
+                dens = None
+                reason = ( "with a sink ( partial transport ), the card integrates in the balls a constant density or a triangle "
+                           "`Mesh`, in 2D -- not an image nor gaussians" )
+            if pd._periodic is not None and dens is not None and dens[ "kind" ] != "const" and not pd._periodized:
+                dens = None                              # ( the card's images are not repeated by a group; gaussians and meshes
+                                                         # repeat themselves: `Distribution.periodized` )
                 reason = ( "with a periodicity, the card integrates a constant density ( a box, a polytope, an image of equal "
-                           "values ) -- its images, gaussians and meshes are not repeated by the group" )
+                           "values ), gaussians or a mesh -- its images are not repeated by the group" )
             if dens is None and reason is None:
                 reason = ( "the card integrates a constant density, an `Image` on a regular grid ( a diagonal frame, uniform knots, "
                            "covering the box ), isotropic gaussians or a triangle `Mesh` in 2D -- not this distribution" if d == 2 else
@@ -1025,7 +1041,10 @@ class SdotPlanNd( Displayable ):
         for name, v in zip( ( "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny" ), dens.get( "geom", [ 0.0 ] * 6 ) ):
             put( name, v )
         grouped = pd.group_rep.is_defined                # ( the tree of aggregates: no aggregation, `Newton2D.cuh` )
-        put( "agg_margin", 0.0 if grouped else self._agg_margin ); put( "agg_gap", self._agg_gap ); put( "agg_nb_dups", 0 if grouped else self._agg_nb_dups )
+        sunk = self._sink is not None                    # ( a sink: no aggregation on the card, the residual `nu - a`: `Newton2D.cuh` )
+        put( "agg_margin", 0.0 if grouped or sunk else self._agg_margin ); put( "agg_gap", self._agg_gap )
+        put( "agg_nb_dups", 0 if grouped or sunk else self._agg_nb_dups )
+        put( "sink", int( sunk ) ); put( "sink_w", float( self._sink ) if sunk else 0.0 )
         options = RealTensor[ Axis( ShapeVar( len( _CARD_OPTIONS ) ), name = "num_card_opt" ) ]( np.asarray( opts, dtype = np.float64 ) )
 
         weights = RealTensor[ pd.num_point ]()
@@ -1225,8 +1244,8 @@ class SdotPlanNd( Displayable ):
 
         `nu`: the target mass of each cell ( the masses of the diracs, normalized, then rescaled
         to what the domain contains -- see `sdotplan/Solve.h` )"""
-        if getattr( self, "_sink", None ) is not None:     # partial: the masses of the diracs themselves ( the sink takes the rest )
-            return self._masses
+        if getattr( self, "_sink", None ) is not None or getattr( self, "_radial", None ) is not None:
+            return self._masses                          # partial or radial: the masses of the diracs themselves ( no rescaling )
         return self._masses * ( self.stats[ "domain_mass" ] / float( self._masses.sum() ) )
 
     def residual( self, weights = None ) -> Tensor:
@@ -1345,10 +1364,10 @@ class SdotPlanNd( Displayable ):
         def diagram( x, ts ):
             gx = g.with_virtual_weights( *ts.virtual_weights( x ) )
             return PowerDiagram( pos_raw, W, distribution = self.problem.target, kernel_dtype = settings.kernel_dtype, memory = 0,
-                                 sink_weight = self._sink, groups = gx ), gx
+                                 sink_weight = self._sink, radial_func = getattr( self, "_radial", None ), groups = gx ), gx
 
         pd = PowerDiagram( pos_raw, W, distribution = self.problem.target, kernel_dtype = settings.kernel_dtype, memory = 0,
-                           sink_weight = self._sink, groups = g )
+                           sink_weight = self._sink, radial_func = getattr( self, "_radial", None ), groups = g )
         counts, ids, vals = pd.hessian_rows( items = members )
         ts = grp.TreeSystem( g, members, counts, ids, vals )
         x = ts.slots_of( W )                             # ( the virtual weights from the solver's: close doubles, exact differences )
@@ -1464,6 +1483,7 @@ class SdotPlanNd( Displayable ):
         kd = settings.kernel_dtype
         per = _periodicity_of( problem )
         sk = self._sink
+        rf = getattr( self, "_radial", None )
         frozen_pos, live_pos, fit_w, nu_raw = self.problem.source.positions.raw, src.positions.raw, fit.raw, src.weights.raw
 
         # EXACT DUPLICATES: the diagrams are built on the merged cloud ( see the docstring ), `axc` its points
@@ -1498,15 +1518,15 @@ class SdotPlanNd( Displayable ):
             from .AaBsp import AaBsp, builds_on_card
             acc = AaBsp( frozen_pos, fit_w ) if on_card and per is None and builds_on_card( frozen_pos ) else None
             frozen = PowerDiagram( frozen_pos, fit_w, accelerator = acc, distribution = self.problem.target, kernel_dtype = kd, memory = 0,
-                                   periodicity = per, sink_weight = sk )
-        live = PowerDiagram( live_pos, fit_w, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk )
+                                   periodicity = per, sink_weight = sk, radial_func = rf )
+        live = PowerDiagram( live_pos, fit_w, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
         m = RealTensor[ axc ]( live.measures.raw )
         nu = RealTensor[ axc ]( nu_raw )
-        # ( partial: no rescaling -- the sink takes the rest of the density )
-        residual = m - nu if sk is not None else m - nu * ( m.sum() / nu.sum() )
+        # ( partial: no rescaling -- the sink takes the rest of the density; radial: the masses are not a partition )
+        residual = m - nu if sk is not None or rf is not None else m - nu * ( m.sum() / nu.sum() )
         step = RealTensor[ axc ]( frozen.laplacian_solve( residual.raw, linear_solver = settings.tuning.linear_solver ).raw )
         weights = RealTensor[ axc ]( fit_w ) - step
-        at = PowerDiagram( live_pos, weights.raw, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk )
+        at = PowerDiagram( live_pos, weights.raw, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
         m = RealTensor[ axc ]( at.measures.raw )
 
         # the moments at the live weights: `first_c`, `second`, and the mass by the SAME quadrature
@@ -1519,7 +1539,7 @@ class SdotPlanNd( Displayable ):
         pos = [ RealTensor[ axc ]( folded[ :, c ] ) for c in range( d ) ]
         pp = sum( ( p * p for p in pos[ 1: ] ), pos[ 0 ] * pos[ 0 ] )
         px = sum( ( p * f for p, f in zip( pos[ 1: ], first[ 1: ] ) ), pos[ 0 ] * first[ 0 ] )
-        nu_eff = nu if sk is not None else nu * ( m.sum() / nu.sum() )
+        nu_eff = nu if sk is not None or rf is not None else nu * ( m.sum() / nu.sum() )
         self.cost = ( second - 2 * px + pp * mass ).sum() + ( weights * ( nu_eff - m ) ).sum()
 
         # an empty cell keeps its seed as barycenter ( there is nothing else to say )
@@ -1531,6 +1551,7 @@ class SdotPlanNd( Displayable ):
             self.weights = weights
             self.cell_masses = m
             self.barycenters = RealTensor[ ax, self._pd.dim ]( full )
+            self._live_diagram = at                      # ( `sphere_areas`, read from it when asked: the derivative goes through `weights` )
             return
         # back to the members of the clusters
         self.weights = RealTensor[ ax ]( weights.raw[ inv ] + gap )
@@ -1562,6 +1583,7 @@ class SdotPlanNd( Displayable ):
         ax = self._pd.num_point
         kd = settings.kernel_dtype
         sk = self._sink
+        rf = getattr( self, "_radial", None )
         n = len( g.parent )
         live_pos = src.positions.raw
         nu = src.weights.raw
@@ -1574,12 +1596,12 @@ class SdotPlanNd( Displayable ):
 
         def grouped( x, at_pos = live_pos ):
             gg = g.with_virtual_weights( *ts.virtual_weights( x ) )
-            return PowerDiagram( at_pos, ts.outer( x ), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, groups = gg )
+            return PowerDiagram( at_pos, ts.outer( x ), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, radial_func = rf, groups = gg )
 
         # ONE FROZEN NEWTON STEP: the roots, then the aggregates
         x0f = loom.array( x0 ) if not isinstance( live_pos, np.ndarray ) else x0
         m0 = grouped( x0f ).measures.raw
-        b = ( nu - m0 ) if sk is not None else ( nu * ( m0.sum() / nu.sum() ) - m0 )
+        b = ( nu - m0 ) if sk is not None or rf is not None else ( nu * ( m0.sum() / nu.sum() ) - m0 )
         D = gpd.laplacian_solve( b, linear_solver = settings.tuning.linear_solver ).raw * grp._arr( m0, ts.root_slot.astype( np.float64 ) )
         x1 = x0f + ts.step( b, D )
 
@@ -1612,14 +1634,14 @@ class SdotPlanNd( Displayable ):
         W1 = ts.outer( x1 )
         if gs is not None:
             _, gs = g.with_virtual_weights( sv1, av1 ).sites()
-        sd = PowerDiagram( p_site, W1[ keep ], distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, groups = gs )
+        sd = PowerDiagram( p_site, W1[ keep ], distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, radial_func = rf, groups = gs )
         ms = RealTensor[ axs ]( sd.measures.raw )
         fs = [ RealTensor[ axs ]( sd.moment( c ).raw ) for c in range( d ) ]
         ss = RealTensor[ axs ]( sd.moment( d ).raw )
         qs = RealTensor[ axs ]( sd.moment( d + 1 ).raw )
         ps = [ RealTensor[ axs ]( p_site[ :, c ] ) for c in range( d ) ]
         nus = RealTensor[ axs ]( nu_s )
-        nus_eff = nus if sk is not None else nus * ( ms.sum() / nus.sum() )
+        nus_eff = nus if sk is not None or rf is not None else nus * ( ms.sum() / nus.sum() )
         pp = sum( ( p * p for p in ps[ 1: ] ), ps[ 0 ] * ps[ 0 ] )
         px = sum( ( p * f for p, f in zip( ps[ 1: ], fs[ 1: ] ) ), ps[ 0 ] * fs[ 0 ] )
         dual = ( RealTensor[ ax ]( x1 ) * RealTensor[ ax ]( ts.slot_sum( ( nus_eff - ms ).raw, rows = keep ) ) ).sum()
@@ -1633,6 +1655,14 @@ class SdotPlanNd( Displayable ):
         self.cell_masses = m
         ops = loom.ops()
         self.barycenters = RealTensor[ ax, self._pd.dim ]( ops.stack( [ ops.where( mass.raw > 0, f.raw / ops.where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 ) )
+
+    @property
+    def sphere_areas( self ):
+        """With a sink ( partial transport ): the measure of the sphere inside each cell, where the target is not zero -- a length in
+        2D, an area in 3D, `[ n ]` ( `PowerDiagram.sphere_areas` ). What a surface energy counts: differentiable with respect to the
+        positions and the masses of the diracs when they are traced, through the weights ( the implicit function theorem )."""
+        live = getattr( self, "_live_diagram", None )
+        return ( live if live is not None else self.power_diagram() ).sphere_areas
 
     def power_diagram( self, weights = None ) -> PowerDiagram:
         """The `PowerDiagram` of the plan, at its weights ( or at `weights` ): to inspect or draw its cells.

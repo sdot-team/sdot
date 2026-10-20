@@ -32,9 +32,16 @@
 // too: `int ( x - c ) phi = -s^2 circ phi n ds` and `int |x - c|^2 phi = 2 s^2 m - s^2 circ ( ( x - c ) . n ) phi ds`, each
 // edge's `int phi ds` being the facet's `erf` -- closed forms, where the CPU uses an adaptive quadrature ( the moments only:
 // barycentres and cost agree with the CPU to its quadrature, ~1e-4 relative on a narrow gaussian ).
+//
+// = Inside a ball ( a sink, partial transport: `Cell2D.cuh::finish_in_ball` )
+//
+// The cell of seed `p` integrated inside `|x - p|^2 <= r2` only, a constant or the mesh: the triangles `( p, a, b )` of its edges
+// inter the disc, and the arcs of the sphere inside it ( `integration/InBall.h`'s `DiscMoments` and `ArcTrig`, the CPU's closed
+// forms ), the mesh's triangles cutting each one first ( `mesh_triangle_in_ball` ).
 // =====================================================================================
 
 #include <loom/support/common_types.h>
+#include "../integration/InBall.h"
 #include <cuda_runtime.h>
 #include <cmath>
 
@@ -292,9 +299,10 @@ __device__ __forceinline__ double mesh_lambda( const DensMesh &m, SI e, int i, d
 /// the pieces `T INTERSECT triangle e` of the polygon `( qx, qy )` ( `nq` vertices, counterclockwise, GLOBAL coordinates ) and
 /// their integrals, with the moments about the seed `( ox, oy )` for `MOM`: each convex piece is cut by the three half-planes
 /// of the triangle, then split in a fan whose triangles integrate the affine density in closed form
-template<bool MOM>
-__device__ __forceinline__ void mesh_element( const DensMesh &m, SI e, const double *qx0, const double *qy0, int nq0, double ox, double oy, double sgn, DensSums &acc ) {
-    double ax[ 8 ], ay[ 8 ], bx[ 8 ], by[ 8 ];
+/// the polygon `( qx0, qy0 )` ( `nq0 <= 3` vertices, counterclockwise, GLOBAL coordinates ) cut by the three half-planes of
+/// triangle `e`, into `( ax, ay )`: its number of vertices ( at most 6 )
+__device__ __forceinline__ int mesh_clip( const DensMesh &m, SI e, const double *qx0, const double *qy0, int nq0, double ( &ax )[ 8 ], double ( &ay )[ 8 ] ) {
+    double bx[ 8 ], by[ 8 ];
     int nq = nq0;
     for ( int j = 0; j < nq; ++j ) { ax[ j ] = qx0[ j ]; ay[ j ] = qy0[ j ]; }
     for ( int i = 0; i < 3 && nq >= 3; ++i ) {
@@ -315,6 +323,13 @@ __device__ __forceinline__ void mesh_element( const DensMesh &m, SI e, const dou
         nq = nn;
         for ( int j = 0; j < nq; ++j ) { ax[ j ] = bx[ j ]; ay[ j ] = by[ j ]; }
     }
+    return nq;
+}
+
+template<bool MOM>
+__device__ __forceinline__ void mesh_element( const DensMesh &m, SI e, const double *qx0, const double *qy0, int nq0, double ox, double oy, double sgn, DensSums &acc ) {
+    double ax[ 8 ], ay[ 8 ];
+    const int nq = mesh_clip( m, e, qx0, qy0, nq0, ax, ay );
     if ( nq < 3 )
         return;
 
@@ -460,6 +475,83 @@ __device__ __forceinline__ double mesh_line( const DensMesh &m, double ox, doubl
         res += w * L * ( t1 - t0 ) * 0.5 * ( fa + fb );
     } );
     return res;
+}
+
+// ---- inside a ball ( a sink ) ------------------------------------------------------------------------------------------
+
+/// what a cell accumulates inside its ball: `DensSums`, and `sph`, the sphere's share of `d m / d r2` ( `int_{arc} rho ds / 2 r` )
+struct BallSums {
+    double m = 0, mx = 0, my = 0, m2 = 0, sph = 0;
+
+    /// a region of moments `R`, arcs `J` ( about the center ), times `sgn`, for the affine density `r0 + gx y_x + gy y_y`
+    __device__ __forceinline__ void add( const sdot::integration::DiscMoments<double> &R, const sdot::integration::ArcTrig<double> &J,
+                                         double r0, double gx, double gy, double r, double sgn ) {
+        const auto &M = R.M;
+        m   += sgn * ( r0 * M[ 0 ][ 0 ] + gx * M[ 1 ][ 0 ] + gy * M[ 0 ][ 1 ] );
+        mx  += sgn * ( r0 * M[ 1 ][ 0 ] + gx * M[ 2 ][ 0 ] + gy * M[ 1 ][ 1 ] );
+        my  += sgn * ( r0 * M[ 0 ][ 1 ] + gx * M[ 1 ][ 1 ] + gy * M[ 0 ][ 2 ] );
+        m2  += sgn * ( r0 * ( M[ 2 ][ 0 ] + M[ 0 ][ 2 ] ) + gx * ( M[ 3 ][ 0 ] + M[ 1 ][ 2 ] ) + gy * ( M[ 2 ][ 1 ] + M[ 0 ][ 3 ] ) );
+        sph += sgn * 0.5 * ( r0 * J.J[ 0 ][ 0 ] + r * ( gx * J.J[ 1 ][ 0 ] + gy * J.J[ 0 ][ 1 ] ) );
+    }
+};
+
+/// the triangle `( 0, a, b )` ( the center's frame ) inter the disc `|y|^2 <= r2`: its moments into `R`, the arcs of its edge `[ a, b ]`
+/// into `J` ( those of the sectors: where the edge leaves the disc ), signed by its orientation
+__device__ __forceinline__ void edge_in_ball( double ax, double ay, double bx, double by, double r2,
+                                             sdot::integration::DiscMoments<double> &R, sdot::integration::ArcTrig<double> &J ) {
+    namespace ig = sdot::integration;
+    ig::add_edge_in_disc( R, ax, ay, bx, by, r2, 1.0 );
+    double t0, t1;
+    if ( ! ig::clip_segment( ax, ay, bx, by, r2, t0, t1 ) ) {
+        J.add_between( ax, ay, bx, by, 1.0 );
+        return;
+    }
+    if ( t0 > 0 ) J.add_between( ax, ay, ax + t0 * ( bx - ax ), ay + t0 * ( by - ay ), 1.0 );
+    if ( t1 < 1 ) J.add_between( ax + t1 * ( bx - ax ), ay + t1 * ( by - ay ), bx, by, 1.0 );
+}
+
+/// THE TRIANGLE `( 0, a, b )` of the seed's frame ( the seed `( ox, oy )`, the center of the ball ) against the mesh, INSIDE the ball:
+/// each element cuts it ( `mesh_clip` ), and the piece is a polygon inter the disc with an affine density. Signed by the orientation
+/// of the triangle, as `mesh_triangle`
+__device__ __forceinline__ void mesh_triangle_in_ball( const DensMesh &m, double ox, double oy, double Xb, double Yb, double Xc, double Yc, double r2, BallSums &acc ) {
+    namespace ig = sdot::integration;
+    double sgn = 1;
+    const double area2 = Xb * Yc - Xc * Yb;
+    if ( ! ( area2 != 0 ) || ! ( r2 > 0 ) )
+        return;
+    if ( area2 < 0 ) {
+        const double tx = Xb, ty = Yb;
+        Xb = Xc; Yb = Yc; Xc = tx; Yc = ty;
+        sgn = -1;
+    }
+    const double r = sqrt( r2 );
+    const double qx[ 3 ] = { ox, ox + Xb, ox + Xc }, qy[ 3 ] = { oy, oy + Yb, oy + Yc };
+    // ( the box of the triangle inter that of the ball )
+    const double lox = fmax( fmin( qx[ 0 ], fmin( qx[ 1 ], qx[ 2 ] ) ), ox - r ), hix = fmin( fmax( qx[ 0 ], fmax( qx[ 1 ], qx[ 2 ] ) ), ox + r );
+    const double loy = fmax( fmin( qy[ 0 ], fmin( qy[ 1 ], qy[ 2 ] ) ), oy - r ), hiy = fmin( fmax( qy[ 0 ], fmax( qy[ 1 ], qy[ 2 ] ) ), oy + r );
+    if ( ! ( lox <= hix ) || ! ( loy <= hiy ) )
+        return;
+    mesh_walk( m, lox, loy, hix, hiy, [&]( SI e ) {
+        double ax[ 8 ], ay[ 8 ];
+        const int nq = mesh_clip( m, e, qx, qy, 3, ax, ay );
+        if ( nq < 3 )
+            return;
+        ig::DiscMoments<double> R;
+        ig::ArcTrig<double> J;
+        for ( int j = 0; j < nq; ++j ) {
+            const int k = j + 1 < nq ? j + 1 : 0;
+            edge_in_ball( ax[ j ] - ox, ay[ j ] - oy, ax[ k ] - ox, ay[ k ] - oy, r2, R, J );
+        }
+        // the density about the center: `f( o + y ) = f( o ) + grad f . y`
+        const int *t = m.tri + 3 * e;
+        double gfx = 0, gfy = 0;
+        for ( int i = 0; i < 3; ++i ) {
+            gfx += m.val[ 3 * e + i ] * m.grad[ 6 * e + 2 * i ];
+            gfy += m.val[ 3 * e + i ] * m.grad[ 6 * e + 2 * i + 1 ];
+        }
+        const double r0 = m.val[ 3 * e ] + gfx * ( ox - m.px[ t[ 0 ] ] ) + gfy * ( oy - m.py[ t[ 0 ] ] );
+        acc.add( R, J, r0, gfx, gfy, r, sgn );
+    } );
 }
 
 // ---- the dispatch: one edge of a cell, whatever the density ------------------------------------------------------------

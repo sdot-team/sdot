@@ -14,6 +14,7 @@ build/
 *.dylib
 compile_commands.json
 catalogue_record
+grill/
 
 # THE PRECOMPILED KERNELS: `<tag>/<key>.so` per architecture, produced by `make catalogue`. Only the README is tracked.
 src/sdot/precompiled-kernels/*

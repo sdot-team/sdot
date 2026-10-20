@@ -16,7 +16,7 @@ Sum of weighted Dirac point masses.
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, color='#d62728', **kwargs)`
@@ -38,7 +38,7 @@ default ). `SumOfDiracs( positions[ :, None ] )` describes the same measure.
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -63,7 +63,7 @@ positions are computed on the fly, never stored.
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -85,22 +85,14 @@ Box(origin=None, frame=None, density=1.0, nb_dims=None, target_mass=1.0)
 A uniform density on a box: `origin + frame^T [ 0, 1 ]^d`. The rows of `frame` are the edges of the box, or `frame`
 is their lengths ( an axis-aligned box ). By default the unit cube, in the dimension of the source it is used with.
 
-## `Polygon`
+## `ConvexHull`
 
 ```python
-Polygon(points, density=1.0, **kwargs)
+ConvexHull(points, density=1.0, **kwargs)
 ```
 
-The `Polytope` of the CONVEX polygon with these `points` ( `[ n, 2 ]`, in any order ). Raises if a point is
-not a vertex of the convex hull -- a non convex polygon is not a polytope.
-
-## `Polyhedron`
-
-```python
-Polyhedron(points, density=1.0, **kwargs)
-```
-
-The `Polytope` of the CONVEX polyhedron with these `points` ( `[ n, 3 ]` ): the 3D sibling of `Polygon`
+The `Polytope` of the convex hull of `points` ( `[ n, d ]`, in any order, in any dimension ). Points inside the hull are
+ignored. Raises if the hull is flat ( all the points in a hyperplane ).
 
 ## `Polytope`
 
@@ -109,11 +101,11 @@ Polytope(directions, offsets, density=1.0, target_mass=1.0, volume=None, **kwarg
 ```
 
 A uniform density on the convex polytope `directions . x <= offsets` ( `[ nb_cuts, d ]`, `[ nb_cuts ]` ), zero
-elsewhere. `Polygon( points )` and `Polyhedron( points )` build one from its vertices.
+elsewhere. `ConvexHull( points )` builds one from points.
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 | `volume` | the volume of the polytope ( a host float ) |
 
@@ -130,10 +122,15 @@ the polytope itself
 ## `Image`
 
 ```python
-Image(values, frame=None, pixel_frame=None, target_mass=1.0, **kwargs)
+Image(values=None, frame=None, pixel_frame=None, target_mass=1.0, degree=0, **kwargs)
 ```
 
-Piecewise constant function on a grid.
+Piecewise function on a grid: a constant per pixel ( `degree = 0` ), or a polynomial of degree `degree` along each axis.
+
+`degree = P > 0`: `values` is `[ pixels..., ( P + 1 )^d ]`, the BERNSTEIN coefficients of each pixel, in its own coordinates
+`t` in `[ 0, 1 ]^d`, flattened in C order ( the first axis the slowest ): `rho = sum_alpha c_alpha prod_a B_{ alpha_a, P }( t_a )`.
+Coefficients `>= 0` give a density `>= 0`, and the mass of a pixel is its volume times the mean of its coefficients.
+They are stored in the field `coeffs` ( `values` stays unset ).
 
 Each square/cube/hypercube is defined by `origin` and `frame( dir ) * knots( ... )`: the FIELD `frame` is the
 frame of ONE pixel ( its rows: the edges of a pixel ).
@@ -147,7 +144,9 @@ With `knots`, the pixels are where the knots say: the default frame is the ident
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `constant_on_pieces` | ( partial transport: `PowerDiagram( sink_weight = ... )` ) |
+| `degree` | the degree along each axis ( 0: a constant per pixel ) |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -159,6 +158,23 @@ with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
 ### `.bounding_half_spaces()`
 
 The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
+
+## `SplineGrid`
+
+```python
+SplineGrid(values, degree=3, frame=None, pixel_frame=None, origin=None, interpolate=False, target_mass=1.0)
+```
+
+A smooth density on a grid of pixels: the tensor-product B-spline of degree `degree` ( `C^{ degree - 1 }` ) whose control
+coefficients are `values`, one per pixel, at its center. Non-negative `values` give a non-negative density. The grid is placed
+like that of an `Image` ( `frame`, `pixel_frame`, `origin` ), and the density is zero outside it.
+
+`interpolate = True`: `values` are SAMPLES at the centers of the pixels instead, and the coefficients are those of the spline that
+goes through them. Such a spline can dip below zero near a sharp edge: it is then refused ( a `ValueError` ), and a lower degree,
+or `interpolate = False`, keeps it non-negative.
+
+It is an `Image( degree = degree )`: each span of the spline is a polynomial, written in the Bernstein basis of its pixel.
+Differentiable with respect to `values`.
 
 ## `SumOfGaussians`
 
@@ -174,7 +190,7 @@ standard deviations ( 6 by default ), or the box `support_box = ( lo, hi )`.
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, color='#d62728', **kwargs)`
@@ -203,7 +219,7 @@ continuous density ( one value per node ), or `[ nb_simplices, d + 1 ]` for a de
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`
@@ -226,6 +242,17 @@ triangles within a contour and `outside` ( 0 ) on those of the box around.
 
 `box` is `( lo, hi )`, or `None` for the box of the contours widened by `margin` times its largest side. `mesh_size` is the
 target length of the edges ( a number, handed to `pygmsh` for the points of the contours and the box ).
+
+### `.periodic_support()`
+
+the box of the mesh, WITHOUT the margin of `bounding_half_spaces`: what a periodicity repeats ( `periodicity = True` reads
+its periods from it )
+
+### `.random_points(n, seed=None)`
+
+`n` points drawn by the density ( a host `[ n, d ]` array ): the simplices by their mass, then in each one by rejection on
+its affine density -- the start of `sdot.quantization`. Drawn in the box of the domain, the seeds that fall where the
+density is zero ( around the mesh, in a hole ) have no mass, and the first solve crawls
 
 ### `.with_values(values, current_mass=None)`
 
@@ -253,7 +280,7 @@ around the nodes, and the edges in 3D ). `quadrature = True` integrates the smoo
 
 | Attribute | |
 |---|---|
-| `domain` | The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets. |
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 
 ### `.add_to_viz(viz, **kwargs)`

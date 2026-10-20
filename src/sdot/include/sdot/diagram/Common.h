@@ -52,6 +52,11 @@
     static constexpr bool has_sink = DECAYED_TYPE_OF( sink_weight )::is_valid; \
     HD TF   sink() const { if constexpr ( has_sink ) return TF( sink_weight() ); else return TF( 0 ); } \
     \
+    /* A RADIAL INTEGRAND ( `PowerDiagram( radial_func = RadialExp( eps ) )` ): the cell of `k` integrates \
+       `rho( x ) exp( ( w_k - |x - p_k|^2 ) / ( 2 eps ) )` ( `diagram::cell_dist`, `integration/RadialExp.h` ) */ \
+    static constexpr bool has_radial = DECAYED_TYPE_OF( radial_eps )::is_valid; \
+    HD TF   radial() const { if constexpr ( has_radial ) return TF( radial_eps() ); else return TF( 0 ); } \
+    \
     HD UnitDensity unit_density() const { return {}; } \
     \
     /* GROUPS ( `PowerDiagram( groups = ... )`, `groups.py` ): a TREE OF AGGREGATES -- seeds much closer to one another than to \

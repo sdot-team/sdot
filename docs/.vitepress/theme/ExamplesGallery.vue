@@ -3,11 +3,11 @@ import { ref, computed } from 'vue'
 import { withBase } from 'vitepress'
 import { data } from '../../examples/examples.data.js'
 
-const allExamples = data.examples
+const allSections = data.sections   // features, then use cases ( see .vitepress/gallery.js )
 const allTags     = data.tags       // pre-sorted by loader
 
 const PLACEHOLDER = withBase( '/examples/img/patate.png' )
-function imgSrc( name ) { return withBase( `/examples/img/${name}` ) }
+function imgSrc( path ) { return path ? withBase( path ) : PLACEHOLDER }
 
 const activeTags = ref( [] )
 
@@ -20,10 +20,9 @@ function toggleTag( tag ) {
 function clearTags() { activeTags.value = [] }
 function isActive( tag ) { return activeTags.value.includes( tag ) }
 
-const filtered = computed( () =>
-  activeTags.value.length === 0
-    ? allExamples
-    : allExamples.filter( e => activeTags.value.every( t => e.tags.includes( t ) ) )
+const sections = computed( () => allSections
+  .map( s => ( { ...s, cards: s.cards.filter( e => activeTags.value.every( t => e.tags.includes( t ) ) ) } ) )
+  .filter( s => s.cards.length > 0 )
 )
 </script>
 
@@ -31,7 +30,7 @@ const filtered = computed( () =>
   <div class="gallery-page">
     <header class="gallery-header">
       <h1>Examples</h1>
-      <p>Self-contained, runnable examples.</p>
+      <p>The features of SDOT, each shown at work on a page of the guide, and use cases that put them together.</p>
     </header>
 
     <!-- Tag filter bar -->
@@ -46,42 +45,49 @@ const filtered = computed( () =>
       <button v-if="activeTags.length > 0" class="clear-chip" @click="clearTags">✕ clear</button>
     </div>
 
-    <!-- Card grid -->
-    <section class="card-grid">
-      <a
-        v-for="ex in filtered"
-        :key="ex.title"
-        :href="withBase( ex.link )"
-        class="card"
-      >
-        <div class="card-img-wrap">
-          <img
-            :src="imgSrc( ex.image )"
-            :alt="ex.title"
-            class="card-img"
-            @error="e => e.target.src = PLACEHOLDER"
-          />
-        </div>
-        <div class="card-body">
-          <div class="card-title">{{ ex.title }}</div>
-          <p class="card-desc">{{ ex.description }}</p>
-          <div class="card-tags">
-            <span
-              v-for="tag in ex.tags"
-              :key="tag"
-              class="card-chip"
-              :class="{ active: isActive( tag ) }"
-              @click.prevent="toggleTag( tag )"
-            >{{ tag }}</span>
-          </div>
-        </div>
-      </a>
+    <template v-for="section in sections" :key="section.key">
+      <header class="gallery-header gallery-subheader">
+        <h2>{{ section.text }}</h2>
+        <p>{{ section.blurb }}</p>
+      </header>
 
-      <div v-if="filtered.length === 0" class="empty">
-        No examples match the selected tags.
-        <button @click="clearTags" class="clear-chip">✕ clear</button>
-      </div>
-    </section>
+      <!-- Card grid -->
+      <section class="card-grid">
+        <a
+          v-for="ex in section.cards"
+          :key="ex.link"
+          :href="withBase( ex.link )"
+          class="card"
+        >
+          <div class="card-img-wrap">
+            <img
+              :src="imgSrc( ex.image )"
+              :alt="ex.title"
+              class="card-img"
+              @error="e => e.target.src = PLACEHOLDER"
+            />
+          </div>
+          <div class="card-body">
+            <div class="card-title">{{ ex.title }}</div>
+            <p class="card-desc">{{ ex.description }}</p>
+            <div class="card-tags">
+              <span
+                v-for="tag in ex.tags"
+                :key="tag"
+                class="card-chip"
+                :class="{ active: isActive( tag ) }"
+                @click.prevent="toggleTag( tag )"
+              >{{ tag }}</span>
+            </div>
+          </div>
+        </a>
+      </section>
+    </template>
+
+    <div v-if="sections.length === 0" class="empty">
+      No examples match the selected tags.
+      <button @click="clearTags" class="clear-chip">✕ clear</button>
+    </div>
   </div>
 </template>
 
@@ -96,6 +102,8 @@ const filtered = computed( () =>
 .gallery-header { margin-bottom: 1.25rem; }
 .gallery-header h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.3rem; }
 .gallery-header p  { color: var(--vp-c-text-2); margin: 0; }
+.gallery-subheader { margin-top: 2rem; }
+.gallery-subheader h2 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.3rem; border-top: none; padding-top: 0; }
 
 /* ── Tag bar ────────────────────────────────────────── */
 .tag-bar {

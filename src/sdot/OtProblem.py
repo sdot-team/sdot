@@ -322,7 +322,7 @@ class OtProblem:
 
     see the module docstring"""
 
-    def __init__( self, source, target, periodicity = None ):
+    def __init__( self, source, target, periodicity = None, radial_func = None ):
         """`source` : the DISCRETE distribution -- a `SumOfDiracs` ( or a `ProjectedSumOfDiracs` ) ;
         its `weights`, normalized, are the target masses of the cells.
 
@@ -337,12 +337,19 @@ class OtProblem:
         `periodicity`: transport on the quotient of the space by a group of translations ( a torus, a cylinder: see
         `sdot.periodicity` ) -- `True` for every side of the box of `target`, one boolean per axis, or the generators. The
         target is repeated by the group, and the diracs may lie anywhere: they are folded, and the barycenters come back
-        next to them."""
+        next to them.
+
+        `radial_func`: a function of the power distance to each dirac that its cell integrates times the target's density
+        ( `sdot.RadialExp( eps )`: `exp( ( w_i - |x - p_i|^2 ) / ( 2 eps ) )`, see `PowerDiagram` ). The cells then integrate
+        that measure ( the Moreau-Yosida regularization of the entropy, `docs/examples/fokker-planck.md` ): their masses are the
+        diracs' as given, not rescaled to the target's, and `barycenters` and `cost` are those of the integrand. 2D, on the CPU."""
         if target is None:
             raise ValueError( "OtProblem : a target is needed -- it is what gives the domain" )
         self._last = None                                # the last solution returned ( not its weights )
         #: the periodicity of the space ( `None`: none ), see `sdot.periodicity`
         self.periodicity = periodicity
+        #: the radial function around each dirac ( `None`: none ), see `sdot.RadialExp`
+        self.radial_func = radial_func
         self._source = None
         self._target = None
         self.source = source
@@ -503,7 +510,7 @@ class OtProblem:
 
 # -- THE SHORTCUT ------------------------------------------------------------------------------
 
-def ot_solve( source, target, *, periodicity = None, verbose = False, **settings ):
+def ot_solve( source, target, *, periodicity = None, radial_func = None, verbose = False, **settings ):
     """The transport plan from `source` to `target`, with the settings of the solver as keywords: those of `Iterative` in
     2D and more ( `tol`, `max_iter`, `ot_plan`... ), of `Direct` in 1D. A name that does not belong to them raises.
 
@@ -542,7 +549,7 @@ def ot_solve( source, target, *, periodicity = None, verbose = False, **settings
             pb.source = SumOfDiracs( move( pos, sol ) )
 
     `ot_solve` builds a fresh `OtProblem` at each call : without `ot_plan`, it restarts from zero."""
-    pb = OtProblem( source, target, periodicity = periodicity )
+    pb = OtProblem( source, target, periodicity = periodicity, radial_func = radial_func )
     cls = { "direct": Direct, "iterative": Iterative }[ pb.regime ]
     try:
         solver_settings = cls( **settings )
@@ -555,10 +562,10 @@ def ot_solve( source, target, *, periodicity = None, verbose = False, **settings
     return pb.solve( solver_settings, verbose )
 
 
-def plan( f, g, periodicity = None ):
+def plan( f, g, periodicity = None, radial_func = None ):
     """The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them ). `periodicity`: on a torus,
-    a cylinder... ( see `OtProblem` )"""
-    return OtProblem( f, g, periodicity = periodicity ).solve()
+    a cylinder... `radial_func`: a function of the distance to each dirac, integrated by its cell ( see `OtProblem` )"""
+    return OtProblem( f, g, periodicity = periodicity, radial_func = radial_func ).solve()
 
 
 def w2( f, g, periodicity = None ):

@@ -86,6 +86,7 @@
 #include "../sdotplan/Continuation.h"
 #include "../sdotplan/Aggregation.h"
 #include "../sdotplan/Groups.h"
+#include "../sdotplan/WarmRepair.h"
 #include "CardGroups.cuh"
 #include <algorithm>
 #include <cmath>
@@ -105,6 +106,7 @@ enum Opt : int {
     O_CONTINUATION, O_CONV_THRESHOLD, O_CONV_S0, O_CONV_RATIO, O_CONV_MIN, O_CONV_POSSIBLE, O_MIN_SCALE,
     O_IMG_X0, O_IMG_Y0, O_IMG_HX, O_IMG_HY, O_IMG_NX, O_IMG_NY,
     O_AGG_MARGIN, O_AGG_GAP, O_AGG_NB_DUPS,
+    O_SINK, O_SINK_W,
     NB_OPTS
 };
 enum ContinuationKind : int { CONT_NEVER = 0, CONT_AUTO = 1, CONT_ALWAYS = 2 };
@@ -317,6 +319,27 @@ __global__ void __launch_bounds__( BLOCK ) similarity_weights( SI n, Strided<TF,
     }
 }
 
+/// THE REPAIR OF A WARM START ( `sdotplan/WarmRepair.h` ): the state of each seed ( `st`: `lo`, `hi`, `step`, `touched`, `n`
+/// each ), the exact duplicates left out
+__global__ void __launch_bounds__( BLOCK ) warm_repair_init_kernel( SI n, double *st, double l2 ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n )
+        sp::warm_repair_init( st[ i ], st[ n + i ], st[ 2 * n + i ], st[ 3 * n + i ], l2, false );
+}
+
+__global__ void __launch_bounds__( BLOCK ) warm_repair_leave_out( SI nd, const SI *dup, SI n, double *st ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q < nd )
+        st[ 3 * n + dup[ q ] ] = -1;
+}
+
+/// one round: `w` moved where the seed is still being repaired, `moved[ i ]` 1 there ( 0 elsewhere )
+__global__ void __launch_bounds__( BLOCK ) warm_repair_round( SI n, const double *a, const double *nu, double *w, double *st, double l2, double *moved ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n )
+        moved[ i ] = sp::warm_repair_cell( a[ i ], nu[ i ], w[ i ], st[ i ], st[ n + i ], st[ 2 * n + i ], st[ 3 * n + i ], l2 ) ? 1.0 : 0.0;
+}
+
 template<int DIM,class TF>
 struct ExtentOf {
     Strided<TF,2> pos;
@@ -338,6 +361,19 @@ struct MinOf {
     const double *x;
     __device__ void operator()( SI i, Min1 &acc ) const { acc.m = fmin( acc.m, x[ i ] ); }
 };
+
+/// `min_i a_i / nu_i` ( the start by balls of a sink )
+struct MinRatioOf {
+    const double *a, *nu;
+    __device__ void operator()( SI i, Min1 &acc ) const { acc.m = fmin( acc.m, a[ i ] / nu[ i ] ); }
+};
+
+/// THE START BY BALLS of a sink ( `sdotplan/Solve.h` ): `r_i^2 = nu_i / ( 2 pi rho )`, half of what the cell would hold alone, drawn
+/// towards their mean by `t` ( `1`: the balls, `0`: equal radii ), every `r^2` grown by `shift`; `w = w_sink + r^2`
+__global__ void __launch_bounds__( BLOCK ) ball_weights( SI n, const double *nu, double scale, double mean, double t, double shift, double w_sink, double *w ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n ) w[ i ] = w_sink + mean + t * ( nu[ i ] * scale - mean ) + shift;
+}
 
 // ---- THE AGGREGATION of near-coincident seeds ( `sdotplan/Aggregation.h`; the host decides, these kernels apply ) --------------
 
@@ -1066,6 +1102,7 @@ struct Slot {
     Counters *counters = nullptr;
     TR       *edges = nullptr;                           ///< `EDGE_CAP x n`
     int      *nb_edges = nullptr;
+    double   *sph = nullptr;                             ///< a sink: the cells' couplings with it ( `Problem::sphere` )
     Report    rep{};                                     ///< its last report ( host )
 };
 
@@ -1157,6 +1194,12 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     const int residual = int( o[ O_RESIDUAL ] );
     const double power = o[ O_POWER ], switch_residual = o[ O_SWITCH ];
     int lin_kind = int( o[ O_LIN ] );                    // ( LIN_HOST afterwards if the card's solver failed: see `solved` )
+    // A SINK ( partial transport, 2D: `Cell2D.cuh::finish_in_ball` ): the cells integrated in their balls, the sink's weight the gauge
+    // ( none on the seeds ), the laplacian bordered by the sink on the host ( `HostLinear::solve_with_sink` ), the residual `nu - a`
+    // with no centring, the targets as given ( not rescaled to the domain ), no continuation, the start by balls
+    const bool sink = DIM == 2 && o[ O_SINK ] != 0;
+    const double sink_w = o[ O_SINK_W ];
+    if ( sink ) lin_kind = LIN_HOST;
     const bool trace = o[ O_TRACE ] != 0;
     const int continuation = int( o[ O_CONTINUATION ] );
     const SI agg_nb_dups = SI( o[ O_AGG_NB_DUPS ] );
@@ -1195,6 +1238,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     card.pb.user_order = false;
     const SI fcap = std::max<SI>( SI( work.nb_facets.max ), 1 );
     card.pb.fcap = fcap;
+    if constexpr ( DIM == 2 ) { card.pb.sink = sink; card.pb.sink_w = sink_w; }
     // MIXED: the double kernel's card, sharing the node records ( the majorants write them for both: they are float records
     // whatever the kernel ) and the passes' lists; only the seeds are packed per kernel
     CardD cardd;
@@ -1208,6 +1252,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         cardd.pb.user_order = false;
         cardd.pb.fcap = fcap;
         cardd.pb.nodes = card.pb.nodes;
+        if constexpr ( DIM == 2 ) { cardd.pb.sink = sink; cardd.pb.sink_w = sink_w; }
     }
     /// the density at the width `s` for the cards of the descent ( a constant: nothing to do )
     double s_current = 0;
@@ -1233,6 +1278,8 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     for ( Slot<TR> &s : slots ) {
         s.fi = coo_i; s.fj = coo_j; s.fc = coo_c;
         if ( ! ( s.a = vec( n ) ) || ! ( s.counters = static_cast<Counters *>( take( allocator, SI( sizeof( Counters ) ) ) ) ) )
+            return;
+        if ( sink && ! ( s.sph = vec( n ) ) )
             return;
         if constexpr ( DIM == 2 )                        // ( the cuts of each cell, for the step `limits`: 2D only )
             if ( ! ( s.edges = static_cast<TR *>( take( allocator, SI( sizeof( TR ) ) * EDGE_CAP * n ) ) ) ||
@@ -1294,7 +1341,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             hl.mg_rebuild = int( o[ O_MG_REBUILD ] );
             hl.mg_stop = int( o[ O_MG_STOP ] );
             hl.mg_nu = int( o[ O_MG_NU ] );
-            host.prepare( int( o[ O_HOST_METHOD ] ), n, hl );
+            host.prepare( int( o[ O_HOST_METHOD ] ), sink ? n + 1 : n, hl );
         } else if ( lin_float ? ! linf.prepare( allocator, n, nnz_cap, lo, &lws, coo, coo_bytes )
                               : ! lin.prepare( allocator, n, nnz_cap, lo, &lws, coo, coo_bytes ) )
             return;
@@ -1426,7 +1473,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             c.pb.res = StridedOut<TF,1>{ reinterpret_cast<char *>( s.a ), { SI( sizeof( double ) ) } };
             c.pb.fi = s.fi; c.pb.fj = s.fj; c.pb.fc = s.fc;
             c.counters = s.counters; c.pb.counters = s.counters;
-            if constexpr ( DIM == 2 ) { c.pb.edges = s.edges; c.pb.nb_edges = s.nb_edges; }
+            if constexpr ( DIM == 2 ) { c.pb.edges = s.edges; c.pb.nb_edges = s.nb_edges; c.pb.sphere = s.sph; }
             tm_diag.start( queue );
             c.run( queue, errors );
             tm_diag.stop( queue );
@@ -1504,17 +1551,69 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
 
     // ---- THE STAGES OF THE WIDTH CONTINUATION ( `Solve.h`, `Continuation.h` ): `s0, s0 / ratio, ... >= s_min`, then `0`
     const double s0 = o[ O_CONV_S0 ] > 0 ? o[ O_CONV_S0 ] : 0.5 * std::sqrt( box_diam2 );
-    auto the_steps = [&]() { return sp::continuation_steps( s0, o[ O_CONV_RATIO ], o[ O_CONV_MIN ] > 0 ? o[ O_CONV_MIN ] : dh.min_scale( queue ) ); };
-    std::vector<double> scales = continuation == CONT_ALWAYS && dh.possible ? the_steps() : std::vector<double>{ 0.0 };
+    double s_min_ = -1;
+    auto s_min = [&]() { if ( s_min_ < 0 ) s_min_ = o[ O_CONV_MIN ] > 0 ? o[ O_CONV_MIN ] : dh.min_scale( queue ); return s_min_; };
+    auto the_steps = [&]() { return sp::continuation_steps( s0, o[ O_CONV_RATIO ], s_min() ); };
+    std::vector<double> scales = ! sink && continuation == CONT_ALWAYS && dh.possible ? the_steps() : std::vector<double>{ 0.0 };
     set_stage( scales[ 0 ] );
 
-    diagram( w, *cur );
-    if ( ! stop_all && given && cur->rep.d.min_a < 1e-3 * nu_min0 ) {   // a warm start that empties a cell: the Voronoi, if better
+    if ( sink && ! given ) {
+        // THE START BY BALLS ( `sdotplan/Solve.h` ): the density of the box, the balls drawn towards equal radii while a cell holds less
+        // than a tenth of its target, then all grown until each meets the density
+        const double rho_box = 1.0 / std::max( box_volume, 1e-300 );     // ( the density is normalized )
+        const double scale = 1.0 / ( 2 * M_PI * rho_box );
+        const double mean = snu.s * scale / double( std::max<SI>( n, 1 ) );
+        auto worst = [&]( double t, double shift ) {
+            launch_kernel( queue, &ball_weights, blocks_for( n ), BLOCK, 0, n, ( const double * ) nu, scale, mean, t, shift, sink_w, w );
+            diagram( w, *cur );
+            reduce( queue, n, MinRatioOf{ cur->a, nu }, red_min.partials, red_min.out );
+            Min1 m;
+            read_back( queue, &m, ( const Min1 * ) red_min.out, 1 );
+            return m.m;
+        };
+        double t = 1, best_t = 1, best = -1, r = 0;
+        for ( int k = 0; ! stop_all; ++k, t *= 0.5 ) {
+            if ( k == 6 ) t = 0;
+            r = worst( t, 0 );
+            if ( r > best ) { best = r; best_t = t; }
+            if ( r >= 0.1 || t == 0 ) break;
+        }
+        if ( ! stop_all && best_t != t ) r = worst( best_t, 0 );
+        for ( double shift = mean; ! stop_all && ! ( r > 0 ) && shift < 1e300; shift *= 4 )
+            r = worst( best_t, shift );
+        start = sp::START_BALLS;
+    } else
+        diagram( w, *cur );
+    if ( ! stop_all && ! sink && given && ! tree.on && cur->rep.d.min_a < 1e-3 * nu_min0 ) {   // a warm start that empties a cell: its repair ( `sdotplan/WarmRepair.h` )
+        double *st = nnz_cap >= 4 * n ? lval : nullptr, *moved = ldia;  // ( the laplacian's room, free until the first assembly )
+        if ( st ) {
+            const double l2 = std::pow( box_volume / double( std::max<SI>( n, 1 ) ), 2.0 / DIM );
+            launch_kernel( queue, &warm_repair_init_kernel, blocks_for( n ), BLOCK, 0, n, st, l2 );
+            if ( agg_nb_dups > 0 )
+                launch_kernel( queue, &warm_repair_leave_out, blocks_for( agg_nb_dups ), BLOCK, 0, agg_nb_dups, ( const SI * ) dup_dev, n, st );
+            cuda_check( cudaMemcpyAsync( w2, w, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the weights" );
+            const double *a_now = cur->a;
+            bool measured = false;
+            for ( int round = 0; round < sp::WarmRepair::MAX_ROUNDS && ! stop_all; ++round ) {
+                launch_kernel( queue, &warm_repair_round, blocks_for( n ), BLOCK, 0, n, a_now, ( const double * ) nu, w2, st, l2, moved );
+                reduce( queue, n, SumOf{ moved }, red1.partials, red1.out );
+                Sum1 m;
+                read_back( queue, &m, ( const Sum1 * ) red1.out, 1 );
+                if ( m.s == 0 || ( round == 0 && ! sp::WarmRepair::worth( m.s, n ) ) )
+                    break;
+                diagram( w2, *tri );
+                a_now = tri->a;
+                measured = true;
+            }
+            if ( ! stop_all && measured && tri->rep.d.min_a > cur->rep.d.min_a ) { std::swap( cur, tri ); std::swap( w, w2 ); }
+        }
+    }
+    if ( ! stop_all && ! sink && given && cur->rep.d.min_a < 1e-3 * nu_min0 ) {   // a warm start still empty somewhere: the Voronoi, if better
         launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, w2, 0.0, n );
         diagram( w2, *tri );
         if ( tri->rep.d.min_a > cur->rep.d.min_a ) { std::swap( cur, tri ); std::swap( w, w2 ); start = sp::START_VORONOI; }
     }
-    if ( ! stop_all && cur->rep.d.min_a <= 0 ) {         // seeds outside the domain: the similarity
+    if ( ! stop_all && ! sink && cur->rep.d.min_a <= 0 ) {   // seeds outside the domain: the similarity
         reduce( queue, n, ExtentOf<DIM,TF>{ pos }, red_ext.partials, red_ext.out );
         ExtentN<DIM> ext;
         read_back( queue, &ext, ( const ExtentN<DIM> * ) red_ext.out, 1 );
@@ -1532,18 +1631,58 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         if ( tri->rep.d.min_a > cur->rep.d.min_a ) { std::swap( cur, tri ); std::swap( w, w2 ); start = sp::START_SIMILARITY; }
     }
     const double min_start_mass = cur->rep.d.min_a;
-    // AUTO: the density is missing where cells are -> the continuation, from the same start
-    if ( ! stop_all && continuation == CONT_AUTO && dh.possible && scales.size() == 1 && min_start_mass < o[ O_CONV_THRESHOLD ] * nu_min0 ) {
-        scales = the_steps();
-        set_stage( scales[ 0 ] );
-        diagram( w, *cur );
-    }
-    if ( tree.on )                                       // ( the gauge moves the roots' outer weights only )
+    // AUTO: the density is missing where cells are -> the continuation, from the same start ( `Solve.h` ). It starts at the
+    // NARROWEST width where every cell of the start keeps `admissible` ( a bisection among `s_min 4^k` ), and goes down
+    // ADAPTIVELY ( `run_adaptive` below ); and when the start passes but the plain Newton fails on it, from the same start after it
+    bool adaptive = false;
+    const double admissible = o[ O_CONV_THRESHOLD ] * nu_min0;
+    const bool can_continue = ! sink && continuation == CONT_AUTO && dh.possible && scales.size() == 1;
+    // ( the start, or the solved weights of a width being tried: taken only where a continuation can run )
+    double *w_keep = nullptr;
+    if ( can_continue && ! stop_all && ! ( w_keep = vec( n ) ) )
+        stop_all = failed = true;                        // ( the pool is exhausted )
+    /// the density at the width `s`, and the diagram of `wt` on it into `sl`: its smallest mass
+    auto mass_at = [&]( double s, const double *wt, Slot<TR> &sl ) {
+        set_stage( s );
+        diagram( wt, sl );
+        return sl.rep.d.min_a;
+    };
+    auto enter_continuation = [&]() {
+        adaptive = true;
+        std::vector<double> ladder = sp::continuation_steps( s0, 4.0, s_min() );   // ( decreasing, 0 last )
+        ladder.pop_back();
+        if ( ladder.empty() ) ladder.push_back( s0 );
+        std::reverse( ladder.begin(), ladder.end() );                             // ( increasing: s_min ... s0 )
+        // ( a warm start can empty a cell GEOMETRICALLY: measured on the widest width, the Voronoi instead if it does better
+        //   there. `cur` holds the diagram of `w` at `ladder[ hi ]` once `have_hi` )
+        size_t lo = 0, hi = ladder.size() - 1;
+        bool have_hi = false;
+        if ( given && mass_at( ladder[ hi ], w, *cur ) < admissible ) {
+            have_hi = true;
+            launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, w2, 0.0, n );
+            if ( mass_at( ladder[ hi ], w2, *tri ) > cur->rep.d.min_a ) { std::swap( cur, tri ); std::swap( w, w2 ); start = sp::START_VORONOI; }
+        }
+        while ( lo < hi && ! stop_all ) {                // ( the smallest index whose width is admissible )
+            const size_t mid = ( lo + hi ) / 2;
+            if ( mass_at( ladder[ mid ], w, *tri ) >= admissible ) { hi = mid; std::swap( cur, tri ); have_hi = true; }
+            else lo = mid + 1;
+        }
+        if ( ! have_hi ) mass_at( ladder[ hi ], w, *cur );
+        else if ( s_current != ladder[ hi ] ) set_stage( ladder[ hi ] );
+        scales.assign( { ladder[ hi ] } );
+    };
+    if ( ! stop_all && can_continue && min_start_mass < admissible )
+        enter_continuation();
+    if ( sink )                                          // ( the gauge is the sink's weight: the seeds' are absolute )
+        r0 = -1;
+    else if ( tree.on )                                  // ( the gauge moves the roots' outer weights only )
         tree.gauge( queue, w, r0 );
     else {
         launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) w, r0, gauge );
         launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, w, ( const double * ) gauge, 1.0, n );
     }
+    if ( can_continue && ! adaptive )                    // ( the start, for a continuation after a failed plain Newton )
+        cuda_check( cudaMemcpyAsync( w_keep, w, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the start" );
 
     /// the scale of a facet's coefficient ( `rho |facet| / 2 delta` ): in 2D `l ~ delta`, the density, or the mean density of
     /// the box; in 3D `|facet| ~ delta^2`, times the spacing of the seeds `( |box| / n )^( 1 / 3 )`
@@ -1761,26 +1900,28 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     SI nb_cell_lim = 0;
     double residual0 = 0, eps0 = 0, residual_max = cur->rep.d.max_abs, domain_mass = 0;
     if ( stop_all ) status = failed ? sp::S_FAILURE : sp::S_CAPACITY;
-    for ( size_t stage = 0; stage < scales.size() && ! stop_all; ++stage ) {
-        if ( stage > 0 ) {                               // the next density: the measures of the start redone
-            set_stage( scales[ stage ] );
-            diagram( w, *cur );
-            if ( stop_all ) { status = failed ? sp::S_FAILURE : sp::S_CAPACITY; break; }
-        }
+    // one stage: Newton at `s_current`, from `w`, whose diagram at `s_current` is `cur`; `nb_planned` stages in all ( 0: the
+    // adaptive descent ). True if it converged ( or stagnated )
+    int nb_stages = 0;
+    auto run_stage = [&]( int nb_planned ) -> bool {
+        const int stage = nb_stages++;                   // ( a stage tried and abandoned counts as an accepted one )
         // the target at the scale of what the domain holds of THIS density
         domain_mass = cur->rep.d.sum_a;
         launch_kernel( queue, &gather_ranks<TF,TI>, blocks_for( n ), BLOCK, 0, n, strided( nu_in ), ids, nu );
         double nu_min = nu_min0;
-        if ( domain_mass > 0 && snu.s > 0 && domain_mass != snu.s ) {
+        if ( ! sink && domain_mass > 0 && snu.s > 0 && domain_mass != snu.s ) {
             launch_kernel( queue, &scale_values, blocks_for( n ), BLOCK, 0, n, nu, domain_mass / snu.s );
             nu_min *= domain_mass / snu.s;
         }
         duplicate_targets_now();
         tau_min = agg.tau( nu_min );
-        if ( trace && scales.size() > 1 )
-            std::printf( "  stage %d / %d : s = %.4e, domain mass %.6f, smallest mass %.3e\n", int( stage + 1 ), int( scales.size() ), s_current,
+        if ( trace && nb_planned > 1 )
+            std::printf( "  stage %d / %d : s = %.4e, domain mass %.6f, smallest mass %.3e\n", stage + 1, nb_planned, s_current,
                          domain_mass, cur->rep.d.min_a );
-        res_cur = residual;
+        else if ( trace && nb_planned == 0 )
+            std::printf( "  stage %d ( adaptive ) : s = %.4e, domain mass %.6f, smallest mass %.3e\n", stage + 1, s_current,
+                         domain_mass, cur->rep.d.min_a );
+        res_cur = sink ? RES_LIN : residual;
         eps = 0;
         report( *cur );
 
@@ -1797,7 +1938,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             // which every cell then carried as a residual the double steps could not remove ( a uniform 3e-11 relative floor under
             // a tight tolerance )
             const double dm = cur->rep.d.sum_a;
-            if ( dm > 0 && domain_mass > 0 && dm != domain_mass ) {
+            if ( ! sink && dm > 0 && domain_mass > 0 && dm != domain_mass ) {
                 launch_kernel( queue, &scale_values, blocks_for( n ), BLOCK, 0, n, nu, dm / domain_mass );
                 nu_min *= dm / domain_mass;
                 domain_mass = dm;
@@ -1909,7 +2050,8 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             launch_kernel( queue, &rhs_kernel, blocks_for( n ), BLOCK, 0, n, ( const double * ) cur->a, tg, power, res_cur,
                            ( const Sum2 * ) red2.out, b );
             reduce( queue, n, SumOf{ b }, red1.partials, red1.out );
-            launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, b, reinterpret_cast<const double *>( red1.out ), 1.0 / double( n ), n );
+            if ( ! sink )                                // ( a sink: `L + diag( s )` is regular, `b` is no projection )
+                launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, b, reinterpret_cast<const double *>( red1.out ), 1.0 / double( n ), n );
             if ( rows_ok )                               // ( `b` at the members, for the correction after the solve )
                 launch_kernel( queue, &gather_at, blocks_for( SI( rows_dir.all.size() ) ), BLOCK, 0, SI( rows_dir.all.size() ), ( const SI * ) rs_mem,
                                ( const double * ) b, rs_nu );
@@ -1926,6 +2068,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             const double tl0 = wall_now();
             auto lin_solve = [&]( const double *rhs, double *x ) {
                 double *r = const_cast<double *>( rhs );
+                if ( sink ) return host.solve_with_sink( queue, L, cur->sph, r, x );
                 return lin_kind == LIN_HOST ? host.solve( queue, L, r, x )
                      : lin_float ? linf.solve( queue, allocator, L, r, x ) : lin.solve( queue, allocator, L, r, x );
             };
@@ -1987,7 +2130,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                 for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) dh[ i ] -= g;
                 CardTree<TR,DIM>::up( queue, d, dh );
                 if ( ! solved ) { st_status = sp::S_LINEAR_FAILURE; break; }
-            } else {
+            } else if ( ! sink ) {
                 launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) d, r0, gauge );
                 launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, d, ( const double * ) gauge, 1.0, n );
             }
@@ -2105,9 +2248,85 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
             residual_max = cur->rep.d.max_abs;
         status = st_status;
         nb_steps_before = nb_steps > 0 ? int( rows[ SI( nb_steps - 1 ) * sp::NB_HIST + sp::H_STEP ] ) + 1 : 0;
-        if ( st_status == sp::S_LINEAR_FAILURE || stop_all )
-            break;
-    }
+        return st_status == sp::S_CONVERGED || st_status == sp::S_STAGNATION;
+    };
+
+    // ADAPTIVE ( `Solve.h::run_adaptive` ): after each solved width `s`, the density itself ( `0` ) if the solved weights are
+    // admissible for it, otherwise `s / r`, `r` taken from the last width that worked and squared after two successes in a row
+    // ( at most 16 ), its square root after a failure ( at least `conv_ratio` ), and never under `s_min`. A width is tried only
+    // if the solved weights leave no cell under the threshold there ( at `r = conv_ratio`, the step of the fixed ladder: no
+    // cell empty ), and abandoned ( back to the solved weights, `w_keep` ) if Newton does not converge on it
+    auto run_adaptive = [&]() {
+        if ( ! run_stage( 0 ) || stop_all )
+            return;
+        const double ratio = o[ O_CONV_RATIO ];
+        double r = 16;
+        int nb_ok = 0;
+        auto try_width = [&]( double s, bool forced ) -> bool {
+            const double s_prev = s_current;
+            const double m = mass_at( s, w, *tri );
+            if ( stop_all ) return false;
+            if ( forced ? ! ( m > 0 ) : m < admissible ) {
+                if ( trace ) std::printf( "  ( s = %.4e: a cell under the threshold, %.3e )\n", s, m );
+                s_current = s_prev;                      // ( the density stays at `s`: the next try sets its own, a stop `s_current` )
+                return false;
+            }
+            std::swap( cur, tri );
+            cuda_check( cudaMemcpyAsync( w_keep, w, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the weights" );
+            if ( run_stage( 0 ) ) return true;
+            if ( stop_all ) return false;
+            if ( trace ) std::printf( "  ( s = %.4e: abandoned )\n", s );
+            cuda_check( cudaMemcpyAsync( w, w_keep, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the weights" );
+            mass_at( s_prev, w, *cur );                  // ( abandoned: the solved weights and their measures again )
+            return false;
+        };
+        while ( s_current > 0 && ! stop_all ) {
+            // ( from `s_min`, the density itself is tried as long as no cell is empty: the last stage of the fixed ladder )
+            if ( try_width( 0, s_current <= s_min() * ( 1 + 1e-12 ) ) || stop_all )
+                break;
+            bool moved = false;
+            while ( ! moved && ! stop_all ) {
+                const double s = std::max( s_current / r, s_min() );
+                if ( s < s_current * ( 1 - 1e-12 ) && try_width( s, r <= ratio * ( 1 + 1e-12 ) ) ) {
+                    moved = true;
+                    if ( ++nb_ok >= 2 ) { r = std::min( r * r, 16.0 ); nb_ok = 0; }
+                    break;
+                }
+                nb_ok = 0;
+                if ( r <= ratio * ( 1 + 1e-12 ) ) break;
+                r = std::max( std::sqrt( r ), ratio );
+            }
+            if ( stop_all ) break;
+            if ( ! moved ) {                             // ( no narrower width works: the solve stops at `s_current`, not on the density )
+                set_stage( s_current );
+                status = sp::S_FAILURE;
+                break;
+            }
+        }
+    };
+
+    if ( stop_all ) {
+    } else if ( ! adaptive ) {                           // the given widths, one after the other
+        bool ok = true;
+        for ( size_t step = 0; step < scales.size(); ++step ) {
+            if ( step > 0 ) {                            // the next density: the measures of the start redone
+                mass_at( scales[ step ], w, *cur );
+                if ( stop_all ) { status = failed ? sp::S_FAILURE : sp::S_CAPACITY; break; }
+            }
+            ok = run_stage( int( scales.size() ) );
+            if ( status == sp::S_LINEAR_FAILURE || stop_all )
+                break;
+        }
+        if ( ! ok && can_continue && ! stop_all ) {      // AUTO, the plain Newton failed: the continuation, from the same start
+            if ( trace ) std::printf( "  the plain Newton did not converge: width continuation from the start\n" );
+            cuda_check( cudaMemcpyAsync( w, w_keep, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the start" );
+            enter_continuation();
+            if ( ! stop_all ) run_adaptive();
+        }
+    } else
+        run_adaptive();
+    if ( stop_all && status != sp::S_FAILURE && status != sp::S_CAPACITY )
+        status = failed ? sp::S_FAILURE : sp::S_CAPACITY;
 
     // ---- THE FULL PROBLEM'S RESIDUAL, and the status when only the aggregated problem passed the test
     double full = residual_max;
@@ -2191,6 +2410,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         mom.pb.nodes = card.pb.nodes;
         if constexpr ( DIM == 2 ) mom.pb.w = cm.pb.w;     // ( 3D: the seeds, borrowed )
         mom.pb.w64 = Strided<TF,1>{ reinterpret_cast<const char *>( w_diag ), { SI( sizeof( double ) ) } };
+        if constexpr ( DIM == 2 ) { mom.pb.sink = sink; mom.pb.sink_w = sink_w; mom.pb.sphere = nullptr; }
         tree.set_on( mom );
         mom.pb.user_order = true;
         mom.pb.res = StridedOut<TF,1>{ reinterpret_cast<char *>( mres ), { SI( sizeof( double ) ) } };
@@ -2240,7 +2460,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
     st[ sp::LIN_NB_ITER ] = ls.nb_iter;
     st[ sp::LIN_WORST ] = ls.worst;
     st[ sp::START ] = start;
-    st[ sp::NB_CONTINUATION_STEPS ] = double( scales.size() );
+    st[ sp::NB_CONTINUATION_STEPS ] = double( std::max( nb_stages, 1 ) );   // ( the stages actually run )
     st[ sp::MIN_START_MASS ] = min_start_mass;
     st[ sp::IT_SWITCH ] = it_switch;
     st[ sp::IT_DOUBLE ] = it_double;

@@ -12,6 +12,7 @@
 #include "ConstantDensity.h"
 #include "CstUdPiece.h"
 #include "Image.h"
+#include "PolynomialPixel.h"
 #include <cmath>
 
 #define UTP SDOT_TEMPLATE_DECL_FOR_Image
@@ -28,15 +29,15 @@ UTP HD auto DTP::with_defaults( auto &&cont ) const {
     //
     // The brace-init is POSITIONAL, so its order must match `SDOT_ATTRIBUTES_OF_Image` (the field
     // declaration order across the MRO, axes skipped): target_mass, nb_dims, shape, values, origin,
-    // frame, knots, current_mass, nb_cells_cum, cell_cum_mass. `::sdot::Image` (qualified) names the
+    // frame, knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs. `::sdot::Image` (qualified) names the
     // TEMPLATE so CTAD re-deduces; bare `Image` would mean the current instantiation and defeat the
     // substitution.
     if constexpr ( ! DECAYED_TYPE_OF( origin )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, Vector<TF,ct_dim>::zeros(), frame, knots, current_mass, nb_cells_cum, cell_cum_mass }.with_defaults( FORWARD( cont ) );
+        return ::sdot::Image{ target_mass, nb_dims, shape, values, Vector<TF,ct_dim>::zeros(), frame, knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
     else if constexpr ( ! DECAYED_TYPE_OF( frame )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, Matrix<TF,ct_dim>::identity(), knots, current_mass, nb_cells_cum, cell_cum_mass }.with_defaults( FORWARD( cont ) );
+        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, Matrix<TF,ct_dim>::identity(), knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
     else if constexpr ( ! DECAYED_TYPE_OF( knots )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, frame, IotaTensor<TF>{}, current_mass, nb_cells_cum, cell_cum_mass }.with_defaults( FORWARD( cont ) );
+        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, frame, IotaTensor<TF>{}, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
     else
         return cont( *this );
 }
@@ -52,26 +53,42 @@ UTP HD typename DTP::TF DTP::measure() const {
         const auto F = Matrix<TF,d>::with_func( [&]( auto r, auto c ) { return TF( img.frame( r, c ) ); } );
         const TF fdet = std::abs( F.determinant() );
 
-        // sum over the cells (extent per axis = number of cells along it = `values.shape()`).
-        // Each cell contributes value * |det(frame)| * Prod_axis ( knots(axis, i+1) - knots(axis, i) ).
-        // `values` is an ordinary dense rank-d view (the `img_pos` AxisList unrolls into d named
-        // dimensions), so it and `knots` are both indexed positionally.
-        auto shape = img.values.shape();
-        CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
-        TF sum = 0;
-        for ( PI flat = 0; flat < cells.size(); ++flat ) {
-            // `cells[ flat ]` now returns a `Coords` ( a NAMED multi-index ) and no longer the
-            // bare tuple: unpacking is requested from its `values`.
-            const TF cell = cells[ flat ].values.apply_values( [&]( auto ...i ) {
-                // running axis counter over the index pack (axes 0..d-1, in order)
-                PI axis = 0;
-                TF spacing = 1;
-                ( ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), ++axis ), ... );
-                return TF( img.values( i... ) ) * spacing;
-            } );
-            sum += cell * fdet;
+        if constexpr ( ImgT::is_polynomial ) {
+            // the mass of a pixel is its volume times the mean of its Bernstein coefficients ( `int B_{ i, P } = 1 / ( P + 1 )` )
+            constexpr PI nc = DECAYED_TYPE_OF( img.nb_coeffs )::value;
+            auto shape = img.coeffs.shape();
+            CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
+            TF sum = 0;
+            for ( PI flat = 0; flat < cells.size(); ++flat )
+                sum += cells[ flat ].values.apply_values( [&]( auto ...i ) {
+                    PI axis = 0;
+                    TF spacing = 1;
+                    ( ( axis < PI( d ) ? ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), 0 ) : 0, ++axis ), ... );
+                    return TF( img.coeffs( i... ) ) * spacing;
+                } );
+            return sum * fdet / TF( nc );
+        } else {
+            // sum over the cells (extent per axis = number of cells along it = `values.shape()`).
+            // Each cell contributes value * |det(frame)| * Prod_axis ( knots(axis, i+1) - knots(axis, i) ).
+            // `values` is an ordinary dense rank-d view (the `img_pos` AxisList unrolls into d named
+            // dimensions), so it and `knots` are both indexed positionally.
+            auto shape = img.values.shape();
+            CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
+            TF sum = 0;
+            for ( PI flat = 0; flat < cells.size(); ++flat ) {
+                // `cells[ flat ]` now returns a `Coords` ( a NAMED multi-index ) and no longer the
+                // bare tuple: unpacking is requested from its `values`.
+                const TF cell = cells[ flat ].values.apply_values( [&]( auto ...i ) {
+                    // running axis counter over the index pack (axes 0..d-1, in order)
+                    PI axis = 0;
+                    TF spacing = 1;
+                    ( ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), ++axis ), ... );
+                    return TF( img.values( i... ) ) * spacing;
+                } );
+                sum += cell * fdet;
+            }
+            return sum;
         }
-        return sum;
     } );
 }
 
@@ -149,7 +166,7 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func, cons
     Vector<TF,d> t_lo, t_hi;                // the extent of the cell along each axis, in grid coordinates
     const bool bounded = cell.bounded();
     for ( PI a = 0; a < d; ++a ) {
-        const SI nb = SI( values.shape( a ) );
+        const SI nb = nb_pixels( int( a ) );
         if ( nb <= 0 )
             return;
         if ( ! bounded ) {
@@ -237,16 +254,30 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func, cons
 
         if ( alive ) {
             const auto idx = detail::image_index_tuple( k, tuple(), Ct<int,0>() );
-            const TF value = TF( values( idx ) );
-            auto density = ConstantDensity{ value, [&]( auto &&grad_dist, TF g ) {
-                // the gradient sink of the piece: `d mass / d values( k )` is the volume of the
-                // piece, and `k` is what this closure knows and the caller does not.
-                // Atomic: several work-items integrate cells that touch the same tile.
-                if constexpr ( DECAYED_TYPE_OF( grad_dist.values )::is_valid )
-                    atomic_add( grad_dist.values( idx ).ref(), g );
-            } };
-            if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, density ); } );
-            else           func( cell, density );
+            if constexpr ( is_polynomial ) {
+                // a polynomial on the pixel, in its own coordinates `( n_a . x - lo_a ) / h_a` ( `PolynomialPixel.h` )
+                PolynomialPixel<TF,d,degree,DECAYED_TYPE_OF( idx )> density{ .idx = idx };
+                for ( int j = 0; j < density.nb_coeffs; ++j )
+                    density.c[ j ] = TF( coeffs( idx.with_appended_value( SI( j ) ) ) );
+                for ( PI a = 0; a < d; ++a ) {
+                    density.nrm[ a ] = nrm[ a ];
+                    density.off[ a ] = TF( knots( a, k[ a ] ) ) + shift[ a ];
+                    density.inv_h[ a ] = TF( 1 ) / ( TF( knots( a, k[ a ] + 1 ) ) - TF( knots( a, k[ a ] ) ) );
+                }
+                if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, density ); } );
+                else           func( cell, density );
+            } else {
+                const TF value = TF( values( idx ) );
+                auto density = ConstantDensity{ value, [&]( auto &&grad_dist, TF g ) {
+                    // the gradient sink of the piece: `d mass / d values( k )` is the volume of the
+                    // piece, and `k` is what this closure knows and the caller does not.
+                    // Atomic: several work-items integrate cells that touch the same tile.
+                    if constexpr ( DECAYED_TYPE_OF( grad_dist.values )::is_valid )
+                        atomic_add( grad_dist.values( idx ).ref(), g );
+                } };
+                if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, density ); } );
+                else           func( cell, density );
+            }
         }
 
         PI a = 0;
@@ -312,6 +343,29 @@ UTP HD void DTP::measure_bwd( auto &&grad_values, auto &&grad_mass ) const {
                     grad_values( i... ) = gm * fdet * spacing;
                 } );
             }
+        } );
+    }
+}
+
+UTP HD void DTP::measure_coeffs_bwd( auto &&grad_coeffs, auto &&grad_mass ) const {
+    // `mass = |det F| sum_pixels spacing mean( coeffs )`: linear, `d mass / d coeffs( k, j ) = |det F| spacing( k ) / nb_coeffs`
+    if constexpr ( DECAYED_TYPE_OF( grad_coeffs )::is_valid && is_polynomial ) {
+        with_defaults( [&]( auto &&img ) {
+            using ImgT = DECAYED_TYPE_OF( img );
+            using TF = typename ImgT::TF;
+            constexpr int d = ImgT::ct_dim;
+            constexpr PI nc = DECAYED_TYPE_OF( img.nb_coeffs )::value;
+            const auto F = Matrix<TF,d>::with_func( [&]( auto r, auto c ) { return TF( img.frame( r, c ) ); } );
+            const TF gm = TF( grad_mass ) * std::abs( F.determinant() ) / TF( nc );
+            auto shape = img.coeffs.shape();
+            CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
+            for ( PI flat = 0; flat < cells.size(); ++flat )
+                cells[ flat ].values.apply_values( [&]( auto ...i ) {
+                    PI axis = 0;
+                    TF spacing = 1;
+                    ( ( axis < PI( d ) ? ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), 0 ) : 0, ++axis ), ... );
+                    grad_coeffs( i... ) = gm * spacing;
+                } );
         } );
     }
 }

@@ -56,9 +56,11 @@ from .distributions.Box import Box as Box
 from .distributions.Mesh import Mesh as Mesh
 from .distributions.CodimMesh import CodimMesh as CodimMesh
 from .distributions.Polytope import Polytope as Polytope
-from .distributions.Polytope import Polygon as Polygon
-from .distributions.Polytope import Polyhedron as Polyhedron
+from .distributions.Polytope import ConvexHull as ConvexHull
 from .distributions.SumOfGaussians import SumOfGaussians as SumOfGaussians
+from .distributions.SplineGrid import SplineGrid as SplineGrid
+
+from .radial_funcs import RadialExp as RadialExp
 
 from .quantization import quantization as quantization
 

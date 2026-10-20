@@ -4,6 +4,8 @@
 // drops in, plus the axes it names -- written to the build include tree by `CallArg_Aggregate`.
 #include <sdot/generated/aggregates/Image.h>
 #include <loom/support/common_macros.h>
+#include <type_traits>
+#include "PolynomialPixel.h"
 
 namespace sdot {
 
@@ -12,7 +14,31 @@ struct Image {
     SDOT_ATTRIBUTES_OF_Image
 
     SCInt  ct_dim       = DECAYED_TYPE_OF( nb_dims )::value;
-    using  TF           = DECAYED_TYPE_OF( values )::TF;
+
+    /// a POLYNOMIAL image ( `Image( degree = P )`, `P > 0` ): `coeffs [ pixels..., ( P + 1 )^d ]`, Bernstein, `values` unset
+    /// ( `PolynomialPixel.h` ). Otherwise `values [ pixels... ]`, one constant per pixel
+    static constexpr bool is_polynomial = DECAYED_TYPE_OF( coeffs )::is_valid;
+    using  TF           = typename std::conditional_t<is_polynomial, DECAYED_TYPE_OF( coeffs ), DECAYED_TYPE_OF( values )>::TF;
+    /// the degree along each axis: `( P + 1 )^d = nb_coeffs`
+    static constexpr int degree = [] {
+        if constexpr ( is_polynomial ) {
+            constexpr int n = DECAYED_TYPE_OF( nb_coeffs )::value;
+            for ( int p = 1; ; ++p ) {
+                int r = 1;
+                for ( int a = 0; a < ct_dim; ++a ) r *= p + 1;
+                if ( r == n ) return p;
+                if ( r > n ) return -1;
+            }
+        } else
+            return 0;
+    }();
+    static_assert( degree >= 0, "Image: `nb_coeffs` is not a `( P + 1 )^d`" );
+
+    /// the number of pixels along axis `a`
+    HD SI nb_pixels( int a ) const {
+        if constexpr ( is_polynomial ) return SI( coeffs.shape( a ) );
+        else                           return SI( values.shape( a ) );
+    }
 
     /// this distribution CUTS the cell into pieces ( one per block ): the integrator reserves
     /// a spare cell for it in the scratch ( `PowerDiagram::nb_work_cells` )
@@ -21,7 +47,9 @@ struct Image {
     /// what this density's adjoint derives, for loom's `computed_grads` ( `flags`: the distribution's, under one
     /// output ). The masses are never read by the integration: their derivative is known to be zero.
     static void computed_grads( auto &&flags ) {
-        flags.values = true;   // the value of each pixel ( `for_each_piece`'s `add_value_grad` ) -- its geometry: `affine_computed_grads`
+        // the value of each pixel ( `for_each_piece`'s `add_value_grad` ), or its coefficients -- its geometry: `affine_computed_grads`
+        if constexpr ( requires { flags.values; } ) flags.values = true;
+        if constexpr ( requires { flags.coeffs; } ) flags.coeffs = true;
         if constexpr ( requires { flags.current_mass; } ) flags.current_mass = true;
         if constexpr ( requires { flags.target_mass; } )  flags.target_mass  = true;
     }
@@ -56,7 +84,7 @@ struct Image {
     // methods below be written ONCE against a complete image instead of gating on `is_valid`.
     HD auto   with_defaults( auto &&cont ) const;
 
-    // total measure of the piecewise-constant function: sum over cells of value * cell volume.
+    // total measure: sum over pixels of value * pixel volume ( a polynomial pixel: the mean of its Bernstein coefficients )
     HD TF  measure   () const;
 
     // ---- integrating a CELL against this image --------------------------------------------------
@@ -82,6 +110,7 @@ struct Image {
     // adjoint of `measure` w.r.t. `values`: since mass = Sum_c values(c) * cell_volume(c) is linear
     // in `values`, grad_values(c) = grad_mass * cell_volume(c). `grad_mass` is the scalar cotangent.
     HD void   measure_bwd  ( auto &&grad_values, auto &&grad_mass ) const;
+    HD void   measure_coeffs_bwd( auto &&grad_coeffs, auto &&grad_mass ) const;
 
     // ... and w.r.t. the frame: mass = |det F| * ( the rest ), so grad_frame = grad_mass * mass * F^-T
     HD void   measure_frame_bwd( auto &&grad_frame, auto &&grad_mass ) const;

@@ -14,7 +14,7 @@ $$W_2^2(f, g) = \min_T \int_\Omega \|x - T(x)\|^2 \, g(x) \, dx \quad \text{s.t.
 
 ---
 
-There are variants for the ground metric, notably for periodicity (see [ground metrics](./ground_metrics)).
+There are variants for the ground metric, notably for periodicity (see [ground metrics](./ground-metrics/)).
 
 Non euclidean norms are also planed (see [roadmap](./roadmap))
 

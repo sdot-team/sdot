@@ -106,6 +106,20 @@ if test( "periodic_measures_cylinder_and_few_seeds" ):
     _compare( pos, numpy.array( [ 0.0, 0.05 ] ), img, True, numpy.diag( [ 2.0, 1.0 ] ) )
 
 
+if test( "periodic_measures_polynomial_image" ):
+    # a polynomial on each pixel ( `Image( degree = 2 )`, then a cubic spline with its half pixels at the ends ): the pieces of the
+    # copies are the same polynomials, moved
+    import numpy
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SplineGrid import SplineGrid
+    rng = numpy.random.default_rng( 7 )
+    pos = rng.uniform( -0.5, 1.7, size = ( 15, 2 ) )
+    w = rng.uniform( -0.01, 0.01, size = 15 )
+    for img in ( Image( rng.uniform( 0.3, 1.5, size = ( 4, 3, 9 ) ), degree = 2, frame = [ 1.0, 1.0 ] ),
+                 SplineGrid( rng.uniform( 0.3, 1.5, size = ( 4, 3 ) ), degree = 3, frame = [ 1.0, 1.0 ] ) ):
+        _compare( pos, w, img, True, numpy.eye( 2 ) )
+
+
 if test( "periodic_measures_skewed_lattice_3d" ):
     import numpy
     from loom.testing import need
@@ -272,7 +286,7 @@ if test( "periodicity_descriptions" ):
     import numpy
     from sdot.periodicity import generators_of, wrap
     from sdot.distributions.Image import Image
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
     img = Image( values = numpy.ones( ( 2, 2 ) ), frame = [ 2.0, 1.0 ], origin = [ 1.0, 0.0 ] )
     sup = img.bounding_half_spaces()
 
@@ -291,7 +305,7 @@ if test( "periodicity_descriptions" ):
         assert numpy.allclose( generators_of( [ g ], 2 ), [ numpy.concatenate( [ R, [ [ 0.5 ], [ 1.0 ] ] ], axis = 1 ) ] )
     assert numpy.allclose( translations( generators_of( [ [ 0.5, 1.0 ] ], 2 ) ), [ [ 0.5, 1.0 ] ] )
     # the booleans read an AXIS-ALIGNED box: a hexagon refuses them, and pairs its opposite sides through its domain
-    hexa = Polygon( [ [ numpy.cos( a ), numpy.sin( a ) ] for a in numpy.arange( 6 ) * numpy.pi / 3 ] )
+    hexa = ConvexHull( [ [ numpy.cos( a ), numpy.sin( a ) ] for a in numpy.arange( 6 ) * numpy.pi / 3 ] )
     for bad in ( True, [ True, False ] ):
         try:
             generators_of( bad, 2, hexa.domain )
@@ -490,3 +504,143 @@ if test( "periodic_cells_are_drawn_whole_around_the_given_diracs" ):
     assert len( pd.periodicity_rings( 1 ) ) == 9 and len( pd.periodicity_rings( 2 ) ) == 25
     viz = pd.add_to_viz( Visualizer() )
     assert viz.nb_frames == 1
+
+
+def _square_mesh( k, values ):
+    """the unit square cut into `2 k^2` triangles, P1 `values` per node ( a function of the nodes )"""
+    import itertools
+    import numpy
+    from sdot.distributions.Mesh import Mesh
+    g = numpy.linspace( 0, 1, k + 1 )
+    nodes = numpy.array( list( itertools.product( g, g ) ) )
+    sx = []
+    for i, j in itertools.product( range( k ), range( k ) ):
+        a, b, c, d = i * ( k + 1 ) + j, i * ( k + 1 ) + j + 1, ( i + 1 ) * ( k + 1 ) + j, ( i + 1 ) * ( k + 1 ) + j + 1
+        sx += [ [ a, b, d ], [ a, d, c ] ]
+    return Mesh( nodes, numpy.array( sx ), values( nodes ) )
+
+
+if test( "periodic_measures_gaussians_match_the_copies" ):
+    # the WRAPPED gaussians: the periodic diagram against the copies of the seeds in the plane, integrating the gaussians folded
+    # onto the square and unbounded ( `support_sigmas` wide ) -- the tails cross the sides, and one center is given outside
+    import numpy
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.periodicity import wrap
+    rng = numpy.random.default_rng( 14 )
+    c = numpy.array( [ [ 0.05, 0.5 ], [ 0.9, 0.95 ], [ 0.5, 0.4 ], [ 1.2, -0.1 ] ] )
+    s = numpy.array( [ 0.08, 0.12, 0.2, 0.1 ] )
+    wg = numpy.array( [ 1.0, 2.0, 1.5, 0.7 ] )
+    flip = numpy.diag( [ 1.0, -1.0 ] )
+    for gens, per in ( ( numpy.eye( 2 ), True ), ( [ ( flip, [ 1.0, 1.0 ] ), [ 0.0, 1.0 ] ], [ ( flip, [ 1.0, 1.0 ] ), [ 0.0, 1.0 ] ] ) ):
+        dist = SumOfGaussians( c, s, wg, support_box = ( [ 0, 0 ], [ 1, 1 ] ), support_sigmas = 8 )
+        ref = SumOfGaussians( wrap( c, per, dist ), s, wg, support_sigmas = 12 )
+        pos = rng.uniform( -0.3, 1.3, size = ( 12, 2 ) )
+        w = rng.uniform( -0.005, 0.005, size = 12 )
+        pd = PowerDiagram( pos, w, distribution = dist, periodicity = per, kernel_dtype = "FP64" )
+        folded = numpy.asarray( pd._stored_positions().raw ).reshape( pos.shape )
+        m = numpy.asarray( pd.measures.value ).reshape( -1 )
+        _, f, _ = pd.moments
+        f = numpy.asarray( f.value ).reshape( -1, 2 )
+        rm, rf = _reference( folded, w, ref, gens, 4 )
+        assert numpy.allclose( m, rm, atol = 1e-11 ), numpy.abs( m - rm ).max()
+        rb = numpy.asarray( pd.unfold( rf / rm[ :, None ] ) )
+        assert numpy.allclose( f, rb * rm[ :, None ], atol = 1e-11 ), numpy.abs( f - rb * rm[ :, None ] ).max()
+        assert abs( m.sum() - 1 ) < 1e-11
+
+
+if test( "periodic_measures_mesh_match_the_copies" ):
+    # a mesh of the unit square: the fundamental domain is its box, without the margin of its support
+    import numpy
+    rng = numpy.random.default_rng( 15 )
+    mesh = _square_mesh( 5, lambda x: 0.5 + x[ :, 0 ] + 2 * x[ :, 1 ] ** 2 )
+    pos = rng.uniform( -0.5, 1.5, size = ( 14, 2 ) )
+    w = rng.uniform( -0.01, 0.01, size = 14 )
+    _compare( pos, w, mesh, True, numpy.eye( 2 ) )
+    flip = numpy.diag( [ 1.0, -1.0 ] )
+    klein = [ ( flip, [ 1.0, 1.0 ] ), [ 0.0, 1.0 ] ]
+    _compare( pos, w, mesh, klein, klein, tol = 1e-9, length = 4 )
+
+
+if test( "periodic_gaussians_and_mesh_derive" ):
+    import numpy
+    from loom.testing import check_grad, need
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.distributions.Mesh import Mesh
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.PowerDiagram import PowerDiagram
+    need( "grad" )
+    # the images are copies made by the framework: the derivatives go back to the parameters of the gaussians and to the values
+    # of the mesh, through the diagrams and through the plan ( the implicit function theorem )
+    rng = numpy.random.default_rng( 16 )
+    pos = rng.uniform( -1, 2, size = ( 12, 2 ) )
+    w = rng.uniform( -0.01, 0.01, size = 12 )
+    c, s = numpy.array( [ [ 0.05, 0.5 ], [ 0.9, 0.95 ], [ 0.5, 0.4 ] ] ), numpy.array( [ 0.08, 0.12, 0.2 ] )
+    box = ( [ 0, 0 ], [ 1, 1 ] )
+    check_grad( lambda q, cc, ss, ww: PowerDiagram( q, w, distribution = SumOfGaussians( cc, ss, ww, support_box = box ), periodicity = True ).measures,
+                pos, c, s, numpy.array( [ 1.0, 2.0, 1.5 ] ) )
+    mesh = _square_mesh( 4, lambda x: 1 + x[ :, 0 ] )
+    nodes, sx = numpy.asarray( mesh.nodes ), numpy.asarray( mesh.simplices )
+    check_grad( lambda q, v: PowerDiagram( q, w, distribution = Mesh( nodes, sx, v ), periodicity = True ).measures,
+                pos, rng.uniform( 0.3, 2.0, size = len( nodes ) ) )
+    nu = rng.uniform( 0.5, 1.5, size = 12 )
+    settings = Iterative( tol = 1e-13, max_iter = 200 )
+
+    def solve( q, cc ):
+        return OtProblem( SumOfDiracs( q, weights = nu ), SumOfGaussians( cc, s, support_box = box ), periodicity = True ).solve( settings )
+
+    for output, tol in ( ( "weights", 1e-5 ), ( "cost", 1e-3 ), ( "barycenters", 1e-3 ) ):
+        check_grad( lambda q, cc: getattr( solve( q, cc ), output ), pos, c, seed = 3, eps = 1e-5, rtol = tol, atol = tol * 1e-2 )
+
+
+if test( "periodic_plan_gaussians_and_mesh" ):
+    import numpy
+    from loom.testing import need
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    need( "cpu" )
+    rng = numpy.random.default_rng( 17 )
+    pos = rng.uniform( -1, 2, size = ( 40, 2 ) )
+    mass = rng.uniform( 0.5, 1.5, size = 40 )
+    flip = numpy.diag( [ 1.0, -1.0 ] )
+    targets = ( SumOfGaussians( [ [ 0.05, 0.5 ], [ 0.9, 0.95 ], [ 0.5, 0.4 ] ], [ 0.08, 0.12, 0.2 ], support_box = ( [ 0, 0 ], [ 1, 1 ] ) ),
+                _square_mesh( 6, lambda x: 0.3 + 2 * x[ :, 0 ] * x[ :, 1 ] ) )
+    for tgt in targets:
+        for per in ( True, [ ( flip, [ 1.0, 1.0 ] ), [ 0.0, 1.0 ] ] ):
+            p = OtProblem( SumOfDiracs( pos, mass ), tgt, periodicity = per ).solve( Iterative( tol = 1e-11 ) )
+            assert p.converged, p.stats[ "status" ]
+            assert numpy.allclose( numpy.asarray( p.cell_masses ).reshape( -1 ), mass / mass.sum(), atol = 1e-9 )
+
+
+if test( "periodic_card_solve_of_gaussians_and_meshes" ):
+    # the card's solve of a group of translations, towards targets that repeat themselves ( `Distribution.periodized` ): the card
+    # integrates the copies as any other gaussians or mesh. The barycenters: those of the generic cells at the solved weights
+    import numpy
+    import loom
+    from errand import skip
+    from sdot import plan
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.PowerDiagram import PowerDiagram
+    if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
+        skip( "the card's solve only exists on a CUDA device" )
+    rng = numpy.random.default_rng( 18 )
+    targets = [
+        ( 2, SumOfGaussians( [ [ 0.05, 0.5 ], [ 0.9, 0.95 ], [ 0.5, 0.4 ] ], [ 0.08, 0.12, 0.2 ], support_box = ( [ 0, 0 ], [ 1, 1 ] ) ) ),
+        ( 2, _square_mesh( 6, lambda x: 0.3 + 2 * x[ :, 0 ] * x[ :, 1 ] ) ),
+        ( 3, SumOfGaussians( [ [ 0.05, 0.5, 0.5 ], [ 0.9, 0.95, 0.1 ] ], [ 0.12, 0.2 ], support_box = ( [ 0, 0, 0 ], [ 1, 1, 1 ] ) ) ),
+    ]
+    for d, tgt in targets:
+        n = 300 if d == 2 else 200
+        pos = rng.uniform( -1, 2, size = ( n, d ) )
+        p = plan( SumOfDiracs( pos ), tgt, periodicity = True )
+        assert p.converged, ( d, type( tgt ).__name__, p.stats[ "status" ] )
+        assert numpy.allclose( numpy.asarray( p.cell_masses ).reshape( -1 ), 1 / n, atol = 1e-8 )
+        pd = PowerDiagram( pos, numpy.asarray( p.weights ).reshape( -1 ), distribution = tgt, periodicity = True, kernel_dtype = "FP64" )
+        pd.use_card_cells = False
+        m, f, _ = pd.moments
+        bary = numpy.asarray( f.value ).reshape( n, d ) / numpy.asarray( m.value ).reshape( n, 1 )
+        assert numpy.allclose( numpy.asarray( m.value ).reshape( -1 ), 1 / n, atol = 1e-7 ), ( d, type( tgt ).__name__ )
+        assert numpy.allclose( numpy.asarray( p.barycenters ).reshape( n, d ), bary, atol = 1e-6 ), ( d, type( tgt ).__name__ )

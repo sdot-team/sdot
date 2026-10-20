@@ -432,6 +432,13 @@ struct Problem {
     [[no_unique_address]] D dens;                        ///< ... or a density ( `Density2D.cuh` ), integrated on the edges
     bool              user_order;                        ///< per-cell outputs at the user's index ( else at the rank )
 
+    // ---- A SINK ( partial transport, `integration/InBall.h` ): the cell of `k` integrated inside its ball `|x - p_k|^2 <= w_k - sink_w`
+    // only ( `finish_in_ball`: a constant or a mesh ), and `sphere[ k ]` ( rank ) the sphere's share of `d m_k / d w_k` -- the
+    // coupling of the cell with the sink, beyond its facets
+    bool              sink = false;
+    double            sink_w = 0;
+    double           *sphere = nullptr;
+
     // ---- GROUPS ( `CardGroups.cuh` ): the tree of aggregates, in ranks ( `grp.on()` false: none )
     sdot::gpu::CardGroups<TR,2> grp;
 
@@ -1173,6 +1180,66 @@ __device__ __forceinline__ unsigned long long reserve( unsigned long long *count
     return __shfl_sync( mask, base, leader ) + off;
 }
 
+/// THE END OF A CELL INSIDE ITS BALL ( a sink ): the triangles `( seed, a, b )` of its edges inter the disc, for a constant or the
+/// mesh ( `Density2D.cuh`, `integration/InBall.h` ): the measure, the facets ( their parts inside the disc ), the sphere's coupling
+/// with the sink and the moments. Not the adjoint ( `VJP` ): the diagrams with a sink take the generic path
+template<class Pb,class Cell>
+__device__ __forceinline__ void finish_in_ball( const Pb &pb, typename Pb::TR k, const Cell &cell, const Origin &o, unsigned long long fbase, bool fok ) {
+    namespace ig = sdot::integration;
+    using TR = typename Pb::TR;
+    using TF = std::remove_reference_t<decltype( pb.res( 0 ) )>;
+    using D = typename Pb::D;
+    constexpr unsigned OUT = Pb::OUT;
+    const double r2 = o.w - pb.sink_w, r = r2 > 0 ? sqrt( r2 ) : 0.0;
+    const double rho = pb.density();
+    BallSums acc;
+    ig::DiscMoments<double> R;
+    ig::ArcTrig<double> J;
+    double a2 = 0;
+    unsigned t = 0;
+    for_each_edge<bool( OUT & FACETS )>( pb, o, cell, [&]( double ax, double ay, double bx, double by, TR c, double d2 ) {
+        a2 += ax * by - bx * ay;
+        double line = 0;
+        if ( r2 > 0 ) {
+            if constexpr ( std::is_same_v<D,DensMesh> ) {
+                mesh_triangle_in_ball( pb.dens, o.x, o.y, ax, ay, bx, by, r2, acc );
+                if constexpr ( bool( OUT & FACETS ) ) {
+                    double t0, t1;
+                    if ( ig::clip_segment( ax, ay, bx, by, r2, t0, t1 ) )
+                        line = mesh_line( pb.dens, o.x, o.y, ax + t0 * ( bx - ax ), ay + t0 * ( by - ay ), ax + t1 * ( bx - ax ), ay + t1 * ( by - ay ) );
+                }
+            } else {
+                edge_in_ball( ax, ay, bx, by, r2, R, J );
+                if constexpr ( bool( OUT & FACETS ) )
+                    line = rho * ig::segment_in_disc( ax, ay, bx, by, 0.0, 0.0, r2 );
+            }
+        }
+        if constexpr ( bool( OUT & FACETS ) ) {
+            if ( c >= 0 && pb.writes_facet( k, pb.seed_of( c ) ) && fok ) {
+                const unsigned long long q = fbase + t++;
+                const TR sc = pb.seed_of( c );
+                pb.fi[ q ] = k < sc ? k : sc;
+                pb.fj[ q ] = k < sc ? sc : k;
+                pb.fc[ q ] = d2 > 0 ? line / ( 2 * sqrt( d2 ) ) : 0.0;
+            }
+        }
+    } );
+    if constexpr ( ! std::is_same_v<D,DensMesh> )
+        acc.add( R, J, rho, 0.0, 0.0, r, 1.0 );
+    const double sg = a2 < 0 ? -1.0 : 1.0;
+    const double m = sg * acc.m;
+    if constexpr ( bool( OUT & MEASURES ) )
+        pb.res( pb.user( k ) ) = TF( m );
+    if ( pb.sphere )
+        pb.sphere[ k ] = sg * acc.sph;
+    if constexpr ( bool( OUT & MOMENTS ) ) {
+        const SI u = pb.user( k );
+        pb.bary( u, 0 ) = TF( m > 0 ? o.x + sg * acc.mx / m : o.x );
+        pb.bary( u, 1 ) = TF( m > 0 ? o.y + sg * acc.my / m : o.y );
+        pb.cost( u ) = TF( sg * acc.m2 );
+    }
+}
+
 /// THE END OF A CELL: everything the call wants of it ( `Pb::OUT` ), from its edges
 template<class Pb,class Cell>
 __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, const Cell &cell ) {
@@ -1204,6 +1271,19 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
         else
             cell.for_each_vertex( [&]( int i, auto, auto, TR c ) { pb.edges[ SI( i ) * n + SI( k ) ] = c; } );
         pb.nb_edges[ k ] = ne;
+    }
+
+    if constexpr ( std::is_same_v<typename Pb::D,DensConst> || std::is_same_v<typename Pb::D,DensMesh> ) {
+        if ( pb.sink ) {
+            if ( cell.nb < 3 ) {                         // ( an empty cell: nothing in its ball )
+                if constexpr ( bool( OUT & MEASURES ) ) pb.res( pb.user( k ) ) = TF( 0 );
+                if ( pb.sphere ) pb.sphere[ k ] = 0;
+                if constexpr ( bool( OUT & MOMENTS ) ) { const SI u = pb.user( k ); pb.bary( u, 0 ) = TF( o.x ); pb.bary( u, 1 ) = TF( o.y ); pb.cost( u ) = TF( 0 ); }
+                return;
+            }
+            finish_in_ball( pb, k, cell, o, fbase, fok );
+            return;
+        }
     }
 
     if constexpr ( ! Pb::CONST_DENSITY ) {
@@ -1335,6 +1415,8 @@ __device__ __forceinline__ void finish_failed( const Pb &pb, typename Pb::TR k )
         pb.res( pb.user( k ) ) = TF( 0 );
     if constexpr ( bool( OUT & EDGES ) )
         pb.nb_edges[ k ] = -1;
+    if ( pb.sphere )
+        pb.sphere[ k ] = 0;
     if constexpr ( bool( OUT & VJP ) ) {
         if ( pb.grad_pos.p ) { pb.grad_pos( SI( k ), 0 ) = TF( 0 ); pb.grad_pos( SI( k ), 1 ) = TF( 0 ); }
         if constexpr ( Pb::W ) if ( pb.grad_w.p ) pb.grad_w( SI( k ) ) = TF( 0 );

@@ -35,6 +35,15 @@ The axis is named (`frame_axis`, "time" by default) and plays by itself if it ma
 traverse it (`playable`): the page then has a bar and a play/pause button, and ParaView receives
 a time series.
 
+Several parameters: `frame_axis` is then a tuple of names, and `new_frame` takes one value per
+axis ( a tuple, or a dict that only gives the axes that change ). The frames form a grid -- a
+missing combination shows the nearest frame --, and each axis gets its own row in the bar:
+
+    v = Visualizer( frame_axis = ( "mass", "iteration" ), playable = ( False, True ) )
+    for m in masses:
+        for it in iterations:
+            v.new_frame( { "mass": m, "iteration": it } )
+
 An object that knows how to draw itself exposes `add_to_viz( viz )` (see `Cell.add_to_viz`) and is
 added with `v.add( obj )` -- the object decides its own primitives, the visualizer knows none.
 
@@ -59,6 +68,16 @@ costs a lot in triangles/edges, and it is the GPU that must absorb that. No depe
 three.js-type lib would require a CDN, hence a network connection, which would break the file's
 autonomy (data in base64 in the HTML, no side file, no server -- opens as `file://`).
 
+- the THEME ( light / dark ): `?theme=`, else that of the page that embeds it ( the `dark` class of the parent document, same
+  origin, followed live: the doc's iframes switch with the doc ), else the system's; [d] toggles it. A color can be given per
+  theme, `( light, dark )` -- the background too;
+- the start view FRAMES the tight box of the scene ( its corners projected, a small margin ), again on a resize until the
+  view is moved;
+- the NAVIGATION switch, top right ( a four-arrow icon, outlined when on ): whether the wheel, the pinch and the touch gestures drive the view
+  or scroll the host page ( off in the doc's iframes, `?wheel=0&touch=0` ); a wheel over the view while it is off makes it
+  pulse, so that one finds it without opening the menu;
+- the point RADIUS slider: the display radius of bare points (Diracs), and a factor on the points that carry their own
+  radius ( 1 at the start );
 - solid faces (adjustable opacity) lit on both sides;
 - HIDDEN EDGES: a PURE depth pass (faces written into the z-buffer without touching the color)
   precedes the edge drawing, which gives hidden-part removal EVEN when the faces are not
@@ -138,6 +157,11 @@ def _rgb( color ):
     return tuple( float( c ) for c in color )[ :3 ]
 
 
+def _is_pair( color ):
+    """a color PER THEME, `( light, dark )`: two colors, not the three components of one"""
+    return isinstance( color, ( tuple, list ) ) and len( color ) == 2 and all( isinstance( c, ( str, tuple, list ) ) for c in color )
+
+
 def _darker( color, factor = 0.72 ):
     return tuple( c * factor for c in _rgb( color ) )
 
@@ -156,19 +180,40 @@ def _b64( arr ):
 class Visualizer:
     """Collects geometric primitives; the outputs (`write_html`, ...) come afterwards.
 
-    `title` names the scene (the tab, on the HTML side).
+    `title` names the scene (the tab, on the HTML side). `depth_colors`: in 3D, the points are colored by their depth in the
+    view ( warm in front, cool behind, recomputed as the view turns ) instead of their own color -- what a cloud needs to be
+    read in depth ( `?depth=0|1` in the URL and the menu still switch it ).
+
+    `morph = k`: the playback goes from one frame to the next in `k` eased steps, the points of the two frames matched by rank
+    when they have as many -- the same diracs moving ( a transport, a descent ) without storing the steps; it holds a moment on
+    each frame. `loop`: it starts again, morphing back to the first frame. `autoplay`: it plays as soon as the page opens
+    ( `?play=0|1` in the URL wins ).
+
+    `frame_axis`: the name of the frame axis, or a tuple of names when the frames vary along several parameters (see
+    `new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
+    the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.
+
+    `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
+    density drawn under diracs.
     """
 
     def __init__( self, title = "sdot", background = None, frame_axis = "time",
-                  playable = True, fps = 5.0, frame_value = 0.0 ):
+                  playable = True, fps = 5.0, frame_value = 0.0, depth_colors = False, morph = 0, loop = False,
+                  autoplay = False, face_opacity = 1.0 ):
         self.title      = title
-        self.background = background      # None -> light/dark according to the system preference
+        self.face_opacity = float( face_opacity )
+        self.depth_colors = depth_colors
+        self.morph      = int( morph )
+        self.loop       = loop
+        self.autoplay   = autoplay
+        self.background = background      # None -> the theme's; a color, or one per theme `( light, dark )`
         self.nb_dims    = None            # deduced from the first addition (size of the position vectors)
 
         # axis of the FRAMES (see `new_frame`): its name (time, or a parameter), and whether it can
         # be played by itself -- playback only makes sense on an axis that is traversed, which
         # is the case of time and not necessarily of a parameter.
         self.frame_axis = frame_axis
+        self.frame_axes = ( frame_axis, ) if isinstance( frame_axis, str ) else tuple( frame_axis )
         self.playable   = playable
         self.fps        = fps
 
@@ -180,6 +225,7 @@ class Visualizer:
         self._nb_verts = 0
 
         self._colors   = []               # table of distinct colors, as (r, g, b, a)
+        self._colors_dark = []            # ... the same in the dark theme ( a color may be given per theme, `( light, dark )` )
         self._col_ids  = {}
 
         self._poly_v, self._poly_len, self._poly_c = [], [], []   # polygons (free length)
@@ -248,11 +294,13 @@ class Visualizer:
         """Index of `(color, opacity)` in the table -- a primitive carries only this index."""
         if color is None:
             color = self.take_color()
-        rgba = ( *_rgb( color ), float( opacity ) )
-        if rgba not in self._col_ids:
-            self._col_ids[ rgba ] = len( self._colors )
-            self._colors.append( rgba )
-        return self._col_ids[ rgba ]
+        light, dark = color if _is_pair( color ) else ( color, color )
+        key = ( ( *_rgb( light ), float( opacity ) ), ( *_rgb( dark ), float( opacity ) ) )
+        if key not in self._col_ids:
+            self._col_ids[ key ] = len( self._colors )
+            self._colors.append( key[ 0 ] )
+            self._colors_dark.append( key[ 1 ] )
+        return self._col_ids[ key ]
 
     # ---- vertex pool --------------------------------------------------------------------------
 
@@ -300,8 +348,25 @@ class Visualizer:
 
     # ---- frames (time, or parameter) ----------------------------------------------------------
 
+    def _frame_values( self, value ):
+        """`value` as one float per frame axis. With several axes: a tuple, or a dict whose missing axes keep the value of
+        the previous frame."""
+        n = len( self.frame_axes )
+        if isinstance( value, dict ):
+            prev = self._frames[ -1 ][ "values" ] if getattr( self, "_frames", None ) else ( 0.0, ) * n
+            unknown = set( value ) - set( self.frame_axes )
+            if unknown:
+                raise ValueError( f"Visualizer: unknown frame axes { sorted( unknown ) } ( axes: { self.frame_axes } )" )
+            return tuple( float( value.get( a, p ) ) for a, p in zip( self.frame_axes, prev ) )
+        vals = tuple( float( v ) for v in np.ravel( value ) )
+        if len( vals ) == 1:
+            vals = vals * n                                         # a scalar: the same on every axis
+        if len( vals ) != n:
+            raise ValueError( f"Visualizer: { len( vals ) } frame value(s) for the axes { self.frame_axes }" )
+        return vals
+
     def _frame_mark( self, value ):
-        return { "value": float( value ),
+        return { "values": self._frame_values( value ),
                  "poly": len( self._poly_len ), "edge": self._nb_edges,
                  "pnt": self._nb_points, "hpoly": len( self._hpolys ) }
 
@@ -314,15 +379,18 @@ class Visualizer:
         only the vertex pool, and only where the caller passes the SAME array again.
 
         `value` is the abscissa on the axis (`frame_axis`): an instant, or the value of the parameter.
-        By default, the rank of the frame.
+        By default, the rank of the frame. With several axes: one value per axis, as a tuple, or as a
+        dict that only names the axes that change ( the others keep the previous frame's ); by default,
+        the rank of the frame on the first axis.
 
         Color numbering restarts from zero here. This is what keeps an animation from
         flickering: what is redrawn at the same rank in each frame takes its color back,
         instead of taking a new one because the previous frame consumed one.
         """
         self._next_color = 0
-        self._frames.append( self._frame_mark(
-            len( self._frames ) if value is None else value ) )
+        if value is None:
+            value = { self.frame_axes[ 0 ]: len( self._frames ) } if len( self.frame_axes ) > 1 else len( self._frames )
+        self._frames.append( self._frame_mark( value ) )
         return self
 
     @property
@@ -545,7 +613,7 @@ class Visualizer:
         """The primitives of frame `i`, already sliced -- enough to write an output without
         knowing anything about the internal slicing.
 
-        Returns a dict: `value`, `polygons`, `polygon_colors`, `edges`, `edge_colors`, `points`,
+        Returns a dict: `value` ( a float, a tuple with several frame axes ), `polygons`, `polygon_colors`, `edges`, `edge_colors`, `points`,
         `point_colors`, `point_radii`, `polytopes`. The indices refer to the `positions` pool,
         common to ALL frames.
         """
@@ -558,7 +626,7 @@ class Visualizer:
         v0, v1 = rng( "pnt" )
         h0, h1 = rng( "hpoly" )
         return {
-            "value"         : self._frames[ i ][ "value" ],
+            "value"         : self._frames[ i ][ "values" ] if len( self.frame_axes ) > 1 else self._frames[ i ][ "values" ][ 0 ],
             "polygons"      : self.polygons[ p0 : p1 ],
             "polygon_colors": self.polygon_colors[ p0 : p1 ],
             "edges"         : self.edges[ e0 : e1 ],
@@ -583,7 +651,7 @@ class Visualizer:
             res.append( ( dirs, offs, tuple( h[ "fcol" ] ), h[ "edg" ] ) )
         return res
 
-    def bounds( self ):
+    def bounds( self, pad_ratio = 1.0 ):
         """Bounding box `[ [lo, hi] ] * d`, dimension by dimension.
 
         It frames the camera AND gives the cut sliders their range. A polytope has no
@@ -610,7 +678,7 @@ class Visualizer:
             lo, hi = np.full( d, -r, np.float32 ), np.full( d, r, np.float32 )
 
         span = np.maximum( hi - lo, 1e-9 )
-        pad  = 0.05 * span.max()
+        pad  = 0.05 * span.max() * pad_ratio
         return [ [ float( a - pad ), float( b + pad ) ] for a, b in zip( lo, hi ) ]
 
     # ---- sorties ------------------------------------------------------------------------------
@@ -654,8 +722,10 @@ class Visualizer:
             "__TITLE__"   : self.title,
             "__D__"       : str( d ),
             "__BOUNDS__"  : json.dumps( bounds ),
+            "__TIGHT__"   : json.dumps( self.bounds( pad_ratio = 0.0 ) ),
             "__POS__"     : _b64( self.positions.astype( np.float32 ) ),
             "__COLORS__"  : json.dumps( [ list( c ) for c in self._colors ] ),
+            "__COLORS_DARK__": json.dumps( [ list( c ) for c in self._colors_dark ] ),
             "__POLY_V__"  : _b64( np.asarray( self._poly_v, dtype = np.int32 ) ),
             "__POLY_OFF__": _b64( poly_off ),
             "__POLY_C__"  : _b64( self.polygon_colors ),
@@ -665,21 +735,27 @@ class Visualizer:
             "__PNT_C__"   : _b64( self.point_colors ),
             "__PNT_R__"   : _b64( self.point_radii ),
             "__HPOLY__"   : json.dumps( self._hpolys ),
-            "__FR_VAL__"  : _b64( np.array( [ f[ "value" ] for f in self._frames ], np.float32 ) ),
+            "__FR_VAL__"  : _b64( np.array( [ f[ "values" ] for f in self._frames ], np.float32 ) ),
             "__FR_POLY__" : _b64( self._frame_ranges( "poly" ) ),
             "__FR_EDG__"  : _b64( self._frame_ranges( "edge" ) ),
             "__FR_PNT__"  : _b64( self._frame_ranges( "pnt" ) ),
             "__FR_HP__"   : _b64( self._frame_ranges( "hpoly" ) ),
-            "__AXIS__"    : json.dumps( self.frame_axis ),
-            "__PLAYABLE__": "true" if self.playable else "false",
+            "__AXES__"    : json.dumps( list( self.frame_axes ) ),
+            "__PLAYABLE__": json.dumps( [ bool( p ) for p in ( self.playable if isinstance( self.playable, ( tuple, list ) )
+                                                              else [ self.playable ] * len( self.frame_axes ) ) ] ),
             "__FPS__"     : repr( float( self.fps ) ),
             "__R0__"      : repr( float( r0 ) ),
             "__RMIN__"    : repr( float( r0 / 30 ) ),
             "__RMAX__"    : repr( float( r0 * 60 ) ),
-            "__BG__"      : json.dumps( None if self.background is None
-                                        else list( _rgb( self.background ) ) ),
+            "__BG__"      : json.dumps( [ None if c is None else list( _rgb( c ) ) for c in
+                                        ( self.background if _is_pair( self.background ) else ( self.background, self.background ) ) ] ),
             "__WHEEL__"   : "true" if wheel else "false",
             "__TOUCH__"   : "true" if touch else "false",
+            "__DEPTHCOL__": "true" if self.depth_colors else "false",
+            "__FACE_OP__" : repr( self.face_opacity ),
+            "__MORPH__"   : str( self.morph ),
+            "__LOOP__"    : "true" if self.loop else "false",
+            "__AUTOPLAY__": "true" if self.autoplay else "false",
         }
         return re.sub( r"__[A-Z0-9_]+__", lambda m: subs.get( m.group( 0 ), m.group( 0 ) ), _HTML )
 
@@ -700,7 +776,7 @@ _HTML = r"""<!DOCTYPE html>
     width: 244px; box-sizing: border-box;
   }
   #controls *, #controls { box-sizing: border-box; }
-  #menu { position: fixed; top: 10px; left: 10px; z-index: 1; }
+  #menu { position: fixed; top: 10px; left: 10px; z-index: 2; }
   #menuBtn {
     display: block; width: 30px; height: 30px; padding: 0; cursor: pointer; border: none;
     border-radius: 6px; background: rgba(255,255,255,0.88); color: #333; font-size: 18px; line-height: 1;
@@ -715,19 +791,47 @@ _HTML = r"""<!DOCTYPE html>
   #controls .hint { color: #666; margin-top: 6px; }
   #controls .sec { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; }
   #controls .val { color: #666; font-variant-numeric: tabular-nums; }
-  #timeControls .row { display: flex; align-items: center; gap: 6px; }
-  #timeControls input[type=range] { flex: 1 1 auto; width: auto; min-width: 0; }
-  #play {
-    cursor: pointer; border: none; border-radius: 4px; background: #444; color: #fff;
-    width: 26px; height: 26px; font-size: 12px; line-height: 1; flex: none;
+  /* the frame axes: in plain sight, right of the menu button -- one row per axis */
+  #anim {
+    display: none; position: fixed; top: 10px; left: 48px; z-index: 1;
+    width: min(460px, calc(100vw - 96px)); box-sizing: border-box; padding: 2px 8px;
+    background: rgba(255,255,255,0.88); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    font-family: sans-serif; font-size: 13px;
+    grid-template-columns: auto minmax(40px, 1fr) auto; align-items: center; column-gap: 8px;
   }
-  #tval { flex: none; text-align: right; font-variant-numeric: tabular-nums; }
-  body.dark #play { background: #8ab4f8; color: #172033; }
+  #anim .row { display: contents; }
+  #anim .row > * { margin: 2px 0; }
+  #anim input[type=range] { width: 100%; accent-color: #2a7de1; }
+  #anim .play {
+    cursor: pointer; border: none; border-radius: 50%; background: #2a7de1; color: #fff; padding: 0;
+    width: 22px; height: 22px; font-size: 10px; line-height: 22px; flex: none;
+  }
+  #anim .play.on { background: #444; }
+  #anim .gap { width: 22px; flex: none; }
+  #anim .lab { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #anim .cnt { color: #888; font-size: 11px; margin-left: 4px; }
+  body.dark #anim { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #anim input[type=range] { accent-color: #8ab4f8; }
+  body.dark #anim .play { background: #8ab4f8; color: #172033; }
+  body.dark #anim .play.on { background: #ddd; }
+  body.dark #anim .cnt { color: #999; }
   #slices .row { display: flex; align-items: center; gap: 6px; }
   #slices .row span { flex: none; width: 62px; }
   #axes select { width: 58px; }
+  #nav {
+    position: fixed; top: 10px; right: 10px; z-index: 1; width: 30px; height: 30px; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; border-radius: 6px;
+    background: rgba(255,255,255,0.88); color: #888; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    transition: background 0.2s, color 0.2s, transform 0.2s;
+  }
+  #nav svg { width: 20px; height: 20px; }
+  #nav.on { color: #2a7de1; box-shadow: 0 0 0 2px #2a7de1; }
+  #nav.pulse { transform: scale(1.15); background: #2a7de1; color: #fff; }
+  body.dark #nav { background: rgba(30,30,30,0.92); color: #999; }
+  body.dark #nav.on { color: #8ab4f8; box-shadow: 0 0 0 2px #8ab4f8; }
+  body.dark #nav.pulse { background: #8ab4f8; color: #172033; }
   #help {
-    display: none; position: fixed; top: 10px; right: 10px; z-index: 2;
+    display: none; position: fixed; top: 48px; right: 10px; z-index: 2;
     background: rgba(255,255,255,0.95); padding: 10px 14px; border-radius: 6px;
     font-family: sans-serif; font-size: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   }
@@ -750,14 +854,6 @@ _HTML = r"""<!DOCTYPE html>
 <button id="menuBtn" title="menu">&#9776;</button>
 <div id="controls">
   <div id="counts"></div>
-  <div class="sec" id="timeControls" style="display:none">
-    <div class="row">
-      <button id="play">&#9654;</button>
-      <input id="t" type="range" min="0" max="0" step="1" value="0">
-      <span id="tval">1 / 1</span>
-    </div>
-    <div class="val" id="tname"></div>
-  </div>
   <div class="sec">
     <label><input type="checkbox" id="cbFaces" checked> faces</label>
     <label>opacity <span class="val" id="opVal"></span>
@@ -771,6 +867,7 @@ _HTML = r"""<!DOCTYPE html>
   </div>
   <div class="sec" id="ptBox">
     <label><input type="checkbox" id="cbPoints" checked> points</label>
+    <label id="depthLbl" style="display:none"><input type="checkbox" id="cbDepth"> colored by depth</label>
     <label>radius <span class="val" id="rVal"></span>
       <input id="r" type="range" min="0" max="1" step="0.001" value="0.5"></label>
   </div>
@@ -778,6 +875,11 @@ _HTML = r"""<!DOCTYPE html>
     <label><input type="checkbox" id="cbEdl" checked> eye-dome lighting</label>
     <label>strength <span class="val" id="edlVal"></span>
       <input id="edlK" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+    <label><input type="checkbox" id="cbAo" checked> ambient occlusion</label>
+    <label>strength <span class="val" id="aoKVal"></span>
+      <input id="aoK" type="range" min="0" max="1" step="0.01" value="0.7"></label>
+    <label>radius ( &times; points ) <span class="val" id="aoRVal"></span>
+      <input id="aoR" type="range" min="1" max="20" step="0.5" value="5"></label>
   </div>
   <div class="sec" id="axes" style="display:none">
     views on <select id="axX"></select><select id="axY"></select><select id="axZ"></select>
@@ -791,11 +893,15 @@ _HTML = r"""<!DOCTYPE html>
   <div class="hint"><b>?</b>: help · <b>d</b>: <span id="modeLabel">light</span></div>
 </div>
 </div>
+<div id="anim"></div>
+<button id="nav" title="navigation: wheel, pinch and touch move / zoom the view">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg>
+</button>
 <div id="help">
   <b>Keyboard shortcuts</b>
   <table>
-    <tr><td>&larr; / &rarr;</td><td id="hTime">frame -1 / +1 (time bar active)</td></tr>
-    <tr><td>Shift + &larr;/&rarr;</td><td>frame, larger step</td></tr>
+    <tr><td>&larr; / &rarr;</td><td id="hTime">frame -1 / +1 (a bar of the top row has the focus)</td></tr>
     <tr><td>Home / End</td><td>first / last frame</td></tr>
     <tr><td>Space</td><td>play / pause</td></tr>
     <tr><td>drag</td><td id="hDrag">orbit</td></tr>
@@ -807,6 +913,7 @@ _HTML = r"""<!DOCTYPE html>
     <tr><td>f</td><td>faces</td></tr>
     <tr><td>e</td><td>hidden-edge mode</td></tr>
     <tr><td>p</td><td>points</td></tr>
+    <tr><td>c</td><td>points colored by depth (3D)</td></tr>
     <tr><td>o</td><td>ortho / perspective projection</td></tr>
     <tr><td>0 · double-click</td><td>reset the view</td></tr>
     <tr><td>d</td><td>light / dark</td></tr>
@@ -835,7 +942,8 @@ const BOUNDS = __BOUNDS__;             // [lo, hi] per dimension
 // file down: a cube vertex serves 6 triangles and 3 edges, it is stored only once, and
 // a color costs only 2 bytes per primitive instead of 4 per vertex.
 const POS    = decF32("__POS__");
-const COLORS = __COLORS__;             // table of distinct colors, as [r, g, b, a]
+const COLORS = __COLORS__, COLORS_DARK = __COLORS_DARK__;
+let PAL = COLORS;                      // the table of the CURRENT theme             // table of distinct colors, as [r, g, b, a]
 
 // polygons of FREE length: POLY_OFF slices POLY_V (POLY_OFF[p] .. POLY_OFF[p+1]). They are only
 // triangulated here, at display time -- the file itself keeps the faces as they are.
@@ -847,14 +955,15 @@ const HPOLY  = __HPOLY__.map(h => ({                                     // poly
   nb: h.nb, dirs: decF32(h.dirs), offs: decF32(h.offs), fcol: h.fcol, ecol: h.ecol, edg: h.edg,
 }));
 // FRAMES: each one is only a RANGE in the lists above (they share nothing else than
-// the vertex pool) -- FR_* gives the bounds, FR_VAL the abscissa on the axis.
+// the vertex pool) -- FR_* gives the bounds, FR_VAL the abscissae on the axes ( NB_AXES per frame ).
+const AXES = __AXES__, PLAYABLE = __PLAYABLE__, FPS = __FPS__, NB_AXES = AXES.length;
 const FR_VAL = decF32("__FR_VAL__");
 const FR_POLY = decI32("__FR_POLY__"), FR_EDG = decI32("__FR_EDG__");
 const FR_PNT = decI32("__FR_PNT__"), FR_HP = decI32("__FR_HP__");
-const NB_FRAMES = FR_VAL.length, AXIS = __AXIS__, PLAYABLE = __PLAYABLE__, FPS = __FPS__;
+const NB_FRAMES = FR_VAL.length / NB_AXES;
 
 const RMIN = __RMIN__, RMAX = __RMAX__, R0 = __R0__;
-const BG = __BG__;
+const BG = __BG__;                      // [ light, dark ], `null`: the theme's
 
 const NB_V = POS.length / D, NB_POLY = POLY_OFF.length - 1, NB_EDG = EDG_V.length / 2;
 
@@ -1096,7 +1205,7 @@ function buildScene() {
   }
   const at = i => [PR[3 * i], PR[3 * i + 1], PR[3 * i + 2]];
   for (let p = p0; p < p1; p++) {
-    const o0 = POLY_OFF[p], o1 = POLY_OFF[p + 1], col = COLORS[POLY_C[p]];
+    const o0 = POLY_OFF[p], o1 = POLY_OFF[p + 1], col = PAL[POLY_C[p]];
     for (let k = o0 + 1; k + 1 < o1; k++)                 // fan from the first vertex
       putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col);
   }
@@ -1116,7 +1225,7 @@ function buildScene() {
     e++;
   }
   for (let i = e0; i < e1; i++)
-    putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), COLORS[EDG_C[i]]);
+    putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), PAL[EDG_C[i]]);
   for (let i = 0; i + 5 < hl.length; i += 6)
     putLin(hl.slice(i, i + 3), hl.slice(i + 3, i + 6), hlc[i / 6]);
 
@@ -1125,7 +1234,7 @@ function buildScene() {
   PNT = { pos: new Float32Array(nPnt * 3), col: new Float32Array(nPnt * 4),
           rad: PNT_R.subarray(v0, v1), n: nPnt };
   for (let i = 0; i < nPnt; i++) {
-    const v = PNT_V[v0 + i], col = COLORS[PNT_C[v0 + i]];
+    const v = PNT_V[v0 + i], col = PAL[PNT_C[v0 + i]];
     PNT.pos[i * 3] = PR[3 * v]; PNT.pos[i * 3 + 1] = PR[3 * v + 1]; PNT.pos[i * 3 + 2] = PR[3 * v + 2];
     for (let q = 0; q < 4; q++) PNT.col[i * 4 + q] = col[q];
   }
@@ -1135,6 +1244,7 @@ function buildScene() {
   centerRays.length = 0;
   document.getElementById("counts").textContent =
     PNT.n + " points · " + LIN.n + " edges · " + TRI.n + " triangles";
+  sceneBuilt = true;
 }
 
 // ============================================================================================
@@ -1205,17 +1315,34 @@ function sceneSphere() {                               // center + radius of the
   }
   return { c, r: Math.max(Math.sqrt(r), 1e-6) };
 }
+// the box the camera frames at the start: the TIGHT one of the viewed dimensions ( BOUNDS has a margin for the sliders )
+const TIGHT = __TIGHT__, FIT_MARGIN = 0.04;
 function resetView() {
   const s = sceneSphere();
-  cam.target = s.c;
-  // the field of view is VERTICAL: on a window taller than wide, fitting to it
-  // would let the scene spill over the sides -- hence the 1/ratio pull-back.
-  const asp = canvas.width / Math.max(canvas.height, 1);
-  cam.dist = s.r / Math.sin(FOV / 2) * 1.05 / Math.min(1, asp);
   // three-quarter view by default -- a starting orientation like any other, with no special
   // status: nothing later takes it up as a reference.
   cam.rot = FLAT ? [0, 0, 0, 1]
                  : qNorm(qMul(qAxis([0, 1, 0], 0.6), qAxis([1, 0, 0], -0.35)));
+  // FIT THE BOX, not its sphere: its corners in the screen frame of that orientation, the target at their middle, and the
+  // distance at which the farthest one touches the border ( the field of view is vertical, `asp` widens it )
+  const asp = canvas.width / Math.max(canvas.height, 1);
+  const b = camBasis(), corners = [];
+  for (let m = 0; m < 8; m++) {
+    const p = [0, 1, 2].map(a => AX[a] >= 0 ? TIGHT[AX[a]][(m >> a) & 1] : 0);
+    corners.push(p);
+  }
+  const proj = corners.map(p => [b.right, b.up, b.fwd].map(e => e[0] * p[0] + e[1] * p[1] + e[2] * p[2]));
+  const lo = [0, 1, 2].map(k => Math.min(...proj.map(q => q[k]))), hi = [0, 1, 2].map(k => Math.max(...proj.map(q => q[k])));
+  const mid = [0, 1, 2].map(k => 0.5 * (lo[k] + hi[k]));
+  cam.target = [0, 1, 2].map(i => mid[0] * b.right[i] + mid[1] * b.up[i] + mid[2] * b.fwd[i]);
+  const t = Math.tan(FOV / 2) * (1 - FIT_MARGIN);
+  let dist = 0;
+  for (const q of proj) {
+    const x = Math.abs(q[0] - mid[0]), y = Math.abs(q[1] - mid[1]);
+    const zf = FLAT ? 0 : -(q[2] - mid[2]);                 // ( how far the corner stands in front of the target )
+    dist = Math.max(dist, zf + x / (t * asp), zf + y / t);
+  }
+  cam.dist = Math.max(dist, 1e-6 * s.r);
   cam.pivotZ = cam.dist; pivotDirty = true; centerRays.length = 0;
   draw();
 }
@@ -1466,25 +1593,48 @@ void main() { oCol = vec4(vCol.rgb, vCol.a * uAlpha); }`);
 
 const pPoint = prog(`#version 300 es
 in vec3 aPos; in vec4 aCol; in float aRad;
-uniform mat4 uMVP; uniform mat4 uMV; uniform float uSizeK; uniform float uOrtho; uniform float uR;
-out vec4 vCol;
+uniform mat4 uMVP; uniform mat4 uMV; uniform float uSizeK; uniform float uOrtho; uniform float uR; uniform float uRScale;
+uniform float uDepthCol; uniform vec2 uDepthRange;
+out vec4 vCol; out vec3 vC; out float vR;
+// the depth colors: warm in front, cool behind
+vec3 depthRamp(float t) {
+  const vec3 c0 = vec3(0.85, 0.22, 0.16), c1 = vec3(0.97, 0.70, 0.22), c2 = vec3(0.30, 0.68, 0.62), c3 = vec3(0.20, 0.28, 0.62);
+  return t < 1.0 / 3.0 ? mix(c0, c1, 3.0 * t) : t < 2.0 / 3.0 ? mix(c1, c2, 3.0 * t - 1.0) : mix(c2, c3, 3.0 * t - 2.0);
+}
 void main() {
   gl_Position = uMVP * vec4(aPos, 1.0);
   // a zero radius = a point with no size of its own (a Dirac): the slider sizes it.
-  float r = aRad > 0.0 ? aRad : uR;
+  // A point with its own radius keeps it at the slider's start, and the slider scales it.
+  float r = aRad > 0.0 ? aRad * uRScale : uR;
   float zv = -(uMV * vec4(aPos, 1.0)).z;
   gl_PointSize = clamp(uSizeK * r / (uOrtho > 0.5 ? 1.0 : max(zv, 1e-4)), 1.0, 1024.0);
-  vCol = aCol;
+  vC = (uMV * vec4(aPos, 1.0)).xyz; vR = r;
+  vCol = uDepthCol > 0.5 ? vec4(depthRamp(clamp((zv - uDepthRange.x) / (uDepthRange.y - uDepthRange.x), 0.0, 1.0)), aCol.a) : aCol;
 }`,
 `#version 300 es
 precision highp float;
-in vec4 vCol; out vec4 oCol;
+in vec4 vCol; in vec3 vC; in float vR; out vec4 oCol;
+uniform mat4 uP; uniform float uSphere;
+// a light from the upper left, in front ( view space )
+const vec3 L = vec3(-0.45, 0.55, 0.70);
 void main() {
   vec2 d = gl_PointCoord * 2.0 - 1.0;
   float q = dot(d, d);
   if (q > 1.0) discard;                                // disc, not square
-  float l = 0.55 + 0.45 * sqrt(max(0.0, 1.0 - q));     // sphere shading
-  oCol = vec4(vCol.rgb * l, vCol.a);
+  if (uSphere > 0.5) {
+    // a true SPHERE ( 3D ): the depth of its surface at this pixel, so that spheres cut into one another and the
+    // ambient occlusion sees relief, and a diffuse + specular light on its normal
+    vec3 n = vec3(d.x, -d.y, sqrt(max(0.0, 1.0 - q)));
+    vec4 c = uP * vec4(vC + vR * n, 1.0);
+    gl_FragDepth = 0.5 * c.z / c.w + 0.5;
+    vec3 l = normalize(L);
+    float diff = max(dot(n, l), 0.0), spec = pow(max(dot(reflect(-l, n), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);
+    oCol = vec4(vCol.rgb * (0.32 + 0.68 * diff) + 0.28 * spec, vCol.a);
+  } else {
+    gl_FragDepth = gl_FragCoord.z;
+    float l = 0.55 + 0.45 * sqrt(max(0.0, 1.0 - q));   // sphere shading
+    oCol = vec4(vCol.rgb * l, vCol.a);
+  }
 }`);
 
 // EYE-DOME LIGHTING (3D): the scene is drawn into a texture, then each pixel is darkened by how far its
@@ -1500,6 +1650,7 @@ void main() {                                          // one triangle that cove
 precision highp float;
 uniform sampler2D uCol; uniform sampler2D uDep;
 uniform float uNear, uFar, uOrtho, uRef, uK, uRad;
+uniform float uAo, uAoRad, uSizeK;
 out vec4 oCol;
 float viewDepth(float d) {                             // the distance along the view axis
   float z = 2.0 * d - 1.0;
@@ -1518,7 +1669,22 @@ void main() {
     s += max(0.0, zc - viewDepth(texelFetch(uDep, q, 0).r)) / ref;
   }
   vec4 col = texelFetch(uCol, c, 0);
-  oCol = vec4(col.rgb * exp(-uK * s / 8.0), 1.0);
+  float shade = exp(-uK * s / 8.0);
+  // AMBIENT OCCLUSION ( screen space, from the depths only ): the neighbours within uAoRad ( world ) that stand in
+  // front darken the pixel, less and less as they stand farther in front -- the hollows and contacts come out
+  if (uAo > 0.0 && texelFetch(uDep, c, 0).r < 0.99999) {
+    float rpx = uAoRad * uSizeK / (uOrtho > 0.5 ? 1.0 : max(zc, 1e-6));
+    float occ = 0.0;
+    for (int i = 0; i < 24; i++) {
+      float t = (float(i) + 0.5) / 24.0;
+      float a = 2.3999632 * float(i);                  // the golden angle: a spiral
+      ivec2 q = clamp(c + ivec2(round(rpx * sqrt(t) * vec2(cos(a), sin(a)))), ivec2(0), sz - 1);
+      float dz = zc - viewDepth(texelFetch(uDep, q, 0).r);
+      occ += dz > 0.05 * uAoRad ? clamp(2.0 - dz / (2.0 * uAoRad), 0.0, 1.0) : 0.0;
+    }
+    shade *= 1.0 - uAo * occ / 24.0;
+  }
+  oCol = vec4(col.rgb * shade, 1.0);
 }`);
 const edl = { fb: null, col: null, dep: null, w: 0, h: 0, vao: gl.createVertexArray() };
 function edlTargets(w, h) {                            // (re)allocated when the canvas changes size
@@ -1542,6 +1708,7 @@ function edlTargets(w, h) {                            // (re)allocated when the
   edl.w = w; edl.h = h;
 }
 function edlStrength() { return 20 * Math.pow(100, parseFloat(ui.edlK.value)); }
+function aoRadius() { return parseFloat(ui.aoR.value) * pointRadius(); }
 
 const buf = {};
 ["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad"]
@@ -1584,16 +1751,21 @@ const ui = {
   edgeMode: document.getElementById("edgeMode"), op: document.getElementById("op"),
   r: document.getElementById("r"),
   edl: document.getElementById("cbEdl"), edlK: document.getElementById("edlK"),
+  ao: document.getElementById("cbAo"), aoK: document.getElementById("aoK"), aoR: document.getElementById("aoR"),
+  depth: document.getElementById("cbDepth"),
 };
 function pointRadius() { return RMIN * Math.pow(RMAX / RMIN, parseFloat(ui.r.value)); }
+ui.r.value = Math.log(R0 / RMIN) / Math.log(RMAX / RMIN);      // ( the start: R0, i.e. the given radii as they are )
+// every point has its own radius: the slider is a factor on them
+const PNT_SIZED = PNT_R.length > 0 && PNT_R.every(r => r > 0);
 
 function draw() {
   const w = canvas.width, h = canvas.height;
   const dark = document.body.classList.contains("dark");
-  const useEdl = D >= 3 && ui.edl.checked;
+  const useEdl = D >= 3 && (ui.edl.checked || ui.ao.checked);   // the post pass: eye-dome lighting and / or occlusion
   if (useEdl) { edlTargets(w, h); gl.bindFramebuffer(gl.FRAMEBUFFER, edl.fb); }
   gl.viewport(0, 0, w, h);
-  const bg = BG !== null ? BG : (dark ? [0.10, 0.10, 0.10] : [1, 1, 1]);
+  const bg = BG[dark ? 1 : 0] !== null ? BG[dark ? 1 : 0] : (dark ? [0.10, 0.10, 0.10] : [1, 1, 1]);
   gl.clearColor(bg[0], bg[1], bg[2], 1);
   gl.clearDepth(1);
   gl.enable(gl.DEPTH_TEST);
@@ -1678,6 +1850,11 @@ function draw() {
     gl.uniform1f(gl.getUniformLocation(pPoint, "uSizeK"),
       cam.ortho ? (h / 2) / orthoHalfH() : (h / 2) / Math.tan(FOV / 2));
     gl.uniform1f(gl.getUniformLocation(pPoint, "uR"), pointRadius());
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uRScale"), pointRadius() / R0);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uDepthCol"), D >= 3 && ui.depth.checked ? 1 : 0);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pPoint, "uP"), false, P);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uSphere"), D >= 3 ? 1 : 0);
+    gl.uniform2f(gl.getUniformLocation(pPoint, "uDepthRange"), dc - s.r, dc + s.r);   // ( the scene's sphere, along the view )
     gl.depthFunc(gl.LEQUAL);
     gl.drawArrays(gl.POINTS, 0, PNT.n);
   }
@@ -1695,7 +1872,10 @@ function draw() {
     gl.uniform1f(gl.getUniformLocation(pEdl, "uFar"), far);
     gl.uniform1f(gl.getUniformLocation(pEdl, "uOrtho"), cam.ortho ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(pEdl, "uRef"), s.r);
-    gl.uniform1f(gl.getUniformLocation(pEdl, "uK"), edlStrength());
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uK"), ui.edl.checked ? edlStrength() : 0);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uAo"), ui.ao.checked ? parseFloat(ui.aoK.value) : 0);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uAoRad"), aoRadius());
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uSizeK"), cam.ortho ? (h / 2) / orthoHalfH() : (h / 2) / Math.tan(FOV / 2));
     gl.uniform1f(gl.getUniformLocation(pEdl, "uRad"), 1.5 * (window.devicePixelRatio || 1));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.activeTexture(gl.TEXTURE0);
@@ -1710,7 +1890,8 @@ function resize() {
   canvas.height = Math.round(window.innerHeight * dpr);
   canvas.style.width = window.innerWidth + "px";
   canvas.style.height = window.innerHeight + "px";
-  draw();
+  if (viewUntouched && typeof resetView === "function") resetView();   // ( the page resized before anyone moved the view: refit )
+  else draw();
 }
 
 // ============================================================================================
@@ -1865,8 +2046,28 @@ const menu = document.getElementById("menu");
 document.getElementById("menuBtn").addEventListener("click", () => menu.classList.toggle("open"));
 const cbWheel = document.getElementById("cbWheel"), cbTouch = document.getElementById("cbTouch");
 cbWheel.checked = wheelEnabled; cbTouch.checked = touchEnabled;
-cbWheel.addEventListener("change", () => { wheelEnabled = cbWheel.checked; });
-cbTouch.addEventListener("change", () => { touchEnabled = cbTouch.checked; });
+const navBtn = document.getElementById("nav");
+function syncNav() {
+  cbWheel.checked = wheelEnabled; cbTouch.checked = touchEnabled;
+  const on = wheelEnabled || touchEnabled;
+  navBtn.classList.toggle("on", on);
+  navBtn.title = on ? "navigation on: wheel, pinch and touch move / zoom the view (click: give them back to the page)"
+                    : "navigation off: click so that the wheel, pinch and touch move / zoom the view";
+}
+cbWheel.addEventListener("change", () => { wheelEnabled = cbWheel.checked; syncNav(); });
+cbTouch.addEventListener("change", () => { touchEnabled = cbTouch.checked; syncNav(); });
+navBtn.addEventListener("click", () => {
+  const on = !(wheelEnabled || touchEnabled);
+  wheelEnabled = on; touchEnabled = on; syncNav();
+});
+syncNav();
+// the switch is off and someone scrolls over the view: show where it is
+let navPulse = 0;
+canvas.addEventListener("wheel", () => {
+  if (wheelEnabled) return;
+  navBtn.classList.add("pulse");
+  clearTimeout(navPulse); navPulse = setTimeout(() => navBtn.classList.remove("pulse"), 700);
+}, { passive: true });
 // embedded: offer the standalone page -- unless there is none (`srcdoc` iframe of a notebook)
 if (window.self !== window.top && location.href !== "about:srcdoc") {
   const a = document.getElementById("openFull");
@@ -1877,7 +2078,7 @@ window.addEventListener("keydown", e => {
   if (e.key === "Escape") { helpPanel.style.display = "none"; return; }
   // Space comes BEFORE the early return below: the time bar keeps the focus (so that the
   // arrows drive it natively), and playback must remain accessible in that state.
-  if (e.key === " " && NB_FRAMES > 1) { e.preventDefault(); togglePlay(); return; }
+  if (e.key === " " && playableAxes.length) { e.preventDefault(); togglePlay(); return; }
   if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
   const s = pick(e, 12, 40, 90);
   switch (e.key) {
@@ -1894,6 +2095,7 @@ window.addEventListener("keydown", e => {
       syncLabels(); break;
     case "f": case "F": ui.faces.checked = !ui.faces.checked; break;
     case "p": case "P": ui.points.checked = !ui.points.checked; break;
+    case "c": case "C": ui.depth.checked = !ui.depth.checked; break;
     case "e": case "E": {
       const opts = ["hide", "ghost", "all", "none"];
       ui.edgeMode.value = opts[(opts.indexOf(ui.edgeMode.value) + 1) % opts.length];
@@ -1908,49 +2110,143 @@ window.addEventListener("keydown", e => {
 // ============================================================================================
 // time / parameter bar
 // ============================================================================================
-const tSlider = document.getElementById("t"), tLabel = document.getElementById("tval");
-const tName = document.getElementById("tname"), playBtn = document.getElementById("play");
-let playing = false, playTimer = null;
+// The frames form a grid over the axes: on each axis, the RANK of a frame among the distinct values. With one axis the
+// rank is the frame's own index ( frames in the order given, equal values allowed ). A combination that no frame
+// has shows the NEAREST frame, the axis just moved weighing the most -- the bars then snap to what is shown.
+const AX_VALS = [], FR_RANK = new Int32Array(NB_FRAMES * NB_AXES);
+for (let a = 0; a < NB_AXES; a++) {
+  const col = Array.from({ length: NB_FRAMES }, (_, f) => FR_VAL[f * NB_AXES + a]);
+  if (NB_AXES === 1) { AX_VALS.push(col); col.forEach((_, f) => { FR_RANK[f] = f; }); continue; }
+  const vals = Array.from(new Set(col)).sort((x, y) => x - y);
+  AX_VALS.push(vals);
+  col.forEach((v, f) => { FR_RANK[f * NB_AXES + a] = vals.indexOf(v); });
+}
+const FRAME_AT = new Map();
+for (let f = NB_FRAMES - 1; f >= 0; f--) FRAME_AT.set(Array.from(FR_RANK.subarray(f * NB_AXES, (f + 1) * NB_AXES)).join(","), f);
+function frameFor(ranks, moved) {
+  const exact = FRAME_AT.get(ranks.join(","));
+  if (exact !== undefined) return exact;
+  let best = 0, bestCost = Infinity;
+  for (let f = 0; f < NB_FRAMES; f++) {
+    let c = 0;
+    for (let a = 0; a < NB_AXES; a++) c += Math.abs(FR_RANK[f * NB_AXES + a] - ranks[a]) * (a === moved ? 1000 : 1);
+    if (c < bestCost) { bestCost = c; best = f; }
+  }
+  return best;
+}
+const fmtVal = v => Number.isInteger(v) ? String(v) : String(parseFloat(v.toPrecision(4)));
+
+// the bar: one row per axis that takes more than one value -- [ play ] [ slider ] name = value  k/n
+// ( no play button anywhere: no column for it either )
+const animBox = document.getElementById("anim"), axRows = [];
+const anyPlay = PLAYABLE.some((p, a) => p && AX_VALS[a].length > 1);
+if (!anyPlay) animBox.style.gridTemplateColumns = "minmax(40px, 1fr) auto";
+for (let a = 0; a < NB_AXES; a++) {
+  if (AX_VALS[a].length < 2) { axRows.push(null); continue; }
+  const row = document.createElement("div"); row.className = "row";
+  const btn = document.createElement(PLAYABLE[a] ? "button" : "span");
+  btn.className = PLAYABLE[a] ? "play" : "gap";
+  if (!anyPlay) btn.style.display = "none";
+  if (PLAYABLE[a]) { btn.innerHTML = "&#9654;"; btn.title = "play / pause " + AXES[a] + " (Space)"; }
+  const inp = document.createElement("input");
+  inp.type = "range"; inp.min = 0; inp.max = AX_VALS[a].length - 1; inp.step = 1; inp.title = AXES[a];
+  const lab = document.createElement("span"); lab.className = "lab";
+  row.append(btn, inp, lab);
+  animBox.appendChild(row);
+  inp.addEventListener("input", () => {
+    stopPlaying();
+    const r = curRanks(); r[a] = parseInt(inp.value, 10);
+    setFrame(frameFor(r, a));
+  });
+  inp.addEventListener("focus", () => { focusAxis = a; });
+  if (PLAYABLE[a]) btn.addEventListener("click", () => togglePlay(a));
+  axRows.push({ btn, inp, lab });
+}
+const shownAxes = axRows.map((r, a) => r ? a : -1).filter(a => a >= 0);
+const playableAxes = shownAxes.filter(a => PLAYABLE[a]);
+let focusAxis = playableAxes.length ? playableAxes[0] : (shownAxes.length ? shownAxes[0] : -1);
+if (shownAxes.length) animBox.style.display = "grid";
+
+let playing = -1, playTimer = null;          // `playing`: the axis being played, -1 when paused
+const curRanks = () => Array.from(FR_RANK.subarray(frameIdx * NB_AXES, (frameIdx + 1) * NB_AXES));
 
 function setFrame(i) {
   frameIdx = Math.max(0, Math.min(NB_FRAMES - 1, i));
-  tSlider.value = frameIdx;
-  tLabel.textContent = (frameIdx + 1) + " / " + NB_FRAMES;
-  tName.textContent = AXIS + " = " + FR_VAL[frameIdx].toPrecision(4);
+  for (const a of shownAxes) {
+    const r = FR_RANK[frameIdx * NB_AXES + a], row = axRows[a];
+    row.inp.value = r;
+    row.lab.innerHTML = AXES[a] + " = " + fmtVal(FR_VAL[frameIdx * NB_AXES + a]) +
+      '<span class="cnt">' + (r + 1) + "/" + AX_VALS[a].length + "</span>";
+  }
   buildScene();                                       // only the displayed frame is rebuilt
   draw();
 }
 function stopPlaying() {
-  playing = false;
-  playBtn.innerHTML = "&#9654;";
+  if (playing >= 0) { axRows[playing].btn.innerHTML = "&#9654;"; axRows[playing].btn.classList.remove("on"); }
+  playing = -1;
   clearInterval(playTimer);
 }
-function togglePlay() {
-  if (!PLAYABLE || NB_FRAMES < 2) return;
-  if (playing) { stopPlaying(); return; }
-  playing = true;
-  playBtn.innerHTML = "&#10074;&#10074;";
-  if (frameIdx >= NB_FRAMES - 1) setFrame(0);
-  playTimer = setInterval(() => {
-    if (frameIdx >= NB_FRAMES - 1) { stopPlaying(); return; }
-    setFrame(frameIdx + 1);
-  }, 1000 / FPS);
+// the frame after the current one along the played axis, the other axes held ( -1: the end, no loop )
+function nextFrame() {
+  const r = curRanks(), n = AX_VALS[playing].length;
+  if (r[playing] + 1 < n) r[playing]++; else if (LOOP) r[playing] = 0; else return -1;
+  return frameFor(r, playing);
 }
-if (NB_FRAMES > 1) {
-  document.getElementById("timeControls").style.display = "block";
-  tSlider.max = NB_FRAMES - 1;
-  tSlider.addEventListener("input", () => { stopPlaying(); setFrame(parseInt(tSlider.value, 10)); });
-  if (PLAYABLE) playBtn.addEventListener("click", togglePlay);
-  else playBtn.style.display = "none";
+// MORPH: from one frame to the next in `MORPH` eased steps, the points matched by rank ( same count ); only the point
+// positions move, the rest of the scene is the frame's. A hold of a moment on each frame.
+const MORPH = __MORPH__, LOOP = __LOOP__, HOLD = MORPH > 0 ? Math.round(0.8 * FPS) : 0;
+function pointPositions(f) {                           // the projected positions of the points of frame `f`
+  const v0 = FR_PNT[f], v1 = FR_PNT[f + 1], out = new Float32Array((v1 - v0) * 3);
+  for (let i = 0; i < v1 - v0; i++) {
+    const v = PNT_V[v0 + i];
+    out[3 * i] = PR[3 * v]; out[3 * i + 1] = PR[3 * v + 1]; out[3 * i + 2] = PR[3 * v + 2];
+  }
+  return out;
 }
+let sub = 0, hold = 0, morphA = null, morphB = null;
+function step() {
+  if (hold > 0) { hold--; return; }
+  const next = nextFrame();
+  if (next < 0) { stopPlaying(); return; }
+  const n0 = FR_PNT[frameIdx + 1] - FR_PNT[frameIdx], n1 = FR_PNT[next + 1] - FR_PNT[next];
+  if (MORPH > 0 && n0 === n1 && n0 > 0) {
+    if (sub === 0) { morphA = PNT.pos.slice(); morphB = pointPositions(next); }
+    if (++sub < MORPH) {
+      const t = 0.5 - 0.5 * Math.cos(Math.PI * sub / MORPH);
+      for (let k = 0; k < morphA.length; k++) PNT.pos[k] = morphA[k] + t * (morphB[k] - morphA[k]);
+      up(buf.pntPos, PNT.pos);
+      draw();
+      return;
+    }
+    sub = 0;
+  }
+  setFrame(next);
+  hold = HOLD;
+}
+// plays axis `a` ( by default the one with the focus, else the first playable ); again on the axis being played: pause
+function togglePlay(a) {
+  if (a === undefined) a = PLAYABLE[focusAxis] && axRows[focusAxis] ? focusAxis : (playing >= 0 ? playing : playableAxes[0]);
+  if (a === undefined || a < 0 || !axRows[a] || !PLAYABLE[a]) return;
+  const was = playing;
+  stopPlaying();
+  if (was === a) return;
+  playing = a; focusAxis = a;
+  axRows[a].btn.innerHTML = "&#10074;&#10074;"; axRows[a].btn.classList.add("on");
+  if (curRanks()[a] >= AX_VALS[a].length - 1 && !LOOP) { const r = curRanks(); r[a] = 0; setFrame(frameFor(r, a)); }
+  sub = 0; hold = 0;
+  playTimer = setInterval(step, 1000 / FPS);
+}
+if (playableAxes.length && (URL_OPTS.has("play") ? URL_OPTS.get("play") !== "0" : __AUTOPLAY__)) setTimeout(() => togglePlay(playableAxes[0]), 400);
 
 // ============================================================================================
 // panel: opacity, radius, viewed dimensions, slices
 // ============================================================================================
 function syncLabels() {
   document.getElementById("opVal").textContent = parseFloat(ui.op.value).toFixed(2);
-  document.getElementById("rVal").textContent = pointRadius().toPrecision(3);
+  document.getElementById("rVal").textContent = PNT_SIZED ? "\u00d7 " + (pointRadius() / R0).toPrecision(3) : pointRadius().toPrecision(3);
   document.getElementById("edlVal").textContent = edlStrength().toFixed(0);
+  document.getElementById("aoKVal").textContent = parseFloat(ui.aoK.value).toFixed(2);
+  document.getElementById("aoRVal").textContent = parseFloat(ui.aoR.value).toFixed(1);
   draw();
 }
 ui.op.addEventListener("input", syncLabels);
@@ -1959,8 +2255,15 @@ ui.faces.addEventListener("change", draw);
 ui.points.addEventListener("change", draw);
 ui.edgeMode.addEventListener("change", draw);
 ui.edl.addEventListener("change", draw);
+ui.depth.addEventListener("change", draw);
+ui.depth.checked = URL_OPTS.has("depth") ? URL_OPTS.get("depth") !== "0" : __DEPTHCOL__;
+ui.op.value = URL_OPTS.has("opacity") ? URL_OPTS.get("opacity") : __FACE_OP__;
 ui.edlK.addEventListener("input", syncLabels);
+ui.ao.addEventListener("change", draw);
+ui.aoK.addEventListener("input", syncLabels);
+ui.aoR.addEventListener("input", syncLabels);
 if (D >= 3) document.getElementById("edlBox").style.display = "block";
+if (D >= 3) document.getElementById("depthLbl").style.display = "block";
 if (PNT_V.length === 0) document.getElementById("ptBox").style.display = "none";
 
 // beyond 3 dimensions: we choose the 3 we look at, and fix the others (the SLICE).
@@ -2011,34 +2314,50 @@ if (FLAT) {
   document.getElementById("hArrows").textContent = "move (Shift/Ctrl: faster)";
 }
 
-// dark mode: system preference at load, then toggled with [d].
+// dark mode: `?theme=dark|light`, else the theme of the page that embeds this one ( its `dark` class, followed live: a
+// VitePress page, same origin ), else the system preference; then toggled with [d]. Colors given per theme switch with it.
+let sceneBuilt = false;
 (function () {
   const ml = window.matchMedia("(prefers-color-scheme: dark)");
-  let cur = ml.matches;
+  const asked = URL_OPTS.get("theme");
+  let host = null;
+  try { if (window.parent !== window) host = window.parent.document.documentElement; } catch (e) { host = null; }
+  let cur = asked ? asked === "dark" : host ? host.classList.contains("dark") : ml.matches;
   function setTheme(on) {
     cur = on;
     document.body.classList.toggle("dark", on);
     document.body.dataset.theme = on ? "dark" : "light";
     document.getElementById("modeLabel").textContent = on ? "dark" : "light";
+    const pal = on ? COLORS_DARK : COLORS;
+    if (pal !== PAL) { PAL = pal; if (sceneBuilt) buildScene(); }
     draw();
   }
   setTheme(cur);
-  ml.addEventListener("change", e => setTheme(e.matches));
+  if (!asked && host)
+    new MutationObserver(() => setTheme(host.classList.contains("dark"))).observe(host, { attributes: true, attributeFilter: ["class"] });
+  else if (!asked)
+    ml.addEventListener("change", e => setTheme(e.matches));
   document.addEventListener("keydown", e => {
     if ((e.key === "d" || e.key === "D") && e.target.tagName !== "SELECT" && e.target.tagName !== "INPUT")
       { e.preventDefault(); setTheme(!cur); }
   });
 })();
 
+// the view refits the box on a resize until the user moves it
+let viewUntouched = true;
+canvas.addEventListener("pointerdown", () => { viewUntouched = false; }, { passive: true });
+canvas.addEventListener("wheel", () => { if (wheelEnabled) viewUntouched = false; }, { passive: true });
+canvas.addEventListener("touchstart", () => { if (touchEnabled) viewUntouched = false; }, { passive: true });
+window.addEventListener("keydown", () => { viewUntouched = false; });
 window.addEventListener("resize", resize);
 projectPool();
 setFrame(NB_FRAMES - 1);          // the final state first -- it is what we want to see first
 syncLabels();
 resize();                         // BEFORE framing: the latter depends on the window's aspect ratio
 resetView();
-// The time bar takes the focus: the arrows drive it NATIVELY (and Home/End too),
+// The bar of an axis takes the focus: the arrows drive it NATIVELY (and Home/End too),
 // without taking anything away from the camera -- a click on the view gives the arrows back to the orbit.
-if (NB_FRAMES > 1) tSlider.focus();
+if (focusAxis >= 0) axRows[focusAxis].inp.focus({ preventScroll: true });
 </script>
 </body>
 </html>

@@ -1680,6 +1680,51 @@ struct HostLinear {
         cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( copy of the direction )" );
         return true;
     }
+
+    /// WITH A SINK ( partial transport ): `( L + diag( s ) ) x = b`, `s` the cells' couplings with the sink ( `sph_dev`, ranks ), whose
+    /// weight is the gauge. Solved as the CPU does ( `sdotplan/Sweep.h`: the sink one more seed ): the laplacian bordered by the
+    /// sink, index `n`, its row the opposite of the others' sum, and `x - x_sink`. `prepare` takes `n + 1`
+    bool solve_with_sink( const CudaQueue &queue, const CsrView<TC> &A, const double *sph_dev, const double *b_dev, double *x_dev ) {
+        const SI n = A.n;
+        std::vector<SI> row( n + 1 );
+        read_back( queue, row.data(), A.row, n + 1 );
+        const SI nnz = row[ n ];
+        std::vector<TC> cl( nnz );
+        std::vector<double> c( nnz ), dia( n ), sph( n );
+        b.resize( n + 1 );
+        read_back( queue, cl.data(), A.col, nnz );
+        read_back( queue, c.data(), A.val, nnz );
+        read_back( queue, dia.data(), A.dia, n );
+        read_back( queue, sph.data(), sph_dev, n );
+        read_back( queue, b.data(), b_dev, n );
+        SI ns = 0;
+        for ( SI i = 0; i < n; ++i ) ns += sph[ i ] > 0;
+        L.n = n + 1;
+        L.row.assign( n + 2, 0 );
+        L.col.resize( nnz + 2 * ns );
+        L.c.resize( nnz + 2 * ns );
+        L.dia.assign( n + 1, 0.0 );
+        SI q = 0;
+        double bs = 0;
+        for ( SI i = 0; i < n; ++i ) {
+            for ( SI e = row[ i ]; e < row[ i + 1 ]; ++e ) { L.col[ q ] = SI( cl[ e ] ); L.c[ q ] = c[ e ]; ++q; }
+            L.dia[ i ] = dia[ i ];
+            if ( sph[ i ] > 0 ) { L.col[ q ] = n; L.c[ q ] = sph[ i ]; ++q; L.dia[ i ] += sph[ i ]; L.dia[ n ] += sph[ i ]; }
+            L.row[ i + 1 ] = q;
+            bs += b[ i ];
+        }
+        for ( SI i = 0; i < n; ++i )
+            if ( sph[ i ] > 0 ) { L.col[ q ] = i; L.c[ q ] = sph[ i ]; ++q; }
+        L.row[ n + 1 ] = q;
+        b[ n ] = - bs;
+        if ( ! lin->solves( L, b, d ) )
+            return false;
+        const double g = d[ n ];
+        for ( SI i = 0; i < n; ++i ) d[ i ] -= g;
+        cuda_check( cudaMemcpyAsync( x_dev, d.data(), sizeof( double ) * n, cudaMemcpyHostToDevice, queue.stream ), "copy of the direction" );
+        cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( copy of the direction )" );
+        return true;
+    }
 };
 
 } // namespace sdot::gpu2d

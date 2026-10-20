@@ -305,6 +305,40 @@ class PeriodicSetup:
         keep = ( images @ u.T <= o[ None, : ] + 1e-9 * scale ).all( axis = 0 )
         self.boundaries = ( dirs[ keep ], offs[ keep ] )
 
+    def maps_meeting( self, lo, hi ):
+        """the elements of the group whose image of the box `[ lo, hi ]` meets the start box, as affine maps `[ m, d, d + 1 ]`,
+        the identity first: where a density whose mass lies in that box ( a gaussian and its tails ) has images that a cell can
+        see ( `Distribution.periodized` ). Found by a walk on the words, through the elements whose image stays within the size
+        of the two boxes."""
+        d = self.nb_dims
+        lo, hi = np.asarray( lo, dtype = float ), np.asarray( hi, dtype = float )
+        slo, shi = self.start_lo, self.start_hi
+        scale = max( float( np.abs( shi - slo ).max() ), 1e-300 )
+        reach = ( hi - lo ) + ( shi - slo )
+        def near( a, margin ):
+            blo, bhi = _image_box( a, lo, hi )
+            return ( ( blo < shi + margin ) & ( bhi > slo - margin ) ).all()
+        eye = np.concatenate( [ np.eye( d ), np.zeros( ( d, 1 ) ) ], axis = 1 )
+        moves = [ g for g in self.generators ] + [ _inverse( g ) for g in self.generators ]
+        maps, seen, front = [ eye ], { _key( eye, scale ) }, [ eye ]
+        while front:
+            nxt = []
+            for a in front:
+                for m in moves:
+                    b = _compose( m, a )
+                    k = _key( b, scale )
+                    if k in seen or not near( b, reach ):
+                        continue
+                    seen.add( k )
+                    nxt.append( b )
+                    if near( b, 0.0 ):
+                        maps.append( b )
+                    if len( seen ) > self.MAX_IMAGES:
+                        raise ValueError( "periodicity: the group has too many elements near the support of the density -- is it "
+                                          "discrete, and is the support a fundamental domain of it?" )
+            front = nxt
+        return np.array( maps )
+
     # ---- the rings -----------------------------------------------------------------------------------
 
     def support_vertices( self ):
@@ -450,7 +484,7 @@ def wrap( positions, periodicity, target = None ):
     What the solver does to the seeds before building the cells ( `PeriodicSetup.fold` ); the results come back unfolded."""
     pos = np.asarray( positions, dtype = float )
     d = pos.shape[ -1 ]
-    support = None if target is None else target.bounding_half_spaces()
+    support = None if target is None else target.periodic_support()
     gens = generators_of( periodicity, d, support )
     if gens is None:
         return pos

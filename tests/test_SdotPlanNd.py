@@ -466,6 +466,35 @@ if test( "the_continuation_solves_what_direct_newton_cannot" ):
     assert numpy.allclose( got, _target_masses( plan ), rtol = 1e-5 ), numpy.abs( got / _target_masses( plan ) - 1 ).max()
 
 
+if test( "auto_continues_when_the_plain_newton_fails_from_an_admissible_start" ):
+    # a start whose cells all pass the threshold ( so `"auto"` tries the plain Newton first ), and a plain Newton that fails on
+    # it: the continuation then runs from the same start ( `sdotplan/Solve.h` ). Found on the 12000 diracs of a word carried to
+    # bands of waves, there at `max_iter = 100`; here in small, the threshold lowered and `max_iter` cut so that the plain
+    # Newton fails
+    import numpy
+    from loom.testing import need
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.distributions._bernstein import from_function
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    need( "cpu" )
+    tau = 2 * numpy.pi
+    funcs = [ lambda x: 0.15 + 0.10 * numpy.sin( tau * 2 * x[ :, 1 ] ),                                 # two bands of waves, a jump
+              lambda x: 1.00 + 0.80 * numpy.sin( tau * ( 3 * x[ :, 1 ] + 2 * x[ :, 0 ] ) ) ]
+    band = ( numpy.arange( 8 ) >= 3 )[ :, None ] * numpy.ones( 4, int )
+    coeffs = sum( ( band == i )[ ..., None ] * from_function( f, ( 8, 4 ), 2, hi = [ 1, 0.5 ] ) for i, f in enumerate( funcs ) )
+    target = Image( coeffs, degree = 2, frame = [ 1, 0.5 ] )
+    pos = numpy.random.default_rng( 0 ).uniform( 0, 1, ( 100, 2 ) ) * [ 0.35, 0.5 ]            # ( all in the light band )
+    settings = dict( max_iter = 20, on_failure = "ignore", tuning = Tuning( conv_threshold = 1e-6 ) )
+    plain = OtProblem( SumOfDiracs( pos ), target ).solve( Iterative( continuation = "never", **settings ) )
+    assert not plain.converged, plain.stats
+    plan = OtProblem( SumOfDiracs( pos ), target ).solve( Iterative( **settings ) )
+    assert plan.converged, plan.stats
+    assert plan.stats[ "nb_continuation_steps" ] > 1 and plan.stats[ "nb_iter" ] > 20, plan.stats  # ( the plain stage first )
+    got = numpy.asarray( plan.cell_masses ).reshape( -1 )
+    assert numpy.allclose( got, _target_masses( plan ), rtol = 1e-6 ), numpy.abs( got / _target_masses( plan ) - 1 ).max()
+
+
 if test( "the_domain_comes_from_the_density_alone" ):
     import numpy
     from loom.testing import need
@@ -1162,7 +1191,7 @@ def _cpu_solve( pos, nu, target, it, tun ):
     with tempfile.TemporaryDirectory() as tmp:
         fi, fo = os.path.join( tmp, "in.pkl" ), os.path.join( tmp, "out.pkl" )
         pickle.dump( dict( pos = pos, nu = nu, target = target, it = it, tun = tun ), open( fi, "wb" ) )
-        env = dict( os.environ, LOOM_DEVICE = "cpu" )
+        env = dict( os.environ, LOOM_DEVICE = "cpu", JAX_PLATFORMS = "cpu" )   # ( jax off the card too: a full or shared card refuses it )
         r = subprocess.run( [ sys.executable, "-c", _CPU_SOLVE, fi, fo ], env = env, capture_output = True, text = True )
         assert r.returncode == 0, r.stdout[ -3000: ] + r.stderr[ -3000: ]
         return pickle.load( open( fo, "rb" ) )
@@ -2090,6 +2119,41 @@ if test( "the_card_solves_gaussians_in_3d" ):
     assert plan.converged, st
     assert abs( m.sum() / box - 1 ) < 1e-10 and abs( st[ "domain_mass" ] / box - 1 ) < 1e-10, ( m.sum(), st[ "domain_mass" ], box )
     assert cpu[ "stats" ][ "status" ] == "converged", cpu[ "stats" ]
+    assert gap < 1e-7 and cgap < 1e-9 and bgap < 1e-6, ( gap, cgap, bgap )
+
+
+if test( "the_card_walks_the_gaussian_tree_as_the_cpu" ):
+    import numpy
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from errand import skip
+    if not _card():
+        skip( "the card's solver needs a CUDA device" )
+    # from 16 gaussians on, the card walks the CPU's tree ( `GaussianTree.h`, `Density3D.cuh::gauss3_fill` ): each cell sees the
+    # terms that weigh on it, groups merged at the width of the stage. Narrow bumps along a knot, a continuation through every
+    # stage: the same plan as the CPU's
+    rng = numpy.random.default_rng( 406 )
+    k, n = 48, 1500
+    u = 2 * numpy.pi * numpy.arange( k ) / k
+    c = 0.5 + numpy.stack( [ numpy.sin( u ) + 2 * numpy.sin( 2 * u ), numpy.cos( u ) - 2 * numpy.cos( 2 * u ), - numpy.sin( 3 * u ) ], -1 ) / 9
+    target = ( "gauss", dict( positions = c, sigmas = numpy.full( k, 0.03 ), weights = rng.uniform( 0.5, 1.5, k ) ) )
+    pos = c[ rng.integers( 0, k, n ) ] + 0.03 * rng.standard_normal( ( n, 3 ) )
+    nu = numpy.full( n, 1 / n )
+    it = dict( tol = 1e-10 / n, max_iter = 100, continuation = "always" )
+    plan = OtProblem( SumOfDiracs( pos, nu ), _make_target( target ) ).solve( Iterative( **it ) )
+    st = plan.stats
+    cpu = _cpu_solve( pos, nu, target, it, {} )
+    wc = cpu[ "weights" ]
+    w = numpy.asarray( plan.weights ).reshape( -1 )
+    gap = numpy.abs( ( w - w.mean() ) - ( wc - wc.mean() ) ).max() / numpy.abs( wc - wc.mean() ).max()
+    cgap = abs( float( plan.cost ) / cpu[ "cost" ] - 1 )
+    bgap = numpy.abs( numpy.asarray( plan.barycenters ) - cpu[ "bary" ] ).max() * n ** ( 1 / 3 )
+    print( f"  card { st[ 'status' ] } { st[ 'nb_iter' ] } it / { st[ 'nb_diag' ] } diag / { st[ 'nb_continuation_steps' ] } stages; cpu "
+           f"{ cpu[ 'stats' ][ 'status' ] } { cpu[ 'stats' ][ 'nb_continuation_steps' ] } stages: weights gap { gap :.1e}, cost gap "
+           f"{ cgap :.1e}, barycentres gap { bgap :.1e}" )
+    assert plan.converged and cpu[ "stats" ][ "status" ] == "converged", ( st, cpu[ "stats" ] )
+    assert st[ "nb_continuation_steps" ] > 1, st
     assert gap < 1e-7 and cgap < 1e-9 and bgap < 1e-6, ( gap, cgap, bgap )
 
 

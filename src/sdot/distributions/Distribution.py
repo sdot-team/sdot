@@ -117,8 +117,12 @@ class Distribution( Aggregate ):
 
     @property
     def domain( self ):
-        """The support as half-spaces `( directions, offsets )`, or `None` ( `bounding_half_spaces` ). `periodicity = target.domain` pairs its opposite facets."""
-        return self.bounding_half_spaces()
+        """The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets.
+
+        = Internals
+
+        `periodic_support`: the support without the margin a `Mesh` adds to it ( `bounding_half_spaces` )."""
+        return self.periodic_support()
 
     def bounding_half_spaces( self ):
         """The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
@@ -154,6 +158,26 @@ class Distribution( Aggregate ):
         largest one -- it must be inside, and not tiny. `None` ( the default ) says "do not know": the solver then uses the
         box of the domain, right when the density is positive on all of it ( a box, an image without holes ), wrong when the
         support is a triangle or a mesh -- those override this."""
+        return None
+
+    def periodic_support( self ):
+        """= Internals
+
+        The FUNDAMENTAL DOMAIN that a periodicity repeats ( half-spaces, as `bounding_half_spaces` ): what `periodicity = True`
+        reads its periods from, and where the seeds are folded. The support itself by default; a distribution whose support
+        carries a margin ( a `Mesh` ) gives it without."""
+        return self.bounding_half_spaces()
+
+    def periodized( self, setup ):
+        """= Internals
+
+        The distribution AND ITS IMAGES by the group of a periodicity ( `setup`, a `periodicity.PeriodicSetup` ), as one plain
+        distribution of the same kind: every image that can bring mass into a cell ( into the start box `setup.start_lo / hi` ),
+        copied. The images are differentiable functions of the parameters ( the framework's operations ), so the derivatives
+        go back to them by themselves.
+
+        `None` ( the default ): the distribution integrates itself moved instead, in the kernels ( `for_each_piece_moved`,
+        `Periodic.h`: `Image`, `Polytope` ), against the images that the diagram walks."""
         return None
 
     #: a distribution the C++ cannot blur may spread itself for the width continuation: `spread( k )` ( the same distribution, wider

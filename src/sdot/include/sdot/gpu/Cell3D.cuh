@@ -1361,8 +1361,10 @@ __device__ __forceinline__ void finish_warp( const Pb &pb, typename Pb::TR k, co
             fmask[ q ] = __ballot_sync( FULL, has );
         }
         auto has_face = [&]( int j ) { return j >= 32 * FM || ( ( fmask[ j >> 5 ] >> ( j & 31 ) ) & 1u ); };
-        double fl[ FAC ? FL : 1 ];
-        if constexpr ( FAC )
+        // ( the gaussians reduce their facets straight into `fmine`: no `FL` doubles per lane, see `gauss3_cell` )
+        constexpr bool GAUSS = std::is_same_v<typename Pb::D,gpu3d::DensGauss3>;
+        double fl[ FAC && ! GAUSS ? FL : 1 ];
+        if constexpr ( FAC && ! GAUSS )
             for ( int j = 0; j < nfl; ++j ) fl[ j ] = 0;
         if ( c.nv > 0 ) {
             const double O[ 3 ] = { o.x, o.y, o.z }, G[ 3 ] = { gx, gy, gz };
@@ -1459,11 +1461,11 @@ __device__ __forceinline__ void finish_warp( const Pb &pb, typename Pb::TR k, co
                         }
                     }
                 };
-                gpu3d::gauss3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, c.pl, c.nc, lo, hi, lane, dtot, fl, face_edges, has_face );
+                gpu3d::gauss3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, c.pl, c.nc, lo, hi, lane, dtot, fmine, face_edges, has_face );
             } else
                 gpu3d::mesh3_cell<MOM,FAC,FAC ? FL : 0>( pb.dens, O, G, c.pl, c.nc, lo, hi, L, lane, dtot, fl, face, has_face );
         }
-        if constexpr ( FAC )
+        if constexpr ( FAC && ! GAUSS )
             for ( int j = 0; j < nfl; ++j ) {
                 const double v = warp_sum( fl[ j ] );
                 if ( ( j & 31 ) == lane ) fmine[ j >> 5 ] = v;

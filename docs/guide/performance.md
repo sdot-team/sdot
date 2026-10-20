@@ -8,8 +8,8 @@ scale with the number of diracs and with the dimension. Every number comes from 
 
 | machine | hardware | used for |
 |---|---|---|
-| `lmo` | Xeon W-2145 (8 cores, 8 pinned threads), RTX 2080 Ti (Turing, FP64 at 1/32) | CPU, 2D GPU |
-| `n22` | RTX A6000 (Ampere, 48 GB, FP64 at 1/64) | 3D GPU, 2D GPU at 1e6 |
+| `1` | Xeon W-2145 (8 cores, 8 pinned threads), RTX 2080 Ti (Turing, FP64 at 1/32) | CPU, 2D GPU |
+| `2` | RTX A6000 (Ampere, 48 GB, FP64 at 1/64) | 3D GPU, 2D GPU at 1e6 |
 
 Protocol:
 
@@ -77,7 +77,7 @@ before it starts.
 
 ## Scaling with the dimension
 
-Lebesgue on the unit hypercube, diracs drawn uniformly, a cold start, `rtol = 1e-6`. CPU `lmo`, 8 pinned threads,
+Lebesgue on the unit hypercube, diracs drawn uniformly, a cold start, `rtol = 1e-6`. CPU `1`, 8 pinned threads,
 double kernel, `step = trials`. One run per row (3 for 4D at 1e5). 6D at 1e3: 9 min (5 / 7).
 
 | dim | total, n = 1e4 | Newton it. / diagrams | one diagram, per dirac (n = 1e4) | vertices per cell |

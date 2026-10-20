@@ -22,6 +22,7 @@
 
 #include "Reduce.cuh"
 #include "Density3D.cuh"
+#include "../GaussianTree.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -372,14 +373,25 @@ struct Mesh3DensityHost {
     void   at( const CudaQueue &, double, bool ) {}
 };
 
-/// gaussians in 3D: the same as `GaussDensityHost`, the centres `[ nb, 3 ]`
+/// gaussians in 3D: the same as `GaussDensityHost`, the centres `[ nb, 3 ]` -- and, from `min_for_tree` gaussians on, THE TREE of the
+/// CPU ( `GaussianTree.h`, as `sdotplan/convolved/SumOfGaussians.h` builds it ): built here once ( one read back of the gaussians ),
+/// copied to the card, walked by each cell ( `Density3D.cuh::gauss3_fill` ). A stage only changes `s2`: the widths of the terms and
+/// the groups that merge are computed by the walk.
 struct Gauss3DensityHost {
     using Dev = gpu3d::DensGauss3;
+    using Tree = GaussianTree<double,3>;
+    static constexpr SI min_for_tree = 16;               ///< `Convolved<SumOfGaussians>::min_for_tree`
     Dev     dev{};
     static constexpr bool possible = true;
     SI      nb = 0;
     double *c = nullptr, *sigma = nullptr, *s = nullptr, *w = nullptr;
     double  cur = -1;
+    Tree    tree;
+    SI      nn = 0;                                      ///< the nodes on the card ( 0: no tree )
+    double *nd = nullptr, *it = nullptr;
+    int    *nl = nullptr;
+    std::vector<double> h_nd, h_it;                      ///< ( the host's copies outlive the asynchronous copies )
+    std::vector<int>    h_nl;
 
     template<class In>
     bool prepare( const CudaQueue &queue, auto &allocator, const In &in, const double * ) {
@@ -396,8 +408,61 @@ struct Gauss3DensityHost {
             launch_kernel( queue, &gather_doubles<TS>, blocks_for( nb ), BLOCK, 0, nb, strided( in.sigma ), sigma );
             launch_kernel( queue, &gather_doubles<TM>, blocks_for( nb ), BLOCK, 0, nb, strided( in.mass ), w );
         }
+        return nb < min_for_tree || prepare_tree( queue, allocator );
+    }
+
+    /// the tree, on the host then on the card ( see the class )
+    bool prepare_tree( const CudaQueue &queue, auto &allocator ) {
+        std::vector<double> hc( 3 * nb ), hs( nb ), hw( nb );
+        read_back( queue, hc.data(), ( const double * ) c, 3 * nb );
+        read_back( queue, hs.data(), ( const double * ) sigma, nb );
+        read_back( queue, hw.data(), ( const double * ) w, nb );
+        tree.build( int( nb ), [&]( int i, double *x, double &si, double &wi ) {
+            for ( int d = 0; d < 3; ++d ) x[ d ] = hc[ 3 * i + d ];
+            si = hs[ i ];
+            wi = hw[ i ];
+        } );
+        // its depth: the walk's stack is one slot per lane ( `gauss3_fill` ), 32 slots for at most the depth plus one entries
+        std::vector<int> depth( tree.nodes.size(), 0 );
+        int max_depth = 0;
+        for ( std::size_t k = 0; k < tree.nodes.size(); ++k ) {
+            max_depth = std::max( max_depth, depth[ k ] );
+            if ( tree.nodes[ k ].left >= 0 )
+                depth[ tree.nodes[ k ].left ] = depth[ tree.nodes[ k ].right ] = depth[ k ] + 1;
+        }
+        if ( max_depth > 30 )                            // ( more than 4e9 gaussians: every cell sees every gaussian )
+            return true;
+        const SI m = SI( tree.nodes.size() );
+        h_nd.resize( std::size_t( Dev::ND ) * m );
+        h_nl.resize( std::size_t( 4 ) * m );
+        for ( SI k = 0; k < m; ++k ) {
+            const auto &n = tree.nodes[ k ];
+            double *o = h_nd.data() + Dev::ND * k;
+            for ( int d = 0; d < 3; ++d ) { o[ d ] = n.lo[ d ]; o[ 3 + d ] = n.hi[ d ]; o[ 6 + d ] = n.mu[ d ]; }
+            o[ 9 ] = n.mass; o[ 10 ] = n.var; o[ 11 ] = n.s_min; o[ 12 ] = n.s_max; o[ 13 ] = n.radius;
+            int *l = h_nl.data() + 4 * k;
+            l[ 0 ] = n.begin; l[ 1 ] = n.end; l[ 2 ] = n.left; l[ 3 ] = n.right;
+        }
+        h_it.resize( std::size_t( 5 ) * nb );
+        for ( SI i = 0; i < nb; ++i ) {
+            const auto &t = tree.items[ i ];
+            double *o = h_it.data() + 5 * i;
+            o[ 0 ] = t.c[ 0 ]; o[ 1 ] = t.c[ 1 ]; o[ 2 ] = t.c[ 2 ]; o[ 3 ] = t.s; o[ 4 ] = t.w;
+        }
+        nd = vec_of<double>( allocator, h_nd.size() );
+        nl = vec_of<int>( allocator, h_nl.size() );
+        it = vec_of<double>( allocator, h_it.size() );
+        if ( ! nd || ! nl || ! it )
+            return false;
+        cuda_check( cudaMemcpyAsync( nd, h_nd.data(), sizeof( double ) * h_nd.size(), cudaMemcpyHostToDevice, queue.stream ), "copy of the gaussian tree" );
+        cuda_check( cudaMemcpyAsync( nl, h_nl.data(), sizeof( int ) * h_nl.size(), cudaMemcpyHostToDevice, queue.stream ), "copy of the gaussian tree" );
+        cuda_check( cudaMemcpyAsync( it, h_it.data(), sizeof( double ) * h_it.size(), cudaMemcpyHostToDevice, queue.stream ), "copy of the gaussian tree" );
+        nn = m;
         return true;
     }
+
+    template<class T>
+    static T *vec_of( auto &allocator, std::size_t m ) { return static_cast<T *>( take( allocator, SI( sizeof( T ) * std::max<std::size_t>( m, 1 ) ) ) ); }
 
     /// `smallest_sigma / 4` ( one read back of the widths )
     double min_scale( const CudaQueue &queue ) const {
@@ -410,6 +475,10 @@ struct Gauss3DensityHost {
     }
 
     void at( const CudaQueue &queue, double sc, bool ) {
+        if ( nn ) {                                      // the walk convolves
+            dev = Dev{ nb, c, sigma, w, nn, nd, nl, it, sc * sc, tree.theta, sc > 0 ? tree.eps : tree.eps_exact };
+            return;
+        }
         if ( sc != cur && nb > 0 )
             launch_kernel( queue, &gauss_widths, blocks_for( nb ), BLOCK, 0, nb, ( const double * ) sigma, sc, s );
         cur = sc;

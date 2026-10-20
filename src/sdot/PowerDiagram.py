@@ -119,6 +119,10 @@ class PowerDiagram( Aggregate, Displayable ):
     # sink_weight` only ( `integration/InBall.h` ). Absent: the whole cell.
     sink_weight     : RealTensor
 
+    # A RADIAL INTEGRAND ( `radial_func = RadialExp( eps )` ): the cell of seed `i` integrates `rho( x ) exp( ( w_i - |x - p_i|² ) /
+    # ( 2 eps ) )` ( `integration/RadialExp.h` ). Absent: `rho` alone.
+    radial_eps      : RealTensor
+
     num_start      : Axis[ "nb_starts" ]
     num_topo       : Axis[ "nb_topo" ]
     nb_starts      : ShapeVar
@@ -160,7 +164,7 @@ class PowerDiagram( Aggregate, Displayable ):
 
     def __init__( self, positions, weights = None, boundaries = None, accelerator = None,
                   distribution = None, kernel_dtype = None, scratch_capacity = None, memory = None, periodicity = None,
-                  sink_weight = None, groups = None ):
+                  sink_weight = None, groups = None, radial_func = None ):
         """`positions`: `[ n, d ]`. `weights`: `[ n ]`, or nothing ( the Euclidean case ). The domain:
 
         - `boundaries = ( directions, offsets )` -- the half-spaces `direction . x <= offset`.
@@ -189,7 +193,15 @@ class PowerDiagram( Aggregate, Displayable ):
 
         `sink_weight`: a SINK, the transport being PARTIAL. The cell of seed `i` stays its Laguerre cell, but what is integrated over it
         ( `measures`, `moments`, `hessian_rows` ) is the density inside the ball `|x - p_i|² <= w_i - sink_weight` only: the mass
-        beyond goes to the sink. In 2D, with a density constant on pieces ( `Image`, `Box`, `Polygon`, or none ).
+        beyond goes to the sink. In 2D, with a density constant on pieces ( `Image`, `Box`, `ConvexHull`, or none ) or affine on them
+        ( `Mesh` ).
+
+        `radial_func`: a function of the power distance to the seed, which each cell integrates times the density ( `radial_funcs.py` ).
+        `RadialExp( eps )`: the cell of seed `i` integrates `rho( x ) exp( ( w_i - |x - p_i|² ) / ( 2 eps ) )` -- the measure of the
+        Moreau-Yosida regularization of the entropy. `measures`, `moments` and `hessian_rows` take it into account ( the hessian
+        rows then have one more slot, the cell's own identifier, for what is not on the facets: `m_i / ( 2 eps )` ). In 2D, with a
+        density constant on pieces. Differentiable with respect to the positions, the weights and the values of the density
+        ( not the frame of an `Image` ).
 
         `memory`: with the BSP tree, the diagram REMEMBERS, per seed, the neighbors of its cell
         at the last `measures` and proposes them first to the next one ( `ProviderBsp`, `MEMO` ) --
@@ -218,7 +230,9 @@ class PowerDiagram( Aggregate, Displayable ):
             pshape = positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
             if len( pshape ) == 2:
                 distribution = distribution.normalized_version( nb_dims = int( pshape[ 1 ] ) )
-            support = distribution.bounding_half_spaces()
+            # ( with a periodicity: the fundamental domain it repeats, `Distribution.periodic_support` )
+            periodic = periodicity is not None and periodicity is not False
+            support = distribution.periodic_support() if periodic else distribution.bounding_half_spaces()
             if support is not None:
                 if boundaries is None:
                     boundaries = support
@@ -231,6 +245,13 @@ class PowerDiagram( Aggregate, Displayable ):
         self._periodic = None
         if periodicity is not None and periodicity is not False:
             positions, boundaries = self._periodic_setup( positions, boundaries, periodicity )
+        # ... and the density with its images, for one that copies them itself ( `Distribution.periodized` ): the kernels then
+        # integrate it as it is, not moved by the images of the diagram
+        self._periodized = False
+        if self._periodic is not None and distribution is not None:
+            images = distribution.periodized( self._periodic )
+            if images is not None:
+                distribution, self._periodized = images, True
 
         # no domain -> we do NOT name the two tensors: leaving them `Unbound` ( never
         # allocated, `NoneTensor` C++ side ) is not the same thing as passing them `None`.
@@ -238,6 +259,9 @@ class PowerDiagram( Aggregate, Displayable ):
         if sink_weight is not None:
             self._check_sink( positions, distribution )
             kwargs[ "sink_weight" ] = RealTensor( getattr( sink_weight, "raw", sink_weight ) ) if loom.is_traced( getattr( sink_weight, "raw", sink_weight ) ) else float( sink_weight )
+        if radial_func is not None:
+            self._check_radial( positions, distribution, radial_func, sink_weight )
+            kwargs[ "radial_eps" ] = float( radial_func.eps )
         if self._periodic is not None:
             kwargs[ "periodic_shifts" ] = self._periodic.shifts
             if self._periodic.linear is not None:
@@ -362,13 +386,33 @@ class PowerDiagram( Aggregate, Displayable ):
 
     @staticmethod
     def _check_sink( positions, distribution ):
-        """what a sink ( partial transport ) can integrate today: 2D, a density constant on pieces"""
+        """what a sink ( partial transport ) can integrate today: in 2D a density constant or affine on pieces, in 3D constant"""
+        pshape = positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
+        if len( pshape ) != 2 or int( pshape[ 1 ] ) not in ( 2, 3 ):
+            raise NotImplementedError( "sink_weight ( partial transport ): in 2D and 3D only for now" )
+        if int( pshape[ 1 ] ) == 3 and distribution is not None and not getattr( distribution, "constant_on_pieces", False ):
+            raise NotImplementedError( f"sink_weight ( partial transport ) in 3D: a density constant on pieces only for now ( `Image` of "
+                                       f"degree 0, `Box`, `ConvexHull` ), not { type( distribution ).__name__ }" )
+        if distribution is not None and not getattr( distribution, "constant_on_pieces", False ) \
+                and not getattr( distribution, "affine_on_pieces", False ):
+            raise NotImplementedError( f"sink_weight ( partial transport ): a density constant or affine on pieces only for now ( `Image` "
+                                       f"of degree 0, `Box`, `ConvexHull`, `Mesh` ), not { type( distribution ).__name__ }"
+                                       f"{ ' of degree ' + str( distribution.degree ) if hasattr( distribution, 'degree' ) else '' }" )
+
+    @staticmethod
+    def _check_radial( positions, distribution, radial_func, sink_weight ):
+        """what a radial integrand can integrate today: `RadialExp`, in 2D, a density constant on pieces, no sink"""
+        from .radial_funcs import RadialExp
+        if not isinstance( radial_func, RadialExp ):
+            raise NotImplementedError( f"radial_func: `RadialExp` only for now, not { type( radial_func ).__name__ }" )
         pshape = positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
         if len( pshape ) != 2 or int( pshape[ 1 ] ) != 2:
-            raise NotImplementedError( "sink_weight ( partial transport ): in 2D only for now" )
+            raise NotImplementedError( "radial_func: in 2D only for now" )
         if distribution is not None and not getattr( distribution, "constant_on_pieces", False ):
-            raise NotImplementedError( f"sink_weight ( partial transport ): a density constant on pieces only for now ( `Image`, `Box`, "
-                                       f"`Polygon` ), not { type( distribution ).__name__ }" )
+            raise NotImplementedError( f"radial_func: a density constant on pieces only for now ( `Image` of degree 0, `Box`, `ConvexHull` ), "
+                                       f"not { type( distribution ).__name__ }" )
+        if sink_weight is not None:
+            raise NotImplementedError( "radial_func with a sink ( partial transport ): not written yet" )
 
     # ---- the positions, as given ---------------------------------------------------------------------
     #
@@ -416,8 +460,11 @@ class PowerDiagram( Aggregate, Displayable ):
             return np.concatenate( [ np.eye( d ), np.zeros( ( d, 1 ) ) ], axis = 1 )[ None ]
         return self._periodic.ring( nb_rings )
 
-    def _draw_balls( self, viz, cells, first_color, opacity ):
-        """what a sink leaves to each cell: the cell inter its ball, in the cell's color ( see `add_to_viz` )"""
+    def _draw_balls( self, viz, cells, first_color, opacity, move = None, edge_opacity = 0.6, frames = True, resolution = 96 ):
+        """what a sink leaves to each cell: the cell inter its ball, in the cell's color ( see `add_to_viz` ); moved by the
+        affine map `move` ( `[ M | V ]`, an element of the periodicity ) when given"""
+        if self.dim_count == 3:
+            return self._draw_balls_3d( viz, cells, first_color, opacity, move, edge_opacity, frames, resolution )
         pos = np.asarray( self.positions, dtype = float ).reshape( -1, 2 )
         wt = self.weights
         w = np.asarray( wt, dtype = float ).reshape( -1 ) if getattr( wt, "is_defined", True ) else np.zeros( len( pos ) )
@@ -425,12 +472,77 @@ class PowerDiagram( Aggregate, Displayable ):
         for i in range( len( pos ) ):
             if not r2[ i ] > 0:
                 continue
-            poly = _disc_in_polygon( cells.vertices( i ), pos[ i ], np.sqrt( r2[ i ] ) )
+            poly = _disc_in_polygon( cells.vertices( i ), pos[ i ], np.sqrt( r2[ i ] ), nb = resolution )
             if len( poly ) < 3:
                 continue
+            if move is not None:
+                poly = poly @ move[ :, :2 ].T + move[ :, 2 ]
             col = viz.color_at( first_color + i )
-            viz.add_faces( poly, [ list( range( len( poly ) ) ) ], color = col, opacity = opacity )
-            viz.add_edges( poly, color = "#000000", opacity = 0.6, closed = True )
+            viz.add_faces( poly, [ list( range( len( poly ) ) ) ], color = col, opacity = opacity, frames = frames )
+            viz.add_edges( poly, color = "#000000", opacity = edge_opacity, closed = True, frames = frames )
+
+    def _draw_balls_3d( self, viz, cells, first_color, opacity, move = None, edge_opacity = 0.6, frames = True, resolution = 96 ):
+        """`_draw_balls` in 3D: THE BOUNDARY OF THE MATTER only, what can be seen of it from outside -- the sphere inside each cell
+        ( an icosphere clipped by the faces of the cell, its vertices shared ) and the faces of the cell on the domain inside the
+        ball ( each clipped by the disc of its plane ). The faces between two cells are inside the matter: not drawn. No edges:
+        those of hidden faces, ghosted by the viewer, would clutter the surface."""
+        pos = np.asarray( self.positions, dtype = float ).reshape( -1, 3 )
+        wt = self.weights
+        w = np.asarray( wt, dtype = float ).reshape( -1 ) if getattr( wt, "is_defined", True ) else np.zeros( len( pos ) )
+        r2 = w - float( np.asarray( self.sink_weight, dtype = float ).reshape( -1 )[ 0 ] )
+        # an icosahedron split `l` times has about `5 2^l` points on a great circle
+        sv, st = _icosphere( int( np.clip( np.round( np.log2( max( resolution, 5 ) / 5 ) ), 0, 3 ) ) )
+        items = cells._items()
+        for i in range( min( len( pos ), len( items ) ) ):
+            it = items[ i ]
+            if not r2[ i ] > 0 or it.nb_vertices < 4:
+                continue
+            c, r = pos[ i ], np.sqrt( r2[ i ] )
+            inside = ( ( it.vp - c ) ** 2 ).sum( axis = 1 ) <= r2[ i ]
+            on_domain = ( it.cid < 0 ).any()
+            if inside.all() and not on_domain:
+                continue                                 # inside its ball, among other cells: hidden
+            all_dirs, all_offs = cells._planes_of( it )
+            live = np.abs( all_dirs ).sum( axis = 1 ) > 0
+            dirs, offs = all_dirs[ live ], all_offs[ live ]
+            pts, polys = [], []                          # the vertices, and the polygons as indices into them
+            # the sphere inside the cell: the icosphere clipped as a MESH, the points cut on an edge shared by its two triangles
+            if not inside.all():
+                V, F = _clip_mesh( c + r * sv, st, dirs, offs )
+                if len( F ):
+                    pts.append( V )
+                    polys += F
+            # the faces on the domain, inside the ball
+            nb = sum( len( p ) for p in pts )
+            for cycle, k in cells._faces_and_cuts_of( it ):
+                n = all_dirs[ k ]
+                if it.cid[ k ] >= 0 or not np.abs( n ).sum() > 0:
+                    continue
+                if inside[ cycle ].all():                # the whole face
+                    f3 = it.vp[ cycle ]
+                else:
+                    h = all_offs[ k ] - n @ c            # from the center to the plane, along the outward normal
+                    rho2 = r2[ i ] - h * h
+                    if not rho2 > 0:
+                        continue
+                    q = c + h * n
+                    e1 = np.cross( n, [ 1.0, 0, 0 ] if abs( n[ 0 ] ) < 0.9 else [ 0, 1.0, 0 ] )
+                    e1 /= np.linalg.norm( e1 )
+                    e2 = np.cross( n, e1 )
+                    f = it.vp[ cycle ] - q
+                    f2 = _disc_in_polygon( np.stack( [ f @ e1, f @ e2 ], axis = 1 ), np.zeros( 2 ), np.sqrt( rho2 ), nb = resolution )
+                    if len( f2 ) < 3:
+                        continue
+                    f3 = q + f2[ :, :1 ] * e1 + f2[ :, 1: ] * e2
+                pts.append( f3 )
+                polys.append( list( range( nb, nb + len( f3 ) ) ) )
+                nb += len( f3 )
+            if not polys:
+                continue
+            P = np.concatenate( pts )
+            if move is not None:
+                P = P @ move[ :, :3 ].T + move[ :, 3 ]
+            viz.add_faces( P, polys, color = viz.color_at( first_color + i ), opacity = opacity, frames = frames )
 
     def domain_outline( self ):
         """The support of the periodicity ( the domain of a diagram without one ) as half-spaces `( directions, offsets )`: what a
@@ -537,7 +649,7 @@ class PowerDiagram( Aggregate, Displayable ):
             expr, grad, kwargs = "inputs.power_diagram.unit_density()", "0", {}
         else:
             expr, grad, kwargs = "inputs.distribution", "grad_of_inputs.distribution", { "distribution": self.distribution }
-            if self._periodic is not None:
+            if self._periodic is not None and not self._periodized:
                 # the density and its translates ( `Periodic.h` ): the unfolded cells go beyond its support
                 expr = f"sdot::periodic_dist( { expr }, inputs.power_diagram.periodic_shifts, inputs.power_diagram.periodic_linear )"
         if moment is not None:
@@ -562,9 +674,10 @@ class PowerDiagram( Aggregate, Displayable ):
 
     def _affine_derivable( self ):
         """the integration derives the frame and the origin of the distribution ( an `Image`, `diagram::AffineAcc` ): not through a
-        periodicity ( the translates ) nor in the balls of a partial transport"""
+        periodicity ( the translates ), nor in the balls of a partial transport, nor with a radial integrand"""
         from .distributions.Image import Image
-        return isinstance( self.distribution, Image ) and self._periodic is None and not self.sink_weight.is_defined
+        return isinstance( self.distribution, Image ) and self._periodic is None and not self.sink_weight.is_defined \
+            and not self.radial_eps.is_defined
 
     def _card_laplacian_solve( self, rhs, linear_solver ):
         """`laplacian_solve` on a card, or `None` when the card does not take this diagram"""
@@ -624,6 +737,20 @@ class PowerDiagram( Aggregate, Displayable ):
         if not 0 <= int( k ) <= d + 1:
             raise ValueError( f"moment( { k } ): 0 .. { d - 1 } ( x_k ), { d } ( |x|^2 ) or { d + 1 } ( 1 )" )
         return self._integral( int( k ) )
+
+    @property
+    def sphere_areas( self ) -> Tensor:
+        """With a sink ( partial transport ): the measure of the SPHERE inside each cell, where the density is not zero -- a length in
+        2D, an area in 3D, `[ n ]`; zeros without a sink. What a surface energy counts. Differentiable like `measures`.
+
+        = Internals
+
+        The moment `d + 2` of `diagram/Moments.h`: `InBallDensity` integrates it over the simplices of the pieces ( `r^2 Omega` in 3D,
+        `r` times the angle of the arcs in 2D ) and gives its adjoint, geometric ( `integration/InBall.h`, `InBall3.h` ). A piece of
+        zero density holds no surface: the sphere there is a wall's."""
+        if not self.sink_weight.is_defined:
+            return RealTensor[ self.num_point ]( self.positions.raw[ :, 0 ] * 0 )   # ( the framework and the dtype of the positions )
+        return self._integral( self.dim_count + 2 )
 
     def _integral( self, moment ):
         """`measures` ( `moment = None` ) and `moment`: one sweep, the cell integrated against the density or against a moment of it"""
@@ -969,7 +1096,8 @@ class PowerDiagram( Aggregate, Displayable ):
 
     def add_to_viz( self, viz, seeds = True, seed_color = "#000000", support_only = None, threshold = 0.0,
                     nb_periodicity_rings = 1, opacity_periodicity_rings = 0.25, fit_periodicity_rings = False, domain = None,
-                    domain_color = "#000000", opacity_beyond_balls = 0.2, virtual_seeds = False, virtual_color = "#888888", **kwargs ):
+                    domain_color = "#000000", opacity_beyond_balls = 0.2, ball_resolution = 96, virtual_seeds = False, virtual_color = "#888888",
+                    **kwargs ):
         """Draws itself into a `Visualizer`: all the cells, in one call ( see `cells` ), and the
         seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_to_viz`
         ( `opacity`, `faces`, `edges`, ... ). The quick ways to look at it -- `write_html`,
@@ -986,8 +1114,10 @@ class PowerDiagram( Aggregate, Displayable ):
         the domain ( the support that the group repeats ), dashed, and that of its images -- by default with a periodicity only.
 
         With a sink ( partial transport, `sink_weight` ), the cells are drawn whole, as they are computed, but fainter
-        ( `opacity_beyond_balls` ): what is integrated -- the part of each cell inside its ball -- is drawn on top, in the same
-        color, its arc approximated by a polygon.
+        ( `opacity_beyond_balls`, 0 to leave them out ): what is integrated -- the part of each cell inside its ball -- is
+        drawn on top, in the same color, its arc approximated by a polygon of `ball_resolution` sides ( in 3D: only the boundary of
+        the matter, its spheres by an icosphere of about as many points on a great circle ). A smaller one makes lighter pages,
+        which matters with many cells or many frames.
 
         With GROUPS ( `groups` ), the cells drawn are those of the members, which split the cell of their group; `virtual_seeds`
         adds the virtual diracs of the exact duplicates ( `virtual_color` ), the points their split is the power diagram of."""
@@ -1002,11 +1132,12 @@ class PowerDiagram( Aggregate, Displayable ):
         if domain is None:
             domain = self._periodic is not None
         outline = self.domain_outline() if domain else None
-        balls = self.sink_weight.is_defined and d == 2 and shown is not None
+        balls = self.sink_weight.is_defined and d in ( 2, 3 ) and shown is not None
         first_color = viz.reserve_colors( 0 )          # ( the cells reserve their colors from there: the balls take the same )
+        ball_opacity = kwargs.get( "opacity", 1.0 )
         if balls:
             kwargs = dict( kwargs )
-            kwargs[ "opacity" ] = opacity_beyond_balls * kwargs.get( "opacity", 1.0 )
+            kwargs[ "opacity" ] = opacity_beyond_balls * ball_opacity
             kwargs[ "edge_opacity" ] = 0.5 * kwargs.get( "edge_opacity", 1.0 )
         for k, a in enumerate( maps ):
             first = k == 0
@@ -1015,11 +1146,13 @@ class PowerDiagram( Aggregate, Displayable ):
             if not first:
                 kw[ "opacity" ] = opacity_periodicity_rings * kw.get( "opacity", 1.0 )
                 kw[ "edge_opacity" ] = opacity_periodicity_rings * kw.get( "edge_opacity", 1.0 )
-            if shown is not None:
+            if shown is not None and not ( balls and opacity_beyond_balls == 0 ):   # ( 0: only what the balls hold )
                 cells = shown if first else shown.moved( a )
                 cells.add_to_viz( viz, owners = np.arange( n ) if owners is None else owners, nb_colors = n, frames = frames, **kw )
-            if balls and first:
-                self._draw_balls( viz, shown, first_color, kwargs.get( "opacity", 1.0 ) / opacity_beyond_balls )
+            if balls:
+                fade = 1.0 if first else opacity_periodicity_rings
+                self._draw_balls( viz, shown, first_color, fade * ball_opacity, move = None if first else a,
+                                  edge_opacity = 0.6 * fade, frames = frames, resolution = ball_resolution )
             if seeds:
                 pos = np.asarray( self.positions, dtype = float ).reshape( -1, d )
                 viz.add_points( pos @ a[ :, :d ].T + a[ :, d ], color = seed_color, opacity = 1.0 if first else opacity_periodicity_rings, frames = frames )
@@ -1066,6 +1199,73 @@ def _host_array( x ):
     """a host copy ( float64 ) of a value of any framework"""
     from loom.tensor.host import to_host
     return np.asarray( to_host( getattr( x, "raw", x ) ), dtype = np.float64 )
+
+
+_ICOSPHERES = {}
+
+
+def _icosphere( level ):
+    """the unit sphere: an icosahedron whose triangles are split in 4 `level` times, `( vertices, triangles )`"""
+    if level not in _ICOSPHERES:
+        t = ( 1 + 5 ** 0.5 ) / 2
+        V = [ [ -1, t, 0 ], [ 1, t, 0 ], [ -1, -t, 0 ], [ 1, -t, 0 ], [ 0, -1, t ], [ 0, 1, t ], [ 0, -1, -t ], [ 0, 1, -t ],
+              [ t, 0, -1 ], [ t, 0, 1 ], [ -t, 0, -1 ], [ -t, 0, 1 ] ]
+        F = [ [ 0, 11, 5 ], [ 0, 5, 1 ], [ 0, 1, 7 ], [ 0, 7, 10 ], [ 0, 10, 11 ], [ 1, 5, 9 ], [ 5, 11, 4 ], [ 11, 10, 2 ], [ 10, 7, 6 ],
+              [ 7, 1, 8 ], [ 3, 9, 4 ], [ 3, 4, 2 ], [ 3, 2, 6 ], [ 3, 6, 8 ], [ 3, 8, 9 ], [ 4, 9, 5 ], [ 2, 4, 11 ], [ 6, 2, 10 ],
+              [ 8, 6, 7 ], [ 9, 8, 1 ] ]
+        V = [ np.array( v, float ) / np.linalg.norm( v ) for v in V ]
+        for _ in range( level ):
+            mid, G = {}, []
+            def m( a, b ):
+                key = ( min( a, b ), max( a, b ) )
+                if key not in mid:
+                    v = V[ a ] + V[ b ]
+                    V.append( v / np.linalg.norm( v ) )
+                    mid[ key ] = len( V ) - 1
+                return mid[ key ]
+            for a, b, c in F:
+                ab, bc, ca = m( a, b ), m( b, c ), m( c, a )
+                G += [ [ a, ab, ca ], [ b, bc, ab ], [ c, ca, bc ], [ ab, bc, ca ] ]
+            F = G
+        _ICOSPHERES[ level ] = ( np.array( V ), np.array( F ) )
+    return _ICOSPHERES[ level ]
+
+
+def _clip_mesh( V, triangles, dirs, offs ):
+    """the surface mesh `( V, triangles )` inter the half-spaces `dirs . x <= offs`, as `( vertices, polygons )` with only the vertices
+    used: each half-space cuts the polygons that cross it, the point cut on an edge made once ( shared by its two polygons )"""
+    V = [ v for v in V ]
+    dist = np.asarray( V ) @ dirs.T - offs
+    polys = [ list( t ) for t in triangles[ ~( dist[ triangles ] > 0 ).all( axis = 1 ).any( axis = 1 ) ] ]
+    for k in np.nonzero( ( dist > 0 ).any( axis = 0 ) )[ 0 ]:
+        n, off = dirs[ k ], offs[ k ]
+        s = [ float( v @ n - off ) for v in V ]
+        cut, out = {}, []
+        for poly in polys:
+            if all( s[ i ] <= 0 for i in poly ):
+                out.append( poly )
+                continue
+            res = []
+            for j in range( len( poly ) ):
+                a, b = poly[ j ], poly[ ( j + 1 ) % len( poly ) ]
+                if s[ a ] <= 0:
+                    res.append( a )
+                if ( s[ a ] <= 0 ) != ( s[ b ] <= 0 ):
+                    key = ( min( a, b ), max( a, b ) )
+                    if key not in cut:
+                        V.append( V[ a ] + ( V[ b ] - V[ a ] ) * ( s[ a ] / ( s[ a ] - s[ b ] ) ) )
+                        s.append( 0.0 )
+                        cut[ key ] = len( V ) - 1
+                    res.append( cut[ key ] )
+            if len( res ) >= 3:
+                out.append( res )
+        polys = out
+    if not polys:
+        return np.zeros( ( 0, 3 ) ), []
+    used = np.unique( np.concatenate( [ np.asarray( p ) for p in polys ] ) )
+    remap = np.full( len( V ), -1 )
+    remap[ used ] = np.arange( len( used ) )
+    return np.asarray( V )[ used ], [ list( remap[ p ] ) for p in polys ]
 
 
 def _disc_in_polygon( vertices, center, r, nb = 96 ):

@@ -154,7 +154,7 @@ class PowerDiagram_Bsp( PowerDiagram ):
                 return float( np.asarray( dist.density ).reshape( -1 )[ 0 ] )
             except ( TypeError, ValueError, RuntimeError ):     # a traced density: the generic path
                 return getattr( dist.density, "raw", dist.density ).reshape( -1 )[ 0 ] if traced_ok else None
-        if not isinstance( dist, Image ):
+        if not isinstance( dist, Image ) or dist.is_polynomial:
             return None
         try:
             nb_pixels = int( np.prod( np.asarray( dist.shape.value ) ) )
@@ -196,8 +196,12 @@ class PowerDiagram_Bsp( PowerDiagram ):
             return False
         if self.group_rep.is_defined and not solver:
             return False
-        # a sink ( partial transport ): the cells integrated in balls are not written for the card
-        if self.sink_weight.is_defined:
+        # a sink ( partial transport ): the cells integrated in balls are written for the card's SOLVE only ( 2D, `Cell2D.cuh::finish_in_ball` );
+        # the diagram's own calls take the generic path
+        if self.sink_weight.is_defined and ( not solver or self.dim_count != 2 ):
+            return False
+        # a radial integrand ( `radial_func` ): the generic path only
+        if self.radial_eps.is_defined:
             return False
         # a periodicity: the card's cells walk the translations of the images ( `Cell2D.cuh`, `Cell3D.cuh`: `Problem::img` );
         # rotations and symmetries take the generic path ( `diagram/Common.h` )
@@ -267,7 +271,7 @@ class PowerDiagram_Bsp( PowerDiagram ):
         if isinstance( dist, Image ):
             try:
                 geo = dist._grid_geometry()
-                if geo is None or dist.batch_axes:
+                if geo is None or dist.batch_axes or dist.is_polynomial:      # ( the card integrates a constant per pixel )
                     return None
                 d, frame, origin, lo, hi = geo
                 shape = np.asarray( dist.shape.value, dtype = int ).reshape( -1 )
@@ -346,7 +350,7 @@ class PowerDiagram_Bsp( PowerDiagram ):
         is one diagram, one matrix and a solve per item. With groups, the roots' laplacian ( the members' cells by their own pass ).
         `None` when the card does not take this diagram ( see `_build_card` )."""
         from .SdotPlanNd import _CARD_OPTIONS, _CARD_MG_PACK, _CardSolveWork, _LIN, card_density_call, card_facet_capacity
-        if not self._card_takes( solver = True ) or self._periodic is not None:
+        if not self._card_takes( solver = True ) or self._periodic is not None or self.sink_weight.is_defined:
             return None
         dens = self._card_solve_density()
         d = self.dim_count

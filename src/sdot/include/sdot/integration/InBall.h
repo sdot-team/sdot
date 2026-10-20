@@ -5,9 +5,9 @@
 // `rho( x ) 1_{ |x - p_i|^2 <= r2 }` -- partial transport ( a sink of weight `w_s`: `r2 = w_i - w_s` ), whose cells are
 // the Laguerre cells capped by the balls of radius `sqrt( w_i - w_s )`.
 //
-// It is the INTEGRATION that changes, not the cell: a distribution still cuts the cell into its pieces of constant density,
-// and each piece is handed over with a density that knows the ball ( `InBallDensity` ). What the integrators ask of a
-// density that is not constant on a piece, it answers EXACTLY, in closed form:
+// It is the INTEGRATION that changes, not the cell: a distribution still cuts the cell into its pieces of constant or AFFINE
+// density ( `Image`, `Box`, `ConvexHull`; `Mesh` ), and each piece is handed over with a density that knows the ball
+// ( `InBallDensity` ). What the integrators ask of a density that is not constant on a piece, it answers EXACTLY, in closed form:
 //
 //     integrate_over_simplex( pts )                       rho |T inter B|
 //     integrate_moments_over_simplex( pts, m, mx, m2 )    the moments of order 0, 1, 2 of rho over T inter B
@@ -21,10 +21,12 @@
 // = The closed forms ( 2D )
 //
 // A convex polygon inter the disc is the signed sum, over its edges `[ a, b ]`, of the triangles `( c, a, b )` inter the disc,
-// `c` its center. Such a triangle splits along its edge into what lies inside the disc ( a triangle `( c, u, v )`, exact
-// moments ) and what lies outside ( a SECTOR between the directions of `u` and `v` ): `|S| = r2 theta / 2`,
-// `int_S y = r^3 / 3 ( v^_y - u^_y, u^_x - v^_x )`, `int_S |y|^2 = r2^2 theta / 4`. The derivative of the area with respect to
-// `r2` is the sum of the half angles of the sectors: the arc inside the polygon, over `2 r`.
+// `c` its center. Such a triangle splits along its edge into what lies inside the disc ( a triangle `( c, u, v )` ) and what
+// lies outside ( a SECTOR between the directions of `u` and `v` ). What is integrated -- the density, affine, times the
+// polynomial of a moment, of degree 2 -- is a polynomial of degree 3 at most in `y = x - c`: the integrals of the MONOMIALS
+// `y_x^a y_y^b`, `a + b <= 3`, over the two shapes are enough ( `DiscMoments` ), exact on a triangle ( its barycentric
+// coordinates ) and on a sector ( polar: `r^( a + b + 2 ) / ( a + b + 2 ) int cos^a sin^b` ). The arcs of the sphere inside the
+// polygon ( the derivatives with respect to the seed and to `r2` ) are integrals of `cos^a sin^b` too ( `ArcTrig` ).
 // =====================================================================================
 
 #include <loom/support/common_macros.h>
@@ -35,30 +37,80 @@
 namespace sdot {
 namespace integration {
 
-/// the moments of a region about the center of the disc: `m = int 1`, `f = int y`, `q = int |y|^2`, and `a = d m / d r2`
+
+/// `int cos^a sin^b` over angular ranges, `a + b <= 4`, ACCUMULATED: the reduction formulas on the antiderivatives
+template<class TF>
+struct ArcTrig {
+    TF J[ 5 ][ 5 ] = {};                                 ///< `J[ a ][ b ]`, `a + b <= 4`
+
+    HD static void antiderivatives( TF f, TF ( &F )[ 5 ][ 5 ] ) {
+        const TF c = TF( std::cos( f ) ), s = TF( std::sin( f ) );
+        TF cp[ 6 ], sp[ 6 ];
+        cp[ 0 ] = sp[ 0 ] = 1;
+        for ( int i = 1; i < 6; ++i ) { cp[ i ] = cp[ i - 1 ] * c; sp[ i ] = sp[ i - 1 ] * s; }
+        F[ 0 ][ 0 ] = f;
+        F[ 1 ][ 0 ] = s;
+        F[ 0 ][ 1 ] = - c;
+        for ( int n = 2; n <= 4; ++n )
+            for ( int a = 0; a <= n; ++a ) {
+                const int b = n - a;
+                if ( a >= 2 )      F[ a ][ b ] =   cp[ a - 1 ] * sp[ b + 1 ] / n + TF( a - 1 ) / n * F[ a - 2 ][ b ];
+                else if ( b >= 2 ) F[ a ][ b ] = - cp[ a + 1 ] * sp[ b - 1 ] / n + TF( b - 1 ) / n * F[ a ][ b - 2 ];
+                else               F[ a ][ b ] = s * s / 2;
+            }
+    }
+
+    /// the range `[ f, f + th ]` ( `th` signed )
+    HD void add( TF f, TF th ) {
+        TF F1[ 5 ][ 5 ], F2[ 5 ][ 5 ];
+        antiderivatives( f, F1 );
+        antiderivatives( f + th, F2 );
+        for ( int a = 0; a <= 4; ++a )
+            for ( int b = 0; a + b <= 4; ++b )
+                J[ a ][ b ] += F2[ a ][ b ] - F1[ a ][ b ];
+    }
+
+    /// the arc between the directions of `u` and `v`, signed by `s`
+    HD void add_between( TF ux, TF uy, TF vx, TF vy, TF s ) {
+        if ( ! ( ux * ux + uy * uy > 0 ) || ! ( vx * vx + vy * vy > 0 ) )
+            return;
+        add( TF( std::atan2( uy, ux ) ), s * TF( std::atan2( ux * vy - uy * vx, ux * vx + uy * vy ) ) );
+    }
+};
+
+/// the moments of a region about the center of the disc: `M[ a ][ b ] = int y_x^a y_y^b`, `a + b <= 3`
 template<class TF>
 struct DiscMoments {
-    TF m = 0, fx = 0, fy = 0, q = 0, a = 0;
+    TF M[ 4 ][ 4 ] = {};
+
+    HD static TF factorial( int n ) { TF r = 1; for ( int i = 2; i <= n; ++i ) r *= i; return r; }
+    HD static TF binomial( int n, int k ) { return factorial( n ) / ( factorial( k ) * factorial( n - k ) ); }
 
     HD void add_triangle( TF ux, TF uy, TF vx, TF vy, TF s ) {        ///< `( 0, u, v )`, signed, times `s`
-        const TF A = s * ( ux * vy - uy * vx ) / 2;
-        m  += A;
-        fx += A * ( ux + vx ) / 3;
-        fy += A * ( uy + vy ) / 3;
-        q  += A * ( ux * ux + uy * uy + vx * vx + vy * vy + ux * vx + uy * vy ) / 6;
+        // `y = sigma u + tau v`: `int sigma^i tau^j = i! j! / ( i + j + 2 )!`, times `det( u, v )`
+        const TF det = s * ( ux * vy - uy * vx );
+        TF pux[ 4 ], pvx[ 4 ], puy[ 4 ], pvy[ 4 ];
+        pux[ 0 ] = pvx[ 0 ] = puy[ 0 ] = pvy[ 0 ] = 1;
+        for ( int i = 1; i < 4; ++i ) { pux[ i ] = pux[ i - 1 ] * ux; pvx[ i ] = pvx[ i - 1 ] * vx; puy[ i ] = puy[ i - 1 ] * uy; pvy[ i ] = pvy[ i - 1 ] * vy; }
+        for ( int a = 0; a <= 3; ++a )
+            for ( int b = 0; a + b <= 3; ++b ) {
+                TF r = 0;
+                for ( int i = 0; i <= a; ++i )
+                    for ( int j = 0; j <= b; ++j )
+                        r += binomial( a, i ) * binomial( b, j ) * pux[ i ] * pvx[ a - i ] * puy[ j ] * pvy[ b - j ]
+                           * factorial( i + j ) * factorial( a + b - i - j );
+                M[ a ][ b ] += det * r / factorial( a + b + 2 );
+            }
     }
 
     HD void add_sector( TF ux, TF uy, TF vx, TF vy, TF r2, TF s ) {   ///< between the directions of `u` and `v`, signed, times `s`
-        const TF nu = sdot::sqrt( ux * ux + uy * uy ), nv = sdot::sqrt( vx * vx + vy * vy );
-        if ( ! ( nu > 0 ) || ! ( nv > 0 ) )
-            return;
-        const TF th = s * TF( std::atan2( ux * vy - uy * vx, ux * vx + uy * vy ) );
+        ArcTrig<TF> at;
+        at.add_between( ux, uy, vx, vy, s );
         const TF r = sdot::sqrt( r2 );
-        m  += r2 * th / 2;
-        q  += r2 * r2 * th / 4;
-        a  += th / 2;
-        fx += s * r2 * r / 3 * ( vy / nv - uy / nu );
-        fy += s * r2 * r / 3 * ( ux / nu - vx / nv );
+        TF rp = r2;                                      // `r^( n + 2 )`
+        for ( int n = 0; n <= 3; ++n, rp *= r )
+            for ( int a = 0; a <= n; ++a )
+                M[ a ][ n - a ] += rp / ( n + 2 ) * at.J[ a ][ n - a ];
     }
 };
 
@@ -107,21 +159,35 @@ HD TF segment_in_disc( TF ax, TF ay, TF bx, TF by, TF cx, TF cy, TF r2 ) {
     return ( t1 - t0 ) * sdot::sqrt( dx * dx + dy * dy );
 }
 
-/// the density `rho` of a piece, integrated only inside the ball `|x - center|^2 <= r2` ( see above )
+
+/// the density `rho` of a piece, integrated only inside the ball `|x - center|^2 <= r2` ( see above ). `rho` is CONSTANT on the
+/// piece ( `Dens::is_constant`: `value`, `add_value_grad` ) or AFFINE ( `Dens::is_affine`: `value_at`, `gradient_at`,
+/// `add_value_grad_at` -- `MeshElementDensity` ): written about the center, `rho( c + y ) = r0 + g . y`, one code for both.
 template<class Dens,class TF_,int D>
 struct InBallDensity {
     using TF = TF_;
     static constexpr int ct_dim = D;
     static constexpr bool is_constant = false;
     static constexpr bool exact_moments = true;          ///< its moments and their adjoints are closed forms ( `diagram/Moments.h` )
-    static_assert( D == 2, "integration in a ball: in 2D only for now" );
-    static_assert( Dens::is_constant, "integration in a ball: only for a density constant on each piece ( `Image`, `Box`, `Polygon` )" );
+    static constexpr bool affine = [] { if constexpr ( requires { Dens::is_affine; } ) return bool( Dens::is_affine ); else return false; }();
+    static_assert( D == 2, "integration in a ball: in 2D and 3D only ( `InBall3.h` )" );
+    static_assert( Dens::is_constant || affine, "integration in a ball: only for a density constant or affine on each piece ( `Image`, `Box`, "
+                                                "`ConvexHull`, `Mesh` )" );
 
-    Dens          base;                                 ///< the density of the piece ( constant )
+    Dens          base;                                 ///< the density of the piece
     Vector<TF,D>  center;
     TF            r2;
 
-    HD TF rho() const { return TF( base.value ); }
+    /// `rho( c + y ) = r0 + gx y_x + gy y_y`
+    struct Affine { TF r0, gx, gy; };
+    HD Affine about_center() const {
+        if constexpr ( Dens::is_constant )
+            return { TF( base.value ), TF( 0 ), TF( 0 ) };
+        else {
+            const auto g = base.gradient_at( center );
+            return { TF( base.value_at( center ) ), TF( g[ 0 ] ), TF( g[ 1 ] ) };
+        }
+    }
 
     /// the moments, about the center, of the triangle `pts` inter the ball
     HD DiscMoments<TF> simplex_moments( const auto &pts ) const {
@@ -134,38 +200,6 @@ struct InBallDensity {
         add_edge_in_disc( res, x1, y1, x2, y2, r2, s );
         add_edge_in_disc( res, x2, y2, x0, y0, r2, s );
         return res;
-    }
-
-    HD TF integrate_over_simplex( const auto &pts ) const {
-        return rho() * simplex_moments( pts ).m;
-    }
-
-    /// in absolute coordinates: `int x = f + m c`, `int |x|^2 = q + 2 c . f + m |c|^2`
-    HD void integrate_moments_over_simplex( const auto &pts, TF &m, auto &mx, TF &m2 ) const {
-        const auto r = simplex_moments( pts );
-        const TF k = rho();
-        m += k * r.m;
-        mx[ 0 ] += k * ( r.fx + r.m * center[ 0 ] );
-        mx[ 1 ] += k * ( r.fy + r.m * center[ 1 ] );
-        m2 += k * ( r.q + 2 * ( center[ 0 ] * r.fx + center[ 1 ] * r.fy ) + r.m * ( center[ 0 ] * center[ 0 ] + center[ 1 ] * center[ 1 ] ) );
-    }
-
-    /// `K < D`: `int x_K`, `K == D`: `int |x|^2`, `K == D + 1`: `int 1` ( `diagram/Moments.h` )
-    template<int K>
-    HD TF integrate_moment_over_simplex( const auto &pts ) const {
-        TF m = 0, m2 = 0;
-        Vector<TF,D> mx = Vector<TF,D>::zeros();
-        integrate_moments_over_simplex( pts, m, mx, m2 );
-        if constexpr ( K < D )       return mx[ K ];
-        else if constexpr ( K == D ) return m2;
-        else                         return m;
-    }
-
-    /// the mass of the facet `cut` of the piece inside the ball ( 2D: cut `i` carries the edge `[ v_i, v_i+1 ]` )
-    HD TF facet_mass( const auto &pc, int cut ) const {
-        const int n = pc.nb_vertices(), j = cut + 1 < n ? cut + 1 : 0;
-        return rho() * segment_in_disc( TF( pc.coord( cut, 0 ) ), TF( pc.coord( cut, 1 ) ), TF( pc.coord( j, 0 ) ), TF( pc.coord( j, 1 ) ),
-                                        center[ 0 ], center[ 1 ], r2 );
     }
 
     /// THE POLYNOMIAL that a moment integrates ( `diagram/Moments.h`: `x_K`, `|x|^2`, `1` ), written about the center:
@@ -189,14 +223,171 @@ struct InBallDensity {
 
     HD static TF value( const Poly &p, TF yx, TF yy ) { return p.alpha + p.bx * yx + p.by * yy + p.gamma * ( yx * yx + yy * yy ); }
 
+    /// `int p y_x^a y_y^b` over the region of `R`, `a + b <= 1`
+    HD static TF p_moment( const Poly &p, const DiscMoments<TF> &R, int a, int b ) {
+        return p.alpha * R.M[ a ][ b ] + p.bx * R.M[ a + 1 ][ b ] + p.by * R.M[ a ][ b + 1 ] + p.gamma * ( R.M[ a + 2 ][ b ] + R.M[ a ][ b + 2 ] );
+    }
+
+    /// `int p rho` over the region of `R`
+    HD TF integral( const Poly &p, const DiscMoments<TF> &R ) const {
+        const Affine f = about_center();
+        return f.r0 * p_moment( p, R, 0, 0 ) + f.gx * p_moment( p, R, 1, 0 ) + f.gy * p_moment( p, R, 0, 1 );
+    }
+
+    HD TF integrate_over_simplex( const auto &pts ) const {
+        return integral( Poly{}, simplex_moments( pts ) );
+    }
+
+    HD void integrate_moments_over_simplex( const auto &pts, TF &m, auto &mx, TF &m2 ) const {
+        const auto R = simplex_moments( pts );
+        m += integral( Poly{}, R );
+        mx[ 0 ] += integral( poly<0>(), R );
+        mx[ 1 ] += integral( poly<1>(), R );
+        m2 += integral( poly<D>(), R );
+    }
+
+    /// `K < D`: `int x_K`, `K == D`: `int |x|^2`, `K == D + 1`: `int 1` ( `diagram/Moments.h` ), `K == D + 2`: THE SPHERE, the length
+    /// of the circle inside the triangle where the density is not zero ( `sphere_length` )
+    template<int K>
+    HD TF integrate_moment_over_simplex( const auto &pts ) const {
+        if constexpr ( K == D + 2 )
+            return sphere_length( pts );
+        else
+            return integral( poly<K>(), simplex_moments( pts ) );
+    }
+
+    // ---- THE SPHERE inside a piece: `|S inter T|`, what a surface energy counts ( `PowerDiagram.sphere_areas` ) -------------
+    //
+    // Its derivatives are geometric. A line of the triangle pushed outward by `delta` lengthens the arc by `r / rho` at each of its
+    // endpoints on that line ( `rho` the half chord ); moving the center by `dc` is moving the lines by `- dc . n`; and the
+    // radius scales the arc and moves the endpoints: `d A / d r = A / r - sum_ends h / rho` ( `h` the signed distance of the line ).
+
+    /// `0` where the density is zero: the circle there is not a free surface ( a wall )
+    HD TF on_support() const {
+        if constexpr ( Dens::is_constant ) return TF( base.value ) > 0 ? TF( 1 ) : TF( 0 );
+        else return TF( 1 );
+    }
+
+    /// `func( i, j, t, rho, h, nx, ny )` for each point where the circle crosses the edge `[ v_i, v_j ]` of the triangle `pts`: its
+    /// parameter `t` on the edge, the half chord `rho`, the signed distance `h` of the line and its outward unit normal
+    HD void for_each_crossing( const auto &pts, auto &&func ) const {
+        TF P[ 3 ][ 2 ];
+        for ( int k = 0; k < 3; ++k ) { P[ k ][ 0 ] = TF( pts[ k ][ 0 ] ) - center[ 0 ]; P[ k ][ 1 ] = TF( pts[ k ][ 1 ] ) - center[ 1 ]; }
+        const TF s = ( P[ 1 ][ 0 ] - P[ 0 ][ 0 ] ) * ( P[ 2 ][ 1 ] - P[ 0 ][ 1 ] ) - ( P[ 1 ][ 1 ] - P[ 0 ][ 1 ] ) * ( P[ 2 ][ 0 ] - P[ 0 ][ 0 ] ) < 0 ? TF( -1 ) : TF( 1 );
+        for ( int i = 0; i < 3; ++i ) {
+            const int j = ( i + 1 ) % 3;
+            const TF dx = P[ j ][ 0 ] - P[ i ][ 0 ], dy = P[ j ][ 1 ] - P[ i ][ 1 ], l = sdot::sqrt( dx * dx + dy * dy );
+            if ( ! ( l > 0 ) )
+                continue;
+            const TF nx = s * dy / l, ny = - s * dx / l;
+            const TF h = nx * P[ i ][ 0 ] + ny * P[ i ][ 1 ], rho2 = r2 - h * h;
+            if ( ! ( rho2 > 0 ) )
+                continue;
+            const TF A = l * l, B = P[ i ][ 0 ] * dx + P[ i ][ 1 ] * dy, sq = sdot::sqrt( B * B - A * ( P[ i ][ 0 ] * P[ i ][ 0 ] + P[ i ][ 1 ] * P[ i ][ 1 ] - r2 ) );
+            for ( TF t : { ( - B - sq ) / A, ( - B + sq ) / A } )
+                if ( t > 0 && t < 1 )
+                    func( i, j, t, sdot::sqrt( rho2 ), h, nx, ny );
+        }
+    }
+
+    /// the arcs of the circle inside the triangle `pts`, counterclockwise
+    HD ArcTrig<TF> triangle_arcs( const auto &pts ) const {
+        TF P[ 3 ][ 2 ];
+        for ( int k = 0; k < 3; ++k ) { P[ k ][ 0 ] = TF( pts[ k ][ 0 ] ) - center[ 0 ]; P[ k ][ 1 ] = TF( pts[ k ][ 1 ] ) - center[ 1 ]; }
+        if ( ( P[ 1 ][ 0 ] - P[ 0 ][ 0 ] ) * ( P[ 2 ][ 1 ] - P[ 0 ][ 1 ] ) - ( P[ 1 ][ 1 ] - P[ 0 ][ 1 ] ) * ( P[ 2 ][ 0 ] - P[ 0 ][ 0 ] ) < 0 )
+            for ( int d = 0; d < 2; ++d ) { const TF t = P[ 1 ][ d ]; P[ 1 ][ d ] = P[ 2 ][ d ]; P[ 2 ][ d ] = t; }
+        ArcTrig<TF> at;
+        for ( int i = 0; i < 3; ++i ) {
+            const int j = ( i + 1 ) % 3;
+            const TF ax = P[ i ][ 0 ], ay = P[ i ][ 1 ], bx = P[ j ][ 0 ], by = P[ j ][ 1 ];
+            TF t0, t1;
+            if ( ! clip_segment( ax, ay, bx, by, r2, t0, t1 ) ) {
+                at.add_between( ax, ay, bx, by, TF( 1 ) );
+                continue;
+            }
+            if ( t0 > 0 ) at.add_between( ax, ay, ax + t0 * ( bx - ax ), ay + t0 * ( by - ay ), TF( 1 ) );
+            if ( t1 < 1 ) at.add_between( ax + t1 * ( bx - ax ), ay + t1 * ( by - ay ), bx, by, TF( 1 ) );
+        }
+        return at;
+    }
+
+    HD TF sphere_length( const auto &pts ) const { return on_support() * sdot::sqrt( r2 ) * triangle_arcs( pts ).J[ 0 ][ 0 ]; }
+
+    /// its adjoint with respect to the vertices: each endpoint of an arc moves with its edge
+    HD void sphere_length_bwd( const auto &pts, TF g, auto &&grad_pts ) const {
+        const TF r = sdot::sqrt( r2 ), f = g * on_support();
+        for_each_crossing( pts, [&]( int i, int j, TF t, TF rho, TF, TF nx, TF ny ) {
+            const TF c = f * r / rho;
+            grad_pts[ i ][ 0 ] += c * ( 1 - t ) * nx;
+            grad_pts[ i ][ 1 ] += c * ( 1 - t ) * ny;
+            grad_pts[ j ][ 0 ] += c * t * nx;
+            grad_pts[ j ][ 1 ] += c * t * ny;
+        } );
+    }
+
+    /// ... and with respect to the seed, over the triangles of the piece `pc` ( its fan from vertex 0 )
+    HD void sphere_length_seed_bwd( const auto &pc, TF g, TF *gp, TF &gw ) const {
+        const int n = pc.nb_vertices();
+        if ( n < 3 )
+            return;
+        const TF r = sdot::sqrt( r2 ), f = g * on_support();
+        TF A = 0, ends = 0;
+        for ( int k = 1; k + 1 < n; ++k ) {
+            const TF pts[ 3 ][ 2 ] = { { TF( pc.coord( 0, 0 ) ), TF( pc.coord( 0, 1 ) ) }, { TF( pc.coord( k, 0 ) ), TF( pc.coord( k, 1 ) ) },
+                                       { TF( pc.coord( k + 1, 0 ) ), TF( pc.coord( k + 1, 1 ) ) } };
+            A += r * triangle_arcs( pts ).J[ 0 ][ 0 ];
+            for_each_crossing( pts, [&]( int, int, TF, TF rho, TF h, TF nx, TF ny ) {
+                gp[ 0 ] -= f * r / rho * nx;
+                gp[ 1 ] -= f * r / rho * ny;
+                ends += h / rho;
+            } );
+        }
+        gw += f * ( A / r - ends ) / ( 2 * r );
+    }
+
+    /// the mass of the facet `cut` of the piece inside the ball ( 2D: cut `i` carries the edge `[ v_i, v_i+1 ]` ): affine on it, its
+    /// length times its value at the middle
+    HD TF facet_mass( const auto &pc, int cut ) const {
+        const int n = pc.nb_vertices(), j = cut + 1 < n ? cut + 1 : 0;
+        const TF ax = TF( pc.coord( cut, 0 ) ) - center[ 0 ], ay = TF( pc.coord( cut, 1 ) ) - center[ 1 ];
+        const TF bx = TF( pc.coord( j, 0 ) ) - center[ 0 ], by = TF( pc.coord( j, 1 ) ) - center[ 1 ];
+        return segment_mass( ax, ay, bx, by );
+    }
+
+    /// `int rho` on the segment `[ c + a, c + b ]` inside the ball
+    HD TF segment_mass( TF ax, TF ay, TF bx, TF by ) const {
+        TF t0, t1;
+        if ( ! clip_segment( ax, ay, bx, by, r2, t0, t1 ) )
+            return 0;
+        const TF dx = bx - ax, dy = by - ay, tm = ( t0 + t1 ) / 2;
+        const Affine f = about_center();
+        return ( t1 - t0 ) * sdot::sqrt( dx * dx + dy * dy ) * ( f.r0 + f.gx * ( ax + tm * dx ) + f.gy * ( ay + tm * dy ) );
+    }
+
     /// THE ADJOINT of the integral of `p rho` over the triangle `pts` inter the ball, with respect to its vertices: the region
-    /// grows by what its edges sweep INSIDE the ball, `int_{edge inter B} p n . ( ( 1 - t ) da + t db ) ds` ( a polynomial of degree
-    /// 3 in `t`: Gauss with 3 nodes is exact ). The ball's own share ( its center and its radius, i.e. the seed ) is `seed_bwd`'s.
-    HD void simplex_bwd( const Poly &p, TF integral, const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const {
-        base.add_value_grad( grad_dist, g * integral );
+    /// grows by what its edges sweep INSIDE the ball, `int_{edge inter B} p rho n . ( ( 1 - t ) da + t db ) ds` ( a polynomial of
+    /// degree 4 in `t`: Gauss with 3 nodes is exact ). The ball's own share ( its center and its radius, i.e. the seed ) is
+    /// `seed_bwd`'s. With respect to the density: `int p` over the region for a constant; for an affine one, its value at
+    /// each corner is the integral of `p lambda_k`, affine too -- `int p lambda_k( c + y ) = P0 lambda_k( c ) + P1 . grad lambda_k`,
+    /// i.e. `lambda_k` at `c` and at `c + e_d` ( `add_value_grad_at` is linear in the point's barycentric coordinates ).
+    HD void simplex_bwd( const Poly &p, const DiscMoments<TF> &R, const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const {
+        const TF P0 = p_moment( p, R, 0, 0 );
+        if constexpr ( Dens::is_constant )
+            base.add_value_grad( grad_dist, g * P0 );
+        else {
+            const TF Px = p_moment( p, R, 1, 0 ), Py = p_moment( p, R, 0, 1 );
+            Vector<TF,D> x = center;
+            base.add_value_grad_at( grad_dist, x, g * ( P0 - Px - Py ) );
+            x[ 0 ] += 1;
+            base.add_value_grad_at( grad_dist, x, g * Px );
+            x[ 0 ] -= 1;
+            x[ 1 ] += 1;
+            base.add_value_grad_at( grad_dist, x, g * Py );
+        }
+
+        const Affine f = about_center();
         const TF x0 = TF( pts[ 0 ][ 0 ] ), y0 = TF( pts[ 0 ][ 1 ] );
         const TF s = ( TF( pts[ 1 ][ 0 ] ) - x0 ) * ( TF( pts[ 2 ][ 1 ] ) - y0 ) - ( TF( pts[ 1 ][ 1 ] ) - y0 ) * ( TF( pts[ 2 ][ 0 ] ) - x0 ) < 0 ? TF( -1 ) : TF( 1 );
-        const TF k = g * rho();
         const TF gn[ 3 ] = { TF( 0.5 ) - TF( 0.3872983346207417 ), TF( 0.5 ), TF( 0.5 ) + TF( 0.3872983346207417 ) };
         const TF gw[ 3 ] = { TF( 5 ) / 18, TF( 8 ) / 18, TF( 5 ) / 18 };
         for ( int i = 0; i < 3; ++i ) {
@@ -206,103 +397,117 @@ struct InBallDensity {
             TF t0, t1;
             if ( ! clip_segment( ax, ay, bx, by, r2, t0, t1 ) )
                 continue;
-            TF wa = 0, wb = 0;                           // `int p ( 1 - t ) dt`, `int p t dt` on `[ t0, t1 ]`
+            TF wa = 0, wb = 0;                           // `int p rho ( 1 - t ) dt`, `int p rho t dt` on `[ t0, t1 ]`
             for ( int q = 0; q < 3; ++q ) {
                 const TF t = t0 + ( t1 - t0 ) * gn[ q ];
-                const TF v = gw[ q ] * ( t1 - t0 ) * value( p, ax + t * ( bx - ax ), ay + t * ( by - ay ) );
+                const TF yx = ax + t * ( bx - ax ), yy = ay + t * ( by - ay );
+                const TF v = gw[ q ] * ( t1 - t0 ) * value( p, yx, yy ) * ( f.r0 + f.gx * yx + f.gy * yy );
                 wa += v * ( 1 - t );
                 wb += v * t;
             }
             const TF nx = s * ( by - ay ), ny = - s * ( bx - ax );           // the outward normal times the length
-            grad_pts[ i ][ 0 ] += k * nx * wa;
-            grad_pts[ i ][ 1 ] += k * ny * wa;
-            grad_pts[ j ][ 0 ] += k * nx * wb;
-            grad_pts[ j ][ 1 ] += k * ny * wb;
+            grad_pts[ i ][ 0 ] += g * nx * wa;
+            grad_pts[ i ][ 1 ] += g * ny * wa;
+            grad_pts[ j ][ 0 ] += g * nx * wb;
+            grad_pts[ j ][ 1 ] += g * ny * wb;
         }
     }
 
     HD void integrate_over_simplex_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const {
-        simplex_bwd( Poly{}, simplex_moments( pts ).m, pts, g, grad_pts, grad_dist );
+        simplex_bwd( Poly{}, simplex_moments( pts ), pts, g, grad_pts, grad_dist );
     }
 
     template<int K>
     HD void integrate_moment_over_simplex_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const {
-        simplex_bwd( poly<K>(), integrate_moment_over_simplex<K>( pts ) / rho(), pts, g, grad_pts, grad_dist );
+        if constexpr ( K == D + 2 )
+            sphere_length_bwd( pts, g, grad_pts );
+        else
+            simplex_bwd( poly<K>(), simplex_moments( pts ), pts, g, grad_pts, grad_dist );
     }
 
-    /// the integrand depends on the seed of the cell: `seed_bwd` gives the cotangent of the integral of `p rho` over the piece on
-    /// the seed's position ( the ball's center: `int_{arc} p n ds`, the arc of the sphere inside the piece ) and on its weight
-    /// ( `r2 = w - w_s`: `int_{arc} p ds / ( 2 r )` )
-    static constexpr bool depends_on_seed = true;
-
-    HD void seed_bwd_poly( const Poly &p, const auto &pc, TF g, TF *gp, TF &gw ) const {
+    /// the arcs of the sphere inside the piece `pc` ( those of the sectors of `add_edge_in_disc` ), oriented: `int cos^a sin^b`
+    HD ArcTrig<TF> arcs( const auto &pc ) const {
+        ArcTrig<TF> at;
         const int n = pc.nb_vertices();
         if ( n < 3 )
-            return;
+            return at;
         TF ar = 0;
         for ( int i = 0; i < n; ++i ) {
             const int j = i + 1 < n ? i + 1 : 0;
             ar += TF( pc.coord( i, 0 ) ) * TF( pc.coord( j, 1 ) ) - TF( pc.coord( j, 0 ) ) * TF( pc.coord( i, 1 ) );
         }
         const TF s = ar < 0 ? TF( -1 ) : TF( 1 );
-        const TF r = sdot::sqrt( r2 );
-        TF nx = 0, ny = 0, ln = 0;                       // `int_{arc} p n ds / r`, `int_{arc} p ds / r`
-        auto arc = [&]( TF ux, TF uy, TF vx, TF vy, TF sg ) {
-            if ( ! ( ux * ux + uy * uy > 0 ) || ! ( vx * vx + vy * vy > 0 ) )
-                return;
-            const TF f1 = TF( std::atan2( uy, ux ) );
-            const TF th = sg * TF( std::atan2( ux * vy - uy * vx, ux * vx + uy * vy ) ), f2 = f1 + th;
-            const TF c1 = TF( std::cos( f1 ) ), s1 = TF( std::sin( f1 ) ), c2 = TF( std::cos( f2 ) ), s2 = TF( std::sin( f2 ) );
-            const TF C = s2 - s1, S = c1 - c2;                                       // int cos, int sin
-            const TF CC = th / 2 + ( s2 * c2 - s1 * c1 ) / 2, SS = th - CC;          // int cos^2, int sin^2
-            const TF CS = ( s2 * s2 - s1 * s1 ) / 2;                                 // int cos sin
-            const TF A = p.alpha + p.gamma * r2;                                     // `p` on the sphere: `A + r beta . n`
-            nx += A * C + r * ( p.bx * CC + p.by * CS );
-            ny += A * S + r * ( p.bx * CS + p.by * SS );
-            ln += A * th + r * ( p.bx * C + p.by * S );
-        };
         for ( int i = 0; i < n; ++i ) {
             const int j = i + 1 < n ? i + 1 : 0;
             const TF ax = TF( pc.coord( i, 0 ) ) - center[ 0 ], ay = TF( pc.coord( i, 1 ) ) - center[ 1 ];
             const TF bx = TF( pc.coord( j, 0 ) ) - center[ 0 ], by = TF( pc.coord( j, 1 ) ) - center[ 1 ];
-            // the arcs of the triangle `( c, a, b )` inter the disc: its sectors ( `add_edge_in_disc` )
             TF t0, t1;
             if ( ! clip_segment( ax, ay, bx, by, r2, t0, t1 ) ) {
-                arc( ax, ay, bx, by, s );
+                at.add_between( ax, ay, bx, by, s );
                 continue;
             }
-            if ( t0 > 0 ) arc( ax, ay, ax + t0 * ( bx - ax ), ay + t0 * ( by - ay ), s );
-            if ( t1 < 1 ) arc( ax + t1 * ( bx - ax ), ay + t1 * ( by - ay ), bx, by, s );
+            if ( t0 > 0 ) at.add_between( ax, ay, ax + t0 * ( bx - ax ), ay + t0 * ( by - ay ), s );
+            if ( t1 < 1 ) at.add_between( ax + t1 * ( bx - ax ), ay + t1 * ( by - ay ), bx, by, s );
         }
-        const TF k = g * rho();
-        gp[ 0 ] += k * r * nx;
-        gp[ 1 ] += k * r * ny;
-        gw += k * ln / 2;
+        return at;
+    }
+
+    /// the integrand depends on the seed of the cell: `seed_bwd` gives the cotangent of the integral of `p rho` over the piece on
+    /// the seed's position ( the ball's center: `int_{arc} p rho n ds`, the arc of the sphere inside the piece ) and on its weight
+    /// ( `r2 = w - w_s`: `int_{arc} p rho ds / ( 2 r )` ). On the sphere, `y = r e`, `p rho` is a polynomial of degree 3 in `e`.
+    static constexpr bool depends_on_seed = true;
+
+    HD void seed_bwd_poly( const Poly &p, const auto &pc, TF g, TF *gp, TF &gw ) const {
+        if ( pc.nb_vertices() < 3 )
+            return;
+        const ArcTrig<TF> at = arcs( pc );
+        const auto &J = at.J;
+        const TF r = sdot::sqrt( r2 );
+        const Affine f = about_center();
+        // `p rho` on the sphere: `c0 + cx e_x + cy e_y + cxx e_x^2 + cxy e_x e_y + cyy e_y^2`
+        const TF A = p.alpha + p.gamma * r2;
+        const TF c0 = A * f.r0;
+        const TF cx = r * ( A * f.gx + f.r0 * p.bx ), cy = r * ( A * f.gy + f.r0 * p.by );
+        const TF cxx = r2 * p.bx * f.gx, cyy = r2 * p.by * f.gy, cxy = r2 * ( p.bx * f.gy + p.by * f.gx );
+        const TF nx = c0 * J[ 1 ][ 0 ] + cx * J[ 2 ][ 0 ] + cy * J[ 1 ][ 1 ] + cxx * J[ 3 ][ 0 ] + cxy * J[ 2 ][ 1 ] + cyy * J[ 1 ][ 2 ];
+        const TF ny = c0 * J[ 0 ][ 1 ] + cx * J[ 1 ][ 1 ] + cy * J[ 0 ][ 2 ] + cxx * J[ 2 ][ 1 ] + cxy * J[ 1 ][ 2 ] + cyy * J[ 0 ][ 3 ];
+        const TF ln = c0 * J[ 0 ][ 0 ] + cx * J[ 1 ][ 0 ] + cy * J[ 0 ][ 1 ] + cxx * J[ 2 ][ 0 ] + cxy * J[ 1 ][ 1 ] + cyy * J[ 0 ][ 2 ];
+        gp[ 0 ] += g * r * nx;
+        gp[ 1 ] += g * r * ny;
+        gw += g * ln / 2;
     }
 
     HD void seed_bwd( const auto &pc, TF g, TF *gp, TF &gw ) const { seed_bwd_poly( Poly{}, pc, g, gp, gw ); }
 
     template<int K>
-    HD void seed_bwd_moment( const auto &pc, TF g, TF *gp, TF &gw ) const { seed_bwd_poly( poly<K>(), pc, g, gp, gw ); }
+    HD void seed_bwd_moment( const auto &pc, TF g, TF *gp, TF &gw ) const {
+        if constexpr ( K == D + 2 ) sphere_length_seed_bwd( pc, g, gp, gw );
+        else                        seed_bwd_poly( poly<K>(), pc, g, gp, gw );
+    }
 
-    /// `d mass / d r2` of the piece: what the sphere sweeps inside it when the radius grows
+    /// `d mass / d r2` of the piece: what the sphere sweeps inside it when the radius grows, `int_{arc} rho ds / ( 2 r )`
     HD TF weight_mass( const auto &pc ) const {
-        DiscMoments<TF> res;
-        const int n = pc.nb_vertices();
-        for ( int i = 0; i < n; ++i ) {
-            const int j = i + 1 < n ? i + 1 : 0;
-            add_edge_in_disc( res, TF( pc.coord( i, 0 ) ) - center[ 0 ], TF( pc.coord( i, 1 ) ) - center[ 1 ],
-                                   TF( pc.coord( j, 0 ) ) - center[ 0 ], TF( pc.coord( j, 1 ) ) - center[ 1 ], r2, TF( 1 ) );
-        }
-        return rho() * ( res.a < 0 ? - res.a : res.a );
+        const ArcTrig<TF> at = arcs( pc );
+        const Affine f = about_center();
+        return ( f.r0 * at.J[ 0 ][ 0 ] + sdot::sqrt( r2 ) * ( f.gx * at.J[ 1 ][ 0 ] + f.gy * at.J[ 0 ][ 1 ] ) ) / 2;
     }
 };
 
+/// a distribution whose facets are cut by itself ( `Mesh::for_each_facet_mass`: `cuts_facets` ) keeps the trait inside a ball
+template<bool> struct InBallCutsFacets {};
+template<> struct InBallCutsFacets<true> { static constexpr bool cuts_facets = true; };
+
+template<class Dist>
+HD constexpr bool dist_cuts_facets() {
+    if constexpr ( requires { Dist::cuts_facets; } ) return bool( Dist::cuts_facets );
+    else return false;
+}
+
 /// a distribution whose pieces are integrated inside the ball `|x - center|^2 <= r2` only. A piece entirely inside the
-/// ball goes through unchanged ( its density stays constant: the closed forms of the integrators apply ), one entirely
+/// ball goes through unchanged ( its density stays as it is: the closed forms of the integrators apply ), one entirely
 /// outside is not handed over at all.
 template<class Dist,class TF,int D>
-struct InBallDist {
+struct InBallDist : InBallCutsFacets<dist_cuts_facets<Dist>()> {
     static constexpr bool cuts_pieces = [] { if constexpr ( requires { Dist::cuts_pieces; } ) return bool( Dist::cuts_pieces ); else return false; }();
     static constexpr bool in_ball = true;
 
@@ -343,12 +548,25 @@ struct InBallDist {
             func( pc, InBallDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, r2 } );
         } );
     }
+
+    /// the facets cut by the distribution itself ( `Mesh` ), each part of a facet integrated inside the ball only: the segment
+    /// clipped by the sphere ( `InBallDensity::segment_mass` )
+    HD void for_each_facet_mass( const auto &cell, auto &&plane_of, auto &&func ) const requires ( dist_cuts_facets<Dist>() ) {
+        if ( ! ( r2 > 0 ) )
+            return;
+        dist.for_each_facet_mass( cell, plane_of, func, [&]( const auto &A, const auto &B, const auto &dens ) {
+            const InBallDensity<DECAYED_TYPE_OF( dens ),TF,D> in{ dens, center, r2 };
+            return in.segment_mass( TF( A[ 0 ] ) - center[ 0 ], TF( A[ 1 ] ) - center[ 1 ], TF( B[ 0 ] ) - center[ 0 ], TF( B[ 1 ] ) - center[ 1 ] );
+        } );
+    }
 };
 
 template<class TF,int D>
 HD auto in_ball( const auto &dist, const Vector<TF,D> &center, TF r2 ) {
-    return InBallDist<DECAYED_TYPE_OF( dist ),TF,D>{ dist, center, r2 };
+    return InBallDist<DECAYED_TYPE_OF( dist ),TF,D>{ {}, dist, center, r2 };
 }
 
 } // namespace integration
 } // namespace sdot
+
+#include "InBall3.h"                                     // ( the 3D specialization of `InBallDensity` )

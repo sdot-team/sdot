@@ -142,6 +142,45 @@ class SumOfGaussians( Distribution ):
         hi = ( c + self.support_sigmas * s ).max( axis = 0 )
         return dirs, numpy.concatenate( [ hi, -lo ] )
 
+    def periodized( self, setup ):
+        """= Internals
+
+        the gaussians and their images by the group of a periodicity, as one sum ( `Distribution.periodized` ): the WRAPPED
+        gaussians, `sum_g rho( g^-1 x )`. The centers are first folded onto the fundamental domain, then each one is copied by
+        every element of the group whose image of its box `c_i +- k s_i` ( `k = support_sigmas`, 6 by default ) meets the start
+        box of the cells -- the tails included, however far they reach. The copies are the framework's operations on
+        `positions`, `sigmas` and `weights`: the derivatives go back to them.
+
+        Under a trace ( the centers not readable ), every gaussian is copied by the images that the diagram walks."""
+        from loom.tensor.host import to_host
+        ops = loom.ops( self.positions.raw )
+        d = int( self.nb_dims.value )
+        folded = setup.fold( self.positions.raw )[ 0 ]
+        sigmas, weights = self.sigmas.raw, self.weights.raw
+        k = self.support_sigmas or 6.0
+        try:
+            c = numpy.asarray( to_host( ops.stop_gradient( folded ) ), dtype = float ).reshape( -1, d )
+            s = numpy.asarray( to_host( ops.stop_gradient( sigmas ) ), dtype = float ).reshape( -1, 1 )
+        except Exception:                                    # a tracer: no value on the host
+            c = None
+        if c is None:
+            maps = setup.maps
+            idx = [ numpy.arange( int( self.nb_gaussians.value ) ) for _ in maps ]
+        else:
+            maps = setup.maps_meeting( ( c - k * s ).min( axis = 0 ), ( c + k * s ).max( axis = 0 ) )
+            idx = []
+            for a in maps:
+                ci = c @ a[ :, :d ].T + a[ :, d ]
+                idx.append( numpy.nonzero( ( ( ci - k * s < setup.start_hi ) & ( ci + k * s > setup.start_lo ) ).all( axis = 1 ) )[ 0 ] )
+        dt = ops.dtype_of( folded )
+        pos = ops.concatenate( [ ops.matmul( folded[ i ], ops.array( a[ :, :d ].T, dt ) ) + ops.array( a[ :, d ], dt )
+                                 for a, i in zip( maps, idx ) if len( i ) ] )
+        cat = numpy.concatenate( idx )
+        return SumOfGaussians(
+            pos, sigmas[ cat ], weights[ cat ], target_mass = self.target_mass, current_mass = self.mass,
+            support_sigmas = self.support_sigmas, support_box = self.support_box, batch_axes = self.batch_axes,
+        )
+
     def _update_current_mass( self ):
         # reduction over the GAUSSIAN axis only, so that a possible batch axis survives
         # (same reason as `SumOfDiracs._update_current_mass`).

@@ -49,11 +49,13 @@ The Wasserstein distance between 100 diracs and an image:
 
 <<< @/snippets/hello_torch.py [PyTorch]
 
+<<< @/snippets/hello_cupy.py [CuPy]
+
 :::
 
 <!-- `sdot.w2` gives the distance, differentiable with respect to the diracs and the image. `sdot.plan` gives the whole plan
 ( barycenters, cell masses... ), and `sdot.ot_solve` the same with the settings of the solver. See
-[W2, plans and settings](/guide/ot-plan). -->
+[Plans and settings](/guide/ot-plan). -->
 
 ## How it works
 
@@ -73,10 +75,9 @@ For the ground metric, SDOT focuses essentially for now on variants of the eucli
 
 ## What's next
 
-- [Getting started →](/guide/getting-started)
-- [Plans and settings →](/guide/ot-plan)
-- [Distributions →](/guide/distributions/): images, gaussians, meshes, polytopes...
-- [Background: the mathematics →](/guide/background)
-- [Fitting a Gaussian mixture with gradients →](/examples/gaussian-mixture-fit)
+- [Getting started →](/guide/getting-started) installation, ...
 - [Examples gallery →](/examples/)
-- [Roadmap: what we are working on →](/guide/roadmap)
+- [Background →](/guide/background) the mathematics
+- [Plans and settings →](/guide/ot-plan) barycenters, moments, ...
+- [Distributions →](/guide/distributions/): images, sum of gaussians, meshes, polytopes...
+- [Roadmap →](/guide/roadmap) what we are working on

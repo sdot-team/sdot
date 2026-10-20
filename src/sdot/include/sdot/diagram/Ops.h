@@ -43,6 +43,7 @@
 #include "Moments.h"
 #include "../Periodic.h"
 #include "../integration/InBall.h"
+#include "../integration/RadialExp.h"
 
 #include <limits>
 
@@ -146,6 +147,8 @@ HD void plane_of( const PD &pd, const auto &cell, SI k0, int k, auto &dir, typen
 /// WHAT IS INTEGRATED over the cell of `k`: the distribution, or -- with a SINK ( partial transport, `sink_weight` ) -- the
 /// distribution inside the ball `|x - p_k|^2 <= w_k - w_s` only ( `integration/InBall.h` ). The cell stays the Laguerre
 /// cell: it is the integration that changes.
+/// With a RADIAL integrand ( `radial_func` ), the distribution times `exp( ( w_k - |x - p_k|^2 ) / ( 2 eps ) )`
+/// ( `integration/RadialExp.h` ).
 template<class Dens>
 HD constexpr bool depends_on_seed() {
     if constexpr ( requires { Dens::depends_on_seed; } ) return bool( Dens::depends_on_seed );
@@ -159,8 +162,25 @@ HD constexpr bool has_sink() {
 }
 
 template<class PD>
+HD constexpr bool has_radial() {
+    if constexpr ( requires { PD::has_radial; } ) return PD::has_radial;
+    else return false;
+}
+
+/// what makes `d m_k / d w_k` more than the sum of the facets ( `hessian_row`: one more slot )
+template<class PD>
+HD constexpr bool has_weight_slot() { return has_sink<PD>() || has_radial<PD>(); }
+
+template<class PD>
 HD decltype( auto ) cell_dist( const PD &pd, SI k, const auto &dist ) {
-    if constexpr ( has_sink<PD>() ) {
+    static_assert( ! ( has_sink<PD>() && has_radial<PD>() ), "a sink and a radial integrand together: not written yet" );
+    if constexpr ( has_radial<PD>() ) {
+        // as for the ball of a sink: the radial factor goes UNDER the moment
+        if constexpr ( requires { DECAYED_TYPE_OF( dist )::moment_order; } )
+            return moment_dist<DECAYED_TYPE_OF( dist )::moment_order>( integration::radial_exp( dist.dist, pd.point( k ), pd.weight( k ), pd.radial() ) );
+        else
+            return integration::radial_exp( dist, pd.point( k ), pd.weight( k ), pd.radial() );
+    } else if constexpr ( has_sink<PD>() ) {
         // a moment of the density integrates its polynomial INSIDE the ball: the ball goes under it
         if constexpr ( requires { DECAYED_TYPE_OF( dist )::moment_order; } )
             return moment_dist<DECAYED_TYPE_OF( dist )::moment_order>( integration::in_ball( dist.dist, pd.point( k ), pd.weight( k ) - pd.sink() ) );
@@ -233,6 +253,15 @@ HD bool integrate_moments_into( auto &&mass, auto &&first, auto &&second, const 
     PieceWorkspace<Local> ws{ piece };
     TF m = 0, m2 = 0;
     auto mx = Vector<TF,D>::zeros();
+    if constexpr ( requires { dist.integrate_moments_cell( cell, ws, m, mx, m2 ); } ) {   // ( as `integrate_into`'s `integrate_cell` )
+        if ( dist.integrate_moments_cell( cell, ws, m, mx, m2 ) ) {
+            mass = m;
+            for ( int d = 0; d < D; ++d )
+                first( d ) = mx[ d ];
+            second = m2;
+            return ! ws.overflow;
+        }
+    }
     dist.for_each_piece( cell, ws, [&]( const auto &pc, const auto &dens ) {
         if ( ! pc.bounded() ) {
             m = std::numeric_limits<TF>::max();
@@ -799,7 +828,8 @@ HD typename PD::TF group_distance2( const PD &pd, SI k, SI id ) {
 /// there. Otherwise the density integrates itself on the facet ( `facet_mass`: gaussians in 2D, `Mesh` ).
 ///
 /// With a SINK ( partial transport ) the row does not sum to zero: the sphere of the ball also moves with `w_k`. One more
-/// slot, LAST, with the cell's own identifier, holds that part of `d m_k / d w_k` ( `weight_mass` ).
+/// slot, LAST, with the cell's own identifier, holds that part of `d m_k / d w_k` ( `weight_mass` ). The same with a RADIAL
+/// integrand, which grows with `w_k` everywhere in the cell ( `m_k / ( 2 eps )` ).
 ///
 /// With GROUPS ( `diagram/Common.h` ), each facet's value is the derivative with respect to ITS OWN weight gap: the outer weights
 /// for a facet between groups, and for two members of a group their weights `V` in the frame of their lowest common aggregate
@@ -826,13 +856,13 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
     // the neighbors of the cell are its live cuts: one slot per cut, accumulated piece
     // by piece ( a piece carries the same identifiers, plus those of its tile )
     const int nc = c.nb_cuts();
-    if ( ! res.nb_nbrs.set( nc + int( has_sink<PD>() ) ) )
+    if ( ! res.nb_nbrs.set( nc + int( has_weight_slot<PD>() ) ) )
         return;                                          // too many neighbors: loom doubles and calls again
     for ( int q = 0; q < nc; ++q ) {
         res.ids( q ) = c.cid[ q ] >= 0 ? int( pd.user_id( c.cid[ q ] ) ) : int( c.cid[ q ] );
         res.vals( q ) = 0;
     }
-    if constexpr ( has_sink<PD>() ) {
+    if constexpr ( has_weight_slot<PD>() ) {
         res.ids( nc ) = int( pd.user_id( k ) );
         res.vals( nc ) = 0;
     }
@@ -846,10 +876,14 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
             dir[ i ] = d[ i ];
         off = o;
     };
-    if constexpr ( requires { DECAYED_TYPE_OF( dist )::cuts_facets; } ) {
-        static_assert( ! has_sink<PD>(), "hessian: a sink ( partial transport ) with a density that cuts the facets ( `Mesh` ) is not written yet" );
-        // a density that cuts the FACETS of the cell itself ( `Mesh` ), see `Mesh::for_each_facet_mass`
-        dist.for_each_facet_mass( c, planes, [&]( int cut, auto part ) { res.vals( cut ) += TF( part ) / ( 2 * sdot::sqrt( group_distance2( pd, k, c.cid[ cut ] ) ) ); } );
+    if constexpr ( requires { DECAYED_TYPE_OF( cdist )::cuts_facets; } ) {
+        // a density that cuts the FACETS of the cell itself ( `Mesh` ), see `Mesh::for_each_facet_mass` -- inside the ball with a sink
+        cdist.for_each_facet_mass( c, planes, [&]( int cut, auto part ) { res.vals( cut ) += TF( part ) / ( 2 * sdot::sqrt( group_distance2( pd, k, c.cid[ cut ] ) ) ); } );
+        if constexpr ( has_weight_slot<PD>() )
+            cdist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+                if constexpr ( requires { dens.weight_mass( pc ); } )
+                    res.vals( nc ) += dens.weight_mass( pc );
+            } );
     } else {
         cdist.for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
             if constexpr ( requires { dens.weight_mass( pc ); } )

@@ -34,7 +34,7 @@ def _volume_of( directions, offsets ):
 
 class Polytope( Distribution ):
     """A uniform density on the convex polytope `directions . x <= offsets` ( `[ nb_cuts, d ]`, `[ nb_cuts ]` ), zero
-    elsewhere. `Polygon( points )` and `Polyhedron( points )` build one from its vertices.
+    elsewhere. `ConvexHull( points )` builds one from points.
 
     = Internals
 
@@ -52,7 +52,7 @@ class Polytope( Distribution ):
     The support it declares is the polytope itself ( `bounding_half_spaces` ), which is what makes
     it a domain for `OtProblem`. The cells of a power diagram then START FROM the polytope: on the card, a small simple
     polygon or polyhedron is laid down as it is ( `StartCell.py`: `start_vertices` ), anything else cuts the box of its vertices.
-    No blurring is possible with it ( `Convolved` is absent: it is as smooth as a density gets ). See also `Polygon` ( the polytope of the convex hull of points ),
+    No blurring is possible with it ( `Convolved` is absent: it is as smooth as a density gets ). See also `ConvexHull` ( the polytope of the convex hull of points ),
     and `Box` ( the parallelepiped, which is an `Image` of one pixel ).
     """
 
@@ -132,24 +132,20 @@ class Polytope( Distribution ):
         self.current_mass = self.density.sum( axis = self.num_density ) * self._volume
 
 
-def Polygon( points, density = 1.0, **kwargs ):
-    """The `Polytope` of the CONVEX polygon with these `points` ( `[ n, 2 ]`, in any order ). Raises if a point is
-    not a vertex of the convex hull -- a non convex polygon is not a polytope."""
-    return _hull( points, 2, density, **kwargs )
-
-
-def Polyhedron( points, density = 1.0, **kwargs ):
-    """The `Polytope` of the CONVEX polyhedron with these `points` ( `[ n, 3 ]` ): the 3D sibling of `Polygon`"""
-    return _hull( points, 3, density, **kwargs )
-
-
-def _hull( points, d, density, **kwargs ):
-    from scipy.spatial import ConvexHull
+def ConvexHull( points, density = 1.0, **kwargs ):
+    """The `Polytope` of the convex hull of `points` ( `[ n, d ]`, in any order, in any dimension ). Points inside the hull are
+    ignored. Raises if the hull is flat ( all the points in a hyperplane )."""
     pts = numpy.asarray( points, dtype = float )
-    if pts.ndim != 2 or pts.shape[ 1 ] != d:
-        raise ValueError( f"the points have to be [ n, { d } ] ( got { pts.shape } )" )
-    hull = ConvexHull( pts )
-    if len( hull.vertices ) != len( pts ):
-        raise ValueError( "the points are not the vertices of a convex polytope" )
-    # `ConvexHull.equations` : `n . x + c <= 0` inside, `n` a unit vector pointing outward
+    if pts.ndim != 2 or len( pts ) == 0:
+        raise ValueError( f"ConvexHull : the points have to be [ n, d ] ( got { pts.shape } )" )
+    d = pts.shape[ 1 ]
+    if d == 1:
+        lo, hi = pts.min(), pts.max()
+        return Polytope( [ [ 1.0 ], [ -1.0 ] ], [ hi, -lo ], density = density, **kwargs )
+    from scipy.spatial import ConvexHull as QHull, QhullError
+    try:
+        hull = QHull( pts )
+    except QhullError as e:
+        raise ValueError( "ConvexHull : the hull of the points is flat" ) from e
+    # `QHull.equations` : `n . x + c <= 0` inside, `n` a unit vector pointing outward
     return Polytope( hull.equations[ :, :d ], - hull.equations[ :, d ], density = density, volume = hull.volume, **kwargs )

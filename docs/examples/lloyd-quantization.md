@@ -32,7 +32,7 @@ x = sdot.quantization( target, 1000 )   # 1000 Diracs, starting uniformly at ran
 x = sdot.quantization( target, x0 )     # or from given positions
 ```
 
-- `target`: any distribution (`Polygon`, `SumOfGaussians`, `Image`, ...);
+- `target`: any distribution (`ConvexHull`, `SumOfGaussians`, `Image`, ...);
 - the starting point: either a number of Diracs, drawn uniformly at random in the support of `target` (`seed` makes the draw reproducible), or the positions themselves, `[ n, d ]`, in any framework (NumPy, JAX, PyTorch, CuPy) — the result comes back in the same one;
 - `masses` (optional): the mass of each Dirac, kept during the iterations — equal by default.
 
@@ -56,7 +56,7 @@ import numpy as np
 import sdot
 
 angles = np.pi / 2 + 2 * np.pi * np.arange( 5 ) / 5
-target = sdot.Polygon( np.stack( [ np.cos( angles ), np.sin( angles ) ], axis = 1 ) )
+target = sdot.ConvexHull( np.stack( [ np.cos( angles ), np.sin( angles ) ], axis = 1 ) )
 
 x = sdot.quantization( target, 1000, seed = 0 )
 ```
@@ -70,7 +70,7 @@ x = sdot.quantization( target, 1000, seed = 0 )
 ></iframe>
 <p style="text-align: right; margin: 0"><a :href="withBase('/examples/lloyd-pentagon.html')" target="_blank">Open in a separate page ↗</a></p>
 
-Use the slider at the bottom of the viewer (or the play button) to go through the iterations.
+Use the slider at the top of the viewer (or the play button) to go through the iterations.
 
 ## A sum of three Gaussians
 

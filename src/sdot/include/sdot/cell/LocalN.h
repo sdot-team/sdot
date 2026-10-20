@@ -125,6 +125,7 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     HD bool bounded () const { return ! unbounded; }
     HD TK   coord   ( int i, int d ) const { return v[ d ][ i ]; }
     HD int  vertex_cut ( int i, int r ) const { return vk[ r ][ i ]; }
+    HD int  vertex_neighbor( int i, int r ) const { return vn[ r ][ i ]; }   ///< across from cut `r`: the edge carried by the other cuts of `i`
 
     HD StateMemN<TK,D> state() const {
         StateMemN<TK,D> e;

@@ -3,7 +3,7 @@
 # API — W2 and Plans
 
 The transport: `w2` for the distance, `plan` for the plan, `ot_solve` for the plan with the settings of
-the solver, `OtProblem` to solve again and again. See [Guide: W2, plans and settings](/guide/ot-plan).
+the solver, `OtProblem` to solve again and again. See [Guide: plans and settings](/guide/ot-plan).
 
 ::: v-pre
 

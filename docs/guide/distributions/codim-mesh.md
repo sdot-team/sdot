@@ -1,3 +1,11 @@
+---
+gallery: feature
+description: "Targets carried by segments or triangles of lower dimension than the space."
+tags: [mesh, 2d, 3d]
+image: /examples/img/codim-mesh.png
+order: 5
+---
+
 <script setup>
 import { withBase } from 'vitepress'
 </script>

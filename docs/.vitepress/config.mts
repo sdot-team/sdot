@@ -1,34 +1,9 @@
 import { defineConfig } from 'vitepress'
 import mathjax3 from 'markdown-it-mathjax3'
-import fs from 'node:fs'
 import path from 'node:path'
+import { gallerySidebar, GALLERY_DIRS } from './gallery.js'
 
-const examplesDir = path.resolve( __dirname, '../examples' )
-
-// the 'Examples' sidebar, from the frontmatter of examples/*.md -- same filter and order as examples/examples.data.js
-function examplesSidebarItems() {
-  const examples = fs.readdirSync( examplesDir )
-    .filter( f => f.endsWith( '.md' ) && f !== 'index.md' )
-    .map( f => {
-      const slug = f.slice( 0, -3 )
-      const fm = fs.readFileSync( path.join( examplesDir, f ), 'utf8' ).match( /^---\r?\n([\s\S]*?)\r?\n---/ )?.[ 1 ] ?? ''
-      const field = ( key: string ) => fm.match( new RegExp( `^${ key }:\\s*(.*?)\\s*$`, 'm' ) )?.[ 1 ].replace( /^(['"])(.*)\1$/, '$2' )
-      return {
-        title: field( 'title' ) || slug,
-        order: Number( field( 'order' ) ?? 999 ),
-        draft: field( 'draft' ) === 'true',
-        link:  `/examples/${ slug }`,
-      }
-    } )
-    .filter( e => !e.draft )
-    .sort( ( a, b ) => a.order - b.order || a.title.localeCompare( b.title ) )
-  return [
-    { text: 'Gallery', link: '/examples/' },
-    ...examples.map( e => ( { text: e.title, link: e.link } ) ),
-  ]
-}
-
-// in dev, refresh the 'Examples' sidebar when an example is added, removed or its frontmatter changes
+// in dev, refresh the 'Examples' sidebar when an example or a guide page is added, removed or its frontmatter changes
 function examplesSidebarPlugin() {
   let siteConfig: any
   return {
@@ -36,12 +11,12 @@ function examplesSidebarPlugin() {
     configResolved( config: any ) { siteConfig = config.vitepress },
     configureServer( server: any ) {
       const refresh = ( file: string ) => {
-        if ( path.dirname( file ) !== examplesDir || !file.endsWith( '.md' ) ) return
-        const group = siteConfig?.site?.themeConfig?.sidebar?.[ '/examples/' ]?.[ 0 ]
-        if ( !group ) return
-        const items = examplesSidebarItems()
-        if ( JSON.stringify( items ) === JSON.stringify( group.items ) ) return
-        group.items = items
+        if ( !file.endsWith( '.md' ) || !GALLERY_DIRS.some( d => file.startsWith( d + path.sep ) ) ) return
+        const sidebar = siteConfig?.site?.themeConfig?.sidebar
+        if ( !sidebar ) return
+        const items = gallerySidebar()
+        if ( JSON.stringify( items ) === JSON.stringify( sidebar[ '/examples/' ] ) ) return
+        sidebar[ '/examples/' ] = items
         const mod = server.moduleGraph.getModuleById( '/@siteData' )
         if ( mod ) server.moduleGraph.invalidateModule( mod )
         server.ws.send( { type: 'full-reload' } )
@@ -83,11 +58,18 @@ export default defineConfig({
           text: 'Guide',
           items: [
             { text: 'Getting Started',          link: '/guide/getting-started' },
-            { text: 'W2, Plans and Settings',   link: '/guide/ot-plan' },
+            { text: 'Plans and Settings',       link: '/guide/ot-plan' },
             { text: 'Distributions',            link: '/guide/distributions/', collapsed: false, items: [
+              { text: 'Convex Polytopes',       link: '/guide/distributions/polytope' },
+              { text: 'Images and Splines',     link: '/guide/distributions/image' },
+              { text: 'Sums of Gaussians',      link: '/guide/distributions/gaussians' },
+              { text: 'Meshes',                 link: '/guide/distributions/mesh' },
               { text: 'Lines and Surfaces',     link: '/guide/distributions/codim-mesh' },
             ] },
-            { text: 'Ground Metrics',           link: '/guide/ground_metrics' },
+            { text: 'Ground Metrics',           link: '/guide/ground-metrics/', collapsed: false, items: [
+              { text: 'Periodicity',            link: '/guide/ground-metrics/periodicity' },
+              { text: 'Partial Transport',      link: '/guide/ground-metrics/partial' },
+            ] },
             { text: 'Duplicates and Close Seeds', link: '/guide/duplicates' },
             { text: 'Frameworks and Devices',   link: '/guide/backends' },
             { text: 'Performance',              link: '/guide/performance' },
@@ -96,12 +78,7 @@ export default defineConfig({
           ]
         }
       ],
-      '/examples/': [
-        {
-          text: 'Examples',
-          items: examplesSidebarItems()
-        }
-      ],
+      '/examples/': gallerySidebar(),
       '/api/': [
         {
           text: 'API Reference',

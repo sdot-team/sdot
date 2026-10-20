@@ -34,7 +34,7 @@ def quantize( name, target, n, background = None, color = None ):
 
 def pentagon( n = 1000 ):
     angles = np.pi / 2 + 2 * np.pi * np.arange( 5 ) / 5
-    target = sdot.Polygon( np.stack( [ np.cos( angles ), np.sin( angles ) ], axis = 1 ) )
+    target = sdot.ConvexHull( np.stack( [ np.cos( angles ), np.sin( angles ) ], axis = 1 ) )
     return quantize( "pentagon", target, n )
 
 

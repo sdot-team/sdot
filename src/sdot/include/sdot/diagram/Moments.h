@@ -8,6 +8,9 @@
 //
 //     sdot::diagram::moment_dist<K>( dist )        K < D : int x_K rho     K == D : int |x|^2 rho     K == D + 1 : int rho
 //
+//     K == D + 2 : the SPHERE of partial transport inside the cell, where the density is not zero ( `integration/InBall.h`; zero
+//                  elsewhere ) -- a length in 2D, an area in 3D: what a surface energy counts ( `PowerDiagram.sphere_areas` )
+//
 // A density that knows its moments and their adjoints in closed form says so ( `exact_moments`: `MeshElementDensity`, `SumOfGaussians`
 // in 2D and 3D, `InBallDensity` ) and integrates them itself. Elsewhere the weight is a polynomial, so `rho( x ) p( x )` has the
 // value, the gradient and the parameters' derivative that the product rule says, and the integral over a piece is the ADAPTIVE
@@ -47,9 +50,10 @@ struct MomentDensity {
     }
 
     HD static TF poly( const auto &x ) {
-        if constexpr ( K < D )       return TF( x[ K ] );
-        else if constexpr ( K == D ) return norm_2_p2( x );
-        else                         return TF( 1 );
+        if constexpr ( K < D )           return TF( x[ K ] );
+        else if constexpr ( K == D )     return norm_2_p2( x );
+        else if constexpr ( K == D + 1 ) return TF( 1 );
+        else                             return TF( 0 );   // `D + 2`, the sphere: none on a piece that no ball cuts
     }
 
     HD static auto poly_grad( const auto &x ) {
@@ -111,8 +115,15 @@ struct MomentDensity {
     /// density constant on it: `J = Int p rho` on the diagonal of `X`, `S_ab = Int d_a p ( x - o )_b rho` in `X`, `s = Int grad p rho`
     /// in `y` -- the polynomial of the moment stays in `x` when the density moves. Closed forms: `Int x = |S| m`,
     /// `Int x_a x_b = |S| ( sum_i P_ia P_ib + sum_i P_ia sum_i P_ib ) / ( ( D + 1 )( D + 2 ) )`.
-    static constexpr bool has_affine_terms = Dens::is_constant;
+    /// ( a density that is not constant on the piece gives them itself: `affine_terms_moment<K>`, `PolynomialPixel` )
+    static constexpr bool has_affine_terms = Dens::is_constant || [] { if constexpr ( requires { Dens::has_affine_terms; } ) return bool( Dens::has_affine_terms ); else return false; }();
     HD void affine_terms( const auto &pts, TF g, auto &acc ) const {
+        if constexpr ( Dens::is_constant )
+            affine_terms_of_constant( pts, g, acc );
+        else
+            dens.template affine_terms_moment<K>( pts, g, acc );
+    }
+    HD void affine_terms_of_constant( const auto &pts, TF g, auto &acc ) const {
         Matrix<TF,D> M;
         for ( int r = 0; r < D; ++r )
             for ( int c = 0; c < D; ++c )
@@ -149,7 +160,7 @@ struct MomentDensity {
                 for ( int b = 0; b < D; ++b )
                     acc.X[ a ][ b ] += 2 * v * ( ixx[ a ][ b ] - acc.o[ b ] * ix[ a ] );
             }
-        } else
+        } else if constexpr ( K == D + 1 )
             J = vol;
         for ( int a = 0; a < D; ++a )
             acc.X[ a ][ a ] += v * J;

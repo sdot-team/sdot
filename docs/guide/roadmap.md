@@ -4,11 +4,13 @@ What we are working on. Nothing on this page is available yet: names and interfa
 
 ## Ground metrics
 
-- **Periodic metrics**, beyond [Ground Metrics](./ground_metrics#periodicity): gaussian and mesh targets, the CUDA solve with rotations
-  and symmetries or a density that is not a constant, 1D ( the circle ).
-- **Partial transport**, beyond [Ground Metrics](./ground_metrics#partial-transport): a source heavier than the target, the
-  penalized variant ( a sink of fixed weight ), 3D, gaussian and mesh targets, a periodicity, the CUDA solve.
-- **Radial kernels**: costs built from radial functions of $\|x - y\|$, e.g. polynomials, piecewise functions...
+- **Periodic metrics**, beyond [Ground Metrics](./ground-metrics/periodicity): the CUDA solve with rotations and symmetries or a
+  density that is not a constant, 1D ( the circle ).
+- **Partial transport**, beyond [Ground Metrics](./ground-metrics/partial): a source heavier than the target, the
+  penalized variant ( a sink of fixed weight ), 3D, gaussian targets, the CUDA solve.
+- **Radial kernels**: costs built from radial functions of $\|x - y\|$, e.g. polynomials, piecewise functions... Beyond
+  `RadialExp` ( [Fokker-Planck](../examples/fokker-planck) ): 3D, the card, other densities than constant pieces, with a periodicity
+  or a sink.
 
 ## Derivatives
 
@@ -18,6 +20,10 @@ What we are working on. Nothing on this page is available yet: names and interfa
 ## Distributions
 
 - **`PolynomialCells`**: piecewise polynomial densities on a polyhedral cell decomposition, the most general target.
+
+## Transport maps
+
+- **Point location**: the power cell of given points ( hence the transport map read at these points ), for [Linearized OT](../examples/lot-dictionary), which finds it by hand with an `argmin` over all the diracs.
 
 ## Frameworks
 

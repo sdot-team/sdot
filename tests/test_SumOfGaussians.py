@@ -76,6 +76,33 @@ if test( "the_3d_transport_towards_gaussians_is_solved" ):
     assert plan.converged and numpy.abs( m * n - 1 ).max() < 1e-8, ( plan.stats[ "status" ], numpy.abs( m * n - 1 ).max() )
 
 
+if test( "the_3d_cells_integrate_gaussians_by_their_edges" ):
+    # `measures` and `moments` integrate a 3D cell at once ( `SumOfGaussians::cell_integrals`: one cone edge per edge and face of
+    # the polyhedron ), `moment( k )` still tetrahedron by tetrahedron: the same integrals, and in a box the cells sum to the closed form
+    import numpy
+    from math import erf, sqrt
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    rng = numpy.random.default_rng( 36 )
+    ng, n = 12, 60
+    c = rng.uniform( 0.2, 0.8, size = ( ng, 3 ) )
+    s = rng.choice( [ 0.02, 0.07, 0.25 ], ng )            # narrow ( against the cells ), mid, wide
+    w = rng.uniform( 0.5, 1.0, ng )
+    pd = PowerDiagram( rng.uniform( 0, 1, size = ( n, 3 ) ), rng.uniform( -0.002, 0.002, n ), boundaries = box_half_spaces( [ 0 ] * 3, [ 1 ] * 3 ),
+                       kernel_dtype = "FP64", distribution = SumOfGaussians( positions = c, sigmas = s, weights = w ) )
+    m = numpy.asarray( pd.measures )
+    ref = [ numpy.asarray( pd.moment( k ) ) for k in range( 5 ) ]
+    mass, first, second = [ numpy.asarray( a ) for a in pd.moments ]
+    a = w / w.sum()
+    box = sum( a[ i ] * numpy.prod( [ ( erf( ( 1 - c[ i, d ] ) / ( s[ i ] * sqrt( 2 ) ) ) + erf( c[ i, d ] / ( s[ i ] * sqrt( 2 ) ) ) ) / 2 for d in range( 3 ) ] )
+               for i in range( ng ) )
+    assert abs( m.sum() - box ) < 1e-13, ( m.sum(), box )
+    assert numpy.abs( m - ref[ 4 ] ).max() < 1e-13, numpy.abs( m - ref[ 4 ] ).max()
+    assert numpy.abs( mass.reshape( -1 ) - ref[ 4 ] ).max() < 1e-13
+    assert numpy.abs( first.reshape( n, 3 ) - numpy.stack( ref[ :3 ], -1 ) ).max() < 1e-13
+    assert numpy.abs( second.reshape( -1 ) - ref[ 3 ] ).max() < 1e-13
+
+
 if test( "the_support_follows_traced_parameters" ):
     import numpy
     from loom.testing import need

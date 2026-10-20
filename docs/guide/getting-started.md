@@ -43,6 +43,8 @@ Here is a simple program to test if the installation works: the Wasserstein 2 di
 
 <<< @/snippets/hello_torch.py [PyTorch]
 
+<<< @/snippets/hello_cupy.py [CuPy]
+
 :::
 
 `sdot.plan( f, g )` gives the whole transport plan, and `p.show()` displays it ( inline in a notebook, in the browser
@@ -65,7 +67,7 @@ import { withBase } from 'vitepress'
 ## What's Next
 
 - [Background →](./background) the mathematics
-- [Examples gallery →](/examples/) use cases
+- [Examples gallery →](/examples/) some use cases
 - [Plans and settings →](./ot-plan) barycenters, moments, ...
 - [Distributions →](./distributions/) the sources and the targets
 - [Frameworks and devices →](./backends) how sdot handles the frameworks

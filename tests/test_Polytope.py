@@ -2,13 +2,13 @@ from errand import test, skip
 
 if test( "measures_of_a_polygon_equal_the_lebesgue_ones_on_its_half_spaces" ):
     import numpy
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     rng = numpy.random.default_rng( 1 )
     n = 30
     pos = rng.uniform( 0.05, 0.6, size = ( n, 2 ) )
     w = rng.uniform( -0.01, 0.01, n )
-    tri = Polygon( [ [ 0, 0 ], [ 1, 0 ], [ 0, 1 ] ] )
+    tri = ConvexHull( [ [ 0, 0 ], [ 1, 0 ], [ 0, 1 ] ] )
     assert abs( tri.volume - 0.5 ) < 1e-14 and abs( float( tri.mass ) - 0.5 ) < 1e-14
     ref = numpy.asarray( PowerDiagram( pos, w, boundaries = tri.bounding_half_spaces(), kernel_dtype = "FP64" ).measures ).reshape( -1 ) / 0.5
     # the polytope alone bounds the diagram, or cuts the cells of a bigger domain: same result
@@ -18,11 +18,13 @@ if test( "measures_of_a_polygon_equal_the_lebesgue_ones_on_its_half_spaces" ):
         assert abs( m.sum() - 1 ) < 1e-12 and numpy.abs( m - ref ).max() < 1e-12
 
 
-if test( "a_polygon_must_be_convex" ):
+if test( "a_convex_hull_ignores_the_points_inside" ):
     import pytest
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
+    assert abs( ConvexHull( [ [ 0, 0 ], [ 2, 0 ], [ 2, 2 ], [ 0, 2 ], [ 1, 1 ] ] ).volume - 4 ) < 1e-14
+    assert abs( ConvexHull( [ [ 0.5 ], [ -1 ], [ 2 ] ] ).volume - 3 ) < 1e-14                     # ( 1D: a segment )
     with pytest.raises( ValueError ):
-        Polygon( [ [ 0, 0 ], [ 2, 0 ], [ 2, 2 ], [ 0, 2 ], [ 1, 1 ] ] )
+        ConvexHull( [ [ 0, 0 ], [ 1, 1 ], [ 2, 2 ] ] )                                                # flat
 
 
 if test( "a_box_is_an_image_of_one_pixel" ):
@@ -39,11 +41,11 @@ if test( "a_box_is_an_image_of_one_pixel" ):
 if test( "the_transport_towards_a_polygon_is_solved" ):
     import numpy
     from sdot.OtProblem import Iterative, OtProblem
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.distributions.SumOfDiracs import SumOfDiracs
     rng = numpy.random.default_rng( 3 )
     n = 40
-    hexa = Polygon( [ [ numpy.cos( t ), numpy.sin( t ) ] for t in numpy.arange( 6 ) * numpy.pi / 3 ] )
+    hexa = ConvexHull( [ [ numpy.cos( t ), numpy.sin( t ) ] for t in numpy.arange( 6 ) * numpy.pi / 3 ] )
     pos = rng.uniform( -0.3, 0.3, size = ( n, 2 ) )
     plan = OtProblem( SumOfDiracs( pos ), hexa ).solve( Iterative() )
     m = numpy.asarray( plan.cell_masses ).reshape( -1 )
@@ -62,7 +64,7 @@ if test( "the_card_cells_of_a_polygon_are_the_generic_ones" ):
     import numpy
     import loom
     from sdot.AaBsp import AaBsp
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.PowerDiagram import PowerDiagram
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the dedicated cell kernels only exist on a CUDA device" )
@@ -70,7 +72,7 @@ if test( "the_card_cells_of_a_polygon_are_the_generic_ones" ):
         rng = numpy.random.default_rng( 7 )
         n = 4000
         for k in ( 3, 5, 9 ):                     # 9 sides: the cells of the border overflow the first registers
-            poly = Polygon( _regular_polygon( k ) )
+            poly = ConvexHull( _regular_polygon( k ) )
             pos = rng.uniform( 0.0, 1.0, size = ( n, 2 ) )
             pos = pos[ numpy.all( poly.bounding_half_spaces()[ 0 ] @ pos.T <= poly.bounding_half_spaces()[ 1 ][ :, None ], axis = 0 ) ]
             w = rng.uniform( -0.2, 0.2, len( pos ) ) / len( pos )
@@ -90,14 +92,14 @@ if test( "the_transport_towards_a_polygon_is_solved_on_the_card" ):
     import numpy
     import loom
     from sdot.OtProblem import Iterative, OtProblem
-    from sdot.distributions.Polytope import Polygon
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
         rng = numpy.random.default_rng( 8 )
         n = 20000
-        poly = Polygon( _regular_polygon( 7 ) )
+        poly = ConvexHull( _regular_polygon( 7 ) )
         pos = rng.uniform( 0.4, 0.6, size = ( n, 2 ) )
         plan = OtProblem( SumOfDiracs( pos ), poly ).solve( Iterative() )
         m = numpy.asarray( plan.cell_masses ).reshape( -1 )
@@ -122,12 +124,12 @@ def _tangent_polytope( k, seed, r = 0.45, c = 0.5 ):
 
 if test( "polyhedron_volume_and_cpu_measures" ):
     import numpy
-    from sdot.distributions.Polytope import Polyhedron
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.PowerDiagram import PowerDiagram
     rng = numpy.random.default_rng( 9 )
-    cube = Polyhedron( [ [ x, y, z ] for x in ( 0, 2 ) for y in ( 0, 1 ) for z in ( 0, 1 ) ] )
+    cube = ConvexHull( [ [ x, y, z ] for x in ( 0, 2 ) for y in ( 0, 1 ) for z in ( 0, 1 ) ] )
     assert abs( cube.volume - 2 ) < 1e-12
-    poly = Polyhedron( _sphere_points( 10 ) )
+    poly = ConvexHull( _sphere_points( 10 ) )
     pos = rng.uniform( 0.35, 0.65, size = ( 200, 3 ) )
     m = numpy.asarray( PowerDiagram( pos, distribution = poly, kernel_dtype = "FP64" ).measures ).reshape( -1 )
     assert abs( m.sum() - 1 ) < 1e-10, m.sum()
@@ -139,15 +141,15 @@ if test( "the_card_cells_of_a_polyhedron_are_the_generic_ones" ):
     import numpy
     import loom
     from sdot.AaBsp import AaBsp
-    from sdot.distributions.Polytope import Polyhedron
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.PowerDiagram import PowerDiagram
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the dedicated cell kernels only exist on a CUDA device" )
     else:
         rng = numpy.random.default_rng( 10 )
         for label, poly, starts in [ ( "simple 4", _tangent_polytope( 4, 1 ), True ), ( "simple 8", _tangent_polytope( 8, 2 ), True ),
-                                     ( "simple 20", _tangent_polytope( 20, 3 ), True ), ( "hull 8", Polyhedron( _sphere_points( 8, seed = 8 ) ), False ),
-                                     ( "hull 20", Polyhedron( _sphere_points( 20, seed = 20 ) ), False ) ]:
+                                     ( "simple 20", _tangent_polytope( 20, 3 ), True ), ( "hull 8", ConvexHull( _sphere_points( 8, seed = 8 ) ), False ),
+                                     ( "hull 20", ConvexHull( _sphere_points( 20, seed = 20 ) ), False ) ]:
             pos = rng.uniform( 0.0, 1.0, size = ( 20000, 3 ) )
             dirs, offs = poly.bounding_half_spaces()
             pos = pos[ numpy.all( dirs @ pos.T <= offs[ :, None ], axis = 0 ) ]
@@ -168,14 +170,14 @@ if test( "the_transport_towards_a_polyhedron_is_solved_on_the_card" ):
     import numpy
     import loom
     from sdot.OtProblem import Iterative, OtProblem
-    from sdot.distributions.Polytope import Polyhedron
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.distributions.SumOfDiracs import SumOfDiracs
     if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
         skip( "the card's solve only exists on a CUDA device" )
     else:
         rng = numpy.random.default_rng( 11 )
         n = 20000
-        for label, poly in [ ( "simple", _tangent_polytope( 10, 5 ) ), ( "hull", Polyhedron( _sphere_points( 12, seed = 5 ) ) ) ]:
+        for label, poly in [ ( "simple", _tangent_polytope( 10, 5 ) ), ( "hull", ConvexHull( _sphere_points( 12, seed = 5 ) ) ) ]:
             pos = rng.uniform( 0.4, 0.6, size = ( n, 3 ) )
             plan = OtProblem( SumOfDiracs( pos ), poly ).solve( Iterative() )
             m = numpy.asarray( plan.cell_masses ).reshape( -1 )
@@ -206,10 +208,10 @@ if test( "a_pyramid_has_no_start_cell_and_cuts_a_box_instead" ):
     import numpy
     import loom
     from sdot.AaBsp import AaBsp
-    from sdot.distributions.Polytope import Polyhedron
+    from sdot.distributions.Polytope import ConvexHull
     from sdot.PowerDiagram import PowerDiagram
     from sdot.StartCell import start_cell
-    pyr = Polyhedron( [ [ 0, 0, 0 ], [ 1, 0, 0 ], [ 1, 1, 0 ], [ 0, 1, 0 ], [ 0.5, 0.5, 1 ] ] )
+    pyr = ConvexHull( [ [ 0, 0, 0 ], [ 1, 0, 0 ], [ 1, 1, 0 ], [ 0, 1, 0 ], [ 0.5, 0.5, 1 ] ] )
     cell = start_cell( *pyr.bounding_half_spaces() )
     assert cell is not None and "vertices" not in cell and numpy.allclose( cell[ "bounding_box" ][ 1 ], [ 1, 1, 1 ] )
     rng = numpy.random.default_rng( 12 )

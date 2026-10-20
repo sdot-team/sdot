@@ -49,6 +49,7 @@ class Mesh( Distribution ):
     """
 
     MARGIN           = 0.1
+    affine_on_pieces = True                   # ( partial transport: `PowerDiagram( sink_weight = ... )`, `integration/InBall.h` )
 
     nb_nodes         : ShapeVar
     nb_elems         : ShapeVar
@@ -198,6 +199,25 @@ class Mesh( Distribution ):
         except ( TypeError, ValueError, RuntimeError ):
             return None
 
+    def random_points( self, n, seed = None ):
+        """`n` points drawn by the density ( a host `[ n, d ]` array ): the simplices by their mass, then in each one by rejection on
+        its affine density -- the start of `sdot.quantization`. Drawn in the box of the domain, the seeds that fall where the
+        density is zero ( around the mesh, in a hole ) have no mass, and the first solve crawls"""
+        rng = numpy.random.default_rng( seed )
+        nodes, sx, values = self._host_geometry()
+        values = numpy.maximum( values, 0 )
+        mass = ( values * numpy.asarray( self.corner_weights, dtype = float ) ).sum( axis = 1 )
+        Q = nodes[ sx ]
+        res = numpy.zeros( ( 0, nodes.shape[ 1 ] ) )
+        while len( res ) < n:
+            m = 2 * ( n - len( res ) ) + 16
+            e = rng.choice( len( Q ), m, p = mass / mass.sum() )
+            b = rng.exponential( size = ( m, Q.shape[ 1 ] ) )             # ( uniform barycentric coordinates )
+            b /= b.sum( axis = 1, keepdims = True )
+            keep = rng.random( m ) * values[ e ].max( axis = 1 ) <= ( b * values[ e ] ).sum( axis = 1 )
+            res = numpy.concatenate( [ res, numpy.einsum( "ni,nic->nc", b[ keep ], Q[ e[ keep ] ] ) ] )
+        return res[ :n ]
+
     def spread( self, k ):
         """= Internals
 
@@ -247,6 +267,52 @@ class Mesh( Distribution ):
         lo, hi = lo - pad, hi + pad
         d = len( lo )
         return numpy.concatenate( [ numpy.eye( d ), -numpy.eye( d ) ] ), numpy.concatenate( [ hi, -lo ] )
+
+    def periodic_support( self ):
+        """the box of the mesh, WITHOUT the margin of `bounding_half_spaces`: what a periodicity repeats ( `periodicity = True` reads
+        its periods from it )"""
+        lo, hi = self._bbox
+        d = len( lo )
+        return numpy.concatenate( [ numpy.eye( d ), -numpy.eye( d ) ] ), numpy.concatenate( [ hi, -lo ] )
+
+    def periodized( self, setup ):
+        """= Internals
+
+        the mesh and its images by the group of a periodicity, as one mesh ( `Distribution.periodized` ): the simplices whose
+        image meets the start box of the cells, copied with their nodes, their gradients turned, and a new hierarchy. The values
+        are those of the simplices copied ( an indexing: the derivatives go back to `values` ); the nodes are constants."""
+        nodes, sx = numpy.asarray( self.nodes, dtype = float ), numpy.asarray( self.simplices ).astype( numpy.int64 )
+        G, cw = numpy.asarray( self.grads, dtype = float ), numpy.asarray( self.corner_weights, dtype = float )
+        n, d = nodes.shape
+        P = nodes[ sx ]
+        ec, eh = ( P.min( axis = 1 ) + P.max( axis = 1 ) ) / 2, ( P.max( axis = 1 ) - P.min( axis = 1 ) ) / 2
+        slo, shi = setup.start_lo, setup.start_hi
+        all_nodes, all_sx, all_G, src = [], [], [], []
+        for t, a in enumerate( setup.maps_meeting( *self._bbox ) ):
+            L, s = a[ :, :d ], a[ :, d ]
+            c, h = ec @ L.T + s, eh @ numpy.abs( L ).T
+            keep = numpy.nonzero( ( ( c - h < shi ) & ( c + h > slo ) ).all( axis = 1 ) )[ 0 ]
+            if not len( keep ):
+                continue
+            all_nodes.append( nodes @ L.T + s )
+            all_sx.append( sx[ keep ] + ( len( all_nodes ) - 1 ) * n )
+            all_G.append( G[ keep ] @ L.T )                        # ( `lambda( L x + s ) = lambda_0( x )`: its gradient turns with `L` )
+            src.append( keep )
+        sx_all, src = numpy.concatenate( all_sx ), numpy.concatenate( src )
+        used, sx_all = numpy.unique( sx_all, return_inverse = True )   # ( the nodes of the simplices kept, numbered anew )
+        nodes_all = numpy.concatenate( all_nodes )[ used ]
+        sx_all = sx_all.reshape( -1, d + 1 )
+        G_all = numpy.concatenate( all_G )
+
+        P = nodes_all[ sx_all ]
+        perm, bvh_lo, bvh_hi, links = build_bvh( P.min( axis = 1 ), P.max( axis = 1 ) )
+        sx_all, G_all, src = sx_all[ perm ], G_all[ perm ], src[ perm ]
+        values = getattr( self.values, "raw", self.values )
+        return Mesh(
+            nodes_all, sx_all.astype( numpy.int32 ), values = values[ ..., src, : ], target_mass = self.target_mass,
+            grads = G_all, corner_weights = cw[ src ], bvh_lo = bvh_lo, bvh_hi = bvh_hi, bvh_links = links.astype( numpy.int32 ),
+            batch_axes = self.batch_axes, bbox = ( P.min( axis = ( 0, 1 ) ), P.max( axis = ( 0, 1 ) ) ), current_mass = self.mass,
+        )
 
     def inscribed_box( self ):
         """= Internals

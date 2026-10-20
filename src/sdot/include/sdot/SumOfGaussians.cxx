@@ -4,6 +4,7 @@
 #include <loom/support/containers/Vector.h>
 #include "SumOfGaussians.h"
 #include <loom/support/math.h>
+#include "integration/StdGaussian2.h"
 
 // Mathematics goes through `sdot::` (`loom/support/math.h`), NEVER through `std::`.
 //
@@ -101,21 +102,8 @@ UTP HD void DTP::add_value_grad_at( auto &&grad_dist, const auto &x, TF g ) cons
 }
 
 // ---- exact integration in 2D ------------------------------------------------------------------
-// See `SumOfGaussians.h` for the reduction. Here, the 8 Gauss-Legendre nodes (symmetric,
-// given as a half-table) and the four methods.
-
-namespace detail {
-    // 8-point Gauss-Legendre on [ -1, 1 ], positive half
-    LOOM_CONSTANT( double gl8_x[ 4 ] ) = { 0.1834346424956498, 0.5255324099163290,
-                                           0.7966664774136267, 0.9602898564975363 };
-    LOOM_CONSTANT( double gl8_w[ 4 ] ) = { 0.3626837833783620, 0.3137066458778873,
-                                           0.2223810344533745, 0.1012285362903763 };
-
-    // `Phi`, the standard normal cumulative distribution function
-    template<class TF> HD TF std_normal_cdf( TF u ) {
-        return TF( 0.5 ) * ( 1 + sdot::erf( u * TF( 0.70710678118654752440 ) ) );
-    }
-}
+// See `SumOfGaussians.h` for the reduction. The corner, the triangle and the edge in the standard frame are
+// `integration/StdGaussian2.h`'s; here, the methods.
 
 UTP HD typename DTP::TF DTP::facet_mass( const auto &pc, int cut ) const requires ( ct_dim == 2 || ct_dim == 3 ) {
     if constexpr ( ct_dim == 2 )
@@ -185,6 +173,58 @@ UTP HD typename DTP::TF DTP::facet_mass_3d( const auto &pc, int cut ) const {
     const auto P0 = pt( o0 );
     TF res = 0;
     const SI ng = nb_terms();
+#if ! defined( __CUDA_ARCH__ )
+    // on the host, the measure of the face is the sum of the corners of its EDGES, each once and counterclockwise ( the corners of the fan
+    // cancel along its inner edges ): the edges are listed once per facet, in the absolute in-plane coordinates `( u . x, w . x )`,
+    // instead of a walk over the cell for each gaussian and three corners per triangle ( `ed[ 4 * e + ... ]`: `A_u, A_w, B_u, B_w` )
+    thread_local std::vector<TF> ed;
+    ed.clear();
+    TF gu = 0, gw = 0, lo[ 3 ], hi[ 3 ];
+    for ( int d = 0; d < 3; ++d ) lo[ d ] = hi[ d ] = P0[ d ];
+    pc.for_each_facet_triangle( cut, [&]( int, int a, int b ) {
+        for ( int v : { a, b } ) {
+            const auto P = pt( v );
+            const TF pu = P[ 0 ] * u[ 0 ] + P[ 1 ] * u[ 1 ] + P[ 2 ] * u[ 2 ], pw = P[ 0 ] * w[ 0 ] + P[ 1 ] * w[ 1 ] + P[ 2 ] * w[ 2 ];
+            ed.push_back( pu );
+            ed.push_back( pw );
+            gu += pu;
+            gw += pw;
+            for ( int d = 0; d < 3; ++d ) { lo[ d ] = sdot::fmin( lo[ d ], P[ d ] ); hi[ d ] = sdot::fmax( hi[ d ], P[ d ] ); }
+        }
+    } );
+    const std::size_t ne = ed.size() / 4;
+    if ( ne == 0 )
+        return 0;
+    gu /= TF( 2 * ne );
+    gw /= TF( 2 * ne );                                  // ( the mean of the ends: inside the convex face )
+    for ( std::size_t e = 0; e < ne; ++e ) {             // the right normal of each edge out of the face
+        TF *E = ed.data() + 4 * e;
+        if ( ( E[ 3 ] - E[ 1 ] ) * ( E[ 0 ] - gu ) - ( E[ 2 ] - E[ 0 ] ) * ( E[ 1 ] - gw ) < 0 ) {
+            std::swap( E[ 0 ], E[ 2 ] );
+            std::swap( E[ 1 ], E[ 3 ] );
+        }
+    }
+    for ( SI i = 0; i < ng; ++i ) {
+        const TF s = sigma_of( i ), is = 1 / s;
+        const TF c[ 3 ] = { center_of( i, 0 ), center_of( i, 1 ), center_of( i, 2 ) };
+        TF d2 = 0;                                       // ( farther than `9 s` from the box of the face: nothing, as `far3` )
+        for ( int d = 0; d < 3; ++d ) {
+            const TF e = sdot::fmax( sdot::fmax( lo[ d ] - c[ d ], c[ d ] - hi[ d ] ), TF( 0 ) );
+            d2 += e * e;
+        }
+        if ( ! ( d2 < 81 * s * s ) )
+            continue;
+        const TF d = ( P0[ 0 ] - c[ 0 ] ) * n[ 0 ] + ( P0[ 1 ] - c[ 1 ] ) * n[ 1 ] + ( P0[ 2 ] - c[ 2 ] ) * n[ 2 ];
+        const TF cu = c[ 0 ] * u[ 0 ] + c[ 1 ] * u[ 1 ] + c[ 2 ] * u[ 2 ], cw = c[ 0 ] * w[ 0 ] + c[ 1 ] * w[ 1 ] + c[ 2 ] * w[ 2 ];
+        TF acc = 0;
+        for ( std::size_t e = 0; e < ne; ++e ) {
+            const TF *E = ed.data() + 4 * e;
+            acc += wedge_measure( Vector<TF,2>( Values(), ( E[ 0 ] - cu ) * is, ( E[ 1 ] - cw ) * is ),
+                                  Vector<TF,2>( Values(), ( E[ 2 ] - cu ) * is, ( E[ 3 ] - cw ) * is ) );
+        }
+        res += weight_of( i ) * sdot::exp( - d * d / ( 2 * s * s ) ) * ( acc < 0 ? -acc : acc ) / ( s * TF( 2.50662827463100050242 ) );
+    }
+#else
     for ( SI i = 0; i < ng; ++i ) {
         const TF s = sigma_of( i );
         const TF c[ 3 ] = { center_of( i, 0 ), center_of( i, 1 ), center_of( i, 2 ) };
@@ -204,113 +244,21 @@ UTP HD typename DTP::TF DTP::facet_mass_3d( const auto &pc, int cut ) const {
         } );
         res += weight_of( i ) * sdot::exp( -q ) * acc / ( s * TF( 2.50662827463100050242 ) );   // `sqrt( 2 pi )`
     }
+#endif
     return res;
 }
 
 UTP HD typename DTP::TF DTP::wedge_measure( const auto &P, const auto &Q ) const {
-    const TF two_pi = TF( 6.283185307179586476925286766559 );
-
-    const TF dx = Q[ 0 ] - P[ 0 ], dy = Q[ 1 ] - P[ 1 ];
-    const TF L = sdot::sqrt( dx * dx + dy * dy );
-    if ( ! ( L > 0 ) )
-        return 0;
-
-    // `( n, u )` DIRECT, so that `cross( P, Q ) = p * L`: the sign of `p` is that of the area
-    // of the corner, and `t` grows from `P` towards `Q`.
-    const TF ux = dx / L, uy = dy / L;
-    const TF nx = uy, ny = -ux;
-    const TF p = nx * P[ 0 ] + ny * P[ 1 ];
-    const TF ap = p < 0 ? -p : p;
-    if ( ! ( ap > 0 ) )                     // the origin IS on the line: flat corner
-        return 0;
-
-    const TF t0 = ux * P[ 0 ] + uy * P[ 1 ];
-    const TF t1 = ux * Q[ 0 ] + uy * Q[ 1 ];
-
-    TF acc = 0;
-    if ( ap >= tail_cut ) {
-        // the gaussian is worth nothing along the whole line: only the Lorentzian remains
-        acc = sdot::atan( t1 / ap ) - sdot::atan( t0 / ap );
-    } else {
-        // The TAILS first, each bounded by the segment itself: a segment entirely
-        // beyond `tail_cut` on one side only has no core at all, and its tail goes from `t0` to
-        // `t1`, not from `tail_cut` to `t1`. Clipping "symmetrically" would count `[ tail_cut, t0 ]`
-        // too much -- a clearly visible share of angle when the edge is long and grazes the origin.
-        if ( t0 < -tail_cut ) {
-            const TF e = t1 < -tail_cut ? t1 : -tail_cut;
-            acc += sdot::atan( e / ap ) - sdot::atan( t0 / ap );
-        }
-        if ( t1 > tail_cut ) {
-            const TF b = t0 > tail_cut ? t0 : tail_cut;
-            acc += sdot::atan( t1 / ap ) - sdot::atan( b / ap );
-        }
-
-        const TF c0 = t0 > -tail_cut ? t0 : -tail_cut;
-        const TF c1 = t1 <  tail_cut ? t1 :  tail_cut;
-
-        // the core, by composite Gauss-Legendre. The integrand has a scale `>= 1` there (the factor
-        // `1 - exp` cancels the Lorentzian peak when `p` is small), so a few panels
-        // suffice whatever the configuration.
-        if ( c1 > c0 ) {
-            const TF h = ( c1 - c0 ) / ( 2 * nb_panels );
-            for ( int k = 0; k < nb_panels; ++k ) {
-                const TF m = c0 + ( 2 * k + 1 ) * h;
-                for ( int j = 0; j < 4; ++j ) {
-                    for ( int sg = -1; sg <= 1; sg += 2 ) {
-                        const TF t = m + sg * h * TF( detail::gl8_x[ j ] );
-                        const TF r2 = ap * ap + t * t;
-                        acc += h * TF( detail::gl8_w[ j ] ) * ( 1 - sdot::exp( - r2 / 2 ) ) * ap / r2;
-                    }
-                }
-            }
-        }
-    }
-
-    return ( p < 0 ? -acc : acc ) / two_pi;
+    return integration::std_wedge_measure<TF>( P, Q, tail_cut, nb_panels );      // ( `integration/StdGaussian2.h` )
 }
 
 UTP HD typename DTP::TF DTP::std_triangle_measure( const auto &ys ) const {
-    const TF s = wedge_measure( ys[ 0 ], ys[ 1 ] )
-               + wedge_measure( ys[ 1 ], ys[ 2 ] )
-               + wedge_measure( ys[ 2 ], ys[ 0 ] );
-    // the signed sum carries the ORIENTATION of the triangle; the measure has none.
-    return s < 0 ? -s : s;
+    return integration::std_triangle_measure<TF>( ys, tail_cut, nb_panels );
 }
 
 UTP HD typename DTP::EdgeInfo DTP::edge_info( const auto &A, const auto &B, const auto &C ) const {
-    const TF two_pi = TF( 6.283185307179586476925286766559 );
-    const TF sq_2pi = TF( 2.5066282746310005024157652848110 );
-
-    EdgeInfo res{ Vector<TF,2>::zeros(), 0, 0, 0 };
-
-    const TF dx = B[ 0 ] - A[ 0 ], dy = B[ 1 ] - A[ 1 ];
-    const TF L2 = dx * dx + dy * dy;
-    if ( ! ( L2 > 0 ) )
-        return res;
-    const TF L = sdot::sqrt( L2 );
-
-    // the OUTWARD normal: the one that points away from the third vertex
-    TF nx = dy / L, ny = -dx / L;
-    if ( nx * ( C[ 0 ] - A[ 0 ] ) + ny * ( C[ 1 ] - A[ 1 ] ) > 0 ) { nx = -nx; ny = -ny; }
-    res.n[ 0 ] = nx;
-    res.n[ 1 ] = ny;
-    res.p = nx * A[ 0 ] + ny * A[ 1 ];      // constant along the edge
-
-    // `| A + s ( B - A ) |^2 = L^2 ( s - s0 )^2 + p^2`: the foot of the perpendicular, and the
-    // distance to the line. That is what pulls out an `exp( -p^2/2 )` as a factor and leaves a
-    // 1D gaussian, hence `erf`s.
-    const TF s0 = - ( A[ 0 ] * dx + A[ 1 ] * dy ) / L2;
-    TF p2 = A[ 0 ] * A[ 0 ] + A[ 1 ] * A[ 1 ] - L2 * s0 * s0;
-    if ( p2 < 0 ) p2 = 0;
-
-    const TF u0 = - L * s0, u1 = L * ( 1 - s0 );
-    const TF d_phi = detail::std_normal_cdf( u1 ) - detail::std_normal_cdf( u0 );
-    const TF e = sdot::exp( - p2 / 2 );
-
-    res.j0  = e * d_phi / sq_2pi;
-    res.j1a = ( e / two_pi ) * ( ( 1 - s0 ) * sq_2pi * d_phi
-                               - ( sdot::exp( - u0 * u0 / 2 ) - sdot::exp( - u1 * u1 / 2 ) ) / L );
-    return res;
+    const auto e = integration::std_edge_info<TF>( A, B, C );
+    return EdgeInfo{ e.n, e.p, e.j0, e.j1a };
 }
 
 UTP HD typename DTP::TF DTP::integrate_over_simplex( const auto &pts ) const {
@@ -456,50 +404,9 @@ UTP HD void DTP::integrate_over_simplex_bwd( const auto &pts, TF g, auto &&grad_
 }
 
 UTP HD typename DTP::EdgeMoments DTP::edge_moments( const auto &A, const auto &B, const auto &C ) const {
-    const TF two_pi = TF( 6.283185307179586476925286766559 );
-    const TF sq_2pi = TF( 2.5066282746310005024157652848110 );
-
-    EdgeMoments res{ Vector<TF,2>::zeros(), 0, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
-
-    const TF dx = B[ 0 ] - A[ 0 ], dy = B[ 1 ] - A[ 1 ];
-    const TF L2 = dx * dx + dy * dy;
-    if ( ! ( L2 > 0 ) )
-        return res;
-    const TF L = sdot::sqrt( L2 );
-
-    TF nx = dy / L, ny = -dx / L;
-    if ( nx * ( C[ 0 ] - A[ 0 ] ) + ny * ( C[ 1 ] - A[ 1 ] ) > 0 ) { nx = -nx; ny = -ny; }
-    res.n[ 0 ] = nx;
-    res.n[ 1 ] = ny;
-    res.p = nx * A[ 0 ] + ny * A[ 1 ];
-
-    // as in `edge_info`: along the edge, `y = F + u t`, `F` the foot of the perpendicular, `u` in `[ u0, u1 ]`, and
-    // `phi = exp( -p^2/2 ) exp( -u^2/2 ) / 2pi`. The weights are polynomials of `u` -- `lambda_A = a0 + a1 u`, `y_c = F_c + u t_c`,
-    // `|y|^2 = p^2 + u^2` -- so everything is `G_m = Int u^m exp( -u^2/2 ) du`, `m <= 3`: one `erf` and two `exp`s
-    const TF s0 = - ( A[ 0 ] * dx + A[ 1 ] * dy ) / L2;
-    TF p2 = A[ 0 ] * A[ 0 ] + A[ 1 ] * A[ 1 ] - L2 * s0 * s0;
-    if ( p2 < 0 ) p2 = 0;
-    const TF u0 = - L * s0, u1 = L * ( 1 - s0 );
-    const TF e0 = sdot::exp( - u0 * u0 / 2 ), e1 = sdot::exp( - u1 * u1 / 2 );
-    const TF G0 = sq_2pi * ( detail::std_normal_cdf( u1 ) - detail::std_normal_cdf( u0 ) );
-    const TF G1 = e0 - e1;
-    const TF G2 = G0 + u0 * e0 - u1 * e1;
-    const TF G3 = ( u0 * u0 + 2 ) * e0 - ( u1 * u1 + 2 ) * e1;
-
-    const TF a0 = 1 - s0, a1 = - 1 / L;
-    const TF H0 = a0 * G0 + a1 * G1, H1 = a0 * G1 + a1 * G2, H2 = a0 * G2 + a1 * G3;
-    const TF E = sdot::exp( - p2 / 2 ) / two_pi;
-    const TF F[ 2 ] = { A[ 0 ] + s0 * dx, A[ 1 ] + s0 * dy };
-    const TF t[ 2 ] = { dx / L, dy / L };
-
-    res.j[ 0 ] = E * G0;
-    res.ja[ 0 ] = E * H0;
-    for ( int c = 0; c < 2; ++c ) {
-        res.j[ 1 + c ] = E * ( F[ c ] * G0 + t[ c ] * G1 );
-        res.ja[ 1 + c ] = E * ( F[ c ] * H0 + t[ c ] * H1 );
-    }
-    res.j[ 3 ] = E * ( p2 * G0 + G2 );
-    res.ja[ 3 ] = E * ( p2 * H0 + H2 );
+    const auto e = integration::std_edge_moments<TF>( A, B, C );      // ( `integration/StdGaussian2.h` )
+    EdgeMoments res{ e.n, e.p, {}, {} };
+    for ( int q = 0; q < 4; ++q ) { res.j[ q ] = e.j[ q ]; res.ja[ q ] = e.ja[ q ]; }
     return res;
 }
 
@@ -618,7 +525,9 @@ namespace detail {
 
     /// `Psi( R ) / rho^2`, `Psi( R ) = Int_h^R Phi3( r ) / r^2 dr`, `R^2 = h^2 + rho^2`, `h >= 0`: by its series in `R^2` below
     /// `R = 2`, by a short quadrature when `R - h` is small, in closed form elsewhere -- never a difference of close numbers
-    template<class TF> HD TF g3_psi_over_rho2( TF h, TF rho2 ) {
+    /// `inf = Psi( infinity ) = Phi3( h ) / h + sqrt( 2 / pi ) exp( -h^2 / 2 )`, per edge: past the series, `Phi3( R ) / R + sqrt( 2 / pi )
+    /// exp( -R^2 / 2 ) = erf( R / sqrt 2 ) / R`, and `Psi( R ) = inf - erf( R / sqrt 2 ) / R` -- one `erf` per point, the `exp`s cancel
+    template<class TF> HD TF g3_psi_over_rho2( TF h, TF rho2, TF inf ) {
         const TF R2 = h * h + rho2;
         if ( R2 <= 4 ) {
             const TF h2 = h * h;
@@ -646,7 +555,7 @@ namespace detail {
                 }
             return acc / ( 2 * ( R + h ) );
         }
-        return ( g3_phi3_over_x( h ) - g3_phi3_over_x( R ) + TF( sqrt_2_over_pi ) * ( sdot::exp( -h * h / 2 ) - sdot::exp( -R2 / 2 ) ) ) / rho2;
+        return ( inf - sdot::erf( R * TF( 0.70710678118654752440 ) ) / R ) / rho2;
     }
 
     /// an edge's share of the cone of a face: `sign( p ) Int_t0^t1 |p| Psi( R ) / rho^2 dt` ( `rho^2 = p^2 + t^2` ), `h >= 0` the
@@ -671,14 +580,15 @@ namespace detail {
             acc += tail( sdot::fmax( t0, tc ), t1 );
         const TF c0 = sdot::fmax( t0, -tc ), c1 = sdot::fmin( t1, tc );
         if ( c1 > c0 ) {
-            const int nc = int( sdot::ceil( c1 - c0 ) ), np = nc < 1 ? 1 : ( nc > 8 ? 8 : nc );
+            // ( panels of at most two units: against panels of one, 3e-14 relative on the cells -- four units lose 3e-10 )
+            const int nc = int( sdot::ceil( ( c1 - c0 ) / 2 ) ), np = nc < 1 ? 1 : ( nc > 8 ? 8 : nc );
             const TF hw = ( c1 - c0 ) / ( 2 * np );
             for ( int k = 0; k < np; ++k ) {
                 const TF m = c0 + TF( 2 * k + 1 ) * hw;
                 for ( int j = 0; j < 4; ++j )
                     for ( int sg = -1; sg <= 1; sg += 2 ) {
                         const TF t = m + TF( sg ) * hw * TF( gl8_x[ j ] );
-                        acc += hw * TF( gl8_w[ j ] ) * ap * g3_psi_over_rho2( h, p * p + t * t );
+                        acc += hw * TF( gl8_w[ j ] ) * ap * g3_psi_over_rho2( h, p * p + t * t, inf );
                     }
             }
         }
@@ -868,6 +778,174 @@ UTP HD void DTP::moments3( const auto &pts, TF &m, auto &mx, TF &m2 ) const {
             mx[ d ] += w * ( c[ d ] * Mt + s * Nv[ d ] );
         m2 += w * ( ( c[ 0 ] * c[ 0 ] + c[ 1 ] * c[ 1 ] + c[ 2 ] * c[ 2 ] ) * Mt + 2 * s * ( c[ 0 ] * Nv[ 0 ] + c[ 1 ] * Nv[ 1 ] + c[ 2 ] * Nv[ 2 ] ) + s * s * Y2 );
     }
+}
+
+UTP template<class TI> HD bool DTP::integrate_cell( const auto &cell, auto &/*ws*/, TI &sum ) const requires ( ct_dim == 3 ) {
+#if defined( __CUDA_ARCH__ )
+    return false;
+#else
+    TF m, mx[ 3 ], m2;
+    if ( ! cell_integrals<false>( cell, m, mx, m2 ) )
+        return false;
+    sum = m;
+    return true;
+#endif
+}
+
+UTP HD bool DTP::integrate_moments_cell( const auto &cell, auto &/*ws*/, TF &m, auto &mx, TF &m2 ) const requires ( ct_dim == 3 ) {
+#if defined( __CUDA_ARCH__ )
+    return false;
+#else
+    TF x[ 3 ];
+    if ( ! cell_integrals<true>( cell, m, x, m2 ) )
+        return false;
+    for ( int d = 0; d < 3; ++d )
+        mx[ d ] = x[ d ];
+    return true;
+#endif
+}
+
+UTP template<bool with_moments> bool DTP::cell_integrals( const auto &cell, TF &m, TF ( &mx )[ 3 ], TF &m2 ) const {
+    m = m2 = 0;
+    for ( int d = 0; d < 3; ++d )
+        mx[ d ] = 0;
+    if ( ! cell.bounded() )
+        return false;
+    const int nv = cell.nb_vertices(), nc = cell.nb_cuts();
+    if ( nv < 4 )
+        return true;
+
+    TF lo[ 3 ], hi[ 3 ], g[ 3 ] = { 0, 0, 0 };
+    for ( int d = 0; d < 3; ++d ) { lo[ d ] = TF( cell.coord( 0, d ) ); hi[ d ] = lo[ d ]; }
+    for ( int v = 0; v < nv; ++v )
+        for ( int d = 0; d < 3; ++d ) {
+            const TF x = TF( cell.coord( v, d ) );
+            lo[ d ] = sdot::fmin( lo[ d ], x );
+            hi[ d ] = sdot::fmax( hi[ d ], x );
+            g[ d ] += x / TF( nv );
+        }
+
+    // the terms of the cell, when a tree carries them ( as `for_each_piece` )
+    if ( tree && ! terms ) {
+        double dlo[ 3 ], dhi[ 3 ];
+        for ( int d = 0; d < 3; ++d ) { dlo[ d ] = double( lo[ d ] ); dhi[ d ] = double( hi[ d ] ); }
+        thread_local std::vector<Term> buf;
+        tree->gather( dlo, dhi, double( conv_s ), buf );
+        SumOfGaussians local( *this );
+        local.terms = buf.data();
+        local.nb_local = SI( buf.size() );
+        return local.template cell_integrals<with_moments>( cell, m, mx, m2 );
+    }
+
+    // THE FACES: outward unit normal ( the cut's plane, turned away from the centroid ) and the mean of their vertices, which is
+    // inside them ( `face[ 7 * k + ... ]`: `n[ 3 ], G[ 3 ], count` )
+    thread_local std::vector<TF> face;
+    face.assign( std::size_t( 7 ) * nc, TF( 0 ) );
+    for ( int v = 0; v < nv; ++v )
+        for ( int r = 0; r < 3; ++r ) {
+            TF *f = face.data() + 7 * cell.vertex_cut( v, r );
+            for ( int d = 0; d < 3; ++d )
+                f[ 3 + d ] += TF( cell.coord( v, d ) );
+            f[ 6 ] += 1;
+        }
+    for ( int k = 0; k < nc; ++k ) {
+        TF *f = face.data() + 7 * k;
+        if ( ! ( f[ 6 ] >= 3 ) )
+            continue;                                    // no face ( `count` stays the flag: `0`, nothing on it )
+        for ( int d = 0; d < 3; ++d )
+            f[ 3 + d ] /= f[ 6 ];
+        TF dir[ 3 ], off;
+        cell.plane( k, dir, off );
+        TF l = 0, sg = 0;
+        for ( int d = 0; d < 3; ++d ) { l += dir[ d ] * dir[ d ]; sg += dir[ d ] * ( f[ 3 + d ] - g[ d ] ); }
+        l = sdot::sqrt( l );
+        if ( ! ( l > 0 ) ) {
+            f[ 6 ] = 0;
+            continue;
+        }
+        for ( int d = 0; d < 3; ++d )
+            f[ d ] = ( sg < 0 ? -dir[ d ] : dir[ d ] ) / l;
+    }
+
+    // THE EDGES, once per face: the start point `a`, the direction `t` such that the in-plane normal `m = t x n` points out of the
+    // face ( the polygon counterclockwise about `n` ), the length ( `edge[ 13 * e + ... ]`: `a[ 3 ], t[ 3 ], m[ 3 ], n[ 3 ], L` )
+    thread_local std::vector<TF> edge;
+    edge.clear();
+    for ( int a = 0; a < nv; ++a )
+        for ( int j = 0; j < 3; ++j ) {
+            const int b = cell.vertex_neighbor( a, j );
+            if ( b <= a )
+                continue;                                // each edge once
+            TF A[ 3 ], B[ 3 ], L = 0;
+            for ( int d = 0; d < 3; ++d ) {
+                A[ d ] = TF( cell.coord( a, d ) );
+                B[ d ] = TF( cell.coord( b, d ) );
+                L += ( B[ d ] - A[ d ] ) * ( B[ d ] - A[ d ] );
+            }
+            L = sdot::sqrt( L );
+            if ( ! ( L > 0 ) )
+                continue;
+            for ( int r = 0; r < 3; ++r ) {
+                if ( r == j )
+                    continue;
+                const TF *f = face.data() + 7 * cell.vertex_cut( a, r );
+                if ( ! ( f[ 6 ] > 0 ) )
+                    continue;
+                TF t[ 3 ], mm[ 3 ];
+                for ( int d = 0; d < 3; ++d ) t[ d ] = ( B[ d ] - A[ d ] ) / L;
+                mm[ 0 ] = t[ 1 ] * f[ 2 ] - t[ 2 ] * f[ 1 ];
+                mm[ 1 ] = t[ 2 ] * f[ 0 ] - t[ 0 ] * f[ 2 ];
+                mm[ 2 ] = t[ 0 ] * f[ 1 ] - t[ 1 ] * f[ 0 ];
+                const bool flip = mm[ 0 ] * ( A[ 0 ] - f[ 3 ] ) + mm[ 1 ] * ( A[ 1 ] - f[ 4 ] ) + mm[ 2 ] * ( A[ 2 ] - f[ 5 ] ) < 0;
+                for ( int d = 0; d < 3; ++d ) edge.push_back( flip ? B[ d ] : A[ d ] );
+                for ( int d = 0; d < 3; ++d ) edge.push_back( flip ? -t[ d ] : t[ d ] );
+                for ( int d = 0; d < 3; ++d ) edge.push_back( flip ? -mm[ d ] : mm[ d ] );
+                for ( int d = 0; d < 3; ++d ) edge.push_back( f[ d ] );
+                edge.push_back( L );
+            }
+        }
+
+    // THE TERMS, each in its standard frame: per ( edge, face ), `h = n . y`, `p = m . y`, `t0 = t . y` at the start point
+    const TF inv_4pi = TF( 0.079577471545947667884 ), inv_sq_2pi = TF( 0.39894228040143267794 );
+    const std::size_t ne = edge.size() / 13;
+    const SI n = nb_terms();
+    for ( SI i = 0; i < n; ++i ) {
+        const TF s = sigma_of( i ), w = weight_of( i ), is = 1 / s;
+        const TF c[ 3 ] = { center_of( i, 0 ), center_of( i, 1 ), center_of( i, 2 ) };
+        TF d2 = 0;                                       // ( farther than `9 s` from the box of the cell: nothing, as `far3` )
+        for ( int d = 0; d < 3; ++d ) {
+            const TF e = sdot::fmax( sdot::fmax( lo[ d ] - c[ d ], c[ d ] - hi[ d ] ), TF( 0 ) );
+            d2 += e * e;
+        }
+        if ( ! ( d2 < 81 * s * s ) )
+            continue;
+        TF W = 0, Nv[ 3 ] = { 0, 0, 0 }, H = 0;
+        for ( std::size_t e = 0; e < ne; ++e ) {
+            const TF *E = edge.data() + 13 * e;
+            const TF y[ 3 ] = { ( E[ 0 ] - c[ 0 ] ) * is, ( E[ 1 ] - c[ 1 ] ) * is, ( E[ 2 ] - c[ 2 ] ) * is };
+            const TF t0 = E[ 3 ] * y[ 0 ] + E[ 4 ] * y[ 1 ] + E[ 5 ] * y[ 2 ];
+            const TF p  = E[ 6 ] * y[ 0 ] + E[ 7 ] * y[ 1 ] + E[ 8 ] * y[ 2 ];
+            const TF h  = E[ 9 ] * y[ 0 ] + E[ 10 ] * y[ 1 ] + E[ 11 ] * y[ 2 ];
+            const TF t1 = t0 + E[ 12 ] * is;
+            if ( h != 0 )
+                W += h * detail::g3_cone_edge( h < 0 ? -h : h, p, t0, t1 );
+            if constexpr ( with_moments ) {
+                const TF Ff = sdot::exp( -h * h / 2 ) * inv_sq_2pi * wedge_measure( Vector<TF,2>( Values(), p, t0 ), Vector<TF,2>( Values(), p, t1 ) );
+                for ( int d = 0; d < 3; ++d )
+                    Nv[ d ] -= E[ 9 + d ] * Ff;
+                H += h * Ff;
+            }
+        }
+        const TF Mt = ( W < 0 ? -W : W ) * inv_4pi;
+        m += w * Mt;
+        if constexpr ( with_moments ) {
+            for ( int d = 0; d < 3; ++d )
+                mx[ d ] += w * ( c[ d ] * Mt + s * Nv[ d ] );
+            m2 += w * ( ( c[ 0 ] * c[ 0 ] + c[ 1 ] * c[ 1 ] + c[ 2 ] * c[ 2 ] ) * Mt + 2 * s * ( c[ 0 ] * Nv[ 0 ] + c[ 1 ] * Nv[ 1 ] + c[ 2 ] * Nv[ 2 ] )
+                        + s * s * ( 3 * Mt - H ) );
+        }
+    }
+    return true;
 }
 
 UTP template<int K> HD void DTP::moment3_bwd( const auto &pts, TF g, auto &&grad_pts, auto &&grad_dist ) const {

@@ -9,12 +9,26 @@ Pages to look at what was computed ( `show`, `write_html` of the objects use the
 ## `Visualizer`
 
 ```python
-Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0, frame_value=0.0)
+Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0, frame_value=0.0, depth_colors=False, morph=0, loop=False, autoplay=False, face_opacity=1.0)
 ```
 
 Collects geometric primitives; the outputs (`write_html`, ...) come afterwards.
 
-`title` names the scene (the tab, on the HTML side).
+`title` names the scene (the tab, on the HTML side). `depth_colors`: in 3D, the points are colored by their depth in the
+view ( warm in front, cool behind, recomputed as the view turns ) instead of their own color -- what a cloud needs to be
+read in depth ( `?depth=0|1` in the URL and the menu still switch it ).
+
+`morph = k`: the playback goes from one frame to the next in `k` eased steps, the points of the two frames matched by rank
+when they have as many -- the same diracs moving ( a transport, a descent ) without storing the steps; it holds a moment on
+each frame. `loop`: it starts again, morphing back to the first frame. `autoplay`: it plays as soon as the page opens
+( `?play=0|1` in the URL wins ).
+
+`frame_axis`: the name of the frame axis, or a tuple of names when the frames vary along several parameters (see
+`new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
+the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.
+
+`face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
+density drawn under diracs.
 
 | Attribute | |
 |---|---|
@@ -76,7 +90,7 @@ knows more than the enumeration: that of an unbounded polytope stops at the scen
 box, so it would render an edge going off to infinity as solid all the way to the border -- where
 `Cell.add_to_viz`, for its part, knows it is truncated and makes it dotted.
 
-### `.bounds()`
+### `.bounds(pad_ratio=1.0)`
 
 Bounding box `[ [lo, hi] ] * d`, dimension by dimension.
 
@@ -103,7 +117,7 @@ The same hue, darkened -- enough to derive an edge color from a face color.
 The primitives of frame `i`, already sliced -- enough to write an output without
 knowing anything about the internal slicing.
 
-Returns a dict: `value`, `polygons`, `polygon_colors`, `edges`, `edge_colors`, `points`,
+Returns a dict: `value` ( a float, a tuple with several frame axes ), `polygons`, `polygon_colors`, `edges`, `edge_colors`, `points`,
 `point_colors`, `point_radii`, `polytopes`. The indices refer to the `positions` pool,
 common to ALL frames.
 
@@ -117,7 +131,9 @@ change shape -- this is what is needed to replay a descent). They share
 only the vertex pool, and only where the caller passes the SAME array again.
 
 `value` is the abscissa on the axis (`frame_axis`): an instant, or the value of the parameter.
-By default, the rank of the frame.
+By default, the rank of the frame. With several axes: one value per axis, as a tuple, or as a
+dict that only names the axes that change ( the others keep the previous frame's ); by default,
+the rank of the frame on the first axis.
 
 Color numbering restarts from zero here. This is what keeps an animation from
 flickering: what is redrawn at the same rank in each frame takes its color back,

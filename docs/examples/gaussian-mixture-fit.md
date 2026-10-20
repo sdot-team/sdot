@@ -153,7 +153,7 @@ Starting from 4 wide Gaussians of equal masses in the middle, both find the mixt
 ></iframe>
 <p style="text-align: right; margin: 0"><a :href="withBase('/examples/gaussian-mixture-fit-torch.html')" target="_blank">Open in a separate page ↗</a></p>
 
-The points in gray, and for each Gaussian its center, its circle at one sigma (solid) and at two sigmas (dashed). The opacity follows the mass. Use the slider at the bottom of the viewer (or the play button) to go through the L-BFGS iterations.
+The points in gray, and for each Gaussian its center, its circle at one sigma (solid) and at two sigmas (dashed). The opacity follows the mass. Use the slider at the top of the viewer (or the play button) to go through the L-BFGS iterations.
 
 ## Reproducing the pages
 

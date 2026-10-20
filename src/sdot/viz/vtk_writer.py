@@ -229,7 +229,8 @@ def write_vtk( viz, filename, axes = ( 0, 1, 2 ), pvd = False ):
     for i in range( viz.nb_frames ):
         out = Path( "%s_%04d.vtu" % ( stem, i ) )
         one( i, out )
-        entries.append( ( viz.frame( i )[ "value" ], out.name ) )
+        value = viz.frame( i )[ "value" ]
+        entries.append( ( i if isinstance( value, tuple ) else value, out.name ) )    # ( several axes: ParaView takes one time, the rank )
 
     lines = [ '<?xml version="1.0"?>',
             '<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">',

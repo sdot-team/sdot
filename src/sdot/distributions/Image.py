@@ -11,7 +11,12 @@ from .Distribution import Distribution
 
 class Image( Distribution ):
     """
-        Piecewise constant function on a grid.
+        Piecewise function on a grid: a constant per pixel ( `degree = 0` ), or a polynomial of degree `degree` along each axis.
+
+        `degree = P > 0`: `values` is `[ pixels..., ( P + 1 )^d ]`, the BERNSTEIN coefficients of each pixel, in its own coordinates
+        `t` in `[ 0, 1 ]^d`, flattened in C order ( the first axis the slowest ): `rho = sum_alpha c_alpha prod_a B_{ alpha_a, P }( t_a )`.
+        Coefficients `>= 0` give a density `>= 0`, and the mass of a pixel is its volume times the mean of its coefficients.
+        They are stored in the field `coeffs` ( `values` stays unset ).
 
         Each square/cube/hypercube is defined by `origin` and `frame( dir ) * knots( ... )`: the FIELD `frame` is the
         frame of ONE pixel ( its rows: the edges of a pixel ).
@@ -38,7 +43,7 @@ class Image( Distribution ):
     frame            : RealTensor[ "dir", "dim" ]
     knots            : RealTensor[ "dim", "num_knot" ]
 
-    current_mass     : ComputedAttribute[ RealTensor, ( "values", "frame", "knots" ) ]
+    current_mass     : ComputedAttribute[ RealTensor, ( "values", "coeffs", "frame", "knots" ) ]
 
     # `nb_cells_cum`/`num_cell_cum`: an INDEPENDENT ShapeVar + Axis pair (not derived from the
     # per-dim `shape`, unlike `num_knot`) -- `cell_cum_mass` is a FLAT array over ALL cells
@@ -59,23 +64,68 @@ class Image( Distribution ):
     # call -- previously it was, twice per call, see [[otplan1d-kernel-profile]].
     cell_cum_mass    : ComputedAttribute[ RealTensor[ "num_cell_cum" ], ( "values", "frame", "knots" ) ]
 
+    # a POLYNOMIAL image ( `degree > 0` ): the Bernstein coefficients of each pixel, `( degree + 1 )^d` of them
+    # ( `PolynomialPixel.h` ). Declared LAST: the C++ side rebuilds the aggregate positionally ( `Image::with_defaults` )
+    nb_coeffs        : CtShapeVar
+    num_coeff        : Axis[ "nb_coeffs" ]
+    coeffs           : RealTensor[ "img_pos...", "num_coeff" ]
+
     # it integrates itself TRANSLATED ( `for_each_piece_shifted`, C++ ): what a periodicity repeats ( `Periodic.h` )
     translatable = True
-    constant_on_pieces = True                 # ( partial transport: `PowerDiagram( sink_weight = ... )` )
 
-    def __init__( self, values, frame = None, pixel_frame = None, target_mass = 1.0, **kwargs ) -> None:
+    @property
+    def constant_on_pieces( self ):
+        """( partial transport: `PowerDiagram( sink_weight = ... )` )"""
+        return not self.is_polynomial
+
+    @property
+    def is_polynomial( self ):
+        return self.coeffs.is_defined
+
+    @property
+    def degree( self ):
+        """the degree along each axis ( 0: a constant per pixel )"""
+        if not self.is_polynomial:
+            return 0
+        return _degree_of( int( self.nb_coeffs.value ), int( self.nb_dims.value ) )
+
+    def __init__( self, values = None, frame = None, pixel_frame = None, target_mass = 1.0, degree = 0, **kwargs ) -> None:
         """`frame`: the edges of the WHOLE image ( `[ d, d ]`, or `[ d ]` lengths ). `pixel_frame`: those of ONE pixel ( the
-        field `frame` ). Neither: the longest side of the image is 1. The copies ( `shape` given ) pass `pixel_frame` as is."""
+        field `frame` ). Neither: the longest side of the image is 1. The copies ( `shape` given ) pass `pixel_frame` as is.
+        `degree > 0`: `values` holds the Bernstein coefficients, `[ pixels..., ( degree + 1 )^d ]` ( see the class )."""
+        if degree:
+            if "coeffs" in kwargs:
+                raise ValueError( "Image: `values` or `coeffs`, not both" )
+            kwargs[ "coeffs" ] = values
+            values = None
+            shape = _grid_shape( kwargs[ "coeffs" ], kwargs.get( "batch_axes" ), trailing = 1 )
+            nc = _shape_of( kwargs[ "coeffs" ] )[ -1 ]
+            if nc != ( degree + 1 ) ** len( shape ):
+                raise ValueError( f"Image: with `degree = { degree }` in { len( shape ) }D, the last axis of `values` holds the "
+                                  f"{ ( degree + 1 ) ** len( shape ) } Bernstein coefficients of a pixel ( got { nc } )" )
         if frame is not None and pixel_frame is not None:
             raise ValueError( "Image: `frame` ( the whole image ) or `pixel_frame` ( one pixel ), not both" )
         if frame is not None or ( pixel_frame is None and "knots" not in kwargs and "shape" not in kwargs ):
             if "knots" in kwargs:
                 raise ValueError( "Image: with `knots`, the frame is that of one pixel: `pixel_frame`" )
-            shape = _grid_shape( values, kwargs.get( "batch_axes" ) )
+            shape = _grid_shape( values, kwargs.get( "batch_axes" ) ) if values is not None else \
+                    _grid_shape( kwargs[ "coeffs" ], kwargs.get( "batch_axes" ), trailing = 1 )
             pixel_frame = _pixel_frame( frame, shape )
         if pixel_frame is not None:
             kwargs[ "frame" ] = pixel_frame
-        self.__base_init__( values = values, target_mass = target_mass, **kwargs )
+        if values is not None:
+            kwargs[ "values" ] = values
+        if "coeffs" in kwargs and kwargs.get( "knots" ) is None:
+            # ( a polynomial image always has its knots: the continuation builds coarser grids in buffers of its own, of the same
+            # C++ type, `sdotplan/convolved/Image.h` )
+            sh = _grid_shape( kwargs[ "coeffs" ], kwargs.get( "batch_axes" ), trailing = 1 )
+            kwargs[ "knots" ] = numpy.stack( [ numpy.minimum( numpy.arange( max( sh ) + 1, dtype = float ), n ) for n in sh ] )
+        if "coeffs" in kwargs and "shape" not in kwargs:
+            # ( said, not inferred: `knots`, declared before `coeffs`, would be read first, and it is ragged )
+            kwargs[ "shape" ] = list( _grid_shape( kwargs[ "coeffs" ], kwargs.get( "batch_axes" ), trailing = 1 ) )
+        if "nb_coeffs" not in kwargs:                         # ( a compile-time size: always given, 1 for a constant per pixel )
+            kwargs[ "nb_coeffs" ] = _shape_of( kwargs[ "coeffs" ] )[ -1 ] if "coeffs" in kwargs else 1
+        self.__base_init__( target_mass = target_mass, **kwargs )
 
     def _grid_geometry( self ):
         """`( d, frame, origin, lo, hi )` of the grid, on the HOST side -- or `None` if it is not
@@ -179,7 +229,9 @@ class Image( Distribution ):
         from ._display import pack_blocks
 
         d = int( self.nb_dims.value )
-        values = numpy.asarray( self.values, dtype = float )
+        values = numpy.asarray( self.coeffs if self.is_polynomial else self.values, dtype = float )
+        if self.is_polynomial:
+            values = values.max( axis = -1 )                 # ( a pixel has mass where one of its coefficients has some )
         shape = values.shape[ -d: ]
         values = values.reshape( shape )
         full = values > key * float( values.max( initial = 0 ) )
@@ -251,11 +303,13 @@ class Image( Distribution ):
 
         # normalize
         if self.target_mass.is_defined:
+            data = dict( coeffs = self.target_mass / mass * self.coeffs, nb_coeffs = self.nb_coeffs.value ) if self.is_polynomial else \
+                   dict( values = self.target_mass / mass * self.values )
             return Image(
                 nb_dims = self.nb_dims.value,
                 shape = self.shape.value,
 
-                values = self.target_mass / mass * self.values,
+                **data,
 
                 origin = self.origin,
                 pixel_frame = self.frame,
@@ -276,12 +330,15 @@ class Image( Distribution ):
                 ),
             FfiCode.per_item( "outputs.image( batch_index ).measure_bwd( grad_of_outputs.image( batch_index ).values, "
                            "grad_of_outputs.image( batch_index ).current_mass ); "
+                           "outputs.image( batch_index ).measure_coeffs_bwd( grad_of_outputs.image( batch_index ).coeffs, "
+                           "grad_of_outputs.image( batch_index ).current_mass ); "
                            "outputs.image( batch_index ).measure_frame_bwd( grad_of_outputs.image( batch_index ).frame, "
                            "grad_of_outputs.image( batch_index ).current_mass );",
                            # the mass with respect to the pixel values and the frame -- not the knots; and with respect to the origin,
                            # which it does not depend on: a zero, computed
-                           computed_grads = "computed_grads.from_image_current_mass.image.values = true; "
-                                            "[]( auto &img ) { if constexpr ( requires { img.origin; } ) img.origin = true; "
+                           computed_grads = "[]( auto &img ) { if constexpr ( requires { img.values; } ) img.values = true; "
+                                            "if constexpr ( requires { img.coeffs; } ) img.coeffs = true; "
+                                            "if constexpr ( requires { img.origin; } ) img.origin = true; "
                                             "if constexpr ( requires { img.frame; } ) img.frame = true; }"
                                             "( computed_grads.from_image_current_mass.image );" ),
             image = loom.out( self, writes = ( "current_mass", ) ),
@@ -300,7 +357,14 @@ class Image( Distribution ):
             attr = getattr( self, name )
             if attr.is_defined:
                 kwargs[ "pixel_frame" if name == "frame" else name ] = attr.value
+        if self.is_polynomial:
+            return Image( values = self.coeffs.value[ index ], degree = self.degree, **kwargs )
         return Image( values = self.values.value[ index ], **kwargs )
+
+    def _only_constant_in_1d( self ):
+        if self.is_polynomial:
+            raise NotImplementedError( "Image: the 1D transport ( `SdotPlan1d`, a sort ) takes a constant per pixel only ( `degree = 0` ) "
+                                       "-- a polynomial image goes through a power diagram in 2D or 3D" )
 
     def ensure_cell_cum_mass( self ):
         """= Internals
@@ -309,6 +373,7 @@ class Image( Distribution ):
         if not already cached. Called once by `SdotPlan1d` before it reads `dst_dist.cell_cum_mass` --
         a plain method (not a same-named property) because the FIELD itself must keep the name
         `cell_cum_mass` for the C++ struct it crosses the FFI as."""
+        self._only_constant_in_1d()
         if self.cell_cum_mass.is_undefined:
             self._update_cell_cum_mass()
 
@@ -378,7 +443,7 @@ class Image( Distribution ):
         buffer) and, measured, is never slower -- often faster -- than `vmap` at every scale
         tried (1e6-1e8), so there is no size threshold to pick between them.
         """
-        if plan._with_barycenters:
+        if plan._with_barycenters or self.is_polynomial:
             return False
         if int( self.nb_dims.value ) != 1:
             return False
@@ -464,11 +529,24 @@ def _merge_along( lo, hi, ids, a ):
     return nlo, nhi, nids
 
 
-def _grid_shape( values, batch_axes ):
-    """the number of pixels along each axis: the shape of `values` without its batch axes ( the first ones )"""
+def _shape_of( values ):
     v = values.value if isinstance( values, loom.Tensor ) else values
-    shape = tuple( v.shape ) if hasattr( v, "shape" ) else numpy.shape( v )
-    return shape[ len( batch_axes or () ): ]
+    return tuple( v.shape ) if hasattr( v, "shape" ) else numpy.shape( v )
+
+
+def _grid_shape( values, batch_axes, trailing = 0 ):
+    """the number of pixels along each axis: the shape of `values` without its batch axes ( the first ones ) and its `trailing`
+    last ones ( the coefficients of a polynomial image )"""
+    shape = _shape_of( values )
+    return shape[ len( batch_axes or () ): len( shape ) - trailing ]
+
+
+def _degree_of( nb_coeffs, d ):
+    """`P` such that `( P + 1 )^d = nb_coeffs`"""
+    p = round( nb_coeffs ** ( 1 / d ) ) - 1
+    if ( p + 1 ) ** d != nb_coeffs:
+        raise ValueError( f"Image: { nb_coeffs } coefficients per pixel is not a `( P + 1 )^{ d }`" )
+    return p
 
 
 def _pixel_frame( frame, shape ):

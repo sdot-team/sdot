@@ -26,6 +26,7 @@ struct MeshElementDensity {
     using TF = typename MeshT::TF;
     static constexpr int ct_dim = MeshT::ct_dim;
     static constexpr bool is_constant = false;
+    static constexpr bool is_affine = true;              ///< `value_at` is affine: what the integration in a ball wants ( `InBall.h` )
     static_assert( ct_dim >= 2 );
 
     const MeshT *mesh;
@@ -357,8 +358,17 @@ struct Mesh {
     /// `func( q, part )` for each facet `q` of `cell` ( a cut that faces a seed ) and each element that cuts it: `part` the integral
     /// of the density on what the element holds of the facet, ACCUMULATED by the caller. `plane_of( r, dir, off )` gives the plane
     /// of cut `r` -- the bisector REBUILT from the seeds, not read back from the vertices: where four cells meet, an edge of length
-    /// zero has a plane that the rounding alone decides, and the bisectors of two cells are exactly opposite
+    /// zero has a plane that the rounding alone decides, and the bisectors of two cells are exactly opposite. `on_segment( A, B, dens )`
+    /// ( 2D ): the integral of the element's density `dens` on the part `[ A, B ]` of a facet -- by default all of it, inside a ball
+    /// what the sphere leaves of it ( `InBall.h` )
     HD void for_each_facet_mass( const auto &cell, auto &&plane_of, auto &&func ) const {
+        for_each_facet_mass( cell, plane_of, func, []( const auto &A, const auto &B, const auto &dens ) {
+            const TF L = sdot::sqrt( ( B[ 0 ] - A[ 0 ] ) * ( B[ 0 ] - A[ 0 ] ) + ( B[ 1 ] - A[ 1 ] ) * ( B[ 1 ] - A[ 1 ] ) );
+            return L * ( dens.value_at( A ) + dens.value_at( B ) ) / 2;
+        } );
+    }
+
+    HD void for_each_facet_mass( const auto &cell, auto &&plane_of, auto &&func, auto &&on_segment ) const {
         if ( cell.nb_vertices() == 0 )
             return;
         TF clo[ ct_dim ], chi[ ct_dim ];
@@ -368,7 +378,7 @@ struct Mesh {
         walk( true, clo, chi, [&]( SI e ) {
             for ( int q = 0; q < nc; ++q )
                 if ( cell.cid[ q ] >= 0 ) {
-                    const TF part = facet_part( e, cell, plane_of, q );
+                    const TF part = facet_part( e, cell, plane_of, q, on_segment );
                     if ( part != 0 )
                         func( q, part );
                 }
@@ -378,7 +388,7 @@ struct Mesh {
 
     /// what element `e` holds of the facet `q` of `cell`: the section of the element by the facet's plane, clipped by the other cuts
     /// of the cell, `f` integrated on it ( affine: measure * `f` at the center )
-    HD TF facet_part( SI e, const auto &cell, auto &&plane_of, int q ) const {
+    HD TF facet_part( SI e, const auto &cell, auto &&plane_of, int q, auto &&on_segment ) const {
         constexpr int D = ct_dim;
         TF n[ D ], off;
         plane_of( q, n, off );
@@ -452,8 +462,7 @@ struct Mesh {
                 return 0;
             const TF A[ 2 ] = { P[ 0 ][ 0 ] + t0 * ( P[ 1 ][ 0 ] - P[ 0 ][ 0 ] ), P[ 0 ][ 1 ] + t0 * ( P[ 1 ][ 1 ] - P[ 0 ][ 1 ] ) };
             const TF B[ 2 ] = { P[ 0 ][ 0 ] + t1 * ( P[ 1 ][ 0 ] - P[ 0 ][ 0 ] ), P[ 0 ][ 1 ] + t1 * ( P[ 1 ][ 1 ] - P[ 0 ][ 1 ] ) };
-            const TF L = sdot::sqrt( ( B[ 0 ] - A[ 0 ] ) * ( B[ 0 ] - A[ 0 ] ) + ( B[ 1 ] - A[ 1 ] ) * ( B[ 1 ] - A[ 1 ] ) );
-            return L * ( dens.value_at( A ) + dens.value_at( B ) ) / 2;
+            return TF( on_segment( A, B, dens ) );
         } else {
             // a polygon, clipped by the cell's other faces ( Sutherland-Hodgman ), then its area times `f` at its center
             constexpr int CAP = 64;
