@@ -1609,6 +1609,11 @@ class SdotPlanNd( Displayable ):
         n = len( g.parent )
         live_pos = src.positions.raw
         nu = src.weights.raw
+        # ( one of them a constant: in the framework of the other -- Torch's operations take no numpy )
+        if isinstance( live_pos, np.ndarray ) and not isinstance( nu, np.ndarray ):
+            live_pos = grp._arr( nu, live_pos )
+        elif isinstance( nu, np.ndarray ) and not isinstance( live_pos, np.ndarray ):
+            nu = grp._arr( live_pos, nu )
 
         # the frozen levels, the solver's slots
         members = np.flatnonzero( g.parent >= 0 )

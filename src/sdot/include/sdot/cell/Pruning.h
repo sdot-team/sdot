@@ -136,7 +136,7 @@ HD inline bool can_cut( const State &e, const TK *p0, TK w0, const Box<TK,D> &B 
     if constexpr ( requires { e.vx + e.vx; } ) {
         static_assert( D == 2 );
         return can_cut_box_reg<WEIGHTED,TK>( e, p0, w0, B );
-    } else if constexpr ( D == 2 ) {
+    } else if constexpr ( requires { e.vy; } ) {
         const TK *v[ 2 ] = { e.vx, e.vy };
         return can_cut_box<WEIGHTED,TK,2>( e.nb, v, p0, w0, B );
     } else {

@@ -73,7 +73,7 @@ which matters with many cells or many frames.
 With GROUPS ( `groups` ), the cells drawn are those of the members, which split the cell of their group; `virtual_seeds`
 adds the virtual diracs of the exact duplicates ( `virtual_color` ), the points their split is the power diagram of.
 
-### `.cell_complex(tolerance=None)`
+### `.cell_complex(contract=True)`
 
 The cells glued along their faces ( `CellComplex` ): each vertex, edge, ..., facet once, numbered per dimension, with
 its children ( the faces on its boundary ) and its parents ( the faces it bounds ) -- to walk the geometry of the diagram.
@@ -84,9 +84,13 @@ With a periodicity, the complex of the QUOTIENT ( a torus, a cylinder... ): a fa
 seed and an image of another -- or of itself --, and the geometry of each face is read off one of its copies, next to the
 given position of a seed of one of its cells ( `walls`: those that the group leaves, in the frame of the folded seeds ).
 
-The cells are cut in doubles for it, whatever the `kernel_dtype` of the diagram: in floats, two cells can disagree on the
-facet they share. `tolerance`: the distance under which two vertices are one where the diagram is not in general position
-( a grid of seeds ) -- `1e-12` times the size of the diagram by default ( the cells are exact to about `1e-15` ).
+The cells are cut for it with CANONICAL PREDICATES ( `predicates = "canonical"`, in doubles ), whatever the diagram's: every
+cell takes the same decision about the same vertex, so they agree exactly on what they share, and the gluing is pure
+connectivity -- no tolerance. Where the diagram is degenerate ( a grid of seeds ), the ties are broken by a symbolic
+perturbation, which blows a degenerate point up into vertices joined by edges of zero length. `contract` ( the default ):
+these edges are contracted, and the faces of zero measure with them -- an exact grid has the exact number of faces, its
+vertices shared by `2^d` cells. `contract = False`: the complex of the perturbed diagram, in general position ( each vertex in
+exactly `d + 1` cells, faces of zero measure included ).
 
 ### `.domain_outline()`
 
@@ -304,7 +308,7 @@ Writes this object for ParaView, as a `.vtu`. Returns the path written.
 ## `CellComplex`
 
 ```python
-CellComplex(cells, walls=None, tolerance=None, seeds=None, weights=None, power=True, group=None, maps=None, values=None, fold=None)
+CellComplex(cells, walls=None, seeds=None, weights=None, power=True, group=None, maps=None, values=None, fold=None, contract=True)
 ```
 
 The cells of a diagram glued along their faces: every face once, numbered per dimension, with its incidences. Built by
@@ -313,16 +317,18 @@ cut identifiers designate.
 
 `faces( k )` the `k`-faces, `vertices` / `edges` / `facets` / `cells` those of dimension `0`, `1`, `d - 1`, `d`. `walls`: the
 half-spaces `( directions, offsets )` of the domain, which the negative sides of the facets designate ( `-1 - wall` ).
-`tolerance`: the distance under which two vertices are one, where the diagram is not in general position ( a grid of seeds ).
+Cells cut with canonical predicates ( `Cell_C` ) glue exactly; others are glued by their keys alone, and the check says whether
+they agreed ( `is_consistent` ). `contract`: the edges of zero length that the cells mark ( `vertex_ties`: a degenerate point blown
+up by the tie-breaking ) are contracted -- `False` keeps the complex of the perturbed diagram, in general position.
 
 | Attribute | |
 |---|---|
 | `cells` | The `dim`-faces, numbered like the seeds ( an empty cell has no face ). |
-| `diagnostics` | What the check of the gluing found ( see `_check` ): `contracted_facets`, `one_sided_facets`, `open_links`, and `facet_mismatch` ( computed when read: the measures of the copies of every facet ). |
+| `diagnostics` | What the check of the gluing found ( see `_check` ): `one_sided_facets`, `open_links`, `kept_zero_edges` ( the edges of zero length that were not contracted, an elongated sliver in conflict ), and `facet_mismatch` ( computed when read: the measures of the copies of every facet ). |
 | `dim` | The dimension of the space ( and of the cells ). |
 | `edges` | The `1`-faces ( the cells themselves in 1D ). |
 | `facets` | The `( dim - 1 )`-faces: what two cells share, or a cell and a wall of the domain ( `Faces.sides` ). |
-| `is_consistent` | Whether every facet between two seeds is in both their cells and the facets close around every face of dimension `d - 2` ( see `diagnostics`: `one_sided_facets`, `open_links`, `contracted_facets`, `facet_mismatch` ). |
+| `is_consistent` | Whether every facet between two seeds is in both their cells and the facets close around every face of dimension `d - 2` ( see `diagnostics`: `one_sided_facets`, `open_links`, `facet_mismatch` ). Always, for the cells of a diagram. |
 | `vertex_positions` | `[ nb_vertices, d ]`: the position of each vertex ( with a periodicity, of one of its copies ) -- a tensor of the framework of the positions, differentiable ( `geometry` ). |
 | `vertices` | The `0`-faces. |
 

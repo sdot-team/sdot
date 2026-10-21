@@ -89,7 +89,7 @@ namespace sdot {
 template<bool ON_CPU,class Cell,class Provider>
 HD int run( Cell &c, Provider &f ) {
     LocalOf<Provider> loc{};
-    if constexpr ( ON_CPU && Cell::ct_dim == 2 ) {
+    if constexpr ( ON_CPU && Cell::ct_dim == 2 && std::is_same_v<Cell,Local2<typename Cell::TKernel>> ) {
         if ( c.bounded() )
             return run_2d_registers( c, f, loc );
         // unbounded: in memory while walls remain to be pushed back, then in registers

@@ -36,6 +36,12 @@
 // vertices than it creates, and then only the difference moves.
 //
 // This is the bench's `Cellule3D.h`, with the dimension as a parameter.
+//
+// `CANON`: THE CANONICAL PREDICATES ( `Canonical.h` ), any dimension `D >= 2`, in doubles. Each cut and the seed of the cell carry
+// their GENERATOR ( set by `canon_start` and `canon_pending`, from `diagram::make_cell` ), each vertex its position relative to the
+// smallest seed among its generators; a vertex is created at the solution of its own equations, and whether a plane removes it is a
+// function of its generators and of the plane alone -- the same decision in every cell that has it. Without a generator ( a cell
+// cut from Python, a made-up wall ), the usual cut.
 // =====================================================================================
 
 #include <loom/support/math.h>
@@ -47,6 +53,7 @@
 #include "Plane.h"
 #include "State.h"
 #include "Ids.h"
+#include "Canonical.h"
 
 #include <type_traits>
 #include <limits>
@@ -54,10 +61,12 @@
 
 namespace sdot {
 
-template<class TK,int D>
+template<class TK,int D,bool CANON = false>
 struct __attribute__(( visibility( "default" ) )) LocalN {
-    static_assert( D >= 3, "below 3D, it is `Local2`" );
-    static constexpr int ct_dim = D;
+    static_assert( D >= 3 || ( CANON && D >= 2 ), "below 3D, it is `Local2` ( or the canonical cell )" );
+    static_assert( ! CANON || std::is_same_v<TK,double>, "the canonical predicates are in doubles" );
+    static constexpr int  ct_dim = D;
+    static constexpr bool canonical = CANON;
     using TKernel = TK;
     using PlaneT  = Plane<TK,D>;
 
@@ -76,12 +85,21 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     TK  *s, *nx[ D ], *rate[ D ], *s3[ 3 ];
     int *hole, *nk[ D - 1 ], *rec_v, *rec_f, *dest, *nn_[ D ], *fresh, *src, *dst, *m, *apex[ D ], *fvl[ D ], *fcl[ D ], *v0, *on_face;
 
+    // CANON: per cut its generator ( `gk` the kind, `gr` the rank or wall number, `gp` / `gs` / `gw` ), per vertex its position `ys`
+    // relative to its frame and that frame `vs0` ( the cut whose generator it is, `-1` the seed of the cell, `-2` not canonical ), and
+    // the same for the new vertices of a cut. `own`: the seed of the cell; `pend`: the generator of the next plane.
+    double *gp[ D ], *gs[ D ], *gw, *ys[ D ], *yl[ D ], *nys[ D ], *nyl[ D ];   ///< ( `ys + yl`: a double-double )
+    int    *gk, *gr, *vs0, *ns0;
+    bool    own_set = false, pend_set = false, canon_active = false;
+    canon::Gen<D> own, pend;
+
     // ---- the scratch --------------------------------------------------------------------------
 
     /// how many words are needed for `cap` vertices ( and as many cuts ) -- THE SAME FORMULA as
     /// `Cell_N.scratch_words`
     HD static constexpr SI words_for( SI cap ) {
-        return ( 4 * D + 5 ) * words_of<TK>( cap ) + ( 7 * D + 10 ) * words_of<int>( cap );
+        return ( 4 * D + 5 ) * words_of<TK>( cap ) + ( 7 * D + 10 ) * words_of<int>( cap )
+             + ( CANON ? ( 6 * D + 1 ) * words_of<double>( cap ) + 4 * words_of<int>( cap ) : 0 );
     }
 
     HD bool attach( Carver &c, SI capacity ) {
@@ -102,7 +120,15 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
         for ( int d = 0; d < D; ++d ) fvl[ d ] = c.take<int>( cap );
         for ( int d = 0; d < D; ++d ) fcl[ d ] = c.take<int>( cap );
         v0 = c.take<int>( cap ); on_face = c.take<int>( cap );
-        nv = 0; nc = 0; unbounded = false; has_planes = false;
+        if constexpr ( CANON ) {
+            for ( int d = 0; d < D; ++d ) {
+                gp[ d ] = c.take<double>( cap ); gs[ d ] = c.take<double>( cap );
+                ys[ d ] = c.take<double>( cap ); yl[ d ] = c.take<double>( cap ); nys[ d ] = c.take<double>( cap ); nyl[ d ] = c.take<double>( cap );
+            }
+            gw = c.take<double>( cap );
+            gk = c.take<int>( cap ); gr = c.take<int>( cap ); vs0 = c.take<int>( cap ); ns0 = c.take<int>( cap );
+        }
+        nv = 0; nc = 0; unbounded = false; has_planes = false; own_set = false; pend_set = false;
         return ! c.overflow;
     }
 
@@ -115,6 +141,13 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
         for ( int k = 0; k < nc; ++k ) {
             cid[ k ] = o.cid[ k ];
             if ( has_planes ) { for ( int d = 0; d < D; ++d ) pd[ d ][ k ] = o.pd[ d ][ k ]; po[ k ] = o.po[ k ]; }
+        }
+        if constexpr ( CANON ) {
+            own_set = o.own_set; own = o.own; pend_set = false;
+            if ( own_set ) {
+                for ( int k = 0; k < nc; ++k ) set_gen( k, o.gen_of( k ) );
+                for ( int i = 0; i < nv; ++i ) { vs0[ i ] = o.vs0[ i ]; for ( int d = 0; d < D; ++d ) { ys[ d ][ i ] = o.ys[ d ][ i ]; yl[ d ][ i ] = o.yl[ d ][ i ]; } }
+            }
         }
         return true;
     }
@@ -163,6 +196,7 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
             cid[ k ] = cut_id;
         unbounded  = cut_id == cell_ids::INFINITE;
         has_planes = false;
+        own_set = false; pend_set = false;
         if ( unbounded )
             planes_from_vertices();
         return true;
@@ -204,10 +238,122 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
         po[ D ] = 1;
         unbounded  = true;
         has_planes = true;
+        own_set = false; pend_set = false;
         return true;
     }
 
     HD void make_empty() { nv = 0; nc = 0; unbounded = false; has_planes = false; }
+
+    // ---- CANON: the generators ----------------------------------------------------------------
+
+    HD canon::Gen<D> gen_of( int k ) const {
+        canon::Gen<D> g;
+        if constexpr ( CANON ) {
+            g.kind = gk[ k ]; g.rank = gr[ k ]; g.w = gw[ k ];
+            for ( int d = 0; d < D; ++d ) { g.p[ d ] = gp[ d ][ k ]; g.s[ d ] = gs[ d ][ k ]; }
+        }
+        return g;
+    }
+    HD void set_gen( int k, const canon::Gen<D> &g ) {
+        if constexpr ( CANON ) {
+            gk[ k ] = g.kind; gr[ k ] = g.rank; gw[ k ] = g.w;
+            for ( int d = 0; d < D; ++d ) { gp[ d ][ k ] = g.p[ d ]; gs[ d ][ k ] = g.s[ d ]; }
+        }
+    }
+    /// the generator of the frame of vertex `i` ( `vs0[ i ] >= -1` )
+    HD canon::Gen<D> frame_of( int i ) const { return vs0[ i ] < 0 ? own : gen_of( vs0[ i ] ); }
+
+    /// the `D + 1` generators of the vertex of cuts `cuts`: the seed of the cell first ( index `-1` ), then the cuts
+    HD void gens_of( const int *cuts, canon::Gen<D> *g ) const {
+        g[ 0 ] = own;
+        for ( int r = 0; r < D; ++r ) g[ r + 1 ] = gen_of( cuts[ r ] );
+    }
+
+    /// solve the vertex of cuts `cuts` canonically: its position relative to its frame `y`, the frame `s0` ( a cut index, `-1` the
+    /// seed, `-2` not canonical ), and its position `x` in the frame of the cell
+    HD bool canon_vertex( const int *cuts, canon::DD *y, int &s0, TK *x ) const {
+        canon::Gen<D> g[ D + 1 ];
+        gens_of( cuts, g );
+        int f = -1;
+        if ( ! canon::solve<D>( g, y, f ) ) { s0 = -2; return false; }
+        s0 = f == 0 ? -1 : cuts[ f - 1 ];
+        for ( int d = 0; d < D; ++d )
+            x[ d ] = TK( ( ( canon::two_sum( g[ f ].p[ d ], g[ f ].s[ d ] ) + y[ d ] ) ).hi );
+        return true;
+    }
+    HD void y_of( int i, canon::DD *y ) const { for ( int d = 0; d < D; ++d ) y[ d ] = { ys[ d ][ i ], yl[ d ][ i ] }; }
+
+    /// THE START OF A CANONICAL CELL ( after `load` of the domain ): the seed of the cell, then each cut of the domain is a wall
+    /// numbered by its rank there ( the same in every cell ), with the plane of its vertices; each vertex gets its frame
+    HD void canon_start( const canon::Gen<D> &seed ) {
+        if constexpr ( CANON ) {
+            own = seed;
+            own_set = true;
+            pend_set = false;
+            for ( int k = 0; k < nc; ++k ) {
+                canon::Gen<D> g;
+                TK dir[ D ], off;
+                if ( cid[ k ] != cell_ids::INFINITE && plane_of_cut( k, dir, off ) ) {
+                    g.kind = canon::WALL;
+                    g.rank = k;
+                    for ( int d = 0; d < D; ++d ) g.p[ d ] = double( dir[ d ] );
+                    g.w = double( off );
+                }
+                set_gen( k, g );
+            }
+            for ( int i = 0; i < nv; ++i ) {
+                int cuts[ D ];
+                for ( int r = 0; r < D; ++r ) cuts[ r ] = vk[ r ][ i ];
+                canon::DD y[ D ];
+                TK x[ D ];
+                if ( canon_vertex( cuts, y, vs0[ i ], x ) )
+                    for ( int d = 0; d < D; ++d ) { ys[ d ][ i ] = y[ d ].hi; yl[ d ][ i ] = y[ d ].lo; }
+            }
+        }
+    }
+
+    /// the generator of the plane that the next `cut` brings ( `diagram::make_cell` sets it from the provider )
+    HD void canon_pending( const canon::Gen<D> &g ) {
+        if constexpr ( CANON ) { pend = g; pend_set = own_set; }
+    }
+
+    /// whether vertex `i` stays on the inside of the plane of generator `j`: the sign of `side`, the perturbation for a tie
+    HD bool canon_inside( int i, const canon::Gen<D> &j ) const {
+        canon::DD y[ D ];
+        y_of( i, y );
+        const int sg = canon::sign_of<D>( frame_of( i ), y, j );
+        if ( sg )
+            return sg > 0;
+        int cuts[ D ];
+        for ( int r = 0; r < D; ++r ) cuts[ r ] = vk[ r ][ i ];
+        canon::Gen<D> g[ D + 1 ];
+        gens_of( cuts, g );
+        return canon::sos_inside<D>( g, j );
+    }
+
+    /// whether the edge between vertex `a` and its neighbor `r` has zero length: each end on the plane of the other's extra
+    /// generator, within `zero_band` ( a function of the two vertices alone: the same in every cell )
+    HD bool canon_zero_edge( int a, int r ) const {
+        const int b = vn[ r ][ a ];
+        if ( vs0[ a ] == -2 || vs0[ b ] == -2 )
+            return false;
+        const int ca = vk[ r ][ a ];
+        int cb = -1;
+        for ( int q = 0; q < D; ++q ) {
+            bool in = false;
+            for ( int t = 0; t < D; ++t ) in |= vk[ q ][ b ] == vk[ t ][ a ];
+            if ( ! in ) cb = vk[ q ][ b ];
+        }
+        if ( cb < 0 )
+            return true;                                 // ( two vertices of the same cuts )
+        canon::DD ya[ D ], yb[ D ];
+        y_of( a, ya );
+        y_of( b, yb );
+        // ( BOTH ends: the extra plane of one end may contain the whole edge -- coincident bisectors, on a grid -- but not that of the
+        // other end, which meets the line of the edge at that end only )
+        return canon::sign_of<D>( frame_of( a ), ya, gen_of( cb ), canon::zero_band() ) == 0
+            && canon::sign_of<D>( frame_of( b ), yb, gen_of( ca ), canon::zero_band() ) == 0;
+    }
 
     // ---- the planes, read back from the geometry ---------------------------------------------------
 
@@ -429,6 +575,9 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     }
 
     HD int cut_impl( const PlaneT &p ) {
+        if constexpr ( CANON )
+            if ( pend_set )
+                return cut_canonical( p );
         if ( signed_distances( p, s ) == 0 )
             return CutStatus::UNCHANGED;
 
@@ -477,6 +626,53 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     /// `on_the_plane` ); the cell is then untouched
     static constexpr int INCONSISTENT = -1;
 
+    /// CANON: the cuts whose canonical outside set no plane carves ( the predicates of the band disagreeing with the geometry ),
+    /// dropped -- what the check of the cell complex then sees
+    int nb_inconsistent = 0;
+
+    /// THE CANONICAL CUT: the geometric distances first, and the canonical predicate for the vertices within `1e-9` of the plane
+    /// ( beyond, both are far from rounding and say the same ). `s` keeps the geometric distances for the made-up vertices, made
+    /// positive or zero where the canonical decision overrides them.
+    HD int cut_canonical( const PlaneT &p ) {
+        const canon::Gen<D> gj = pend;
+        pend_set = false;
+        signed_distances( p, s );
+        int nb_out = 0;
+        for ( int i = 0; i < nv; ++i ) {
+            bool out;
+            const TK mg = magnitude( p, i );
+            if ( gj.kind == canon::OTHER || vs0[ i ] == -2 )
+                out = s[ i ] > 0;
+            else if ( s[ i ] > TK( 1e-9 ) * mg )
+                out = true;
+            else if ( s[ i ] < - TK( 1e-9 ) * mg )
+                out = false;
+            else
+                out = ! canon_inside( i, gj );
+            if ( out && ! ( s[ i ] > 0 ) )
+                s[ i ] = std::numeric_limits<TK>::min();
+            if ( ! out && s[ i ] > 0 )
+                s[ i ] = 0;
+            nb_out += out;
+        }
+        if ( nb_out == 0 )
+            return CutStatus::UNCHANGED;
+        if ( nb_out == nv ) {
+            nv = 0; nc = 0;
+            unbounded = false;
+            return CutStatus::EMPTY;
+        }
+        pend = gj;
+        canon_active = true;
+        const int r = cut_classified( p );
+        canon_active = false;
+        if ( r == INCONSISTENT ) {
+            ++nb_inconsistent;
+            return CutStatus::UNCHANGED;
+        }
+        return r;
+    }
+
     /// the cut proper, `s` classified ( `> 0`: outside ), at least one vertex on each side
     HD int cut_classified( const PlaneT &p ) {
         if ( nc >= cap ) {
@@ -485,6 +681,9 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
                 return CutStatus::NO_ROOM;
         }
         const int knew = nc;
+        if constexpr ( CANON )
+            if ( canon_active )
+                set_gen( knew, pend );
 
         // ---- A SINGLE PASS OVER THE VERTICES: the holes left by the outside vertices and, for
         // each of them, its crossing edges -- from which the new vertices are born. `nk`: the
@@ -510,6 +709,19 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
                 for ( int r = 0, q = 0; r < D; ++r )
                     if ( r != j )
                         nk[ q++ ][ nm ] = vk[ r ][ o ];
+                if constexpr ( CANON ) {
+                    // the new vertex at the solution of its own equations ( the interpolation for a made-up one )
+                    ns0[ nm ] = -2;
+                    if ( canon_active ) {
+                        int cuts[ D ];
+                        for ( int q = 0; q + 1 < D; ++q ) cuts[ q ] = nk[ q ][ nm ];
+                        cuts[ D - 1 ] = knew;
+                        canon::DD y[ D ];
+                        TK x[ D ];
+                        if ( canon_vertex( cuts, y, ns0[ nm ], x ) )
+                            for ( int d = 0; d < D; ++d ) { nys[ d ][ nm ] = y[ d ].hi; nyl[ d ][ nm ] = y[ d ].lo; nx[ d ][ nm ] = x[ d ]; }
+                    }
+                }
 
                 rec_v[ nm ] = u;
                 int f = 0;
@@ -593,6 +805,10 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
             vk[ D - 1 ][ m ] = knew;
             for ( int r = 0; r < D; ++r )
                 vn[ r ][ m ] = nn_[ r ][ j ];
+            if constexpr ( CANON ) {
+                vs0[ m ] = ns0[ j ];
+                for ( int d = 0; d < D; ++d ) { ys[ d ][ m ] = nys[ d ][ j ]; yl[ d ][ m ] = nyl[ d ][ j ]; }
+            }
         }
         for ( int i = 0; i < nm; ++i )                   // the reattachment, on the INSIDE vertex side
             vn[ rec_f[ i ] ][ rec_v[ i ] ] = dest[ i ];
@@ -615,6 +831,10 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
                 const int a = src[ t ], b = dst[ t ];
                 for ( int d = 0; d < D; ++d ) v[ d ][ b ] = v[ d ][ a ];
                 for ( int r = 0; r < D; ++r ) { vk[ r ][ b ] = vk[ r ][ a ]; vn[ r ][ b ] = vn[ r ][ a ]; }
+                if constexpr ( CANON ) {
+                    vs0[ b ] = vs0[ a ];
+                    for ( int d = 0; d < D; ++d ) { ys[ d ][ b ] = ys[ d ][ a ]; yl[ d ][ b ] = yl[ d ][ a ]; }
+                }
             }
             // and the neighbors that pointed to them; a neighbor may itself have moved
             for ( int t = 0; t < nmv; ++t ) {
@@ -666,11 +886,19 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
                 for ( int d = 0; d < D; ++d ) pd[ d ][ q ] = pd[ d ][ k ];
                 po[ q ] = po[ k ];
             }
+            if constexpr ( CANON )
+                if ( own_set && q != k )
+                    set_gen( q, gen_of( k ) );
             m[ k ] = q++;
         }
         for ( int i = 0; i < nv; ++i )
             for ( int r = 0; r < D; ++r )
                 vk[ r ][ i ] = m[ vk[ r ][ i ] ];
+        if constexpr ( CANON )
+            if ( own_set )
+                for ( int i = 0; i < nv; ++i )
+                    if ( vs0[ i ] >= 0 )
+                        vs0[ i ] = m[ vs0[ i ] ];
         nc = q;
     }
 
@@ -940,7 +1168,7 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     HD void for_each_facet( auto &&func ) const {
         if ( nv < D + 1 )
             return;
-        if constexpr ( D > 3 ) {
+        if constexpr ( D != 3 ) {
             TF fact = 1;
             for ( int i = 2; i < D; ++i )
                 fact *= i;
@@ -1109,6 +1337,7 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
             for ( int r = 0; r < D; ++r )
                 unbounded |= cid[ vk[ r ][ i ] ] == cell_ids::INFINITE;
         has_planes = false;
+        own_set = false; pend_set = false;
         return true;
     }
 
@@ -1125,6 +1354,18 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
             }
         for ( int k = 0; k < nc; ++k )
             c.cut_ids( k ) = cid[ k ];
+        // CANON: the edges of zero length that the ties make, a bit per neighbor ( `canon_zero_edge` )
+        if constexpr ( requires { c.vertex_ties; } ) {
+            for ( int i = 0; i < nv; ++i ) {
+                int mask = 0;
+                if constexpr ( CANON )
+                    if ( own_set )
+                        for ( int r = 0; r < D; ++r )
+                            if ( canon_zero_edge( i, r ) )
+                                mask |= 1 << r;
+                c.vertex_ties( i ) = mask;
+            }
+        }
         return true;
     }
 };

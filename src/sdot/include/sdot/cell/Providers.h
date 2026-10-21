@@ -26,6 +26,7 @@
 #include "Pruning.h"
 #include "Plane.h"
 #include "State.h"
+#include "Canonical.h"
 
 namespace sdot {
 
@@ -143,6 +144,7 @@ struct ProviderBsp {
     SI  n;                                               ///< the number of seeds: image `t` of rank `k` is `k + n t`
     SI  depth;                                           ///< `nb_nodes == 2^depth - 1`
     int npre = 0;                                        ///< MEMO: how many memories for `k0`
+    TK  slack = 0;                                       ///< the boxes widened by this much ( the canonical cut: a plane through a vertex is never pruned )
     TF  p0[ D ], w0;
     TK  q0[ D ], v0;                                     ///< the same, for the pruning
 
@@ -221,8 +223,8 @@ struct ProviderBsp {
         TF lo[ D ], hi[ D ];
         image_box( n, t, lo, hi );
         for ( int d = 0; d < D; ++d ) {
-            B.lo[ d ] = TK( lo[ d ] );
-            B.hi[ d ] = TK( hi[ d ] );
+            B.lo[ d ] = TK( lo[ d ] ) - slack;
+            B.hi[ d ] = TK( hi[ d ] ) + slack;
             B.a[ d ] = 0;
         }
         B.b = 0;
@@ -350,6 +352,55 @@ struct ProviderBsp {
                 l.stack[ l.top++ ] = ( rc << 6 ) | hc;
             }
         }
+    }
+};
+
+/// THE GENERATOR of the plane of identifier `j` in the cell of `k0` ( `cell/Canonical.h` ): seed `j` itself for `j == k0`. Its rank,
+/// its position without the image and the shift of its image ( with a linear part, its position as it is ); a plane inside a group
+/// is not a bisector, and has none.
+template<int D,class PD>
+HD canon::Gen<D> canon_generator( const PD &pd, SI k0, SI j ) {
+    canon::Gen<D> g;
+    if constexpr ( has_groups<PD>() )
+        if ( pd.same_group( k0, j ) )
+            return g;
+    const SI n = pd.nb_seeds();
+    SI seed = j, t = 0;
+    if constexpr ( is_periodic<PD>() ) { seed = j % n; t = j / n; }
+    g.kind = canon::SEED;
+    g.rank = int( seed );
+    g.w = double( pd.weight( j ) );
+    constexpr bool linear = [] { if constexpr ( requires { PD::periodic_linear_part; } ) return bool( PD::periodic_linear_part ); else return false; }();
+    if ( linear && t ) {
+        const auto q = pd.point( j );
+        for ( int d = 0; d < D; ++d ) g.p[ d ] = double( q[ d ] );
+    } else {
+        const auto q = pd.point( seed );
+        for ( int d = 0; d < D; ++d ) {
+            g.p[ d ] = double( q[ d ] );
+            if constexpr ( is_periodic<PD>() ) g.s[ d ] = double( pd.image_shift( t, d ) );
+        }
+    }
+    return g;
+}
+
+/// THE PROVIDER OF A CANONICAL CELL: the planes of `f`, each with its generator told to the cell before it cuts
+template<class PD,class Inner,class Cell>
+struct CanonProvider {
+    using Local = LocalOf<Inner>;
+    static constexpr int D = Cell::ct_dim;
+
+    const PD &pd;
+    Inner    &f;
+    Cell     &c;
+    SI        k0;
+
+    template<class State>
+    HD bool next( const State &e, Local &l, typename Cell::PlaneT &p ) {
+        if ( ! f.next( e, l, p ) )
+            return false;
+        c.canon_pending( canon_generator<D>( pd, k0, SI( p.id ) ) );
+        return true;
     }
 };
 

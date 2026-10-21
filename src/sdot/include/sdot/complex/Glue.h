@@ -2,19 +2,18 @@
 
 // =====================================================================================
 // THE GLUING OF A CELL COMPLEX ( `CellComplex.py` ), any dimension: the true face lattice of each cell, then a name per face that every
-// cell having it gives alike.
+// cell having it gives alike. Pure connectivity: no distance is compared.
 //
-// PER CELL. The cells of the kernel are SIMPLE polytopes ( each vertex the corner of exactly `D` cuts ): a degenerate cell -- a cube
-// of a grid, `2^D` cells around each corner -- is represented with extra vertices at one place, zero-length edges, cuts that touch
-// only a lower face. The lattice is read off the GEOMETRY instead, which is that of a convex polytope whatever its representation:
+// PER CELL. The cells are cut with canonical predicates ( `cell/Canonical.h` ): SIMPLE polytopes ( each vertex the corner of exactly
+// `D` cuts ) that agree from cell to cell, where a degenerate point -- a corner of a grid, `2^D` cells around it -- is blown up into
+// vertices joined by edges of ZERO LENGTH ( `vertex_ties` ). The lattice of the cell as it is ( the degenerate polytope ) is read off
+// the representation once those edges are contracted:
 //
-//   * the POINTS: the local vertices merged by their global number ( `gv`, the vertex gluing ) when at one place;
-//   * the incidences: a point is on the cuts of the local vertices merged into it ( the planes, exact from the seeds, give the
-//     normals );
-//   * the true FACETS: the cuts whose points span `D - 1` dimensions; the true VERTICES: the points whose facets' normals span `D`
-//     ( a point inside an edge or a facet is a corner of nothing );
-//   * the FACES: the intersections of the vertex sets of the facets -- the children of a face are the sets `V( F ) n V( f )`, `f` a
-//     facet not containing it, whose dimension is one less: `D - rank` of the normals of the facets containing them.
+//   * the POINTS: the classes of local vertices joined by zero-length edges ( `lp`, the vertex gluing );
+//   * the incidences: a point is on the cuts of its local vertices;
+//   * the true FACETS: the cuts whose points are in no other cut's ( a cut of a tie touches a lower face only: its points are those
+//     of that face ); the CORNERS: the points alone in the smallest face containing them;
+//   * the FACES: the children of a face are the maximal proper intersections of its corners with the facets not containing it.
 //
 // GLOBALLY. A face is named by its points: their global numbers, sorted ( without a periodicity ). With a periodicity, a face may
 // hold two copies of one vertex: each point then comes with the element of the group that relates it to the face's first point
@@ -104,67 +103,47 @@ struct CellLattice {
 };
 
 template<int D>
-CellLattice<D> lattice_of( SI cell, const auto &W, const auto &VC, const auto &gv, const auto &planes, const auto &cut_inf,
-                           SI v0, SI v1, SI c0, SI c1, double tol, double same ) {
+CellLattice<D> lattice_of( SI cell, const auto &lp, const auto &gv, const auto &VC, const auto &planes, SI v0, SI v1, SI c0, SI c1 ) {
     CellLattice<D> L;
-    // ---- the points
-    std::vector<int> pt_of( v1 - v0, -1 );
+    // ---- the points: the local vertices of one class of zero-length edges ( `lp`, the smallest of the class )
+    std::vector<int> pt_of( v1 - v0, -1 ), of_root( v1 - v0, -1 );
     for ( SI v = v0; v < v1; ++v ) {
-        const I64 g = I64( gv( v ) );
-        int found = -1;
-        if ( g >= 0 )
-            for ( int p = 0; p < int( L.rep.size() ); ++p ) {
-                if ( L.pgv[ p ] != g ) continue;
-                double m = 0;
-                for ( int d = 0; d < D; ++d ) m = std::max( m, std::fabs( double( W( v, d ) ) - double( W( L.rep[ p ], d ) ) ) );
-                if ( m <= same ) { found = p; break; }
-            }
-        if ( found < 0 ) {
-            found = int( L.rep.size() );
-            L.rep.push_back( v );
-            L.pgv.push_back( g );
-            L.fake.push_back( g < 0 );
+        const SI r = SI( lp( v ) ) - v0;
+        if ( of_root[ r ] < 0 ) {
+            of_root[ r ] = int( L.rep.size() );
+            L.rep.push_back( v0 + r );
+            L.pgv.push_back( I64( gv( v0 + r ) ) );
+            L.fake.push_back( I64( gv( v0 + r ) ) < 0 );
         }
-        pt_of[ v - v0 ] = found;
+        pt_of[ v - v0 ] = of_root[ r ];
     }
     const int np = int( L.rep.size() ), nc = int( c1 - c0 );
-    auto P = [&]( int p, int d ) { return double( W( L.rep[ p ], d ) ); };
 
-    // ---- the incidences: by the representation ( the cuts of each local vertex ) and by the geometry ( within `tol` of the plane )
+    // ---- the incidences, by the representation: a point is on the cuts of its local vertices
     std::vector<std::vector<int>> inc( nc );                 // points of each cut, sorted
-    std::vector<std::vector<int>> rep_inc( nc );
     for ( SI v = v0; v < v1; ++v )
         for ( int r = 0; r < D; ++r ) {
             const SI c = SI( VC( v, r ) ) - c0;
-            if ( c >= 0 && c < nc ) rep_inc[ c ].push_back( pt_of[ v - v0 ] );
+            if ( c >= 0 && c < nc ) inc[ c ].push_back( pt_of[ v - v0 ] );
         }
-    // ( by the representation only: a cut through an existing vertex makes a copy of it on the crossing edge, which the merge of the
-    // copies joins -- and a test by distance is no test at a vertex where planes meet at angles of 1e-9: two points 1e-3 apart are
-    // then both within 1e-12 of all of them )
-    for ( int c = 0; c < nc; ++c ) {
-        std::vector<int> &s = inc[ c ];
-        s = rep_inc[ c ];
+    for ( auto &s : inc ) {
         std::sort( s.begin(), s.end() );
         s.erase( std::unique( s.begin(), s.end() ), s.end() );
     }
 
-    auto normal = [&]( int c ) {
-        std::array<double,D> n;
-        for ( int d = 0; d < D; ++d ) n[ d ] = double( planes( c0 + c, d ) );
-        return n;
-    };
-    // the true facets: the cuts whose points span `D - 1` dimensions -- told by the NORMALS, exact from the seeds and the same in every
-    // cell: `D - rank` of the normals of all the cuts containing all their points. Not by the positions: at a vertex where planes meet
-    // at angles of 1e-9, its copies in the cells around it differ by 1e-7, and a sliver of 1e-10 is a facet for one and not another
+    // the true FACETS: the cuts whose points are not strictly inside those of another cut -- in a convex polytope, the vertex set of a
+    // facet is in no other face's; a cut that only touches a lower face ( a tie, contracted ) has the points of that face. Of two cuts
+    // with the same points ( two planes that coincide on the cell ), the first.
     std::vector<int> facet;                                  // ( local cut indices )
     for ( int c = 0; c < nc; ++c ) {
         if ( inc[ c ].size() < std::size_t( D ) ) continue;
-        std::vector<std::array<double,D>> ns;
-        for ( int e = 0; e < nc; ++e )
-            if ( ! inc[ e ].empty() && std::includes( inc[ e ].begin(), inc[ e ].end(), inc[ c ].begin(), inc[ c ].end() ) )
-                ns.push_back( normal( e ) );
-        if ( rank_of<D>( ns, 1e-12 ) == 1 )
-            facet.push_back( c );
+        bool keep = true;
+        for ( int e = 0; e < nc && keep; ++e ) {
+            if ( e == c || inc[ e ].size() < inc[ c ].size() ) continue;
+            if ( ! std::includes( inc[ e ].begin(), inc[ e ].end(), inc[ c ].begin(), inc[ c ].end() ) ) continue;
+            keep = inc[ e ].size() == inc[ c ].size() && e > c;
+        }
+        if ( keep ) facet.push_back( c );
     }
     // facets containing a set of points ( sorted )
     auto facets_of = [&]( const std::vector<int> &s ) {
@@ -174,13 +153,21 @@ CellLattice<D> lattice_of( SI cell, const auto &W, const auto &VC, const auto &g
                 res.push_back( c );
         return res;
     };
-    auto dim_of = [&]( const std::vector<int> &fs ) {
-        std::vector<std::array<double,D>> ns;
-        for ( int c : fs ) ns.push_back( normal( c ) );
-        return D - rank_of<D>( ns, 1e-12 );
+    // the points of all the facets of `fs` ( the smallest face containing a set )
+    auto closure = [&]( const std::vector<int> &fs ) {
+        std::vector<int> res;
+        bool first = true;
+        for ( int c : fs ) {
+            if ( first ) { res = inc[ c ]; first = false; continue; }
+            std::vector<int> t;
+            std::set_intersection( res.begin(), res.end(), inc[ c ].begin(), inc[ c ].end(), std::back_inserter( t ) );
+            res.swap( t );
+        }
+        return res;
     };
 
-    // ---- the faces, from the cell down
+    // ---- the faces, from the cell down: the children of a face are the MAXIMAL proper intersections of its corners with the facets
+    // that do not contain it -- one dimension less ( the lattice of a polytope is graded )
     std::vector<std::map<std::vector<int>,int>> seen( D + 1 );
     auto add = [&]( int k, const std::vector<int> &s, const std::vector<int> &fs, SI cut ) {
         auto it = seen[ k ].find( s );
@@ -196,42 +183,52 @@ CellLattice<D> lattice_of( SI cell, const auto &W, const auto &VC, const auto &g
         return id;
     };
     {
+        // the corners: the points that are the only one of the smallest face containing them ( a point inside an edge is not )
         std::vector<int> all;
         for ( int p = 0; p < np; ++p ) {
-            // ( a point counts if it is a corner: its facets span `D` )
-            if ( dim_of( facets_of( { p } ) ) == 0 ) all.push_back( p );
+            const std::vector<int> fs = facets_of( { p } );
+            if ( fs.empty() ) continue;
+            const std::vector<int> cl = closure( fs );
+            if ( cl.size() == 1 ) all.push_back( p );
         }
         if ( all.empty() ) return L;
         add( D, all, {}, -1 );
     }
     for ( int k = D; k >= 1; --k ) {
-        // ( the faces of dimension `k` found so far, in order )
         std::vector<int> cur;
         for ( int i = 0; i < int( L.dim.size() ); ++i ) if ( L.dim[ i ] == k ) cur.push_back( i );
         for ( int fi : cur ) {
             const std::vector<int> V = L.pts[ fi ];
-            std::vector<SI> SF = L.facets[ fi ];
+            const std::vector<SI> SF = L.facets[ fi ];
+            std::vector<std::vector<int>> cands;
             for ( int c : facet ) {
                 if ( std::binary_search( SF.begin(), SF.end(), c0 + c ) ) continue;
                 std::vector<int> C;
                 std::set_intersection( V.begin(), V.end(), inc[ c ].begin(), inc[ c ].end(), std::back_inserter( C ) );
-                if ( C.empty() ) continue;
-                // ( only the corners: a point inside an edge is no vertex of its faces )
-                std::vector<int> Ck;
-                for ( int p : C ) if ( std::binary_search( L.pts[ 0 ].begin(), L.pts[ 0 ].end(), p ) ) Ck.push_back( p );
-                if ( Ck.empty() ) continue;
-                const std::vector<int> fs = facets_of( Ck );
-                if ( dim_of( fs ) != k - 1 ) continue;
-                const int child = add( k - 1, Ck, fs, k - 1 == D - 1 ? SI( c0 + fs[ 0 ] ) : SI( -1 ) );
+                if ( C.empty() || C.size() == V.size() ) continue;
+                cands.push_back( C );
+            }
+            std::sort( cands.begin(), cands.end() );
+            cands.erase( std::unique( cands.begin(), cands.end() ), cands.end() );
+            for ( std::size_t a = 0; a < cands.size(); ++a ) {
+                bool maximal = true;
+                for ( std::size_t b = 0; b < cands.size() && maximal; ++b )
+                    if ( b != a && cands[ b ].size() > cands[ a ].size()
+                         && std::includes( cands[ b ].begin(), cands[ b ].end(), cands[ a ].begin(), cands[ a ].end() ) )
+                        maximal = false;
+                if ( ! maximal ) continue;
+                const std::vector<int> fs = facets_of( cands[ a ] );
+                const int child = add( k - 1, cands[ a ], fs, k - 1 == D - 1 && ! fs.empty() ? SI( c0 + fs[ 0 ] ) : SI( -1 ) );
                 L.children.push_back( { fi, child } );
             }
         }
     }
-    // a facet of dimension `D - 1` takes the cut whose plane it lies on: the first of its facets is the only one ( a true facet is one cut )
-    for ( int i = 0; i < int( L.dim.size() ); ++i )
-        if ( L.dim[ i ] == D - 1 && ! L.facets[ i ].empty() )
-            L.cut[ i ] = L.facets[ i ][ 0 ];
-    // the equations of the vertices: `D` of their facets, independent
+    // the equations of the vertices: `D` of their facets, independent ( the planes, exact from the seeds: what `CellGeometry` solves )
+    auto normal = [&]( SI c ) {
+        std::array<double,D> n;
+        for ( int d = 0; d < D; ++d ) n[ d ] = double( planes( c, d ) );
+        return n;
+    };
     for ( int i = 0; i < int( L.dim.size() ); ++i ) {
         if ( L.dim[ i ] != 0 ) continue;
         std::array<SI,D> e;
@@ -240,9 +237,9 @@ CellLattice<D> lattice_of( SI cell, const auto &W, const auto &VC, const auto &g
         int q = 0;
         for ( SI c : L.facets[ i ] ) {
             std::vector<std::array<double,D>> t = chosen;
-            t.push_back( normal( int( c - c0 ) ) );
+            t.push_back( normal( c ) );
             if ( rank_of<D>( t, 1e-9 ) > int( chosen.size() ) ) {
-                chosen.push_back( normal( int( c - c0 ) ) );
+                chosen.push_back( normal( c ) );
                 e[ q++ ] = c;
                 if ( q == D ) break;
             }
@@ -358,18 +355,17 @@ struct Union {
 ///   `c_par` / `c_chi` the local children, `v_eq` the equations of each local face of dimension 0 ( in the order of the faces ),
 ///   `stats`: the numbers of faces, points, children, vertices, then the number of global faces per dimension.
 template<int D>
-void run( const CpuQueue &queue, const auto &W, const auto &VC, const auto &gv, const auto &E, const auto &planes, const auto &cut_inf,
+void run( const CpuQueue &queue, const auto &lp, const auto &VC, const auto &gv, const auto &E, const auto &planes, const auto &cut_inf,
           const auto &cgen, const auto &cimg, const auto &cell_v, const auto &cell_c, const auto &G, const auto &walls, const auto &params,
           auto &&f_cell, auto &&f_dim, auto &&f_gid, auto &&f_cut, auto &&f_fake, auto &&f_off, auto &&f_pts, auto &&c_par, auto &&c_chi,
           auto &&v_eq, auto &&stats ) {
     const SI n = SI( cell_v.shape( 0 ) ) - 1;
-    const double tol = double( params( 0 ) ), same = double( params( 1 ) );
-    const bool periodic = double( params( 2 ) ) != 0;
+    const bool periodic = double( params( 0 ) ) != 0;
     auto is_inf = [&]( SI c ) { return int( cut_inf( c ) ) != 0; };
 
     std::vector<CellLattice<D>> cells( n );
     par_for( queue, n, [&]( SI i ) {
-        cells[ i ] = lattice_of<D>( i, W, VC, gv, planes, is_inf, SI( cell_v( i ) ), SI( cell_v( i + 1 ) ), SI( cell_c( i ) ), SI( cell_c( i + 1 ) ), tol, same );
+        cells[ i ] = lattice_of<D>( i, lp, gv, VC, planes, SI( cell_v( i ) ), SI( cell_v( i + 1 ) ), SI( cell_c( i ) ), SI( cell_c( i + 1 ) ) );
     } );
 
     // a face on a made-up wall is none; one with a made-up point is unbounded

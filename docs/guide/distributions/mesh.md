@@ -2,6 +2,7 @@
 gallery: feature
 description: "Piecewise linear densities on triangles or tetrahedra: domains of any shape."
 tags: [mesh, 2d, 3d]
+image: /examples/img/mesh.png
 order: 4
 ---
 

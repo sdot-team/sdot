@@ -1124,7 +1124,8 @@ class TreeSystem:
         if not tgt:
             return x
         ops = loom.ops( w ) if not isinstance( w, np.ndarray ) else None
-        z = np.concatenate( [ seed_v.reshape( -1 ), agg_v.reshape( -1 ) ] ) if ops is None else ops.concatenate( [ seed_v.reshape( -1 ), agg_v.reshape( -1 ) ], axis = 0 )
+        parts = [ v.reshape( -1 ) if ops is None or not isinstance( v, np.ndarray ) else _arr( w, v.reshape( -1 ) ) for v in ( seed_v, agg_v ) ]
+        z = np.concatenate( parts ) if ops is None else ops.concatenate( parts, axis = 0 )   # ( host pieces in w's framework: Torch's `cat` takes no numpy )
         src, sub = np.asarray( src, dtype = np.int64 ), np.asarray( sub, dtype = np.int64 )
         return x + _scatter( z[ src ] - z[ sub ], np.asarray( tgt, dtype = np.int64 ), n )
 

@@ -21,18 +21,19 @@ Host side, in numpy: a snapshot of the diagram when it was asked for -- a new on
 
 = Internals
 
-THE GLUING. A vertex of cell `i` is the corner of `d` cuts; with the seed of the cell, the `d + 1` GENERATORS of the vertex ( seeds,
-or walls of the domain ) name it in every cell that has it, as long as the diagram is in general position. Where it is not ( four
-cells or more around a 2D vertex, a grid of seeds ), one point has several keys, which differ from cell to cell: the keys are
-then merged by DISTANCE ( `tolerance`, on a grid of boxes: no quadratic search ) -- an edge shorter than that is not an edge. A face of dimension `k > 0` of a cell is the set of the vertices on `d - k` of its cuts ( a simple
-polytope: each `d - k` cuts of a vertex carry a face through it ), and it is named, across cells, by its set of GLOBAL vertices --
-a face that collapsed to fewer than `k + 1` vertices ( a tiny edge merged ) is not a face. An unbounded face ( on a vertex
-of an `INFINITE` wall, made up ) is named by its finite vertices AND its generators.
+THE GLUING, pure connectivity. The cells are cut with CANONICAL PREDICATES ( `Cell_C`, `cell/Canonical.h` ): every decision about a
+vertex is a function of its generators alone, so the cells agree exactly on what they share. A vertex of cell `i` is the corner of
+`d` cuts; with the seed of the cell, its `d + 1` GENERATORS ( seeds with their images, or walls of the domain ) are its KEY, the same
+in every cell that has it. Where the diagram is degenerate ( four cells or more around a 2D vertex, a grid of seeds ), the ties are
+broken by a symbolic perturbation: one point becomes several vertices joined by edges of zero length, marked by the cells
+( `vertex_ties` ) -- the gluing CONTRACTS them, so a face of zero measure disappears in every cell at once. The faces of each cell
+are then those of the polytope with its zero edges contracted ( `sdot/complex/Glue.h` ), named across cells by their global
+vertices; an unbounded face ( on a vertex of an `INFINITE` wall, made up ) by its finite vertices AND its generators. No distance is
+compared, no tolerance is involved.
 
 The walls of the domain all carry `BOUNDARY` in the cells: each is told apart by the half-space of `walls` its vertices lie on.
 """
 
-import itertools
 import math
 
 import numpy as np
@@ -49,7 +50,9 @@ class CellComplex:
 
     `faces( k )` the `k`-faces, `vertices` / `edges` / `facets` / `cells` those of dimension `0`, `1`, `d - 1`, `d`. `walls`: the
     half-spaces `( directions, offsets )` of the domain, which the negative sides of the facets designate ( `-1 - wall` ).
-    `tolerance`: the distance under which two vertices are one, where the diagram is not in general position ( a grid of seeds ).
+    Cells cut with canonical predicates ( `Cell_C` ) glue exactly; others are glued by their keys alone, and the check says whether
+    they agreed ( `is_consistent` ). `contract`: the edges of zero length that the cells mark ( `vertex_ties`: a degenerate point blown
+    up by the tie-breaking ) are contracted -- `False` keeps the complex of the perturbed diagram, in general position.
 
     = Internals
 
@@ -60,11 +63,13 @@ class CellComplex:
     seed `j`, and the faces are glued MODULO the group. `maps` ( `[ n, d, d + 1 ]` ): the frame each cell is read in by the user
     ( the given positions of a periodic diagram ), the cells being given in the frame where they were cut ( the folded seeds )."""
 
-    def __init__( self, cells, walls = None, tolerance = None, seeds = None, weights = None, power = True, group = None, maps = None,
-                  values = None, fold = None ):
+    def __init__( self, cells, walls = None, seeds = None, weights = None, power = True, group = None, maps = None,
+                  values = None, fold = None, contract = True ):
         self._d = d = int( cells.dim )
         self._n = n = int( cells.nb_items )
-        W, vcell, VC, CID, ccell, coff = _bulk( cells )   # ( `W`: the frame of the cuts, where the gluing happens )
+        W, vcell, VC, CID, ccell, coff, zero = _bulk( cells )   # ( `W`: the frame of the cuts, where the gluing happens )
+        if not contract:
+            zero = zero[ :0 ]
         V = W if maps is None else _moved( W, vcell, maps )
         self._W, self._V, self._vcell, self._cid = W, V, vcell, CID
         self._seeds = None if seeds is None else np.asarray( seeds, dtype = float ).reshape( n, d )
@@ -75,14 +80,13 @@ class CellComplex:
         self._values = values                          # ( positions, weights ) of the framework: what `geometry()` reads by default
         self._fold = None if fold is None else np.asarray( fold, dtype = float )   # per seed, from the given positions to the frame of the cuts
 
-        # the scale, and the tolerance of the merge ( in the kernel's float, which is what the vertices are exact to )
+        # the scale, and the resolution of the GEOMETRIC questions ( which wall a cut lies on, whether a point is in the domain ) --
+        # not of the connectivity
         fake_cut = CID == INFINITE
         fake_v = fake_cut[ VC ].any( axis = 1 ) if len( VC ) else np.zeros( 0, bool )
         real = W[ ~fake_v ]
         scale = float( np.ptp( real, axis = 0 ).max() ) if len( real ) else 1.0
-        if tolerance is None:
-            tolerance = ( 1e-12 if str( getattr( cells, "kernel_dtype", "FP32" ) ) == "FP64" else 1e-5 ) * max( scale, 1e-300 )
-        self.tolerance = tol = float( tolerance )
+        self._resolution = tol = 1e-12 * max( scale, 1e-300 )
 
         # THE GENERATORS of each cut: the seed it faces ( an image of it with a periodicity ), or the wall it lies on ( `-1 - wall` )
         gen = CID.astype( np.int64 )
@@ -99,31 +103,38 @@ class CellComplex:
         self.walls = None if walls is None else ( np.asarray( walls[ 0 ], dtype = float ).reshape( -1, d ),
                                                   np.asarray( walls[ 1 ], dtype = float ).reshape( -1 ) )
         self._gen, self._img = gen, img
-        quotient = None if group is None else _Quotient( group, tol )
 
         # THE VERTICES: named EXACTLY by their generators ( the seed of the cell and the `d` cuts, seeds with their images or walls ),
-        # in the frame of the smallest seed among them -- the same from every cell that has the vertex --, then merged by distance
-        # where the diagram is degenerate. `E`: per local vertex, the element of the group from that frame to the frame of its cell
-        gv, self._E = _glue_vertices( W, vcell, VC, gen, img, fake_v, tol, quotient, self.walls )
-        # THE GLUING, CHECKED: a facet that only one of its two cells has ( the cells disagree ) is contracted to a point on both
-        # sides when it is tiny, and the faces glued again ( `_check` )
+        # in the frame of the smallest seed among them -- the same from every cell that has the vertex --, and the edges of zero
+        # length contracted ( `zero`, the ties of the cells ). `E`: per local vertex, the element of the group from that frame to the
+        # frame of its cell; `lp`: per local vertex, the first local vertex of its point in its cell
+        K = _Keys( W, vcell, VC, gen, img, fake_v, group, self.walls )
+        zero = zero[ ( K.of[ zero[ :, 0 ] ] >= 0 ) & ( K.of[ zero[ :, 1 ] ] >= 0 ) ] if len( zero ) else zero
         self._ctx = dict( W = W, V = V, vcell = vcell, VC = VC, ccell = ccell, fake_cut = fake_cut, fake_v = fake_v, gen = gen,
-                          quotient = quotient, scale = scale )
-        self._diag = dict( contracted_facets = 0, one_sided_facets = 0, open_links = 0 )
-        for it in range( 8 ):
+                          scale = scale )
+        # THE GLUING, CHECKED ( `_check` ): each facet between two seeds in both their cells, the facets closed around every face of
+        # dimension `d - 2` -- what canonical cells always give without contraction. A contraction can break it: an ELONGATED sliver,
+        # some of whose edges have zero length and others not, collapses into a lower face in one of its cells and not in the other.
+        # The zero edges of the faces in conflict are then kept, by their keys ( in every cell alike ), and the faces glued again.
+        self._diag = dict( one_sided_facets = 0, open_links = 0, kept_zero_edges = 0 )
+        nb_zero = len( np.unique( np.sort( K.of[ zero ], axis = 1 ), axis = 0 ) ) if len( zero ) else 0
+        while True:
+            gv, self._E, self._lp = _glue_vertices( K, zero )
             self._build( gv )
-            merges = self._check( final = it == 7 )
-            if merges is None:
+            self._check( warn = False )
+            if self.is_consistent or len( zero ) == 0:
                 break
-            gv = _merge_ids( gv, merges )
-            self._diag[ "contracted_facets" ] += len( merges )
+            bad = self._conflict_keys( K )
+            keep = ~( np.isin( K.of[ zero[ :, 0 ] ], bad ) | np.isin( K.of[ zero[ :, 1 ] ], bad ) )
+            zero = zero[ keep ] if not keep.all() else zero[ :0 ]
+        self._diag[ "kept_zero_edges" ] = nb_zero - ( len( np.unique( np.sort( K.of[ zero ], axis = 1 ), axis = 0 ) ) if len( zero ) else 0 )
+        self._check()
 
     def _build( self, gv ):
         """the faces of the complex, from the global numbers of the local vertices `gv` ( the vertex gluing ): the true face lattice of
         each cell and the global names of its faces, by `sdot/complex/Glue.h`"""
         d, n = self._d, self._n
         V, vcell = self._ctx[ "V" ], self._ctx[ "vcell" ]
-        quotient = self._ctx[ "quotient" ]
         self._gv0 = gv
         out = self._glue_kernel( gv )
         f_cell, f_dim, f_gid, f_cut, f_fake, f_off, f_pts = ( out[ k ] for k in ( "f_cell", "f_dim", "f_gid", "f_cut", "f_fake", "f_off", "f_pts" ) )
@@ -137,7 +148,7 @@ class CellComplex:
         nv = int( nbk[ 0 ] )
         self._vertex_positions = np.zeros( ( nv, d ) )
         if nv:
-            if quotient is None:                         # ( the mean of its copies, all at the same place )
+            if self._group is None:                      # ( the mean of its copies, all at the same place )
                 np.add.at( self._vertex_positions, f_gid[ d0 ], V[ reps0 ] )
                 self._vertex_positions /= np.maximum( np.bincount( f_gid[ d0 ], minlength = nv ), 1 )[ :, None ]
             else:                                        # ( one of its copies: they are a period apart )
@@ -266,9 +277,7 @@ class CellComplex:
         E = self._E if self._group is not None else np.broadcast_to( eye, ( max( nV, 1 ), d, d + 1 ) )
         cell_v = np.concatenate( [ [ 0 ], np.cumsum( np.bincount( vcell, minlength = n ) ) ] )
         cell_c = np.concatenate( [ [ 0 ], np.cumsum( np.bincount( ccell, minlength = n ) ) ] )
-        # ( the resolution of the lattice is that of the vertex gluing: two distinct vertices are more than `tol` apart, so an edge
-        # between them is one; the copies of one vertex in a cell are within `_same_place` )
-        params = np.array( [ self.tolerance, _same_place( self.tolerance, d ), float( self._group is not None ) ] )
+        params = np.array( [ float( self._group is not None ) ] )
         ax = lambda m, name: Axis( ShapeVar( int( max( m, 1 ) ) ), name = name )
         I32 = lambda a, *axes: IntTensor[ ( *axes, dict( size = 32 ) ) ]( np.ascontiguousarray( a, dtype = np.int32 ) )
         nv_ax, nc_ax, dim = ax( nV, "num_lv" ), ax( nC, "num_cut" ), ax( d, "dim" )
@@ -283,12 +292,12 @@ class CellComplex:
                          stats = IntTensor[ ax( 4 + d + 1, "num_stat" ), dict( size = 64 ) ]() )
             loom.ffi_call(
                 f"cell_complex_glue_{ d }",
-                FfiCode.inline( f"sdot::glue::run<{ d }>( queue, args.inputs.W, args.inputs.VC, args.inputs.gv, args.inputs.E, args.inputs.planes, "
+                FfiCode.inline( f"sdot::glue::run<{ d }>( queue, args.inputs.lp, args.inputs.VC, args.inputs.gv, args.inputs.E, args.inputs.planes, "
                                 "args.inputs.cut_inf, args.inputs.cgen, args.inputs.cimg, args.inputs.cell_v, args.inputs.cell_c, args.inputs.G, "
                                 "args.inputs.walls, args.inputs.params, args.outputs.f_cell, args.outputs.f_dim, args.outputs.f_gid, "
                                 "args.outputs.f_cut, args.outputs.f_fake, args.outputs.f_off, args.outputs.f_pts, args.outputs.c_par, "
                                 "args.outputs.c_chi, args.outputs.v_eq, args.outputs.stats );", includes = [ "sdot/complex/Glue.h" ] ),
-                W = RealTensor[ nv_ax, dim ]( W if nV else np.zeros( ( 1, d ) ) ),
+                lp = I32( self._lp if nV else np.zeros( 1 ), nv_ax ),
                 VC = I32( VC if nV else np.zeros( ( 1, d ) ), nv_ax, dim ),
                 gv = I32( gv if nV else np.full( 1, -1 ), nv_ax ),
                 E = RealTensor[ nv_ax, dim, ax( d + 1, "aff" ) ]( np.ascontiguousarray( E[ :max( nV, 1 ) ] ) ),
@@ -300,7 +309,7 @@ class CellComplex:
                 cell_c = I32( cell_c, ax( n + 1, "num_cell1" ) ),
                 G = RealTensor[ ax( len( G ), "num_map" ), dim, ax( d + 1, "aff" ) ]( G ),
                 walls = RealTensor[ ax( len( walls ), "num_wall" ), ax( d + 1, "aff" ) ]( walls ),
-                params = RealTensor[ ax( 3, "num_param" ) ]( params ),
+                params = RealTensor[ ax( 1, "num_param" ) ]( params ),
                 **{ k: loom.out( v ) for k, v in outs.items() },
                 has_dynamic_capacity = False,
             )
@@ -382,42 +391,24 @@ class CellComplex:
 
     # ---- the check -----------------------------------------------------------------------------------
 
-    def _check( self, final = False ):
-        """THE CONSISTENCY OF THE GLUING, into `diagnostics`, and the vertices to merge ( pairs of global numbers ) or `None`:
+    def _check( self, warn = True ):
+        """THE CONSISTENCY OF THE GLUING, into `diagnostics` -- what cells cut with canonical predicates always give, and a warning
+        otherwise ( cells from elsewhere, `CellComplex( cells )`, which may disagree ):
 
-          * a facet between two seeds that only one of them has: contracted to a point when it is smaller than `100 tolerance`
-            ( its vertices merged, the faces glued again ), counted in `one_sided_facets` otherwise;
-          * `facet_mismatch`: the largest difference between the measures of the two copies of a facet, relative to the facet of a
-            typical cell ( `( volume / n )^( ( d - 1 ) / d )` ) ( what the cells disagree on, without changing the connectivity );
+          * `one_sided_facets`: the facets between two seeds that only one of them has;
           * `open_links`: the faces of dimension `d - 2` around which the facets do not close ( as many facets as cells inside the
-            domain, one more on its boundary ) -- what a cell that misses a facet leaves."""
+            domain, one more on its boundary );
+          * `facet_mismatch` ( computed when read ): the largest difference between the measures of the two copies of a facet,
+            relative to the facet of a typical cell -- what the cells disagree on, without changing the connectivity."""
         d = self._d
         if d < 2:
-            self._diag.update( one_sided_facets = 0, open_links = 0 )
-            return None
+            return
         sides = self._sides_and_normals()[ 0 ]
         off, _ = self.incident( d - 1, d )
         cnt = np.diff( off )
         inner = ( sides[ :, 1 ] >= 0 ) & ( sides[ :, 0 ] != sides[ :, 1 ] )
-        one = np.flatnonzero( inner & ( cnt == 1 ) )
-
-        # the one-sided facets: their extent, from the vertices of their copy
-        ro, rv = self._rep_points( d - 1 ) if len( one ) else ( None, None )
-        V, gv = self._V, self._gv0                       # ( the merges are those of the vertex gluing )
-        merges, big = [], 0
-        for f in one:
-            lv = rv[ ro[ f ] : ro[ f + 1 ] ]
-            if len( lv ) == 0:
-                continue
-            P = V[ lv ]
-            if np.abs( P.max( axis = 0 ) - P.min( axis = 0 ) ).max() <= 100 * self.tolerance:
-                g = np.unique( gv[ lv ] )
-                merges += [ ( int( g[ 0 ] ), int( h ) ) for h in g[ 1: ] ]
-            else:
-                big += 1
-        if merges and not final:
-            return merges
-        big += len( merges ) if final else 0
+        one_sided = np.flatnonzero( inner & ( cnt == 1 ) )
+        one = len( one_sided )
 
         # the links of the faces of dimension d - 2
         po, pf = self.incident( d - 2, d - 1 )
@@ -430,17 +421,34 @@ class CellComplex:
         closed = np.where( wall, nf == nc + 1, nf == nc ) | ~bounded
         if self.periodic:                                # ( a cell around a face twice, two of its copies: counted once )
             closed |= nf >= nc
-        self._diag.update( one_sided_facets = big, open_links = int( ( ~closed ).sum() ) )
-        if big or not closed.all():
+        self._diag.update( one_sided_facets = one, open_links = int( ( ~closed ).sum() ) )
+        self._conflicts = ( one_sided, np.flatnonzero( ~closed ) )
+        if warn and ( one or not closed.all() ):
             import warnings
-            warnings.warn( f"cell_complex: the cells disagree on { big } facets larger than 100 x tolerance, and { int( ( ~closed ).sum() ) } "
-                           f"faces of dimension { d - 2 } are not closed -- see `CellComplex.diagnostics`", stacklevel = 3 )
-        return None
+            warnings.warn( f"cell_complex: the cells disagree on { one } facets, and { int( ( ~closed ).sum() ) } faces of dimension { d - 2 } "
+                           f"are not closed -- see `CellComplex.diagnostics`", stacklevel = 3 )
+
+    def _conflict_keys( self, K ):
+        """the keys of the vertices of the faces in conflict ( `_check`: the one-sided facets, the faces of dimension `d - 2` whose
+        facets do not close ), all their local copies"""
+        facets, links = self._conflicts
+        pts = []
+        for c, ids in ( ( 1, facets ), ( 2, links ) ):
+            L = self._loc.get( c )
+            if L is None or len( ids ) == 0:
+                continue
+            sel = np.isin( L[ "lg" ], ids )
+            pts.append( L[ "lv" ][ sel[ L[ "lf" ] ] ] )
+        if not pts:
+            return np.zeros( 0, np.int64 )
+        pts = np.unique( np.concatenate( pts ) )
+        return np.unique( K.of[ np.isin( self._lp, pts ) ] )
 
     @property
     def diagnostics( self ):
-        """What the check of the gluing found ( see `_check` ): `contracted_facets`, `one_sided_facets`, `open_links`, and
-        `facet_mismatch` ( computed when read: the measures of the copies of every facet )."""
+        """What the check of the gluing found ( see `_check` ): `one_sided_facets`, `open_links`, `kept_zero_edges` ( the edges of zero
+        length that were not contracted, an elongated sliver in conflict ), and `facet_mismatch` ( computed when read: the measures of
+        the copies of every facet )."""
         if "facet_mismatch" not in self._diag:
             self._diag[ "facet_mismatch" ] = self._facet_mismatch()
         return self._diag
@@ -472,7 +480,7 @@ class CellComplex:
     @property
     def is_consistent( self ):
         """Whether every facet between two seeds is in both their cells and the facets close around every face of dimension `d - 2`
-        ( see `diagnostics`: `one_sided_facets`, `open_links`, `contracted_facets`, `facet_mismatch` )."""
+        ( see `diagnostics`: `one_sided_facets`, `open_links`, `facet_mismatch` ). Always, for the cells of a diagram."""
         return self._diag.get( "one_sided_facets", 0 ) == 0 and self._diag.get( "open_links", 0 ) == 0
 
     # ---- incidences ------------------------------------------------------------------------------
@@ -548,7 +556,7 @@ class CellComplex:
 
     def _rep_points( self, k ):
         """`( offsets, flat vertex ids )`: the vertices of the representative of each `k`-face -- without the made-up ones nor the
-        copies of one vertex that the merge says are one, in the order of the boundary for a `2`-face ( oriented as `incident`
+        local vertices of one point ( joined by zero-length edges ), in the order of the boundary for a `2`-face ( oriented as `incident`
         says ), by global number otherwise"""
         key = ( "rep", k )
         if key in self._geom:
@@ -584,14 +592,13 @@ class CellComplex:
             nxt = np.arange( len( lv ) ) + 1
             last = np.r_[ owner[ 1: ] != owner[ :-1 ], True ]
             nxt[ last ] = o2[ owner[ last ] ]
-            same = ( self._gv[ lv ] == self._gv[ lv[ nxt ] ] ) & ( np.abs( V[ lv ] - V[ lv[ nxt ] ] ).max( axis = 1 ) <= _same_place( self.tolerance, d ) )
+            same = self._lp[ lv ] == self._lp[ lv[ nxt ] ]
             same &= nxt != np.arange( len( lv ) )
             owner, lv = owner[ ~same ], lv[ ~same ]
         elif len( lv ):
             order = np.lexsort( ( self._gv[ lv ], owner ) )
             owner, lv = owner[ order ], lv[ order ]
-            dup = np.r_[ False, ( owner[ 1: ] == owner[ :-1 ] ) & ( self._gv[ lv[ 1: ] ] == self._gv[ lv[ :-1 ] ] )
-                         & ( np.abs( V[ lv[ 1: ] ] - V[ lv[ :-1 ] ] ).max( axis = 1 ) <= _same_place( self.tolerance, d ) ) ]
+            dup = np.r_[ False, ( owner[ 1: ] == owner[ :-1 ] ) & ( self._lp[ lv[ 1: ] ] == self._lp[ lv[ :-1 ] ] ) ]
             owner, lv = owner[ ~dup ], lv[ ~dup ]
         res = ( np.concatenate( [ [ 0 ], np.cumsum( np.bincount( owner, minlength = len( rep ) ) ) ] ), lv )
         self._geom[ key ] = res
@@ -699,7 +706,7 @@ class CellComplex:
         if self.walls is not None and len( self.walls[ 1 ] ):
             dirs, offs = self.walls
             nrm = np.linalg.norm( dirs, axis = 1 )
-            inside = ( ( Z @ dirs.T - offs ) / nrm <= self.tolerance ).all( axis = 1 )
+            inside = ( ( Z @ dirs.T - offs ) / nrm <= self._resolution ).all( axis = 1 )
         cell = np.where( inside, cell, -1 )
         moved[ ~inside ] = np.nan
         maps[ ~inside ] = np.nan
@@ -1269,9 +1276,10 @@ class Face( Displayable ):
 # ---- the gluing ------------------------------------------------------------------------------------
 
 def _bulk( cells ):
-    """The cells of a batch, flattened in ONE read: `( V [ nv, d ], vcell [ nv ], VC [ nv, d ], CID [ nc ], ccell [ nc ], coff )` --
+    """The cells of a batch, flattened in ONE read: `( V [ nv, d ], vcell [ nv ], VC [ nv, d ], CID [ nc ], ccell [ nc ], coff, zero )` --
     the vertices of all the items, the item of each, the `d` cuts of each ( indices into the flat cuts ), the identifiers of the
-    cuts, the item of each, and the first cut of each item."""
+    cuts, the item of each, the first cut of each item, and the edges of zero length ( `[ m, 2 ]` flat vertex pairs, from the
+    `vertex_ties` of canonical cells )."""
     from loom.tensor.host import to_host
     d, n, nbb = int( cells.dim ), int( cells.nb_items ), len( cells.batch_axes or [] )
 
@@ -1285,7 +1293,7 @@ def _bulk( cells ):
 
     if cells.vertex_positions.raw is None:
         e = np.zeros( 0, np.int64 )
-        return np.zeros( ( 0, d ) ), e, np.zeros( ( 0, d ), np.int64 ), e, e, np.zeros( n + 1, np.int64 )
+        return np.zeros( ( 0, d ) ), e, np.zeros( ( 0, d ), np.int64 ), e, e, np.zeros( n + 1, np.int64 ), np.zeros( ( 0, 2 ), np.int64 )
     vp, cid = rows( cells.vertex_positions ), rows( cells.cut_ids )
     nv, nc = counts( cells.nb_vertices ), counts( cells.nb_cuts )
     vmask = np.arange( vp.shape[ 1 ] )[ None, : ] < nv[ :, None ]
@@ -1303,7 +1311,14 @@ def _bulk( cells ):
     else:                                                # end `i` of a segment is cut `i`
         lvc = np.broadcast_to( np.arange( vp.shape[ 1 ] )[ None, :, None ], vmask.shape + ( 1, ) )[ vmask ]
     VC = lvc + coff[ vcell ][ :, None ]
-    return V, vcell, VC, CID, ccell, coff
+    zero = np.zeros( ( 0, 2 ), np.int64 )
+    if "vertex_ties" in cells._GEOMETRY and len( V ):
+        voff = np.concatenate( [ [ 0 ], np.cumsum( nv ) ] )
+        ties = rows( cells.vertex_ties )[ vmask ].astype( np.int64 ).reshape( -1 )
+        vn = rows( cells.vertex_nbrs )[ vmask ].astype( np.int64 ).reshape( -1, d ) + voff[ vcell ][ :, None ]
+        a, r = np.nonzero( ( ties[ :, None ] >> np.arange( d )[ None, : ] ) & 1 )
+        zero = np.stack( [ a, vn[ a, r ] ], axis = 1 )
+    return V, vcell, VC, CID, ccell, coff, zero
 
 
 def _wall_of_cuts( V, VC, dom, walls ):
@@ -1348,54 +1363,94 @@ def _fit_walls( V, vcell, VC, dom, tol ):
     return planes[ :, :d ], planes[ :, d ]
 
 
-def _glue_vertices( W, vcell, VC, gen, img, fake_v, tol, quotient, walls ):
-    """`( gv, E )`: the global number of each local vertex ( `-1` for a made-up one ) and the element of the group ( `[ nv, d, d + 1 ]` )
-    from the frame of the vertex to that of its cell.
+class _Keys:
+    """THE KEY of each local vertex: its `d + 1` generators -- the seed of its cell, and per cut the seed it faces with its image ( an
+    element of the group ), or the plane of the wall it lies on --, expressed in the frame where the SMALLEST seed among them is itself
+    ( its element the identity ): every cell that has the vertex says the same key, exactly. Where several images of that seed generate
+    it ( a small torus ), the smallest key of the choices. Without a periodicity, the sorted generators.
 
-    THE KEY of a vertex: its `d + 1` generators -- the seed of its cell, and per cut the seed it faces with its image ( an element of
-    the group ), or the plane of the wall it lies on --, expressed in the frame where the SMALLEST seed among them is itself ( its
-    element the identity ): every cell that has the vertex says the same key, exactly. Where several images of that seed generate it
-    ( a small torus ), the smallest key of the choices. Without a periodicity, the sorted generators.
+    `real`: the local vertices that are not made up, `of[ v ]` the key of each ( `-1` for a made-up one ), `nk` their number, `Ea` per
+    real vertex the element from the frame of its key to that of its cell, `cnt` the copies of each key."""
 
-    THE MERGE, where the diagram is not in general position ( more than `d + 1` cells at a point, a grid ): one point has several
-    keys, which differ from cell to cell. Keys closer than `tol` are one vertex ( `_merge_close`, modulo the group ): the tolerance
-    is a resolution, under which every cell collapses the same features."""
-    nv_loc, d = VC.shape
+    def __init__( self, W, vcell, VC, gen, img, fake_v, group, walls ):
+        nv_loc, d = VC.shape
+        self.d, self.W, self.vcell, self.group = d, W, vcell, group
+        self.real = np.flatnonzero( ~fake_v )
+        self.of = np.full( nv_loc, -1, np.int64 )
+        eye = np.concatenate( [ np.eye( d ), np.zeros( ( d, 1 ) ) ], axis = 1 )
+        self.Ea = np.broadcast_to( eye, ( len( self.real ), d, d + 1 ) ).copy()
+        self.nk, self.inv, self.cnt = 0, np.zeros( 0, np.int64 ), np.zeros( 0, np.int64 )
+        if len( self.real ):
+            rows, Ea, _ = _canonical_rows( vcell[ self.real ], VC[ self.real ], gen, img, group, walls )
+            if group is not None:
+                self.Ea = Ea
+            keys, inv, self.cnt = _unique_rows( rows, return_inverse = True, return_counts = True )
+            self.inv = inv.reshape( -1 )
+            self.nk = len( keys )
+            self.of[ self.real ] = self.inv
+
+
+def _glue_vertices( K, zero ):
+    """`( gv, E, lp )`: the global number of each local vertex ( `-1` for a made-up one ), the element of the group ( `[ nv, d, d + 1 ]` )
+    from the frame of the vertex to that of its cell, and the first local vertex of its point in its cell -- from the keys `K`
+    ( `_Keys` ), the keys joined by an edge of zero length being one vertex ( `zero`, `[ m, 2 ]` local vertex pairs: a tie of the
+    canonical predicates, a degenerate point blown up )."""
+    real, d, group = K.real, K.d, K.group
+    nv_loc = len( K.of )
     gv = np.full( nv_loc, -1, np.int64 )
+    lp = np.arange( nv_loc, dtype = np.int64 )
     eye = np.concatenate( [ np.eye( d ), np.zeros( ( d, 1 ) ) ], axis = 1 )
     E = np.broadcast_to( eye, ( nv_loc, d, d + 1 ) ).copy()
-    real = np.flatnonzero( ~fake_v )
     if len( real ) == 0:
-        return gv, E
-    rows, Ea, nseed = _canonical_rows( vcell[ real ], VC[ real ], gen, img, quotient, walls )
-    if quotient is None:
-        Ea = E[ real ]
-    keys, inv, cnt = _unique_rows( rows, return_inverse = True, return_counts = True )
-    nk = len( keys )
-
-    # the point of each key, in its frame
-    y = np.einsum( "mij,mj->mi", _inverse_maps( Ea )[ :, :, :d ], W[ real ] ) + _inverse_maps( Ea )[ :, :, d ]
-    pts = np.zeros( ( nk, d ) )
-    np.add.at( pts, inv, y )
-    pts /= cnt[ :, None ]
-
-    # the merge: closer than `tol` is one point, whatever the keys say ( a feature under the tolerance collapses in every cell alike )
-    label = _merge_points( pts, tol, quotient, far_check = True )
+        return gv, E, lp
+    label = _union( K.nk, K.of[ zero ] ) if len( zero ) else np.arange( K.nk )
     _, glob = np.unique( label, return_inverse = True )
     glob = glob.reshape( -1 )
-    gv[ real ] = glob[ inv ]
+    gv[ real ] = glob[ K.inv ]
 
-    # the frame of a merged vertex: that of the first of its keys -- the others brought to it by an element of the group
-    if quotient is not None:
+    # the frame of a contracted vertex: that of the first of its keys -- the others brought to it by an element of the group
+    Ea = K.Ea
+    if group is not None and len( zero ):
+        inv = _inverse_maps( Ea )
+        y = np.einsum( "mij,mj->mi", inv[ :, :, :d ], K.W[ real ] ) + inv[ :, :, d ]
+        pts = np.zeros( ( K.nk, d ) )
+        np.add.at( pts, K.inv, y )
+        pts /= K.cnt[ :, None ]
         first_key = np.full( int( glob.max() ) + 1, -1, np.int64 )
-        first_key[ glob[ ::-1 ] ] = np.arange( nk )[ ::-1 ]
-        h = _relating_maps( pts, first_key[ glob ], quotient )                 # [ nk, d, d + 1 ]: y_k = h_k( y_first )
-        Ea = _compose_maps( Ea, h[ inv ] )
+        first_key[ glob[ ::-1 ] ] = np.arange( K.nk )[ ::-1 ]
+        h = _relating_maps( pts, first_key[ glob ], group )                    # [ nk, d, d + 1 ]: y_k = h_k( y_first )
+        Ea = _compose_maps( Ea, h[ K.inv ] )
     E[ real ] = Ea
-    return gv, E
+
+    # THE POINTS of each cell: its local vertices of one global vertex -- and with a periodicity, of one copy of it ( the same element
+    # of the group from the frame of the vertex: the contraction is global, a chain of zero edges may run through other cells ), or
+    # joined by a zero edge in the cell ( a point the group fixes, a cone's apex: its element is not unique )
+    cols = [ K.vcell[ real ][ :, None ], gv[ real ][ :, None ] ]
+    if group is not None:
+        cols.append( _round_key( Ea.reshape( len( real ), -1 ) ) )
+    _, first, cls = _unique_rows( np.concatenate( cols, axis = 1 ), return_index = True, return_inverse = True )
+    same = np.stack( [ real, real[ first ][ cls.reshape( -1 ) ] ], axis = 1 )
+    lp = _union( nv_loc, np.concatenate( [ same, zero ] ) if group is not None and len( zero ) else same )
+    return gv, E, lp
 
 
-def _canonical_rows( own, cuts, gen, img, quotient, walls ):
+def _union( m, pairs ):
+    """`[ m ]`: per item, the smallest item of its class, the `pairs` ( `[ p, 2 ]` ) joining them"""
+    lab = np.arange( m, dtype = np.int64 )
+    pairs = np.asarray( pairs, dtype = np.int64 ).reshape( -1, 2 )
+    if len( pairs ) == 0:
+        return lab
+    while True:
+        old = lab.copy()
+        low = np.minimum( lab[ pairs[ :, 0 ] ], lab[ pairs[ :, 1 ] ] )
+        np.minimum.at( lab, pairs[ :, 0 ], low )
+        np.minimum.at( lab, pairs[ :, 1 ], low )
+        lab = lab[ lab ]
+        if ( lab == old ).all():
+            return lab
+
+
+def _canonical_rows( own, cuts, gen, img, group, walls ):
     """`( rows, Ea, nseed )`: the KEY of each local face ( a vertex: `d` cuts ) from its generators -- the seed of its cell `own`, and
     per cut ( flat indices `cuts` ) the seed it faces with its image, or the plane of its wall -- expressed in the frame where the
     smallest seed among them is itself, the same from every cell that has the face ( the smallest key over the choices when several
@@ -1404,9 +1459,9 @@ def _canonical_rows( own, cuts, gen, img, quotient, walls ):
     m, c = cuts.shape
     seeds = np.concatenate( [ own[ :, None ], gen[ cuts ] ], axis = 1 )                     # [ m, c + 1 ]: >= 0 a seed, < 0 a wall
     nseed = ( seeds >= 0 ).sum( axis = 1 )
-    if quotient is None:
+    if group is None:
         return np.sort( seeds, axis = 1 ), None, nseed
-    G = quotient.ps.maps
+    G = group.maps
     d = G.shape[ 1 ]
     els = np.concatenate( [ np.zeros( ( m, 1 ), np.int64 ), img[ cuts ] ], axis = 1 )
     planes = None if walls is None else _unit_planes( *walls )
@@ -1441,18 +1496,10 @@ def _canonical_rows( own, cuts, gen, img, quotient, walls ):
     return allrows.reshape( c + 1, m, -1 )[ best, np.arange( m ) ], np.stack( cand_E )[ best, np.arange( m ) ], nseed
 
 
-def _merge_points( pts, tol, quotient, far_check ):
-    """the labels of `_merge_close` for points in their own frames: modulo the group with a periodicity"""
-    if quotient is None:
-        return _merge_close( pts, np.arange( len( pts ) ), len( pts ), tol, far_check = far_check )
-    return _glue_points( pts, tol, quotient )
-
-
-def _relating_maps( pts, ref, quotient ):
+def _relating_maps( pts, ref, ps ):
     """`[ m, d, d + 1 ]`: for each point `k`, an element `h` of the group with `pts[ k ] = h( pts[ ref[ k ] ] )` ( the identity for
     `ref[ k ] == k` ): both folded ( `PeriodicSetup.fold`, `y -> F y` ), then the element `a` of `maps` that brings one onto the other,
     `h = F_k^-1 a F_ref`"""
-    ps = quotient.ps
     m, d = pts.shape
     Y, M, c = ps.fold( pts )
     Y = np.asarray( Y, dtype = float )
@@ -1491,11 +1538,6 @@ def _unit_planes( dirs, offs ):
     return dirs / nrm[ :, None ], offs / nrm
 
 
-def _same_place( tol, d ):
-    """how far apart two copies of one merged vertex can be: the merge joins points that share a box of side `2 tol` ( `_merge_close` )"""
-    return 2 * math.sqrt( d ) * tol * ( 1 + 1e-9 )
-
-
 def _area_vectors( E ):
     """`[ m, d ]`: the area vectors of simplices of `d - 1` edges `E [ m, d - 1, d ]` -- `( -1 )^c det( E without column c ) / ( d - 1 )!`,
     the normal times the measure in any dimension"""
@@ -1505,108 +1547,6 @@ def _area_vectors( E ):
         M = np.delete( E, c, axis = 2 )
         res[ :, c ] = ( -1 ) ** c * ( np.linalg.det( M ) if k else np.ones( m ) )
     return res / math.factorial( k )
-
-
-def _merge_ids( gv, pairs ):
-    """`gv` with the global numbers of each pair made one ( the smallest ), renumbered"""
-    m = int( gv.max( initial = -1 ) ) + 1
-    lab = np.arange( m )
-    pairs = np.asarray( pairs, dtype = np.int64 ).reshape( -1, 2 )
-    while True:
-        old = lab.copy()
-        low = np.minimum( lab[ pairs[ :, 0 ] ], lab[ pairs[ :, 1 ] ] )
-        np.minimum.at( lab, pairs[ :, 0 ], low )
-        np.minimum.at( lab, pairs[ :, 1 ], low )
-        lab = lab[ lab ]
-        if ( lab == old ).all():
-            break
-    _, ren = np.unique( lab, return_inverse = True )
-    return np.where( gv >= 0, ren.reshape( -1 )[ np.maximum( gv, 0 ) ], -1 )
-
-
-def _glue_points( P, tol, quotient ):
-    """the global number of each point, the points closer than `tol` MODULO THE GROUP being one: their representatives on the
-    fundamental domain, and the images of those that lie on its border ( `_Quotient.canonical` )"""
-    if len( P ) == 0:
-        return np.zeros( 0, np.int64 )
-    Y, owner, alias = quotient.canonical( P )
-    label = _merge_close( np.concatenate( [ Y, alias ] ), np.concatenate( [ np.arange( len( P ) ), owner ] ), len( P ), tol,
-                          far_check = len( owner ) == 0 )
-    return np.unique( label, return_inverse = True )[ 1 ].reshape( -1 )
-
-
-def _merge_close( pts, owners, m, tol, far_check ):
-    """`[ m ]` labels: the points `owners` ( one point may have several rows: its images ) closer than `tol` share one -- they share
-    a box of side `2 tol` for one of the `2^d` half-shifted grids, and labels flow through these boxes until they stop. `far_check`:
-    a point farther than `tol` from the first of its group leaves it ( a chain of close points is not one point )"""
-    d = pts.shape[ 1 ]
-    lab = np.arange( m )
-    if m < 2:
-        return lab
-    h = 2 * max( tol, 1e-300 )
-    grids = [ _unique_rows( np.floor( pts / h + np.asarray( s ) ).astype( np.int64 ), return_inverse = True )[ 1 ]
-              for s in itertools.product( ( 0.0, 0.5 ), repeat = d ) ]
-    while True:
-        old = lab.copy()
-        for g in grids:
-            low = np.full( int( g.max() ) + 1, m )
-            np.minimum.at( low, g, lab[ owners ] )
-            np.minimum.at( lab, owners, low[ g ] )
-        lab = lab[ lab ]
-        if ( lab == old ).all():
-            break
-    if far_check:
-        far = np.abs( pts - pts[ lab ] ).max( axis = 1 ) > tol
-        lab[ far ] = np.flatnonzero( far )
-    return lab
-
-
-class _Quotient:
-    """THE QUOTIENT by the group of a periodicity, for the merge: `canonical( P )` gives the representatives of the points on the
-    fundamental domain ( `PeriodicSetup.fold` ), and the images of those that the folding could have put elsewhere -- on the
-    border of the parallelepiped of the lattice for translations, everywhere for a group with rotations or symmetries ( the
-    folding then chooses among images that tie )"""
-
-    def __init__( self, ps, tol ):
-        self.ps, self.tol = ps, tol
-
-    def canonical( self, P ):
-        ps = self.ps
-        Y = np.asarray( ps.fold( np.asarray( P, dtype = float ) )[ 0 ], dtype = float )
-        B = ps.lattice
-        if ps.translation_only and len( B ):
-            # a point near the border of the parallelepiped of the lattice: its images across the borders it is near only ( a
-            # translation by `+ b_r` near `k_r = 0`, `- b_r` near `k_r = 1`, and their sums ) -- not every element of the group
-            Pi = np.linalg.pinv( B )
-            k = ( Y - ps.anchor ) @ Pi
-            fr = k - np.floor( k )
-            lim = 4 * self.tol * np.linalg.norm( Pi, axis = 0 )
-            lo, hi = fr < lim, fr > 1 - lim
-            near = lo | hi
-            idx = np.flatnonzero( near.any( axis = 1 ) )
-            if len( idx ) == 0:
-                return Y, np.zeros( 0, np.int64 ), np.zeros( ( 0, Y.shape[ 1 ] ) )
-            step = np.where( lo[ idx ], 1.0, -1.0 ) * near[ idx ]                  # [ m, r ]: the move along each lattice vector
-            r = B.shape[ 0 ]
-            owners, alias = [], []
-            for mask in range( 1, 2 ** r ):
-                bits = np.array( [ ( mask >> i ) & 1 for i in range( r ) ], bool )
-                use = ( near[ idx ][ :, bits ] ).all( axis = 1 )
-                if not use.any():
-                    continue
-                sh = ( step[ use ][ :, bits ] ) @ B[ bits ]
-                owners.append( idx[ use ] )
-                alias.append( Y[ idx[ use ] ] + sh )
-            return Y, np.concatenate( owners ), np.concatenate( alias )
-        else:
-            flag = np.ones( len( Y ), bool )
-        idx = np.flatnonzero( flag )
-        maps = ps.maps[ 1: ]
-        if len( idx ) == 0 or len( maps ) == 0:
-            return Y, np.zeros( 0, np.int64 ), np.zeros( ( 0, Y.shape[ 1 ] ) )
-        d = Y.shape[ 1 ]
-        alias = np.concatenate( [ Y[ idx ] @ a[ :, :d ].T + a[ :, d ] for a in maps ] )
-        return Y, np.tile( idx, len( maps ) ), alias
 
 
 def _moved( W, vcell, maps ):

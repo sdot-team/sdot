@@ -43,6 +43,7 @@ from .OtProblem import Tuning as Tuning
 from .OtProblem import OtNotConverged as OtNotConverged
 from .OtProblem import ot_solve as ot_solve
 from .SdotPlan1d import SdotPlan1d as SdotPlan1d
+from .ContinuousOtPlan1d import ContinuousOtPlan1d as ContinuousOtPlan1d
 from .SdotPlanNd import SdotPlanNd as SdotPlanNd
 from .PowerDiagram import PowerDiagram as PowerDiagram
 from .PowerDiagram import box_half_spaces as box_half_spaces
@@ -55,6 +56,7 @@ from .Voronoi import Voronoi as Voronoi
 from .distributions.SumOfDiracs1d import SumOfDiracs1d as SumOfDiracs1d
 from .distributions.SumOfDiracs import SumOfDiracs as SumOfDiracs
 from .distributions.ProjectedSumOfDiracs import ProjectedSumOfDiracs as ProjectedSumOfDiracs
+from .distributions.ProjectedSumOfTents import ProjectedSumOfTents as ProjectedSumOfTents
 from .distributions.Image import Image as Image
 from .distributions.Box import Box as Box
 from .distributions.Mesh import Mesh as Mesh

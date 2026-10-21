@@ -164,7 +164,7 @@ class PowerDiagram( Aggregate, Displayable ):
 
     def __init__( self, positions, weights = None, boundaries = None, accelerator = None,
                   distribution = None, kernel_dtype = None, scratch_capacity = None, memory = None, periodicity = None,
-                  sink_weight = None, groups = None, radial_func = None ):
+                  sink_weight = None, groups = None, radial_func = None, predicates = None ):
         """`positions`: `[ n, d ]`. `weights`: `[ n ]`, or nothing ( the Euclidean case ). The domain:
 
         - `boundaries = ( directions, offsets )` -- the half-spaces `direction . x <= offset`.
@@ -220,6 +220,12 @@ class PowerDiagram( Aggregate, Displayable ):
         their lowest common aggregate ( their true bisector, computed at the scale of the aggregate; for exact duplicates, unit
         directions spread by springs ), whose virtual weights come from the weights given ( `groups.virtual_weights` ) or from the
         tree itself ( a solver's ). Read back with `groups`. Not with a periodicity.
+
+        `predicates`: how a cut decides which vertices it removes. `"fast"` ( the default ): from the coordinates of the vertices in the
+        cell, in `kernel_dtype` -- two cells can then decide differently where a plane passes within rounding of a vertex ( a grid of
+        seeds ). `"canonical"`: from the generators of the vertex alone ( its seeds and walls, `cell/Canonical.h` ), in doubles, a tie
+        broken by a symbolic perturbation of the weights -- every cell takes the same decision about the same vertex, at a cost ( about
+        four times the cells' ). What `cell_complex()` always uses. Dimension 2 and above.
         """
         # the SUPPORT of the distribution bounds the domain, for free and without changing the
         # result: what lies beyond brings no mass. The caller's domain is INTERSECTED
@@ -300,6 +306,9 @@ class PowerDiagram( Aggregate, Displayable ):
         if groups is not None:
             weights, group_members = self._group_setup( groups, pos, weights, boundaries, distribution, sink_weight )
 
+        if predicates not in ( None, "fast", "canonical" ):
+            raise ValueError( f"predicates: 'fast' or 'canonical' ( got { predicates !r} )" )
+        self._predicates = predicates or "fast"
         self._kernel_dtype = kernel_dtype
         self._scratch_capacity = int( scratch_capacity or { 2: 64, 3: 128 }.get( d, 256 ) )
         self._memory = int( self._default_memory( d ) if memory is None else memory )
@@ -617,20 +626,26 @@ class PowerDiagram( Aggregate, Displayable ):
 
     # ---- the domain, and the distribution ----------------------------------------------------------
 
-    def _domain_cell( self, kernel_dtype = None ):
+    def _domain_cell( self, kernel_dtype = None, canonical = None ):
         """The domain as a POLYTOPE, computed ONCE -- what each cell starts from. Built with
         the SAME code as the `cell( i )` oracle, which keeps the two descriptions of the domain
         literally identical. It is the type of THIS cell that decides, C++ side, the local
         shape in which each cell is built. `kernel_dtype`: another float than the diagram's ( the cell complex cuts in
-        `FP64` ), kept apart."""
-        if kernel_dtype is not None:
+        `FP64` ), kept apart; `canonical`: the cells cut with canonical predicates ( a `Cell_C`, see `predicates` ) or not."""
+        if kernel_dtype is not None or ( canonical is not None and canonical != self._canonical() ):
+            canonical = self._canonical() if canonical is None else bool( canonical )
             cache = self.__dict__.setdefault( "_dom_cells", {} )
-            if kernel_dtype not in cache:
-                cache[ kernel_dtype ] = self._cut_domain( self._start_cell( kernel_dtype ) )
-            return cache[ kernel_dtype ]
+            key = ( kernel_dtype, canonical )
+            if key not in cache:
+                cache[ key ] = self._cut_domain( self._start_cell( kernel_dtype, canonical ) )
+            return cache[ key ]
         if getattr( self, "_dom_cell", None ) is None:
             self._dom_cell = self._cut_domain( self._start_cell() )
         return self._dom_cell
+
+    def _canonical( self ):
+        """whether the cells are cut with canonical predicates ( `predicates`: not in 1D, where a vertex is one cut )"""
+        return getattr( self, "_predicates", "fast" ) == "canonical" and self.dim_count >= 2
 
     def _cut_domain( self, cell ):
         """`cell` cut by the half-spaces of the domain that the start cell does not express"""
@@ -644,16 +659,21 @@ class PowerDiagram( Aggregate, Displayable ):
                 cell.cut( dirs[ b ], offs[ b ], BOUNDARY )
         return cell
 
-    def _start_cell( self, kernel_dtype = None ):
-        """the starting box, or all of space"""
+    def _start_cell( self, kernel_dtype = None, canonical = None ):
+        """the starting box, or all of space -- a `Cell_C` for canonical predicates"""
         d = self.dim_count
         kw = dict( kernel_dtype = kernel_dtype or self._kernel_dtype )
+        canonical = self._canonical() if canonical is None else bool( canonical ) and d >= 2
+        if canonical:
+            from .Cell_C import Cell_C as cls
+        else:
+            cls = Cell
         if self.box_min.is_defined:
             # the backend's values ( a box known only under a trace: `traced_box` ), detached -- the domain is a constant
             mi = loom.ops().stop_gradient( self.box_min.raw ).reshape( -1 )
             ma = loom.ops().stop_gradient( self.box_max.raw ).reshape( -1 )
-            return Cell.make_hypercube( d, mi, np.eye( d ) * ( ma - mi )[ None, : ], **kw )
-        return Cell.make_unbounded( d, **kw )
+            return cls.make_hypercube( d, mi, np.eye( d ) * ( ma - mi )[ None, : ], **kw )
+        return cls.make_unbounded( d, **kw )
 
     def _dist_for( self, moment = None ):
         """How a call names its distribution: `( C++ expression, expression of its cotangent,
@@ -700,10 +720,10 @@ class PowerDiagram( Aggregate, Displayable ):
 
     # ---- the scratch -------------------------------------------------------------------------------
 
-    def _scratch_words( self, cap, nb_cells, with_grad, kernel_dtype = None ):
+    def _scratch_words( self, cap, nb_cells, with_grad, kernel_dtype = None, canonical = None ):
         """What a work-item holds, in words: `nb_cells` local cells of `cap` vertices, and
         for the adjoint one cotangent per vertex -- THE SAME FORMULA as `diagram::words_for`."""
-        dom = self._domain_cell( kernel_dtype )
+        dom = self._domain_cell( kernel_dtype, canonical )
         words = nb_cells * dom.scratch_words( cap, fp_size( dom.kernel_dtype ) )
         if with_grad:
             words += -( -self.dim_count * cap * 8 // 32 ) * 8
@@ -990,19 +1010,20 @@ class PowerDiagram( Aggregate, Displayable ):
             cells = cells.moved( self._unfold_maps() )
         return cells
 
-    def _folded_cells( self, kernel_dtype = None, keep_images = False ):
+    def _folded_cells( self, kernel_dtype = None, keep_images = False, canonical = None ):
         """`cells` as they are cut: around the folded seeds with a periodicity. `kernel_dtype`: cut in that float rather than the
         diagram's. `keep_images`: the cut identifiers say the image too, `j + n t` for the image `t` of seed `j` ( `maps[ t ]` of
-        the periodicity ) -- the user's index `j` alone otherwise."""
+        the periodicity ) -- the user's index `j` alone otherwise. `canonical`: with canonical predicates or not ( see `predicates` ),
+        the diagram's setting by default."""
         n, d = int( self.nb_points.value ), self.dim_count
         num_cell = new_batch_axis( n, prefix = "cell" )
         ranks = IntTensor[ num_cell ]( self._ranks_of_items() )
 
-        dom = self._domain_cell( kernel_dtype )
+        dom = self._domain_cell( kernel_dtype, canonical )
         cap = self._scratch_capacity
-        cells = Cell( d, init_as_unbounded = False, batch_axes = [ num_cell ], kernel_dtype = dom.kernel_dtype )
+        cells = type( dom )( d, init_as_unbounded = False, batch_axes = [ num_cell ], kernel_dtype = dom.kernel_dtype )
 
-        nb_words = self._scratch_words( cap, 1, False, kernel_dtype )
+        nb_words = self._scratch_words( cap, 1, False, kernel_dtype, canonical )
         nt = loom.resolved_device().nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ num_cell ] )
         loom.ffi_call(
             "power_diagram_cells",
@@ -1017,7 +1038,7 @@ class PowerDiagram( Aggregate, Displayable ):
         )
         return cells
 
-    def cell_complex( self, tolerance = None ):
+    def cell_complex( self, contract = True ):
         """The cells glued along their faces ( `CellComplex` ): each vertex, edge, ..., facet once, numbered per dimension, with
         its children ( the faces on its boundary ) and its parents ( the faces it bounds ) -- to walk the geometry of the diagram.
         The facets know their two seeds, or their seed and the wall of the domain ( `walls`, the half-spaces of `domain_outline` ).
@@ -1027,9 +1048,13 @@ class PowerDiagram( Aggregate, Displayable ):
         seed and an image of another -- or of itself --, and the geometry of each face is read off one of its copies, next to the
         given position of a seed of one of its cells ( `walls`: those that the group leaves, in the frame of the folded seeds ).
 
-        The cells are cut in doubles for it, whatever the `kernel_dtype` of the diagram: in floats, two cells can disagree on the
-        facet they share. `tolerance`: the distance under which two vertices are one where the diagram is not in general position
-        ( a grid of seeds ) -- `1e-12` times the size of the diagram by default ( the cells are exact to about `1e-15` ).
+        The cells are cut for it with CANONICAL PREDICATES ( `predicates = "canonical"`, in doubles ), whatever the diagram's: every
+        cell takes the same decision about the same vertex, so they agree exactly on what they share, and the gluing is pure
+        connectivity -- no tolerance. Where the diagram is degenerate ( a grid of seeds ), the ties are broken by a symbolic
+        perturbation, which blows a degenerate point up into vertices joined by edges of zero length. `contract` ( the default ):
+        these edges are contracted, and the faces of zero measure with them -- an exact grid has the exact number of faces, its
+        vertices shared by `2^d` cells. `contract = False`: the complex of the perturbed diagram, in general position ( each vertex in
+        exactly `d + 1` cells, faces of zero measure included ).
 
         = Internals
 
@@ -1041,18 +1066,18 @@ class PowerDiagram( Aggregate, Displayable ):
         weights = _host_array( self.weights ).reshape( -1 ) if self.weights.is_defined else None
         # the values as the framework holds them: what the numbers of the complex are differentiable with respect to
         values = ( self.positions.raw, self.weights.raw if self.weights.is_defined else None )
-        # THE CELLS IN DOUBLES, whatever the diagram's kernel float: cut in `FP32`, two cells disagree on what they share ( a facet of
-        # 5e-5 of the size of a cell on one side and not on the other, on a grid ), in `FP64` they do not ( see the guide )
-        cells = self._folded_cells( "FP64", keep_images = self._periodic is not None )
+        # THE CANONICAL CELLS, whatever the diagram's predicates: with the usual ones, two cells can disagree on what they share where
+        # a plane passes within rounding of a vertex ( see the guide )
+        cells = self._folded_cells( "FP64", keep_images = self._periodic is not None, canonical = True )
         if self._periodic is None:
-            return CellComplex( cells, walls = self.domain_outline(), tolerance = tolerance, seeds = given, weights = weights,
-                                power = self._groups is None, values = values )
+            return CellComplex( cells, walls = self.domain_outline(), seeds = given, weights = weights,
+                                power = self._groups is None, values = values, contract = contract )
         from .CellComplex import _inverse_maps
         unfold = self._unfold_maps()
         fold = _inverse_maps( unfold )
         folded = np.einsum( "nij,nj->ni", fold[ :, :, :-1 ], given ) + fold[ :, :, -1 ]
-        return CellComplex( cells, walls = self._domain_half_spaces(), tolerance = tolerance, seeds = folded,
-                            weights = weights, group = self._periodic, maps = unfold, values = values, fold = fold )
+        return CellComplex( cells, walls = self._domain_half_spaces(), seeds = folded,
+                            weights = weights, group = self._periodic, maps = unfold, values = values, fold = fold, contract = contract )
 
     def support_pieces( self, threshold = 0.0 ):
         """= Internals

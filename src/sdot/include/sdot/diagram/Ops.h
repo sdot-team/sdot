@@ -107,6 +107,24 @@ HD bool make_cell( const PD &pd, Local &c, SI k0, const auto &dom ) {
 #endif
     } else {
         auto f = pd.template provider<TK>( k0 );
+        if constexpr ( requires { Local::canonical; } ) {
+            if constexpr ( Local::canonical ) {
+                // THE CANONICAL CELL ( `cell/Canonical.h` ): the seed and each plane come with their generators, and the pruning
+                // keeps the planes that pass within rounding of a vertex ( a tie must be seen by every cell it concerns )
+                c.canon_start( canon_generator<PD::ct_dim>( pd, k0, k0 ) );
+                if constexpr ( requires { f.slack; pd.tree.node_box( 0, 0, 0 ); } ) {
+                    TK ext = 0;
+                    for ( int d = 0; d < PD::ct_dim; ++d ) {
+                        const TK e = TK( pd.tree.node_box( 0, 1, d ) ) - TK( pd.tree.node_box( 0, 0, d ) );
+                        ext = e > ext ? e : ext;
+                    }
+                    f.slack = TK( 1e-8 ) * ext;
+                }
+                CanonProvider<PD,decltype( f ),Local> w{ pd, f, c, k0 };
+                LocalOf<decltype( w )> loc{};
+                return run_memory( c, w, loc ) != CutStatus::NO_ROOM;
+            }
+        }
         return run<PD::on_cpu>( c, f ) != CutStatus::NO_ROOM;
     }
 }

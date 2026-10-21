@@ -2,7 +2,7 @@
 gallery: feature
 description: "Walk the geometry of a power diagram: vertices, edges, facets and cells, each once, with their parents and children, simplices and distances — also on a torus."
 tags: [geometry, cells, periodic, 2d, 3d]
-image: /guide/img/cell-complex.png
+image: /examples/img/cell-complex.png
 order: 8
 ---
 
@@ -151,7 +151,7 @@ cx = sdot.PowerDiagram( positions, weights, boundaries = box ).cell_complex()   
 step = jax.jit( jax.grad( lambda p: cx.geometry( p, weights ).measures( 1 ).sum() ) )  # inside: the same topology
 ```
 
-The topology stays valid as long as the seeds move little, and the derivatives are exact as long as it is. Rebuild the complex when the seeds have moved enough to change which cells are neighbours. For $10^4$ cells in 3D, the kernels take about 30 ms and building the topology about 2.5 s.
+The topology stays valid as long as the seeds move little, and the derivatives are exact as long as it is. Rebuild the complex when the seeds have moved enough to change which cells are neighbours. For $10^4$ cells in 3D, the kernels take about 30 ms and building the topology about 1 s.
 
 ## A consistent connectivity
 
@@ -164,27 +164,32 @@ How often does it happen? Below, the facets of raw cells compared side by side, 
 | FP32, random seeds | 0–1 | $10^{-5}$ | $2 \cdot 10^{-3}$ |
 | FP32, grid nudged by $10^{-6}$ | 20 000 out of 70 000 | $5 \cdot 10^{-5}$ | $10^{-4}$ |
 | FP64, all of the above | 0 | — | $2 \cdot 10^{-12}$ |
+| canonical predicates (what the complex cuts), all of the above | 0 | — | $10^{-14}$ |
 
-The cell complex is built so that its connectivity can be relied on:
+The cell complex does not try to reconcile cells after the fact. It makes them agree from the start, so that gluing them is pure connectivity, with no distance compared and no tolerance:
 
-1. **The cells are cut in FP64**, whatever the `kernel_dtype` of the diagram (which stays the float of `measures` and of the transport).
-2. **Every face is named exactly by its generators**: the seeds whose bisectors carry it, or the walls. A vertex is the corner of $d$ cuts in the cell of a seed, so $d + 1$ generators. With a periodicity, each generator is a seed together with its image, and the name is written in the frame of the smallest seed among them, so every cell that has the face gives the same name. No distance is compared for that.
-3. **Where the diagram is degenerate** — more than $d + 1$ cells at a point, as on a grid — one point has several names, which differ from cell to cell. There, `tolerance` acts as a resolution: points closer than that are one vertex, in every cell alike, so that a feature smaller than the tolerance disappears everywhere at once. The default is $10^{-12}$ times the size of the diagram, a thousand times above what FP64 cells are exact to. A point that is a corner of no cell (a cut through the middle of an edge) is not a vertex: its edge stays one edge.
-4. **The faces of each cell come from its vertices, not from its cuts.** In 4D and above, a vertex of a grid is shared by $2^d$ cells and a cell is no longer a simple polytope: a cut can hold a single point, and $d$ cuts through a vertex do not make it a corner. So, for each cell (in C++, in parallel), a cut is a facet when the vertices on it span a $(d-1)$-plane, which is judged on the exact normals of the cuts, not on the positions; a vertex is a corner when the facets through it have normals of rank $d$; and the faces of dimension $k$ are the intersections of facets whose normals have rank $d - k$. This is the true face lattice of the cell, in any dimension, and the faces of all the cells are then glued by the names of their corners.
-5. **A check pass** looks at the result: `cx.diagnostics` and `cx.is_consistent`.
-   - A facet between two seeds that only one of them has is contracted to a point on both sides when it is smaller than 100 times the tolerance, and the faces are glued again (`contracted_facets`).
-   - A larger one is reported (`one_sided_facets`), as are the faces of dimension $d - 2$ around which the facets do not close (`open_links`). Both come with a warning.
-   - `facet_mismatch` is the largest difference between the measures of the two copies of a facet.
+1. **Every vertex is named by its generators.** A vertex is the corner of $d$ cuts in the cell of a seed, so it has $d + 1$ generators: seeds (with their image under a periodicity) or walls of the domain. Sorted, and written in the frame of the smallest seed among them, they are its key: the same in every cell that has the vertex.
+2. **Every decision about a vertex depends on its generators alone.** The cells of the complex are cut with **canonical predicates** (`PowerDiagram( predicates = "canonical" )`, always used by `cell_complex()`):
+   - the position of a vertex is solved from its own $d$ equations, in the frame of its smallest seed and in a fixed order, never interpolated along an edge;
+   - whether a plane removes it is the sign of the power distance to the plane's seed minus that to its smallest seed (or of the distance to a wall). This sign is computed in double-double, about 106 bits, by the same code in every cell, so it is the sign for the doubles given, as good as exact;
+   - an exact zero (a **tie**: a plane through a vertex, as on a grid of seeds) is broken by **simulation of simplicity**. The weights are perturbed by infinitesimals ordered by seed. The predicate is linear in them, so the first nonzero coefficient decides. Images of one seed share its weight, and four of them can sit on one sphere whatever the seeds (the corners of a period); there, a smaller deformation of the lattice of the periodicity decides.
 
-On grids nudged by 0 to $10^{-3}$ of a cell, in 2D and 3D, in a box and on a torus, the complex has the right Euler characteristic and nothing to report. On exact grids, up to 5D, it has the exact number of faces of each dimension, and random seeds give the right Euler characteristic in 4D and 5D too. A cell that the diagram itself gets wrong is reported, not repaired.
+   Two cells that share a vertex therefore take the same decisions about it. The perturbed diagram is in general position, the same in every cell: each vertex is in exactly $d + 1$ cells, and each facet is seen identically from both sides. Where planes meet at angles of $10^{-9}$, no copy of a vertex is computed differently from another.
+3. **The faces of zero measure are contracted.** The tie-breaking blows a degenerate point up into vertices joined by edges of zero length, and so does rounding of doubles meant to be degenerate (a grid of thirds). The cells mark these edges: both ends of the edge lie, within $2^{-48}$ of the size of their terms, on the plane of the other's extra generator. That is a function of the two vertices alone, the same in every cell. The complex contracts them, and every face of zero measure disappears in every cell at once: an exact grid has the exact number of faces, its vertices shared by $2^d$ cells. `cell_complex( contract = False )` keeps the complex of the perturbed diagram instead, in general position.
+4. **The faces of each cell come from its points**, once the zero edges are contracted, and not from its cuts. A cut is a facet when its points are in no other cut's. A point is a corner when it is alone in the smallest face containing it. The faces of a face are the maximal intersections of its corners with the other facets. This is the face lattice of the cell as it is, degenerate or not, in any dimension, and the faces of all the cells are then glued by the names of their corners.
+5. **A check pass** looks at the result: `cx.diagnostics` and `cx.is_consistent`. It counts the facets between two seeds that only one of them has (`one_sided_facets`) and the faces of dimension $d - 2$ around which the facets do not close (`open_links`), and it measures the largest difference between the two copies of a facet (`facet_mismatch`). With canonical cells it finds nothing. The one exception is a contraction that would glue inconsistently: an **elongated sliver**, some of whose edges are below the resolution and others not, collapses into a lower face in one of its cells and not in the other. The zero edges of the faces in conflict are then kept, by their keys, in every cell alike, and counted in `kept_zero_edges`.
 
-One case is beyond the resolution: grids nudged by about $10^{-9}$, where the planes through a vertex are nearly dependent. The copies of a vertex computed in two cells can then differ by $10^{-7}$, far more than the tolerance. Some faces are then seen by one side only; the check reports them (`is_consistent` is false, with a warning) instead of guessing. Raising `tolerance` above that gap (`cell_complex( tolerance = 1e-6 )`) glues them.
+On grids nudged by 0, $10^{-12}$, $10^{-9}$, $10^{-6}$ and $10^{-3}$ of a cell, in 2D, 3D and 4D, in a box and on a torus, the complex has the right Euler characteristic, both copies of each facet agree to $10^{-14}$, and the check reports nothing. On exact grids up to 5D it has the exact number of faces of each dimension, and random seeds give the right Euler characteristic in 4D and 5D too.
+
+What remains is the resolution of the contraction. A genuinely tiny feature, below $2^{-48}$ of the coordinates, is contracted like a degenerate one. In rare configurations (a 4D grid nudged by $10^{-12}$) contracting such a feature changes the topology near it without any local inconsistency. `contract = False` never contracts anything. At a point fixed by the group of a periodicity (the apex of a cone), no perturbation can separate the images of a seed: the contraction joins them, and only the contracted complex is meaningful there.
+
+The canonical cut costs about four times the usual one (0.08 s against 0.02 s for $10^4$ cells in 3D), little next to the gluing. It is used for the complex; `PowerDiagram( predicates = "canonical" )` uses it for every computation of a diagram, `measures` included.
 
 ## What to know
 
 - **A snapshot of the topology.** The topology is computed on the host from the seeds at the time of the call, and the numbers are recomputed from it (see [Differentiable numbers](#differentiable-numbers)). Build a new complex when the seeds have moved enough to change the neighbours.
 - **Degenerate diagrams.** See [A consistent connectivity](#a-consistent-connectivity) above.
-- **Cost.** For $10^4$ random cells in 3D, the topology takes about 1 s on one laptop, and the first numbers about 0.7 s more (the tables they are computed from are kept).
+- **Cost.** For $10^4$ random cells in 3D, the topology takes about 1 s on one laptop (2 s on a grid, where the degenerate points are blown up and contracted), and the first numbers about 0.7 s more (the tables they are computed from are kept).
 - **Unbounded cells.** Without a domain, faces that extend to infinity are still in the complex, with `is_bounded` false and an infinite measure. Only their finite vertices are listed.
 - **Empty cells.** A seed whose cell is empty (its weight is too small) keeps its number among the cells, but has no face.
 - **Any batch of cells.** `sdot.CellComplex( cells )` glues any batch of `Cell`s whose cut identifiers name the other items. The walls of the domain are then read from the faces themselves.

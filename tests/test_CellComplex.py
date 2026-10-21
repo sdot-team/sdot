@@ -297,18 +297,19 @@ if test( "simplices_and_distances" ):
 
 
 if test( "consistent_connectivity" ):
-    # grids nudged by 0, 1e-9, 1e-6, 1e-3 of a cell: the cells of an FP32 diagram disagree on what they share there ( a facet on one
-    # side only, measured up to 5e-5 of a cell ); those of the complex are cut in FP64 and glued exactly -- the Euler characteristic
-    # of a box ( 1 ) and of a torus ( 0 ), and nothing for the check to report ( at 1e-9, exact or reported )
+    # grids nudged by 0, 1e-12, 1e-9, 1e-6, 1e-3 of a cell: the cells of an FP32 diagram disagree on what they share there ( a facet on
+    # one side only, measured up to 5e-5 of a cell ); those of the complex are cut with canonical predicates and glued by their keys --
+    # the Euler characteristic of a box ( 1 ) and of a torus ( 0 ), the copies of each facet equal, and nothing for the check to report,
+    # in 2D, 3D and 4D
     import numpy
     import warnings
     from sdot.Cell import set_kernel_dtype
     from sdot.PowerDiagram import PowerDiagram
     set_kernel_dtype( "FP32" )
     rng = numpy.random.default_rng( 8 )
-    for d, m in ( ( 2, 30 ), ( 3, 8 ) ):
+    for d, m, jitters in ( ( 2, 30, ( 0.0, 1e-12, 1e-9, 1e-6, 1e-3 ) ), ( 3, 8, ( 0.0, 1e-12, 1e-9, 1e-6, 1e-3 ) ), ( 4, 3, ( 0.0, 1e-9 ) ) ):
         g = ( numpy.stack( numpy.meshgrid( *[ numpy.arange( m ) + 0.5 ] * d, indexing = "ij" ), -1 ).reshape( -1, d ) ) / m
-        for jitter in ( 0.0, 1e-9, 1e-6, 1e-3 ):
+        for jitter in jitters:
             p = ( g + jitter / m * rng.standard_normal( g.shape ) ) % 1.0
             for per in ( None, True ):
                 with warnings.catch_warnings( record = True ) as caught:
@@ -316,14 +317,56 @@ if test( "consistent_connectivity" ):
                     cx = PowerDiagram( p, boundaries = _box( d ), periodicity = per ).cell_complex()
                 nb = [ cx.nb_faces( k ) for k in range( d ) ] + [ int( ( numpy.diff( cx.cells.incident( 0 )[ 0 ] ) > 0 ).sum() ) ]
                 chi = sum( ( -1 ) ** k * nb[ k ] for k in range( d + 1 ) )
-                exact = chi == ( 0 if per else 1 ) and cx.is_consistent
-                if jitter == 1e-9:
-                    # a feature of 1e-10 at a vertex where planes meet at angles of 1e-9: its copies in the cells around it differ by 1e-7,
-                    # the cells do not agree on what is that small -- the complex is exact, or says it is not ( never wrong in silence )
-                    assert exact or ( not cx.is_consistent and caught ), ( d, per, nb, cx.diagnostics )
-                else:
-                    assert exact and cx.diagnostics[ "facet_mismatch" ] < 1e-9 and not caught, ( d, jitter, per, nb, cx.diagnostics )
+                assert chi == ( 0 if per else 1 ) and cx.is_consistent, ( d, jitter, per, nb, cx.diagnostics )
+                assert cx.diagnostics[ "facet_mismatch" ] < 1e-9 and not caught, ( d, jitter, per, nb, cx.diagnostics )
     set_kernel_dtype( "FP64" )
+
+
+if test( "canonical_measures" ):
+    # `predicates = "canonical"`: the cells of the canonical predicates are those of the usual cut ( in FP64 ) -- on random seeds with
+    # weights, on nudged grids, in a box and on a torus, 2D to 4D -- and they tile the domain
+    import numpy
+    from sdot.PowerDiagram import PowerDiagram
+    rng = numpy.random.default_rng( 12 )
+    for d, n in ( ( 2, 200 ), ( 3, 100 ), ( 4, 60 ) ):
+        m = 4 if d < 4 else 3
+        g = ( numpy.stack( numpy.meshgrid( *[ numpy.arange( m ) + 0.5 ] * d, indexing = "ij" ), -1 ).reshape( -1, d ) ) / m
+        for p, w in ( ( rng.random( ( n, d ) ), 1e-3 * rng.random( n ) ), ( g + 1e-9 * rng.standard_normal( g.shape ), None ) ):
+            for per in ( None, True ):
+                kw = dict( boundaries = _box( d ), periodicity = per )
+                fast = numpy.asarray( PowerDiagram( p, w, kernel_dtype = "FP64", **kw ).measures )
+                pd = PowerDiagram( p, w, predicates = "canonical", **kw )
+                assert pd.kernel_dtype == "FP64"
+                canon = numpy.asarray( pd.measures )
+                assert numpy.allclose( canon, fast, atol = 1e-12 ), ( d, per, abs( canon - fast ).max() )
+                assert abs( canon.sum() - 1 ) < 1e-12
+
+
+if test( "contraction" ):
+    # a degenerate point blown up by the tie-breaking: with `contract = False`, the complex of the perturbed diagram -- in general
+    # position, every vertex in exactly `d + 1` cells or walls, faces of zero measure included --; contracted ( the default ), the
+    # exact faces of the grid. Both consistent, with the same cells
+    import numpy
+    from math import comb
+    from sdot.PowerDiagram import PowerDiagram
+    for d in ( 2, 3 ):
+        m = 4
+        g = ( numpy.stack( numpy.meshgrid( *[ numpy.arange( m ) + 0.5 ] * d, indexing = "ij" ), -1 ).reshape( -1, d ) ) / m
+        pd = PowerDiagram( g, boundaries = _box( d ) )
+        cx = _check( pd )
+        assert [ cx.nb_faces( k ) for k in range( d + 1 ) ] == [ comb( d, k ) * m ** k * ( m + 1 ) ** ( d - k ) for k in range( d + 1 ) ]
+        px = pd.cell_complex( contract = False )
+        assert px.is_consistent
+        nb = [ px.nb_faces( k ) for k in range( d + 1 ) ]
+        assert nb[ 0 ] > cx.nb_faces( 0 ) and sum( ( -1 ) ** k * nb[ k ] for k in range( d + 1 ) ) == 1
+        # ( each vertex in exactly `d + 1` cells or walls: its facets are `d + 1 choose 2`, its cells plus its walls `d + 1` )
+        cells = numpy.diff( px.incident( 0, d )[ 0 ] )
+        sides = px.facets.sides
+        vo, vf = px.incident( 0, d - 1 )
+        walls = numpy.array( [ len( numpy.unique( sides[ vf[ vo[ v ] : vo[ v + 1 ] ], 1 ][ sides[ vf[ vo[ v ] : vo[ v + 1 ] ], 1 ] < 0 ] ) )
+                               for v in range( nb[ 0 ] ) ] )
+        assert ( cells + walls == d + 1 ).all()
+        assert numpy.allclose( _np( px.cells.measures ), _np( cx.cells.measures ) )
 
 
 if test( "higher_dimensions" ):
