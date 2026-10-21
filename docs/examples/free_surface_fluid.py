@@ -139,8 +139,9 @@ class Fluid:
         print( f"settled in { it + 1 } iterations ( last move { move / size:.1e} particle )" )
         return p
 
-    def run( self, p, dt, duration, nb_frames = 100 ):
-        """the frames `( t, positions, weights, energy )`, `nb_frames + 1` of them evenly spaced in time"""
+    def run( self, p, dt, duration, nb_frames = 100, damping = 0.0 ):
+        """the frames `( t, positions, weights, energy )`, `nb_frames + 1` of them evenly spaced in time. `damping`: a friction
+        `- damping v`, the velocities multiplied by `exp( - damping dt )` after each step ( to reach a state at rest )"""
         p = np.asarray( p, dtype = float )
         v = np.zeros_like( p )
         a, b, w = self.acceleration( p )
@@ -151,7 +152,7 @@ class Fluid:
             v = v + 0.5 * dt * a
             p = p + dt * v
             a, b, w = self.acceleration( p )
-            v = v + 0.5 * dt * a
+            v = ( v + 0.5 * dt * a ) * np.exp( - damping * dt )
             if k % every == 0:
                 frames.append( ( k * dt, p, w, self.energy( p, v, b ) ) )
                 print( f"t = { k * dt:.3f}  energy = { frames[ -1 ][ 3 ]:.6f}  max |p - b| = { np.abs( p - b ).max():.2e}  "

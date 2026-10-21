@@ -34,7 +34,10 @@ x = sdot.quantization( target, x0 )     # or from given positions
 
 - `target`: any distribution (`ConvexHull`, `SumOfGaussians`, `Image`, ...);
 - the starting point: either a number of Diracs, drawn uniformly at random in the support of `target` (`seed` makes the draw reproducible), or the positions themselves, `[ n, d ]`, in any framework (NumPy, JAX, PyTorch, CuPy) — the result comes back in the same one;
-- `masses` (optional): the mass of each Dirac, kept during the iterations — equal by default.
+- `masses` (optional): the mass of each Dirac, kept during the iterations — equal by default;
+- `periodicity` (optional): Lloyd on a quotient space, a torus, a Klein bottle... (see [Periodicity](/guide/ground-metrics/periodicity)). The returned positions stay next to where they started, possibly outside the support;
+- `target_mass` (optional): the share of `target` that the Diracs take, as a [partial transport](/guide/ground-metrics/partial) — `1` by default;
+- `radial_func` (optional): a radial integrand around each Dirac, as in `OtProblem` (for instance `sdot.RadialExp( eps )`).
 
 The iterations stop when the root mean square move of the Diracs is below `tol` times $\sqrt{W_2^2}$, i.e. the typical size of a cell. The default, `tol = 2e-2`, means the Diracs move by less than a fiftieth of a cell: the eye no longer sees anything. It takes about 20 iterations on the examples below; halving `tol` roughly doubles that. `max_iter` (200 by default) bounds the number of iterations.
 

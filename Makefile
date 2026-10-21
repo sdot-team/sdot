@@ -10,7 +10,7 @@ help:
 	@echo "  make site-deploy   site-build, then push it to the gh-pages branch ( https://sdot-team.github.io/sdot/ )"
 	@echo "  make local_kernels measure the choices and build the kernels ( src/sdot/precompiled-kernels/ ) for this machine, per framework"
 	@echo "  make wheels        every wheel ( mac, manylinux, windows ) under dist/, from the environments of errand-envs.py"
-	@echo "  make local_wheels  local_kernels, then the loom + sdot wheels of this machine under dist/, validated"
+	@echo "  make local_wheels  local_kernels, then the sdot wheel of this machine under dist/, validated ( loom-ffi is released from loom )"
 	@echo "  make publish       upload dist/ to PyPI ( TWINE_PASSWORD = your PyPI token )"
 	@echo "  make anim          regenerate the tutorials' animations ( docs/public/anim/*.gif ) -- needs jax + matplotlib"
 
@@ -56,7 +56,7 @@ local_kernels:
 WHEEL_ENVS ?= mac_wheels,lin_wheels,win_wheels
 
 wheels:
-	errand shell --env $(WHEEL_ENVS) --pull dist -- make local_wheels
+	errand run --env $(WHEEL_ENVS) --pull dist make local_wheels
 
 local_wheels:
 	$(PYTHON) scripts/wheels.py --kernels $(FRAMEWORKS)

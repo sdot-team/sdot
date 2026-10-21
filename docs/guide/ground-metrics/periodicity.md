@@ -40,28 +40,52 @@ $x \mapsto M x + V$, $M$ orthogonal:
 | a $( d + 1 )^2$ homogeneous matrix | the same, as one matrix |
 
 ```python
-flip, quarter = np.diag( [ 1, -1 ] ), np.array( [ [ 0, -1 ], [ 1, 0 ] ] )
 f, g = sdot.SumOfDiracs( positions ), sdot.Box()
+quarter = np.array( [ [ 0, -1 ], [ 1, 0 ] ] )
 
 sdot.plan( f, g, periodicity = [ [ 1, 0 ], [ 0, 1 ] ] )                 # a torus
-sdot.plan( f, g, periodicity = [ ( flip, [ 1, 1 ] ), [ 0, 1 ] ] )       # a Klein bottle
-sdot.plan( f, g, periodicity = [ ( flip, [ 1, 1 ] ) ] )                 # a Moebius strip ( its other two sides stay walls )
 sdot.plan( f, g, periodicity = [ ( quarter, [ 0, 0 ] ) ] )              # a cone: a quarter turn about a corner
 sdot.plan( f, g, periodicity = [ True, False ] )                        # a cylinder along x
 sdot.plan( f, g, periodicity = [ [ 1, 1 ] ] )                           # a cylinder along any direction
 ```
 
-Two sides with the same arrows are glued, the arrows matching; a grey side is a wall:
+<!-- Two sides with the same arrows are glued, the arrows matching; a grey side is a wall:
 
-![The sides of the unit square glued by a torus, a Klein bottle, a Moebius strip, a cone and a cylinder](/guide/img/periodicity-gluings.png)
+![The sides of the unit square glued by a torus, a Klein bottle, a Moebius strip, a cone and a cylinder](/guide/img/periodicity-gluings.png) -->
 
-The target is the content of a **fundamental domain**: its images by the group must not overlap ( checked for a lattice of
-translations ). Its sides that the group does not glue stay walls.
+Translations that are not independent are reduced to a basis of their lattice: `[ [ 1, 0 ], [ 2, 0 ] ]` is the period $1$, and
+`[ [ 1, 0 ], [ 1.1, 0 ] ]` the period $0.1$. A group that is not **discrete** is refused: `[ [ 1, 0 ], [ √2, 0 ] ]`, a turn by one
+radian, a fivefold turn with a translation. So is a generator that is the identity.
+
+The target is the content of a **fundamental domain**: its images by the group must not overlap. This is checked for every
+group, the first time a diagram is built with it: an image of the support that holds a ball inside the support raises an error
+naming the element of the group. Images that only touch the support are fine. The sides of the support that the group does not
+glue stay walls.
 
 Two shortcuts read the support of the target:
 
 * `True`, or one boolean per axis ( `[ True, False ]`: a cylinder along $x$ ): one translation per side of an **axis-aligned box**;
-* `target.domain`: the opposite parallel facets of the support, paired by translations.
+* `target.domain`: each facet of the support is glued onto the opposite parallel facet, by the translation that sends one onto
+  the other. On a parallelogram, that translation runs along a side, not across it. The two facets must be translates of each
+  other, and translations that are not independent are reduced to a basis of their lattice: the three pairs of sides of a hexagon
+  give a lattice of rank 2.
+
+## The fundamental domain of a target
+
+The group alone does not say where the fundamental domain is. It is **the support of the target**, as the distribution declares
+it. The values of the density are never read to find it. A density that is not constant is repeated as it is, and its images are
+summed:
+
+| target | its fundamental domain |
+|---|---|
+| `Box`, `Polytope`, `ConvexHull` | the polytope itself |
+| `Image`, `SplineGrid` | the block of its pixels, placed by `frame` and `origin` ( a parallelogram for an oblique `frame`: glue it with `target.domain` ) |
+| `Mesh` | the box of its nodes, without the margin of its support |
+| `SumOfGaussians` | `support_box = ( lo, hi )`, which is then **required**: the box of the tails depends on the gaussians and cannot be a period |
+
+With `True`, the booleans or `target.domain`, the periods are read from this domain. With explicit generators, the domain is
+where the diracs are folded and where the walls are found, and it must lie in a fundamental domain of the group ( checked as
+above ).
 
 ## Visualization
 
@@ -91,7 +115,7 @@ for k, a in enumerate( pd.periodicity_rings( 1 ) ):   # the elements of the firs
 touches the domain ( the 8 neighbours of a square on a torus ), ring 2 those touching ring 1, and so on. `Cell.moved` moves a cell by
 one of them, or each cell by its own.
 
-## Walls, then a torus
+<!-- ## Walls, then a torus
 
 24 diracs with random masses on the unit square. Move the slider at the top of the viewer: `periodic = 0` is the transport with
 walls, its cells moved by hand by the elements of the torus's first ring; `periodic = 1` is the transport on the torus.
@@ -106,7 +130,7 @@ walls, its cells moved by hand by the elements of the torus's first ring; `perio
 <p style="text-align: right; margin: 0"><a :href="withBase('/guide/periodicity-walls.html')" target="_blank">Open in a separate page ↗</a></p>
 
 With walls, the copies do not match along the sides: the cells are cut by the box, and a dirac near a side has no neighbour beyond it.
-On the torus the copies glue without a seam, and every cell is surrounded on all sides: there is no boundary effect left.
+On the torus the copies glue without a seam, and every cell is surrounded on all sides: there is no boundary effect left. -->
 
 ## Cells are where their diracs are
 
@@ -169,7 +193,7 @@ for it in range( 50 ):
 ></iframe>
 <p style="text-align: right; margin: 0"><a :href="withBase('/guide/periodicity-torus.html')" target="_blank">Open in a separate page ↗</a></p>
 
-### A Klein bottle
+<!-- ### A Klein bottle
 
 `periodicity = [ ( flip, [ 1, 1 ] ), [ 0, 1 ] ]`. Leaving the square on the right brings you back on the left **upside down**, and the
 top is glued to the bottom as on a torus. In the copies, the columns on either side of the square are its mirror images.
@@ -195,7 +219,7 @@ top is glued to the bottom as on a torus. In the copies, the columns on either s
   allowfullscreen
   style="width: 100%; height: 60vh; min-height: 380px; border: 0; display: block; margin: 1.5rem 0 0.5rem;"
 ></iframe>
-<p style="text-align: right; margin: 0"><a :href="withBase('/guide/periodicity-moebius.html')" target="_blank">Open in a separate page ↗</a></p>
+<p style="text-align: right; margin: 0"><a :href="withBase('/guide/periodicity-moebius.html')" target="_blank">Open in a separate page ↗</a></p> -->
 
 ### A cone
 
@@ -305,8 +329,8 @@ into its own pieces. In 2D, a torus traverses the tree 9 times instead of once, 
 
 The diagrams ( `PowerDiagram`: measures, moments, their derivatives ) work on a CUDA device for any group. The **solve** on a CUDA
 device handles a group of **translations** ( a torus, a cylinder, a sheared lattice ) with a constant density ( a `Box`, a
-`Polytope`, an `Image` of equal values ), in 2D and 3D. A group with rotations or symmetries, or a density that is not a constant, is
-solved on the CPU ( `LOOM_DEVICE=cpu` ).
+`Polytope`, an `Image` of equal values ), gaussians or a `Mesh`, in 2D and 3D. A group with rotations or symmetries, or an `Image`
+that is not a constant, is solved on the CPU ( `LOOM_DEVICE=cpu` ).
 
 ## Gaussians and meshes
 

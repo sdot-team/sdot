@@ -136,6 +136,80 @@ if test( "measures_and_moments_inside_balls_derive_in_3d" ):
             check_grad( lambda p, q, k = k: mk( p, q ).moment( k ), pos, w, seed = 2 + k, eps = 1e-6, rtol = 1e-5, atol = 1e-7 )
 
 
+def _cube_mesh( values ):
+    """the unit cube, a grid of `values.shape` cubes cut into 6 tetrahedra each, every tetrahedron with the value of its cube: `Mesh(
+    degree = 0 )` with the density of `Image( values )`"""
+    import numpy
+    from sdot.distributions.Mesh import Mesh
+    k = values.shape
+    g = [ numpy.linspace( 0, 1, n + 1 ) for n in k ]
+    nodes = numpy.stack( numpy.meshgrid( *g, indexing = "ij" ), -1 ).reshape( -1, 3 )
+    I = lambda i, j, l: ( i * ( k[ 1 ] + 1 ) + j ) * ( k[ 2 ] + 1 ) + l
+    tets, vals = [], []
+    for i in range( k[ 0 ] ):
+        for j in range( k[ 1 ] ):
+            for l in range( k[ 2 ] ):
+                c = [ I( i + a, j + b, l + e ) for a in ( 0, 1 ) for b in ( 0, 1 ) for e in ( 0, 1 ) ]
+                for q in ( ( 1, 3 ), ( 3, 2 ), ( 2, 6 ), ( 6, 4 ), ( 4, 5 ), ( 5, 1 ) ):
+                    tets.append( [ c[ 0 ], c[ q[ 0 ] ], c[ q[ 1 ] ], c[ 7 ] ] )
+                    vals.append( values[ i, j, l ] )
+    return Mesh( nodes, numpy.array( tets ), values = numpy.repeat( numpy.array( vals )[ :, None ], 4, axis = 1 ),
+                 degree = 0 )
+
+
+if test( "a_mesh_of_degree_0_in_3d_is_its_image" ):
+    import numpy
+    from sdot.distributions.Image import Image
+    from sdot.PowerDiagram import PowerDiagram
+    # the same density, cut by the tetrahedra or by the pixels: the measures, the moments and the hessian ( its facets inside the
+    # balls, `InBallDist::polygon_area_in_ball` ) agree
+    rng = numpy.random.default_rng( 0 )
+    n = 10
+    values = rng.uniform( 0.5, 2, size = ( 3, 4, 3 ) )
+    mesh, img = _cube_mesh( values ), Image( values, frame = [ 1.0, 1.0, 1.0 ] )
+    pos = rng.uniform( 0.05, 0.95, size = ( n, 3 ) )
+    w = rng.uniform( 0.0, 0.03, size = n )
+    for ws in ( -0.01, -0.04 ):
+        a, b = ( PowerDiagram( pos, w, distribution = d, kernel_dtype = "FP64", sink_weight = ws ) for d in ( mesh, img ) )
+        assert numpy.allclose( numpy.asarray( a.measures ), numpy.asarray( b.measures ), rtol = 1e-10, atol = 1e-13 )
+        for ma, mb in zip( a.moments, b.moments ):
+            assert numpy.allclose( numpy.asarray( ma.value ), numpy.asarray( mb.value ), rtol = 1e-10, atol = 1e-13 )
+        assert numpy.allclose( numpy.asarray( a.sphere_areas ), numpy.asarray( b.sphere_areas ), rtol = 1e-10, atol = 1e-13 )
+
+        def dense( pd ):
+            cnt, ids, vals = pd.hessian_rows()
+            H = numpy.zeros( ( n, n ) )
+            for i in range( n ):
+                for r in range( cnt[ i ] ):
+                    j = ids[ i, r ]
+                    if j == i:
+                        H[ i, i ] += vals[ i, r ]
+                    elif j >= 0:
+                        H[ i, j ] -= vals[ i, r ]
+                        H[ i, i ] += vals[ i, r ]
+            return H
+        Ha, Hb = dense( a ), dense( b )
+        assert numpy.abs( Ha - Hb ).max() < 1e-10 * numpy.abs( Hb ).max(), numpy.abs( Ha - Hb ).max()
+
+
+if test( "a_mesh_of_degree_0_derives_in_3d" ):
+    import numpy
+    from loom.testing import need, check_grad
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.Cell import set_kernel_dtype
+    set_kernel_dtype( "FP64" )
+    need( "grad" )
+    rng = numpy.random.default_rng( 0 )
+    n, ws = 8, -0.01
+    mesh = _cube_mesh( rng.uniform( 0.5, 2, size = ( 2, 3, 2 ) ) )
+    pos = rng.uniform( 0.05, 0.95, size = ( n, 3 ) )
+    w = rng.uniform( 0.0, 0.03, size = n )
+    mk = lambda p, q: PowerDiagram( p, weights = q, distribution = mesh, sink_weight = ws, accelerator = "plain" )
+    check_grad( lambda p, q: mk( p, q ).measures, pos, w, seed = 1, eps = 1e-6, rtol = 1e-5, atol = 1e-7 )
+    for k in range( 5 ):
+        check_grad( lambda p, q, k = k: mk( p, q ).moment( k ), pos, w, seed = 2 + k, eps = 1e-6, rtol = 1e-5, atol = 1e-7 )
+
+
 if test( "a_partial_plan_in_3d_reaches_its_masses" ):
     import numpy
     from sdot.OtProblem import ot_solve
@@ -169,6 +243,9 @@ if test( "what_partial_transport_refuses_in_3d" ):
     smooth = Image( rng.uniform( 0.5, 2, size = ( 3, 3, 3, 8 ) ), frame = [ 1.0, 1.0, 1.0 ], degree = 1 )
     raises( lambda: PowerDiagram( pos, distribution = smooth, sink_weight = 0.0 ), "constant on pieces" )
     raises( lambda: PowerDiagram( rng.uniform( 0, 1, size = ( 8, 4 ) ), sink_weight = 0.0 ), "2D and 3D only" )
+    from sdot.distributions.Mesh import Mesh
+    affine = Mesh( rng.uniform( 0, 1, size = ( 4, 3 ) ), numpy.array( [ [ 0, 1, 2, 3 ] ] ) )
+    raises( lambda: PowerDiagram( pos, distribution = affine, sink_weight = 0.0 ), "constant on pieces" )
 
 
 if test( "a_partial_plan_in_3d_is_drawn_by_the_boundary_of_its_matter" ):

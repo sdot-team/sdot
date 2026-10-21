@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""The wheels of loom and sdot, for the OS / CPU family of this machine: build, validate, publish.
+"""The sdot wheel of the OS / CPU family of this machine: build, validate, publish.
 
     python scripts/wheels.py --kernels jax numpy    ... after the kernels of those frameworks ( python -m sdot.catalogue )
-    python scripts/wheels.py                  build dist/*.whl (the sdot one carries src/sdot/precompiled-kernels) and validate them
-    python scripts/wheels.py --publish URL    ... then upload them to the index at URL (the token is in TWINE_PASSWORD)
+    python scripts/wheels.py                  build dist/sdot-*.whl ( it carries src/sdot/precompiled-kernels ) and validate it
+    python scripts/wheels.py --publish URL    ... then upload dist/ to the index at URL (the token is in TWINE_PASSWORD)
+
+loom-ffi is released from loom ( `make version wheels publish` there ), first. The loom checkout beside this one is what the
+kernels are generated with: the sdot wheel requires at least its version, and is validated with a wheel of it, built on the
+side ( not kept in dist/ ).
 
 The kernels themselves come from `python -m sdot.catalogue` ( run it first, on every machine that has hardware to cover,
 and merge the directories ). The binaries do not depend on the python version: the wheel is `py3-none-<platform>`.
@@ -35,18 +39,16 @@ def next_version( current, today = None ):
 
 
 def set_version( version, loom ):
-    """Write `version` in the `pyproject.toml` of loom and of sdot, and make sdot depend on that loom at least. A newer loom is fine: the
-    kernels of an sdot wheel are looked up by hash of the sources loom generates, and one it generates otherwise is compiled."""
-    for toml in ( loom / "pyproject.toml", ROOT / "pyproject.toml" ):
-        text = toml.read_text()
-        text = re.sub( r'(?m)^version = "[^"]*"', f'version = "{ version }"', text, count = 1 )
-        if toml.parent == ROOT:
-            text = re.sub( r'(?m)^(\s*)"loom-ffi[^"]*",', rf'\1"loom-ffi>={ version }",', text, count = 1 )
-        toml.write_text( text )
+    """Write `version` in the `pyproject.toml` of sdot, and make it depend on the loom checkout's version at least. A newer loom is
+    fine: the kernels of an sdot wheel are looked up by hash of the sources loom generates, and one it generates otherwise is compiled."""
+    toml = ROOT / "pyproject.toml"
+    text = re.sub( r'(?m)^version = "[^"]*"', f'version = "{ version }"', toml.read_text(), count = 1 )
+    text = re.sub( r'(?m)^(\s*)"loom-ffi[^"]*",', rf'\1"loom-ffi>={ current_version( loom ) }",', text, count = 1 )
+    toml.write_text( text )
 
 
-def current_version( loom ):
-    return re.search( r'(?m)^version = "([^"]*)"', ( loom / "pyproject.toml" ).read_text() ).group( 1 )
+def current_version( root = ROOT ):
+    return re.search( r'(?m)^version = "([^"]*)"', ( root / "pyproject.toml" ).read_text() ).group( 1 )
 
 
 def default_platform_tag():
@@ -63,12 +65,13 @@ def foreign_kernels( platform_tag ):
 
 
 def build( a, loom, dist ):
-    """The loom and sdot wheels of this machine into `dist/`, validated; those of other platforms already there are kept,
-    those of another version are not ( they would be uploaded with the rest )."""
+    """The sdot wheel of this machine into `dist/`, validated with a loom wheel of the checkout ( not kept: loom publishes its
+    own ); those of other platforms already there are kept, those of another version, or of another package, are not ( they would
+    be uploaded with the rest )."""
     run( sys.executable, "-m", "pip", "install", "--quiet", "wheel" )
-    version = current_version( loom )
+    version = current_version()
     for old in dist.glob( "*.whl" ):
-        if old.name.split( "-" )[ 1 ] != version:
+        if not old.name.startswith( "sdot-" ) or old.name.split( "-" )[ 1 ] != version:
             old.unlink()
     out = dist / ".build"
     shutil.rmtree( out, ignore_errors = True )
@@ -91,18 +94,20 @@ def build( a, loom, dist ):
     sdot = next( out.glob( "sdot-*.whl" ) )
     run( sys.executable, "-m", "wheel", "tags", "--remove", "--python-tag", "py3", "--abi-tag", "none", "--platform-tag", a.platform_tag, sdot )
 
-    wheels = sorted( out.glob( "*.whl" ) )
     if not a.no_validate:
         # nothing may be compiled: the kernels of the wheel are what is tested
-        run( sys.executable, ROOT / "scripts" / "validate_wheel.py", "--wheel", *wheels, env = { **os.environ, "LOOM_KERNELS": "catalogue" } )
-    for w in wheels:
-        w.replace( dist / w.name )
+        run( sys.executable, ROOT / "scripts" / "validate_wheel.py", "--wheel", *sorted( out.glob( "*.whl" ) ),
+             env = { **os.environ, "LOOM_KERNELS": "catalogue" } )
+    sdot = next( out.glob( "sdot-*.whl" ) )           # under its platform name now ( `wheel tags` )
+    sdot.replace( dist / sdot.name )
     shutil.rmtree( out, ignore_errors = True )
 
 
 def kernels( frameworks, loom ):
     """`python -m sdot.catalogue` once per framework, in this interpreter: the kernels land in src/sdot/precompiled-kernels."""
     path = os.pathsep.join( [ str( ROOT / "src" ), str( loom / "src" ), *filter( None, [ os.environ.get( "PYTHONPATH" ) ] ) ] )
+    # from scratch: a tag of an earlier build ( a level no longer built ) would go into the wheel
+    shutil.rmtree( ROOT / "src" / "sdot" / "precompiled-kernels", ignore_errors = True )
     for fw in frameworks:
         print( f"=== kernels for { fw }", flush = True )
         env = { **os.environ, "LOOM_FRAMEWORK": fw, "PYTHONPATH": path }
@@ -114,7 +119,7 @@ def main():
     p.add_argument( "--platform-tag", default = default_platform_tag(),
                     help = "the platform tag of the sdot wheel (default: this interpreter's, manylinux_2_28 on Linux: the image the kernels are built in)" )
     p.add_argument( "--loom", default = None, help = "the loom checkout (default: ./loom or ../loom)" )
-    p.add_argument( "--version", default = None, help = "write this version in loom and sdot first (`next`: year.month.day.number of today, the number counting today's releases)" )
+    p.add_argument( "--version", default = None, help = "write this version in sdot first, and require the loom checkout's (`next`: year.month.day.number of today, the number counting today's releases)" )
     p.add_argument( "--kernels", nargs = "+", metavar = "FRAMEWORK", help = "first, make the kernels of these frameworks ( python -m sdot.catalogue for each )" )
     p.add_argument( "--no-validate", action = "store_true" )
     p.add_argument( "--no-build", action = "store_true", help = "build nothing: only write the version, and publish what dist/ holds" )
@@ -123,14 +128,15 @@ def main():
 
     loom = Path( a.loom ) if a.loom else next( d for d in ( ROOT / "loom", ROOT.parent / "loom" ) if ( d / "pyproject.toml" ).exists() )
     if a.version:
-        set_version( next_version( current_version( loom ) ) if a.version == "next" else a.version, loom )
-        print( "version:", current_version( loom ), flush = True )
+        set_version( next_version( current_version() ) if a.version == "next" else a.version, loom )
+        print( "version:", current_version(), "( loom-ffi >=", current_version( loom ), ")", flush = True )
     dist = ROOT / "dist"
     if a.kernels:
         kernels( a.kernels, loom )
     if not a.no_build:
         build( a, loom, dist )
-    wheels = sorted( dist.glob( "*.whl" ) )
+    # only this version's sdot wheels: `--pull dist` also brings back what an earlier build left on another machine
+    wheels = sorted( dist.glob( f"sdot-{ current_version() }-*.whl" ) )
     if a.publish:
         run( sys.executable, "-m", "pip", "install", "--quiet", "twine" )
         run( sys.executable, "-m", "twine", "upload", "--skip-existing", "--repository-url", a.publish, *wheels,

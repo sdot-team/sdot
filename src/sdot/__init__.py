@@ -28,6 +28,10 @@ from .Cell_1 import Cell_1 as Cell_1
 from .Cell_2 import Cell_2 as Cell_2
 from .Cell_N import Cell_N as Cell_N
 from .CellScratch import CellScratch as CellScratch
+from .CellComplex import CellComplex as CellComplex
+from .CellComplex import Faces as Faces
+from .CellComplex import Face as Face
+from .CellGeometry import CellGeometry as CellGeometry
 from .Cell import set_kernel_dtype as set_kernel_dtype
 from .Cell import kernel_dtype as kernel_dtype
 # THE TRANSPORT: a problem is POSED ( `OtProblem` ), then asked for a solution -- direct

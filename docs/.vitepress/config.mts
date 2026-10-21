@@ -71,6 +71,7 @@ export default defineConfig({
               { text: 'Partial Transport',      link: '/guide/ground-metrics/partial' },
             ] },
             { text: 'Duplicates and Close Seeds', link: '/guide/duplicates' },
+            { text: 'The Cell Complex',         link: '/guide/cell-complex' },
             { text: 'Frameworks and Devices',   link: '/guide/backends' },
             { text: 'Performance',              link: '/guide/performance' },
             { text: 'Background',               link: '/guide/background' },

@@ -197,8 +197,8 @@
     HD void hessian_row( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist ) const { \
         diagram::hessian_row( *this, k, dom, res, scratch, thread_index, dist ); \
     } \
-    HD void build_cell( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index ) const { \
-        diagram::build_cell( *this, k, dom, res, scratch, thread_index ); \
+    HD void build_cell( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, bool keep_images = false ) const { \
+        diagram::build_cell( *this, k, dom, res, scratch, thread_index, keep_images ); \
     } \
     HD void build_support_piece( SI k, SI b, const auto &dirs, const auto &offs, const auto &ids, const auto &dom, auto &&res, auto &&scratch, SI thread_index ) const { \
         diagram::build_support_piece( *this, k, b, dirs, offs, ids, dom, res, scratch, thread_index ); \

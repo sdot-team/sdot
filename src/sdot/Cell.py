@@ -275,7 +275,8 @@ class Cell( Aggregate, Displayable ):
         The batch axes are flattened, and NOTHING else : on a GPU the batch is padded to
         the device alignment (`Device.batch_alignment`), item `b` is at row `b` of a
         buffer that has more than `nb_items`."""
-        raw = np.asarray( tensor.raw )
+        from loom.tensor.host import to_host
+        raw = to_host( tensor.raw )                      # ( a buffer on the card: `np.asarray` refuses Torch's )
         return raw.reshape( ( -1, ) + raw.shape[ len( self.batch_axes ) : ] )[ b ][ : count ]
 
     def _items( self ):
@@ -297,7 +298,8 @@ class Cell( Aggregate, Displayable ):
             maps = np.broadcast_to( maps, ( n, d, d + 1 ) )
         res = self._empty_like_me()
         res._adopt_geometry( self )
-        raw = np.array( np.asarray( self.vertex_positions.raw ), dtype = float, copy = True )
+        from loom.tensor.host import to_host
+        raw = np.array( to_host( self.vertex_positions.raw ), dtype = float, copy = True )
         flat = raw.reshape( ( -1, ) + raw.shape[ len( self.batch_axes ) : ] )
         for b in range( n ):
             flat[ b ] = flat[ b ] @ maps[ b, :, :d ].T + maps[ b, :, d ]

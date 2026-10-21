@@ -255,6 +255,34 @@ struct MeshElementDensity {
     }
 };
 
+// The density of ONE ELEMENT of a mesh of degree 0 ( `Mesh( degree = 0 )` ): CONSTANT on the element, the mean of its corner
+// values -- the contract `is_constant` ( `ConstantDensity.h` ), what the integration in a ball takes in 3D ( `InBall3.h` ). The
+// mean keeps the mass of the corner weights, `sum_i values( e, i ) |e| / ( d + 1 )`, and its derivative goes to each corner by
+// `1 / ( d + 1 )`.
+template<class MeshT>
+struct MeshElementConstDensity {
+    using TF = typename MeshT::TF;
+    static constexpr int ct_dim = MeshT::ct_dim;
+    static constexpr bool is_constant = true;
+
+    const MeshT *mesh;
+    SI           e;                                      ///< the element
+    TF           value;                                  ///< the mean of its corner values
+
+    HD void add_value_grad( auto &&grad_dist, TF g ) const {
+        if constexpr ( DECAYED_TYPE_OF( grad_dist.values )::is_valid )
+            for ( int i = 0; i <= ct_dim; ++i )
+                atomic_add( grad_dist.values( e, i ).ref(), g / ( ct_dim + 1 ) );
+    }
+};
+
+/// the value of a piece's density at `x`: constant, or affine
+template<class Dens>
+HD auto density_value_at( const Dens &dens, const auto &x ) {
+    if constexpr ( Dens::is_constant ) return dens.value;
+    else                               return dens.value_at( x );
+}
+
 // A CONTINUOUS PIECEWISE LINEAR density on a mesh of simplices, seen as a density to integrate over a cell.
 //
 // A cell is cut by each simplex it meets, `cell INTERSECT simplex` being a piece ( the cuts are the simplex's `d + 1` facets,
@@ -266,6 +294,21 @@ struct Mesh {
 
     static constexpr int ct_dim = DECAYED_TYPE_OF( nb_dims )::value;
     using TF = DECAYED_TYPE_OF( nodes )::TF;
+
+    /// 0: a constant per element ( `MeshElementConstDensity` ), 1: affine ( `MeshElementDensity`, DG1 )
+    static constexpr int ct_degree = DECAYED_TYPE_OF( degree )::value;
+    static_assert( ct_degree == 0 || ct_degree == 1, "Mesh: degree 0 or 1" );
+
+    /// the density of the element `e`
+    HD auto density_of( SI e ) const {
+        if constexpr ( ct_degree == 0 ) {
+            TF s = 0;
+            for ( int i = 0; i <= ct_dim; ++i )
+                s += TF( values( e, i ) );
+            return MeshElementConstDensity<Mesh>{ this, e, s / ( ct_dim + 1 ) };
+        } else
+            return MeshElementDensity<Mesh>{ this, e };
+    }
 
     /// the cell is cut by the facets of the simplices: the integrator reserves a spare cell for it
     static constexpr bool cuts_pieces = true;
@@ -360,11 +403,15 @@ struct Mesh {
     /// of cut `r` -- the bisector REBUILT from the seeds, not read back from the vertices: where four cells meet, an edge of length
     /// zero has a plane that the rounding alone decides, and the bisectors of two cells are exactly opposite. `on_segment( A, B, dens )`
     /// ( 2D ): the integral of the element's density `dens` on the part `[ A, B ]` of a facet -- by default all of it, inside a ball
-    /// what the sphere leaves of it ( `InBall.h` )
+    /// what the sphere leaves of it ( `InBall.h` ). In 3D, `on_segment( poly, m, dens )`: the same on the convex polygon `poly[ 0 .. m )`
+    /// ( `polygon_mass` by default )
     HD void for_each_facet_mass( const auto &cell, auto &&plane_of, auto &&func ) const {
-        for_each_facet_mass( cell, plane_of, func, []( const auto &A, const auto &B, const auto &dens ) {
-            const TF L = sdot::sqrt( ( B[ 0 ] - A[ 0 ] ) * ( B[ 0 ] - A[ 0 ] ) + ( B[ 1 ] - A[ 1 ] ) * ( B[ 1 ] - A[ 1 ] ) );
-            return L * ( dens.value_at( A ) + dens.value_at( B ) ) / 2;
+        for_each_facet_mass( cell, plane_of, func, []( const auto &A, const auto &B, const auto &dens ) -> TF {
+            if constexpr ( ct_dim == 2 ) {
+                const TF L = sdot::sqrt( ( B[ 0 ] - A[ 0 ] ) * ( B[ 0 ] - A[ 0 ] ) + ( B[ 1 ] - A[ 1 ] ) * ( B[ 1 ] - A[ 1 ] ) );
+                return L * ( density_value_at( dens, A ) + density_value_at( dens, B ) ) / 2;
+            } else
+                return polygon_mass( A, B, dens );
         } );
     }
 
@@ -443,7 +490,7 @@ struct Mesh {
                     point( outs[ a ], ins[ b ] );
         }
 
-        MeshElementDensity<Mesh> dens{ this, e };
+        const auto dens = density_of( e );
         const int nc = cell.nb_cuts();
         if constexpr ( D == 2 ) {
             // a segment `[ P0, P1 ]`, clipped by the cell's other edges
@@ -499,22 +546,28 @@ struct Mesh {
             }
             if ( m < 3 )
                 return 0;
-            TF area = 0, g[ 3 ] = { 0, 0, 0 };
-            for ( int k = 1; k + 1 < m; ++k ) {
-                const TF ax = poly[ k ][ 0 ] - poly[ 0 ][ 0 ], ay = poly[ k ][ 1 ] - poly[ 0 ][ 1 ], az = poly[ k ][ 2 ] - poly[ 0 ][ 2 ];
-                const TF bx = poly[ k + 1 ][ 0 ] - poly[ 0 ][ 0 ], by = poly[ k + 1 ][ 1 ] - poly[ 0 ][ 1 ], bz = poly[ k + 1 ][ 2 ] - poly[ 0 ][ 2 ];
-                const TF cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
-                const TF t = sdot::sqrt( cx * cx + cy * cy + cz * cz ) / 2;
-                area += t;
-                for ( int c = 0; c < 3; ++c )
-                    g[ c ] += t * ( poly[ 0 ][ c ] + poly[ k ][ c ] + poly[ k + 1 ][ c ] ) / 3;
-            }
-            if ( ! ( area > 0 ) )
-                return 0;
-            for ( int c = 0; c < 3; ++c )
-                g[ c ] /= area;
-            return area * dens.value_at( g );
+            return TF( on_segment( poly, m, dens ) );
         }
+    }
+
+    /// the integral of the density `dens` ( constant or affine ) on the convex polygon `poly[ 0 .. m )` of 3D: its area times the
+    /// value at its center
+    HD static TF polygon_mass( const auto &poly, int m, const auto &dens ) {
+        TF area = 0, g[ 3 ] = { 0, 0, 0 };
+        for ( int k = 1; k + 1 < m; ++k ) {
+            const TF ax = poly[ k ][ 0 ] - poly[ 0 ][ 0 ], ay = poly[ k ][ 1 ] - poly[ 0 ][ 1 ], az = poly[ k ][ 2 ] - poly[ 0 ][ 2 ];
+            const TF bx = poly[ k + 1 ][ 0 ] - poly[ 0 ][ 0 ], by = poly[ k + 1 ][ 1 ] - poly[ 0 ][ 1 ], bz = poly[ k + 1 ][ 2 ] - poly[ 0 ][ 2 ];
+            const TF cx = ay * bz - az * by, cy = az * bx - ax * bz, cz = ax * by - ay * bx;
+            const TF t = sdot::sqrt( cx * cx + cy * cy + cz * cz ) / 2;
+            area += t;
+            for ( int c = 0; c < 3; ++c )
+                g[ c ] += t * ( poly[ 0 ][ c ] + poly[ k ][ c ] + poly[ k + 1 ][ c ] ) / 3;
+        }
+        if ( ! ( area > 0 ) )
+            return 0;
+        for ( int c = 0; c < 3; ++c )
+            g[ c ] /= area;
+        return area * density_value_at( dens, g );
     }
 
     /// the piece `cell INTERSECT element e`, to `func`. `false` when the cutting ran out of room
@@ -576,7 +629,7 @@ struct Mesh {
                 return true;                             // the element does not meet the cell
         }
 
-        MeshElementDensity<Mesh> dens{ this, e };
+        const auto dens = density_of( e );
         if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, dens ); } );
         else           func( cell, dens );
         return true;

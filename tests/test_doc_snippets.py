@@ -37,6 +37,9 @@ if test( "hello_cupy" ):
 if test( "plan" ):
     _run( "plan.py" )
 
+if test( "cell_complex" ):
+    _run( "cell_complex.py" )
+
 if test( "ot_solve" ):
     _run( "ot_solve.py" )
 

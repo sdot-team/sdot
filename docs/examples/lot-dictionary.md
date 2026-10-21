@@ -37,6 +37,8 @@ def transport_map( y ):
     return y[ ( ( y * y ).sum( axis = 1 ) - w - 2 * x @ y.T ).argmin( axis = 1 ) ]
 ```
 
+The `argmin` over all the diracs is the power cell of each reading point. For many diracs, the [cell complex](/guide/cell-complex) finds it with a tree: `cells, _ = sdot.PowerDiagram( y, w, boundaries = ... ).cell_complex().locate( x )`.
+
 The family of the example is a **ring**, centered in the square. Its inner and outer boundaries each go from a circle ($s = 0$) to a square ($s = 1$), by interpolating the polar radius: two parameters, $s_\text{in}$ and $s_\text{out}$ in $[ 0, 1 ]$. Below are the power cells of four draws (of 1000 diracs), at the four corners of the family. Use the slider at the top of the viewer to go from one draw to the next.
 
 <iframe

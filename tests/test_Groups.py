@@ -196,23 +196,26 @@ if test( "groups_derive_like_seeds" ):
         f = lambda q: PowerDiagram( pos, q, boundaries = bnd, groups = g, kernel_dtype = "FP64", accelerator = tree ).measures
         check_grad( f, w, seed = 7, **tight )
 
-    # ONE duplicate moved alone is not differentiable ( the cells around see its site through planes that coincide ): its share is
-    # the mean of the one-sided derivatives -- each member of the site the same column, the sum that of the site moved as a whole
-    import jax, jax.numpy as jnp
-    n = 12
-    pos = rng.uniform( 0.1, 0.9, size = ( n, 2 ) )
-    pos[ 1 ] = pos[ 0 ]
-    w = rng.uniform( -0.01, 0.01, size = n )
-    g = find_groups( pos )
-    bnd = box_half_spaces( [ 0.0 ] * 2, [ 1.0 ] * 2 )
-    meas = lambda p: ( lambda m: jnp.asarray( getattr( m, "raw", m ) ) )( PowerDiagram( p, w, boundaries = bnd, groups = g, kernel_dtype = "FP64" ).measures )
-    J = numpy.asarray( jax.jacrev( meas )( jnp.asarray( pos ) ) )
-    rows = [ i for i in range( n ) if i not in ( 0, 1 ) ]             # the cells around ( the members see their own virtual planes )
-    assert numpy.abs( J[ rows, 0 ] - J[ rows, 1 ] ).max() < 1e-12
-    e = numpy.zeros( ( n, 2 ) )
-    e[ [ 0, 1 ], 0 ] = 1e-7
-    fd = ( numpy.asarray( meas( jnp.asarray( pos + e ) ) ) - numpy.asarray( meas( jnp.asarray( pos - e ) ) ) ) / 2e-7
-    assert numpy.abs( fd - J[ :, 0, 0 ] - J[ :, 1, 0 ] ).max() < 1e-6, numpy.abs( fd - J[ :, 0, 0 ] - J[ :, 1, 0 ] ).max()
+    # ( calls jax itself: under another framework, only the generic part above runs )
+    from loom.drivers import framework_defaults
+    if str( framework_defaults.framework() ) == "jax":
+        # ONE duplicate moved alone is not differentiable ( the cells around see its site through planes that coincide ): its share is
+        # the mean of the one-sided derivatives -- each member of the site the same column, the sum that of the site moved as a whole
+        import jax, jax.numpy as jnp
+        n = 12
+        pos = rng.uniform( 0.1, 0.9, size = ( n, 2 ) )
+        pos[ 1 ] = pos[ 0 ]
+        w = rng.uniform( -0.01, 0.01, size = n )
+        g = find_groups( pos )
+        bnd = box_half_spaces( [ 0.0 ] * 2, [ 1.0 ] * 2 )
+        meas = lambda p: ( lambda m: jnp.asarray( getattr( m, "raw", m ) ) )( PowerDiagram( p, w, boundaries = bnd, groups = g, kernel_dtype = "FP64" ).measures )
+        J = numpy.asarray( jax.jacrev( meas )( jnp.asarray( pos ) ) )
+        rows = [ i for i in range( n ) if i not in ( 0, 1 ) ]             # the cells around ( the members see their own virtual planes )
+        assert numpy.abs( J[ rows, 0 ] - J[ rows, 1 ] ).max() < 1e-12
+        e = numpy.zeros( ( n, 2 ) )
+        e[ [ 0, 1 ], 0 ] = 1e-7
+        fd = ( numpy.asarray( meas( jnp.asarray( pos + e ) ) ) - numpy.asarray( meas( jnp.asarray( pos - e ) ) ) ) / 2e-7
+        assert numpy.abs( fd - J[ :, 0, 0 ] - J[ :, 1, 0 ] ).max() < 1e-6, numpy.abs( fd - J[ :, 0, 0 ] - J[ :, 1, 0 ] ).max()
 
 
 if test( "a_sink_keeps_the_balls_on_the_true_positions" ):
@@ -246,7 +249,7 @@ if test( "groups_run_under_jit_and_refuse_what_they_cannot_read" ):
     from sdot import PowerDiagram, box_half_spaces
     from sdot.groups import find_groups
     need( "cpu" )
-    need_autodiff()
+    need( "jax" )                                   # ( the test calls jax itself )
     import jax, jax.numpy as jnp
     rng = numpy.random.default_rng( 2 )
     n = 20
@@ -276,7 +279,7 @@ if test( "the_frozen_levels_read_the_backend_rows" ):
     from sdot import PowerDiagram, box_half_spaces
     from sdot.groups import TreeSystem, find_groups
     need( "cpu" )
-    need_autodiff()
+    need( "jax" )                                   # ( the test calls jax itself )
     import jax, jax.numpy as jnp
     # `TreeSystem.from_rows` ( the backend's rows, gathers: what a `jit` takes ) is the system of the host's rows, its step the
     # same to the rounding -- eagerly and inside a `jit`, on every degenerate cloud ( the nested one couples its levels )

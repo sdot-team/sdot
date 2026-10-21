@@ -549,6 +549,11 @@ class PowerDiagram( Aggregate, Displayable ):
         display draws dashed ( `add_to_viz` ). `None` for an unbounded diagram."""
         if self._periodic is not None:
             return self._periodic.support
+        return self._domain_half_spaces()
+
+    def _domain_half_spaces( self ):
+        """the domain the cells are cut in, as half-spaces: the start box and `bnd_*` ( with a periodicity, the walls the group leaves
+        and the start box of the folded cells ) -- `None` without one"""
         if not self.bnd_directions.is_defined and not self.box_min.is_defined:
             return None
         dirs, offs = [], []
@@ -612,27 +617,37 @@ class PowerDiagram( Aggregate, Displayable ):
 
     # ---- the domain, and the distribution ----------------------------------------------------------
 
-    def _domain_cell( self ):
+    def _domain_cell( self, kernel_dtype = None ):
         """The domain as a POLYTOPE, computed ONCE -- what each cell starts from. Built with
         the SAME code as the `cell( i )` oracle, which keeps the two descriptions of the domain
         literally identical. It is the type of THIS cell that decides, C++ side, the local
-        shape in which each cell is built."""
+        shape in which each cell is built. `kernel_dtype`: another float than the diagram's ( the cell complex cuts in
+        `FP64` ), kept apart."""
+        if kernel_dtype is not None:
+            cache = self.__dict__.setdefault( "_dom_cells", {} )
+            if kernel_dtype not in cache:
+                cache[ kernel_dtype ] = self._cut_domain( self._start_cell( kernel_dtype ) )
+            return cache[ kernel_dtype ]
         if getattr( self, "_dom_cell", None ) is None:
-            self._dom_cell = self._start_cell()
-            if self.bnd_directions.is_defined:
-                # the backend's VALUES, not numpy's: under a `jit` the half-spaces may be
-                # traced. `stop_gradient`: the domain is a constant of the problem ( its cuts
-                # carry `BOUNDARY`, "not a seed", and have nowhere to send a derivative ).
-                dirs = loom.ops().stop_gradient( self.bnd_directions.raw )
-                offs = loom.ops().stop_gradient( self.bnd_offsets.raw )
-                for b in range( int( self.bnd_directions.shape[ 0 ] ) ):
-                    self._dom_cell.cut( dirs[ b ], offs[ b ], BOUNDARY )
+            self._dom_cell = self._cut_domain( self._start_cell() )
         return self._dom_cell
 
-    def _start_cell( self ):
+    def _cut_domain( self, cell ):
+        """`cell` cut by the half-spaces of the domain that the start cell does not express"""
+        if self.bnd_directions.is_defined:
+            # the backend's VALUES, not numpy's: under a `jit` the half-spaces may be
+            # traced. `stop_gradient`: the domain is a constant of the problem ( its cuts
+            # carry `BOUNDARY`, "not a seed", and have nowhere to send a derivative ).
+            dirs = loom.ops().stop_gradient( self.bnd_directions.raw )
+            offs = loom.ops().stop_gradient( self.bnd_offsets.raw )
+            for b in range( int( self.bnd_directions.shape[ 0 ] ) ):
+                cell.cut( dirs[ b ], offs[ b ], BOUNDARY )
+        return cell
+
+    def _start_cell( self, kernel_dtype = None ):
         """the starting box, or all of space"""
         d = self.dim_count
-        kw = dict( kernel_dtype = self._kernel_dtype )
+        kw = dict( kernel_dtype = kernel_dtype or self._kernel_dtype )
         if self.box_min.is_defined:
             # the backend's values ( a box known only under a trace: `traced_box` ), detached -- the domain is a constant
             mi = loom.ops().stop_gradient( self.box_min.raw ).reshape( -1 )
@@ -685,10 +700,10 @@ class PowerDiagram( Aggregate, Displayable ):
 
     # ---- the scratch -------------------------------------------------------------------------------
 
-    def _scratch_words( self, cap, nb_cells, with_grad ):
+    def _scratch_words( self, cap, nb_cells, with_grad, kernel_dtype = None ):
         """What a work-item holds, in words: `nb_cells` local cells of `cap` vertices, and
         for the adjoint one cotangent per vertex -- THE SAME FORMULA as `diagram::words_for`."""
-        dom = self._domain_cell()
+        dom = self._domain_cell( kernel_dtype )
         words = nb_cells * dom.scratch_words( cap, fp_size( dom.kernel_dtype ) )
         if with_grad:
             words += -( -self.dim_count * cap * 8 // 32 ) * 8
@@ -920,7 +935,7 @@ class PowerDiagram( Aggregate, Displayable ):
         weights between root aggregates, and between two members of one the weights `V` in the frame of their lowest common
         aggregate ( `vals = int_{facet} rho / ( 2 | q_i - q_j | / s )`, their virtual diracs `q` in that frame of scale `s` )."""
         d = self.dim_count
-        all_ranks = np.asarray( self._ranks_of_items() ).reshape( -1 )
+        all_ranks = _host_ints( self._ranks_of_items() ).reshape( -1 )
         sel = all_ranks if items is None else all_ranks[ np.asarray( items, dtype = np.int64 ).reshape( -1 ) ]
         n = len( sel )
         num_cell = new_batch_axis( n, prefix = "cell" )
@@ -970,20 +985,29 @@ class PowerDiagram( Aggregate, Displayable ):
         a function of the number of seeds -- which is what a DISPLAY is. The scratch, for its part, stays PER
         WORK-ITEM ( `max_nb_threads` ). The returned `Cell` is drawn as is.
         """
+        cells = self._folded_cells()
+        if self._periodic is not None:                   # built around the folded seeds: moved next to the given positions
+            cells = cells.moved( self._unfold_maps() )
+        return cells
+
+    def _folded_cells( self, kernel_dtype = None, keep_images = False ):
+        """`cells` as they are cut: around the folded seeds with a periodicity. `kernel_dtype`: cut in that float rather than the
+        diagram's. `keep_images`: the cut identifiers say the image too, `j + n t` for the image `t` of seed `j` ( `maps[ t ]` of
+        the periodicity ) -- the user's index `j` alone otherwise."""
         n, d = int( self.nb_points.value ), self.dim_count
         num_cell = new_batch_axis( n, prefix = "cell" )
         ranks = IntTensor[ num_cell ]( self._ranks_of_items() )
 
-        dom = self._domain_cell()
+        dom = self._domain_cell( kernel_dtype )
         cap = self._scratch_capacity
         cells = Cell( d, init_as_unbounded = False, batch_axes = [ num_cell ], kernel_dtype = dom.kernel_dtype )
 
-        nb_words = self._scratch_words( cap, 1, False )
+        nb_words = self._scratch_words( cap, 1, False, kernel_dtype )
         nt = loom.resolved_device().nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ num_cell ] )
         loom.ffi_call(
             "power_diagram_cells",
             FfiCode.per_item( code = "inputs.power_diagram.build_cell( SI( inputs.ranks( batch_index ) ), inputs.dom_cell, "
-                           "outputs.cells( batch_index ), scratch.pool, thread_index );",
+                           f"outputs.cells( batch_index ), scratch.pool, thread_index, { 'true' if keep_images else 'false' } );",
                 max_nb_threads = "return scratch.pool.words.shape( 0 );" ),
             power_diagram = self,
             dom_cell = dom,
@@ -991,9 +1015,44 @@ class PowerDiagram( Aggregate, Displayable ):
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, nb_threads = nt ),
             cells = loom.out( cells, capacities = { "nb_vertices": cap, "nb_cuts": cap } ),
         )
-        if self._periodic is not None:                   # built around the folded seeds: moved next to the given positions
-            cells = cells.moved( self._unfold_maps() )
         return cells
+
+    def cell_complex( self, tolerance = None ):
+        """The cells glued along their faces ( `CellComplex` ): each vertex, edge, ..., facet once, numbered per dimension, with
+        its children ( the faces on its boundary ) and its parents ( the faces it bounds ) -- to walk the geometry of the diagram.
+        The facets know their two seeds, or their seed and the wall of the domain ( `walls`, the half-spaces of `domain_outline` ).
+        A host-side snapshot: a new one after moving the seeds.
+
+        With a periodicity, the complex of the QUOTIENT ( a torus, a cylinder... ): a facet across the period is there once, between a
+        seed and an image of another -- or of itself --, and the geometry of each face is read off one of its copies, next to the
+        given position of a seed of one of its cells ( `walls`: those that the group leaves, in the frame of the folded seeds ).
+
+        The cells are cut in doubles for it, whatever the `kernel_dtype` of the diagram: in floats, two cells can disagree on the
+        facet they share. `tolerance`: the distance under which two vertices are one where the diagram is not in general position
+        ( a grid of seeds ) -- `1e-12` times the size of the diagram by default ( the cells are exact to about `1e-15` ).
+
+        = Internals
+
+        Read off `cells` ( one call ), glued host side ( `CellComplex.py` ). With a periodicity, the cells as they are cut ( around the
+        folded seeds, where the cut identifiers and the walls mean something ) are glued modulo the group, and read in the frame of the
+        given positions ( `_unfold_maps` )."""
+        from .CellComplex import CellComplex
+        given = _host_array( self.positions ).reshape( -1, self.dim_count )
+        weights = _host_array( self.weights ).reshape( -1 ) if self.weights.is_defined else None
+        # the values as the framework holds them: what the numbers of the complex are differentiable with respect to
+        values = ( self.positions.raw, self.weights.raw if self.weights.is_defined else None )
+        # THE CELLS IN DOUBLES, whatever the diagram's kernel float: cut in `FP32`, two cells disagree on what they share ( a facet of
+        # 5e-5 of the size of a cell on one side and not on the other, on a grid ), in `FP64` they do not ( see the guide )
+        cells = self._folded_cells( "FP64", keep_images = self._periodic is not None )
+        if self._periodic is None:
+            return CellComplex( cells, walls = self.domain_outline(), tolerance = tolerance, seeds = given, weights = weights,
+                                power = self._groups is None, values = values )
+        from .CellComplex import _inverse_maps
+        unfold = self._unfold_maps()
+        fold = _inverse_maps( unfold )
+        folded = np.einsum( "nij,nj->ni", fold[ :, :, :-1 ], given ) + fold[ :, :, -1 ]
+        return CellComplex( cells, walls = self._domain_half_spaces(), tolerance = tolerance, seeds = folded,
+                            weights = weights, group = self._periodic, maps = unfold, values = values, fold = fold )
 
     def support_pieces( self, threshold = 0.0 ):
         """= Internals
@@ -1022,7 +1081,7 @@ class PowerDiagram( Aggregate, Displayable ):
         num_piece = new_batch_axis( len( owners ), prefix = "piece" )
         num_block = Axis( ShapeVar( dirs.shape[ 0 ] ), name = "num_block" )
         num_wall = Axis( ShapeVar( dirs.shape[ 1 ] ), name = "num_wall" )
-        ranks = IntTensor[ num_piece ]( np.asarray( self._ranks_of_items() ).reshape( -1 )[ owners ] )
+        ranks = IntTensor[ num_piece ]( _host_ints( self._ranks_of_items() ).reshape( -1 )[ owners ] )
 
         dom = self._domain_cell()
         cap = self._scratch_capacity
@@ -1199,6 +1258,12 @@ def _host_array( x ):
     """a host copy ( float64 ) of a value of any framework"""
     from loom.tensor.host import to_host
     return np.asarray( to_host( getattr( x, "raw", x ) ), dtype = np.float64 )
+
+
+def _host_ints( x ):
+    """a host copy of integers of any framework ( a Torch tensor on a card has no `__array__` )"""
+    from loom.tensor.host import to_host
+    return np.asarray( to_host( getattr( x, "raw", x ) ) )
 
 
 _ICOSPHERES = {}

@@ -41,6 +41,17 @@ assert abs( float( np.asarray( c.measure ) ) - 2.0 ) < 1e-9, "measure != 2.0"
 print( "SMOKE-OK" )
 """
 
+# What the documentation shows ( docs/snippets ): a user starts with these, and nothing may be compiled for them -- they are
+# run with `LOOM_KERNELS=catalogue`, where a kernel the wheel lacks is an error that names it. The list is `DOCUMENTED` of
+# `sdot/catalogue.py`, which makes the catalogue from the same files. A snippet of a framework the venv does not have is skipped.
+def _documented():
+    """`( DOCUMENTED, SNIPPETS )` of `src/sdot/catalogue.py`, read from the file ( the checkout's sdot is not imported here )."""
+    import ast
+    tree = ast.parse( ( ROOT / "src" / "sdot" / "catalogue.py" ).read_text() )
+    names = next( ast.literal_eval( n.value ) for n in tree.body if isinstance( n, ast.Assign ) and getattr( n.targets[ 0 ], "id", "" ) == "DOCUMENTED" )
+    return names, ROOT / "docs" / "snippets"
+
+
 PRECHECK = """
 import sdot, loom.compilation as c
 print( sdot.__file__ )
@@ -120,6 +131,19 @@ def validate( wheels: list, keep: bool ) -> int:
         print( out, flush = True )
         if r.returncode or "SMOKE-OK" not in r.stdout:
             raise RuntimeError( "smoke test failed" )
+
+        # The documented first steps, from the wheel's kernels alone
+        strict = { **env, "LOOM_KERNELS": "catalogue" }
+        names, snippets = _documented()
+        for name in names:
+            r = _run( [ py, snippets / name ], cwd = work_dir, env = strict, capture_output = True, text = True )
+            if r.returncode and "No module named" in r.stderr and any( m in r.stderr for m in ( "'torch'", "'cupy'" ) ):
+                print( f"  { name }: skipped ( its framework is not in this venv )", flush = True )
+                continue
+            if r.returncode:
+                print( r.stdout + r.stderr, flush = True )
+                raise RuntimeError( f"{ name } needs a kernel the wheel does not hold ( or failed ): see above" )
+            print( f"  { name }: OK, nothing compiled", flush = True )
 
         # The proof that the compilation used the wheel's headers is the pre-check above:
         # `include_roots()` only names paths of the venv, and the kernel compiled with them.

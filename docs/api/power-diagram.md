@@ -45,8 +45,9 @@ would have removed nothing, so the cells are the SAME, up to rounding errors.
 | `groups` | The `Groups` of this diagram ( `groups.py` ), in the user's order -- `None` without groups. |
 | `measures` | The measure of each cell, `[ n ]` -- its integral against `distribution` when there is one. Differentiable with respect to the positions, the weights and the parameters of the distribution. |
 | `moments` | `( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and `int \|x\|^2 rho`. Not differentiable ( see `moment` ). |
+| `sphere_areas` | With a sink ( partial transport ): the measure of the SPHERE inside each cell, where the density is not zero -- a length in 2D, an area in 3D, `[ n ]`; zeros without a sink. What a surface energy counts. Differentiable like `measures`. |
 
-### `.add_to_viz(viz, seeds=True, seed_color='#000000', support_only=None, threshold=0.0, nb_periodicity_rings=1, opacity_periodicity_rings=0.25, fit_periodicity_rings=False, domain=None, domain_color='#000000', opacity_beyond_balls=0.2, virtual_seeds=False, virtual_color='#888888', **kwargs)`
+### `.add_to_viz(viz, seeds=True, seed_color='#000000', support_only=None, threshold=0.0, nb_periodicity_rings=1, opacity_periodicity_rings=0.25, fit_periodicity_rings=False, domain=None, domain_color='#000000', opacity_beyond_balls=0.2, ball_resolution=96, virtual_seeds=False, virtual_color='#888888', **kwargs)`
 
 Draws itself into a `Visualizer`: all the cells, in one call ( see `cells` ), and the
 seeds as points when `seeds` ( `seed_color` ). `kwargs` are those of `Cell.add_to_viz`
@@ -64,11 +65,28 @@ copies must glue without a seam. They do not count in the scale of the scene ( t
 the domain ( the support that the group repeats ), dashed, and that of its images -- by default with a periodicity only.
 
 With a sink ( partial transport, `sink_weight` ), the cells are drawn whole, as they are computed, but fainter
-( `opacity_beyond_balls` ): what is integrated -- the part of each cell inside its ball -- is drawn on top, in the same
-color, its arc approximated by a polygon.
+( `opacity_beyond_balls`, 0 to leave them out ): what is integrated -- the part of each cell inside its ball -- is
+drawn on top, in the same color, its arc approximated by a polygon of `ball_resolution` sides ( in 3D: only the boundary of
+the matter, its spheres by an icosphere of about as many points on a great circle ). A smaller one makes lighter pages,
+which matters with many cells or many frames.
 
 With GROUPS ( `groups` ), the cells drawn are those of the members, which split the cell of their group; `virtual_seeds`
 adds the virtual diracs of the exact duplicates ( `virtual_color` ), the points their split is the power diagram of.
+
+### `.cell_complex(tolerance=None)`
+
+The cells glued along their faces ( `CellComplex` ): each vertex, edge, ..., facet once, numbered per dimension, with
+its children ( the faces on its boundary ) and its parents ( the faces it bounds ) -- to walk the geometry of the diagram.
+The facets know their two seeds, or their seed and the wall of the domain ( `walls`, the half-spaces of `domain_outline` ).
+A host-side snapshot: a new one after moving the seeds.
+
+With a periodicity, the complex of the QUOTIENT ( a torus, a cylinder... ): a facet across the period is there once, between a
+seed and an image of another -- or of itself --, and the geometry of each face is read off one of its copies, next to the
+given position of a seed of one of its cells ( `walls`: those that the group leaves, in the frame of the folded seeds ).
+
+The cells are cut in doubles for it, whatever the `kernel_dtype` of the diagram: in floats, two cells can disagree on the
+facet they share. `tolerance`: the distance under which two vertices are one where the diagram is not in general position
+( a grid of seeds ) -- `1e-12` times the size of the diagram by default ( the cells are exact to about `1e-15` ).
 
 ### `.domain_outline()`
 
@@ -282,6 +300,247 @@ the entry point one opens. Returns the `.pvd` path.
 ### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
 
 Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `CellComplex`
+
+```python
+CellComplex(cells, walls=None, tolerance=None, seeds=None, weights=None, power=True, group=None, maps=None, values=None, fold=None)
+```
+
+The cells of a diagram glued along their faces: every face once, numbered per dimension, with its incidences. Built by
+`PowerDiagram.cell_complex()` -- or from any batch of cells, `CellComplex( cells, walls )`, the items being the seeds their
+cut identifiers designate.
+
+`faces( k )` the `k`-faces, `vertices` / `edges` / `facets` / `cells` those of dimension `0`, `1`, `d - 1`, `d`. `walls`: the
+half-spaces `( directions, offsets )` of the domain, which the negative sides of the facets designate ( `-1 - wall` ).
+`tolerance`: the distance under which two vertices are one, where the diagram is not in general position ( a grid of seeds ).
+
+| Attribute | |
+|---|---|
+| `cells` | The `dim`-faces, numbered like the seeds ( an empty cell has no face ). |
+| `diagnostics` | What the check of the gluing found ( see `_check` ): `contracted_facets`, `one_sided_facets`, `open_links`, and `facet_mismatch` ( computed when read: the measures of the copies of every facet ). |
+| `dim` | The dimension of the space ( and of the cells ). |
+| `edges` | The `1`-faces ( the cells themselves in 1D ). |
+| `facets` | The `( dim - 1 )`-faces: what two cells share, or a cell and a wall of the domain ( `Faces.sides` ). |
+| `is_consistent` | Whether every facet between two seeds is in both their cells and the facets close around every face of dimension `d - 2` ( see `diagnostics`: `one_sided_facets`, `open_links`, `contracted_facets`, `facet_mismatch` ). |
+| `vertex_positions` | `[ nb_vertices, d ]`: the position of each vertex ( with a periodicity, of one of its copies ) -- a tensor of the framework of the positions, differentiable ( `geometry` ). |
+| `vertices` | The `0`-faces. |
+
+### `.boundary_distances(points, cells=None)`
+
+`( distances [ m ], facets [ m ] )`: for each point, its distance to the boundary of its cell -- positive inside, the
+distance to the plane of the nearest facet -- and that facet. `cells`: the cell of each point, the points then being in the
+frame of the copies of these cells ( `locate`'s `moved` ); by default, `locate` finds them. A point outside the domain has
+NaN and `-1`; a point given outside its cell, minus the largest overshoot of a plane ( a lower bound of its distance ).
+`distances`: a tensor of the framework of the points, differentiable with respect to them and to the seeds.
+
+### `.faces(k)`
+
+The `k`-faces, `0 <= k <= dim`: a sequence of `Face`, and their arrays ( `Faces` ).
+
+### `.geometry(positions=None, weights=None)`
+
+The numbers of this complex for given seeds ( `CellGeometry` ): measures, centroids, normals, seed vectors, vertex positions,
+simplices, distances -- tensors of the framework of `positions`, differentiable with respect to them and to `weights`. By
+default the positions and weights the complex was built from ( what `measures`, `centroids`... read ); others keep THIS
+topology -- the way to differentiate, or to evaluate under a `jax.jit`, with the complex built outside.
+
+### `.incident(k, j)`
+
+The `j`-faces of each `k`-face, as a CSR `( offsets, ids )`: those of face `i` are `ids[ offsets[ i ] : offsets[ i + 1 ] ]`
+-- the faces it contains for `j < k`, the faces that contain it for `j > k`, sorted, except the vertices of a `2`-face, in
+the order of its boundary ( counterclockwise for a 2D cell, around `normal` for a 3D facet; with a periodicity, a vertex
+can come back there, two of its copies bounding the face ). `j == k`: each face itself.
+
+### `.locate(points)`
+
+`( cells [ m ], moved [ m, d ] )`: the cell that holds each point ( `-1` outside the domain ), and the point moved by the
+group to the copy of that cell ( `Face.points` ) -- the point itself without a periodicity, a tensor of its framework. Exact:
+the cell of the smallest power distance, found by a nearest-neighbour search among the seeds lifted in one more dimension
+( `|x - p|^2 - w = |( x, 0 ) - ( p, sqrt( W - w ) )|^2 - W` ), and among their images with a periodicity.
+
+### `.nb_faces(k)`
+
+The number of `k`-faces.
+
+### `.simplices(k=None, ids=None)`
+
+A decomposition of the `k`-faces ( the cells by default; `ids`: those faces only ) into `k`-simplices: `( points [ m,
+k + 1, d ], faces [ m ] )`, the corners of each simplex and the face it belongs to. Each face is fanned from the mean of its
+vertices over its faces one dimension below, themselves fanned from theirs, down to the edges: a simplex per chain
+`face > ... > edge`. Exact: the volumes of the simplices of a face add up to its measure. Unbounded faces have none; with a
+periodicity, the simplices of a face are those of the copy its geometry is read off ( `Face.points` ). `points`: a tensor of
+the framework of the positions, differentiable.
+
+## `Faces`
+
+```python
+Faces(complex, k)
+```
+
+The `k`-faces of a `CellComplex`: a sequence of `Face` ( `len`, `[ i ]`, iteration ), and their values as arrays.
+
+For the facets: `sides` and `normals`. For the cells: `seeds` ( their index, which is the seed's ).
+
+| Attribute | |
+|---|---|
+| `centroids` | `[ m, d ]`: the centers of mass ( NaN for an unbounded face ). |
+| `is_bounded` | `[ m ]` booleans: whether each face is bounded ( a diagram without a domain has unbounded cells ). |
+| `measures` | `[ m ]`: length, area, volume... ( `1` for a vertex; infinite for an unbounded face ). Like all the numbers of the complex, a tensor of the framework of the positions, differentiable with respect to the positions and the weights ( `CellComplex.geometry` ). |
+| `normals` | For the facets: `[ m, d ]`, the unit normal, from the first side to the second ( outward on the boundary ). |
+| `seed_vectors` | For the facets: `[ m, d ]`, from the seed `sides[ 0 ]` to the seed `sides[ 1 ]` -- with a periodicity, to the image of `sides[ 1 ]` across the facet ( a cell can meet another, or itself, across the period ). Zero on the boundary of the domain. What a finite-volume scheme divides the area of a facet by: `measures / norm( seed_vectors )`. |
+| `seeds` | For the cells: `[ n ]`, the seed of each ( its index ). |
+| `sides` | For the facets: `[ m, 2 ]`, the seeds on both sides, the smaller first; the second is `-1 - wall` on the boundary of the domain ( `CellComplex.walls` ). |
+
+### `.add_to_viz(viz, ids=None, color=None, opacity=1.0, faces=True, edges=True, edge_color=None, frames=True)`
+
+Draws these faces ( or those of `ids` ), the bounded ones: the vertices as points, the edges as segments, the
+`2`-faces as polygons, the `3`-faces by their `2`-faces. `color`: one for all, by default one per face ( on a block
+reserved for all the faces of this dimension: the cell of a seed always has the same ). `faces = False`: the edges of
+the polygons only ( a wireframe ), in `edge_color` ( by default a darker `color` ).
+
+### `.children()`
+
+`incident( dim - 1 )`: the faces of each one, one dimension below.
+
+### `.incident(j)`
+
+The `j`-faces of each of these faces, as a CSR `( offsets, ids )` ( see `CellComplex.incident` ).
+
+### `.parents()`
+
+`incident( dim + 1 )`: the faces that contain each one, one dimension above.
+
+### `.show(filename=None, title=None, height=500, **kwargs)`
+
+In a notebook ( Jupyter, VS Code, Colab, ... ): displays the page inline, in an iframe
+`height` pixels high -- the wheel and touch gestures are then left to the notebook, they
+can be switched back on from the menu. Elsewhere, or when `filename` is given: writes the
+HTML page ( `filename`, or a temporary file ) and opens it in the browser. Returns the
+path written ( None when nothing was written ).
+
+### `.simplices(ids=None)`
+
+`( points [ m, dim + 1, d ], faces [ m ] )`: these faces ( or those of `ids` ) cut into simplices ( see
+`CellComplex.simplices` ).
+
+### `.to_viz(viz=None, title=None, **kwargs)`
+
+A `Visualizer` holding this object ( `viz`, when given: it is then completed ). `title`
+names a NEW scene; `kwargs` are those of `add_to_viz`.
+
+### `.write_html(filename, title=None, **kwargs)`
+
+Writes the self-contained HTML page of this object. Returns the path written.
+
+### `.write_pvd(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView as a `.pvd` collection ( with its `.vtu` beside it ),
+the entry point one opens. Returns the `.pvd` path.
+
+### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `Face`
+
+```python
+Face(complex, k, i)
+```
+
+ONE face of a `CellComplex`: its dimension `dim`, its number `index` among the faces of that dimension, and what it
+is attached to -- `children`, `parents`, `faces( j )` -- as `Face`s again, to walk the complex.
+
+| Attribute | |
+|---|---|
+| `cells` | The cells that contain it, as `Face`s ( their `index` is the seed ). |
+| `centroid` | Its center of mass, `[ d ]`. |
+| `children` | Its `dim - 1`-faces ( none for a vertex ). |
+| `measure` | Its length, area, volume... ( `1` for a vertex, infinite when unbounded ): a scalar of the framework, differentiable. |
+| `normal` | For a facet: its unit normal, from `sides[ 0 ]` to `sides[ 1 ]`. |
+| `parents` | The `dim + 1`-faces that contain it ( none for a cell ). |
+| `points` | `[ nb_vertices, d ]`: the positions of its vertices, in the order of `vertices` -- read off ONE copy of the face ( with a periodicity: the copy of one of its cells, next to the given position of its seed ). |
+| `seed` | For a cell: its seed. |
+| `seed_vector` | For a facet: from the seed `sides[ 0 ]` to ( the image of ) the seed `sides[ 1 ]` across it, zero on a wall. |
+| `sides` | For a facet: `( a, b )`, the seeds on both sides, `b = -1 - wall` on the boundary of the domain. |
+| `vertices` | Its vertices, as `Face`s -- in the order of its boundary for a `2`-face. |
+
+### `.add_to_viz(viz, **kwargs)`
+
+Draws this face ( see `Faces.add_to_viz` ).
+
+### `.faces(j)`
+
+The `j`-faces of this one, as `Face`s ( contained for `j < dim`, containing for `j > dim` ).
+
+### `.ids(j)`
+
+The numbers of the `j`-faces of this one ( contained for `j < dim`, containing for `j > dim` ), an int array.
+
+### `.show(filename=None, title=None, height=500, **kwargs)`
+
+In a notebook ( Jupyter, VS Code, Colab, ... ): displays the page inline, in an iframe
+`height` pixels high -- the wheel and touch gestures are then left to the notebook, they
+can be switched back on from the menu. Elsewhere, or when `filename` is given: writes the
+HTML page ( `filename`, or a temporary file ) and opens it in the browser. Returns the
+path written ( None when nothing was written ).
+
+### `.simplices()`
+
+`[ m, dim + 1, d ]`: a decomposition of this face into simplices ( see `CellComplex.simplices` ).
+
+### `.to_viz(viz=None, title=None, **kwargs)`
+
+A `Visualizer` holding this object ( `viz`, when given: it is then completed ). `title`
+names a NEW scene; `kwargs` are those of `add_to_viz`.
+
+### `.write_html(filename, title=None, **kwargs)`
+
+Writes the self-contained HTML page of this object. Returns the path written.
+
+### `.write_pvd(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView as a `.pvd` collection ( with its `.vtu` beside it ),
+the entry point one opens. Returns the `.pvd` path.
+
+### `.write_vtk(filename, title=None, axes=(0, 1, 2), **kwargs)`
+
+Writes this object for ParaView, as a `.vtu`. Returns the path written.
+
+## `CellGeometry`
+
+```python
+CellGeometry(complex, positions, weights=None)
+```
+
+The numbers of a `CellComplex` for given seeds ( `CellComplex.geometry` ): tensors of the framework of the positions,
+differentiable with respect to the positions and the weights. The faces are those of the complex; their geometry is that of
+these seeds.
+
+| Attribute | |
+|---|---|
+| `normals` | `[ nb_facets, d ]`: the unit normals of the facets, from their first side to their second. |
+| `seed_vectors` | `[ nb_facets, d ]`: from the seed `sides[ 0 ]` to ( the image of ) the seed `sides[ 1 ]` across each facet, zero on a wall. |
+| `vertex_positions` | `[ nb_vertices, d ]`: the position of each vertex ( with a periodicity, of one of its copies ). |
+
+### `.boundary_distances(points, cells=None)`
+
+`( distances [ m ], facets [ m ] )`: the distance from each point to the boundary of its cell ( positive inside ) and the
+nearest facet, differentiable with respect to the points and the seeds ( the facet chosen on the values, a constant of the
+derivative ). `cells` / `points` as in `CellComplex.boundary_distances`.
+
+### `.centroids(k)`
+
+`[ nb_faces( k ), d ]`: the centers of mass ( NaN for an unbounded face ).
+
+### `.measures(k)`
+
+`[ nb_faces( k ) ]`: length, area, volume... ( `1` for a vertex, infinite for an unbounded face ).
+
+### `.simplices(k=None)`
+
+`( points [ m, k + 1, d ], faces [ m ] )`: the faces of dimension `k` ( the cells by default ) cut into simplices ( see
+`CellComplex.simplices` ), the points a tensor of the framework of the positions.
 
 ## `box_half_spaces`
 

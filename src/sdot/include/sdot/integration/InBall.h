@@ -493,6 +493,8 @@ struct InBallDensity {
     }
 };
 
+template<class TF> struct FaceInBall;                // ( `InBall3.h` )
+
 /// a distribution whose facets are cut by itself ( `Mesh::for_each_facet_mass`: `cuts_facets` ) keeps the trait inside a ball
 template<bool> struct InBallCutsFacets {};
 template<> struct InBallCutsFacets<true> { static constexpr bool cuts_facets = true; };
@@ -549,15 +551,41 @@ struct InBallDist : InBallCutsFacets<dist_cuts_facets<Dist>()> {
         } );
     }
 
-    /// the facets cut by the distribution itself ( `Mesh` ), each part of a facet integrated inside the ball only: the segment
-    /// clipped by the sphere ( `InBallDensity::segment_mass` )
+    /// the facets cut by the distribution itself ( `Mesh` ), each part of a facet integrated inside the ball only: in 2D the segment
+    /// clipped by the sphere ( `InBallDensity::segment_mass` ), in 3D the convex polygon inter the disc the ball cuts in its plane
+    /// ( `polygon_mass_in_ball`, a density constant on the piece )
     HD void for_each_facet_mass( const auto &cell, auto &&plane_of, auto &&func ) const requires ( dist_cuts_facets<Dist>() ) {
         if ( ! ( r2 > 0 ) )
             return;
-        dist.for_each_facet_mass( cell, plane_of, func, [&]( const auto &A, const auto &B, const auto &dens ) {
-            const InBallDensity<DECAYED_TYPE_OF( dens ),TF,D> in{ dens, center, r2 };
-            return in.segment_mass( TF( A[ 0 ] ) - center[ 0 ], TF( A[ 1 ] ) - center[ 1 ], TF( B[ 0 ] ) - center[ 0 ], TF( B[ 1 ] ) - center[ 1 ] );
+        dist.for_each_facet_mass( cell, plane_of, func, [&]( const auto &A, const auto &B, const auto &dens ) -> TF {
+            if constexpr ( D == 2 ) {
+                const InBallDensity<DECAYED_TYPE_OF( dens ),TF,D> in{ dens, center, r2 };
+                return in.segment_mass( TF( A[ 0 ] ) - center[ 0 ], TF( A[ 1 ] ) - center[ 1 ], TF( B[ 0 ] ) - center[ 0 ], TF( B[ 1 ] ) - center[ 1 ] );
+            } else {
+                static_assert( DECAYED_TYPE_OF( dens )::is_constant, "integration in a ball, in 3D: only for a density constant on each piece" );
+                return TF( dens.value ) * polygon_area_in_ball( A, B );
+            }
         } );
+    }
+
+    /// 3D: the area of the convex polygon `poly[ 0 .. m )` inside the ball, a fan of triangles ( `FaceInBall::area` )
+    HD TF polygon_area_in_ball( const auto &poly, int m ) const {
+        TF P[ 3 ][ 3 ], a = 0;
+        for ( int d = 0; d < 3; ++d )
+            P[ 0 ][ d ] = TF( poly[ 0 ][ d ] ) - center[ d ];
+        for ( int k = 1; k + 1 < m; ++k ) {
+            for ( int d = 0; d < 3; ++d ) {
+                P[ 1 ][ d ] = TF( poly[ k ][ d ] ) - center[ d ];
+                P[ 2 ][ d ] = TF( poly[ k + 1 ][ d ] ) - center[ d ];
+            }
+            TF ab[ 3 ], ac[ 3 ], n[ 3 ];
+            for ( int d = 0; d < 3; ++d ) { ab[ d ] = P[ 1 ][ d ] - P[ 0 ][ d ]; ac[ d ] = P[ 2 ][ d ] - P[ 0 ][ d ]; }
+            n[ 0 ] = ab[ 1 ] * ac[ 2 ] - ab[ 2 ] * ac[ 1 ];      // ( the side does not change the area )
+            n[ 1 ] = ab[ 2 ] * ac[ 0 ] - ab[ 0 ] * ac[ 2 ];
+            n[ 2 ] = ab[ 0 ] * ac[ 1 ] - ab[ 1 ] * ac[ 0 ];
+            a += FaceInBall<TF>( P[ 0 ], P[ 1 ], P[ 2 ], n, r2 ).area();
+        }
+        return a;
     }
 };
 

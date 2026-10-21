@@ -64,3 +64,23 @@ if test( "a_mesh_starts_its_diracs_by_mass" ):
     assert numpy.all( ( x0 >= 0 ) & ( x0 <= 1 ) ) and not numpy.any( numpy.linalg.norm( x0 - 0.5, axis = 1 ) < 0.2 )
     x = quantization( mesh, 500, seed = 0, max_iter = 5 )
     assert x.shape == ( 500, 2 )
+
+
+if test( "the_settings_of_the_transport_go_through" ):
+    # `periodicity`, `target_mass` ( partial transport ) and `radial_func` reach the transports of the iterations
+    import numpy
+    from sdot import Box, RadialExp, quantization
+    box = Box( nb_dims = 2 )
+    # on a torus: a fixed point of Lloyd, the diracs at the barycenters of their cells ( which may lie across the period )
+    last = {}
+    def keep( it, pos, plan ):
+        last.update( pos = numpy.asarray( pos ), plan = plan )
+    quantization( box, 40, seed = 0, periodicity = True, tol = 1e-3, callback = keep )
+    pos, plan = last[ "pos" ], last[ "plan" ]
+    assert numpy.sqrt( ( ( numpy.asarray( plan.barycenters ) - pos ) ** 2 ).sum( axis = 1 ).mean() ) < 1e-2 / numpy.sqrt( 40 )
+    assert numpy.allclose( numpy.asarray( plan.cell_masses ), 1 / 40, atol = 1e-6 )
+    # partial: the diracs take half of the square
+    quantization( box, 30, seed = 1, target_mass = 0.5, callback = keep )
+    assert abs( float( numpy.asarray( last[ "plan" ].cell_masses ).sum() ) - 0.5 ) < 1e-4
+    # a radial integrand
+    assert numpy.asarray( quantization( box, 30, seed = 2, radial_func = RadialExp( 1e-3 ) ) ).shape == ( 30, 2 )

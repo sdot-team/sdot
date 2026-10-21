@@ -34,7 +34,7 @@ the solver, `OtProblem` to solve again and again. See [Guide: plans and settings
                        [ "SumOfDiracs", "SumOfDiracs1d", "ProjectedSumOfDiracs", "Box", "ConvexHull", "Polytope",
                          "Image", "SplineGrid", "SumOfGaussians", "Mesh", "CodimMesh" ] ),
     "power-diagram": ( "Power Diagrams", """The geometry under the plans: power diagrams, their cells, and what speeds them up. For seeds at the same position, see [Guide: Duplicates and Close Seeds](/guide/duplicates).""",
-                       [ "PowerDiagram", "Groups", "Voronoi", "Cell", "box_half_spaces", "AaBsp", "SpatialAccelerator", "set_kernel_dtype",
+                       [ "PowerDiagram", "Groups", "Voronoi", "Cell", "CellComplex", "Faces", "Face", "CellGeometry", "box_half_spaces", "AaBsp", "SpatialAccelerator", "set_kernel_dtype",
                          "kernel_dtype" ] ),
     "visualization": ( "Visualization", """Pages to look at what was computed ( `show`, `write_html` of the objects use them ).""",
                        [ "Visualizer", "write_convergence_html" ] ),

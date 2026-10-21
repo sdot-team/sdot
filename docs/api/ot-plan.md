@@ -18,16 +18,16 @@ w2(f, g, periodicity=None)
 ## `plan`
 
 ```python
-plan(f, g, periodicity=None)
+plan(f, g, periodicity=None, radial_func=None)
 ```
 
 The transport plan from `f` to `g`, with the default settings ( `ot_solve` takes them ). `periodicity`: on a torus,
-a cylinder... ( see `OtProblem` )
+a cylinder... `radial_func`: a function of the distance to each dirac, integrated by its cell ( see `OtProblem` )
 
 ## `ot_solve`
 
 ```python
-ot_solve(source, target, *, periodicity=None, verbose=False, **settings)
+ot_solve(source, target, *, periodicity=None, radial_func=None, verbose=False, **settings)
 ```
 
 The transport plan from `source` to `target`, with the settings of the solver as keywords: those of `Iterative` in
@@ -41,7 +41,7 @@ To solve again and again, keep an `OtProblem`.
 ## `OtProblem`
 
 ```python
-OtProblem(source, target, periodicity=None)
+OtProblem(source, target, periodicity=None, radial_func=None)
 ```
 
 A transport problem, to solve once or again and again.
@@ -61,6 +61,7 @@ problem in a loop ( a descent, Lloyd, a reconstruction ) rather than calling `ot
 | `nb_dims` | The dimension of the space. |
 | `nb_diracs` | The number of diracs of the source. |
 | `periodicity` | the periodicity of the space ( `None`: none ), see `sdot.periodicity` |
+| `radial_func` | the radial function around each dirac ( `None`: none ), see `sdot.RadialExp` |
 | `regime` | `"iterative"` ( a Newton method, in 2D and more ) or `"direct"` ( a sort, in 1D ): it follows from the inputs. |
 | `source` | the discrete distribution, normalized |
 | `target` | the target density, normalized -- and what gives the domain |
@@ -136,6 +137,7 @@ dirac: the plan sends each cell onto its dirac. `cost` is `W_2^2`, `barycenters`
 | `groups` | The groups of the plan ( `sdot.Groups`: seeds that share a cell and split it, `Iterative( duplicates = "split" )` ), else `None`. |
 | `history` | one dict per Newton step ( the first is the starting point ): `t` the step length, `residual_l2`, `max_abs_residual`, `min_measure`, `nb_diag`... and `weights` with `Iterative( keep_weights = True )` |
 | `problem` | the problem this is the solution of |
+| `sphere_areas` | With a sink ( partial transport ): the measure of the sphere inside each cell, where the target is not zero -- a length in 2D, an area in 3D, `[ n ]` ( `PowerDiagram.sphere_areas` ). What a surface energy counts: differentiable with respect to the positions and the masses of the diracs when they are traced, through the weights ( the implicit function theorem ). |
 | `stats` | how the solve went, a dict: `status`, `nb_iter`, `residual`, `nb_diag` ( the power diagrams computed ), timings... |
 | `target_masses` | The mass each cell must reach ( `[ n ]` ): the masses of the diracs, normalized. |
 | `weights` | the weights of the power diagram of the plan, `[ n ]` ( defined up to a constant: `weights[ 0 ] == 0` ) |
@@ -214,7 +216,7 @@ angle of a sinogram ) and differentiable end to end. It is requested from an `Ot
 ## `quantization`
 
 ```python
-quantization(target, positions, masses=None, *, tol=0.02, max_iter=200, callback=None, verbose=False, ot_tol=None, seed=None, **settings)
+quantization(target, positions, masses=None, *, periodicity=None, radial_func=None, target_mass=1.0, tol=0.02, max_iter=200, callback=None, verbose=False, ot_tol=None, seed=None, **settings)
 ```
 
 Positions of diracs that quantize `target` optimally, by Lloyd iterations: each dirac moves to the barycenter of its
@@ -223,6 +225,9 @@ cell until the moves are small. Returns the positions, `[ n, d ]`.
 * `positions`: the starting positions `[ n, d ]`, or a number of diracs, then drawn uniformly in the support of
   `target` ( with `seed` ).
 * `masses`: the mass of each dirac `[ n ]`, equal by default.
+* `periodicity`, `radial_func`: those of the transport ( see `OtProblem` ) -- Lloyd on a torus, a Klein bottle...; the
+  positions then stay next to where they started, possibly outside the support.
+* `target_mass`: the share of `target` the diracs take ( a partial transport, see `SumOfDiracs` ), `1` by default.
 * `tol`: stop when the root mean square move is under `tol` times the size of the cells. `max_iter`: at most.
 * `callback( iteration, positions, plan )`: called after each solve -- to record the iterations.
 * `ot_tol` and the other keywords: the settings of the solver ( see `Iterative` ).

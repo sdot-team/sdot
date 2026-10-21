@@ -719,8 +719,10 @@ HD void measures_bwd( const PD &pd, auto &&res, const auto &dom, auto &&grad_res
 /// The cell of seed `k`, KEPT: built like any other, then put into `res` -- with its cut
 /// identifiers translated for the user. The only query whose memory is a function
 /// of the number of seeds: which is what a DISPLAY is.
+/// The cell of seed `k`, put into `res` with the user's indices in its `cut_ids`. `keep_images`: with a periodicity, the image `t` of
+/// the seed `j` a cut faces stays in its identifier, `j + n t` ( `j` the user's index ) -- what the cell complex glues modulo the group
 template<class PD>
-HD void build_cell( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index ) {
+HD void build_cell( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, bool keep_images = false ) {
     using TK    = KernelType<DECAYED_TYPE_OF( scratch )>;
     using Local = typename DECAYED_TYPE_OF( dom )::template Local<TK>;
     Carver cv = carver_of( scratch, thread_index );
@@ -730,9 +732,10 @@ HD void build_cell( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scra
         return;
     }
     c.tidy();
+    const SI n = pd.nb_seeds();
     for ( int q = 0; q < c.nb_cuts(); ++q )
         if ( c.cid[ q ] >= 0 )
-            c.cid[ q ] = int( pd.user_id( c.cid[ q ] ) );
+            c.cid[ q ] = int( pd.user_id( c.cid[ q ] ) + ( keep_images ? n * ( SI( c.cid[ q ] ) / n ) : 0 ) );
     c.store( res );
 }
 

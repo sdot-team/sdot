@@ -1690,11 +1690,10 @@ struct HostLinear {
         read_back( queue, row.data(), A.row, n + 1 );
         const SI nnz = row[ n ];
         std::vector<TC> cl( nnz );
-        std::vector<double> c( nnz ), dia( n ), sph( n );
+        std::vector<double> c( nnz ), sph( n );
         b.resize( n + 1 );
         read_back( queue, cl.data(), A.col, nnz );
         read_back( queue, c.data(), A.val, nnz );
-        read_back( queue, dia.data(), A.dia, n );
         read_back( queue, sph.data(), sph_dev, n );
         read_back( queue, b.data(), b_dev, n );
         SI ns = 0;
@@ -1707,8 +1706,11 @@ struct HostLinear {
         SI q = 0;
         double bs = 0;
         for ( SI i = 0; i < n; ++i ) {
-            for ( SI e = row[ i ]; e < row[ i + 1 ]; ++e ) { L.col[ q ] = SI( cl[ e ] ); L.c[ q ] = c[ e ]; ++q; }
-            L.dia[ i ] = dia[ i ];
+            // the diagonal summed again: a ball inside its cell has no facet in its disc, and the card's laplacian sets the diagonal of an
+            // empty row to one ( `Laplacian2D.cuh` ) -- with a sink that row is the sink's coupling alone
+            double sr = 0;
+            for ( SI e = row[ i ]; e < row[ i + 1 ]; ++e ) { L.col[ q ] = SI( cl[ e ] ); L.c[ q ] = c[ e ]; sr += c[ e ]; ++q; }
+            L.dia[ i ] = sr;
             if ( sph[ i ] > 0 ) { L.col[ q ] = n; L.c[ q ] = sph[ i ]; ++q; L.dia[ i ] += sph[ i ]; L.dia[ n ] += sph[ i ]; }
             L.row[ i + 1 ] = q;
             bs += b[ i ];

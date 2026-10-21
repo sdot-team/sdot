@@ -13,7 +13,8 @@ class Mesh( Distribution ):
     `nodes` `[ nb_nodes, d ]`, `simplices` `[ nb_simplices, d + 1 ]` ( indices of nodes ). `values`: `[ nb_nodes ]` for a
     continuous density ( one value per node ), or `[ nb_simplices, d + 1 ]` for a density discontinuous between simplices
     ( one value per corner of each simplex: zeros make a hole ). Constant by default. Differentiable with respect to
-    `values`.
+    `values`. `degree = 0`: a density CONSTANT on each simplex, the mean of its corner values ( what partial transport takes in
+    3D: `PowerDiagram( sink_weight = ... )` ).
 
     = Internals
 
@@ -51,12 +52,18 @@ class Mesh( Distribution ):
     MARGIN           = 0.1
     affine_on_pieces = True                   # ( partial transport: `PowerDiagram( sink_weight = ... )`, `integration/InBall.h` )
 
+    @property
+    def constant_on_pieces( self ):
+        """( partial transport in 3D: `integration/InBall3.h` )"""
+        return int( self.degree.value ) == 0
+
     nb_nodes         : ShapeVar
     nb_elems         : ShapeVar
     nb_corners       : ShapeVar
     nb_bnodes        : ShapeVar
     nb_links         : ShapeVar
     nb_dims          : CtShapeVar
+    degree           : CtShapeVar             # 0: a constant per simplex ( the mean of its corners ), 1: affine ( DG1 )
 
     num_node         : Axis[ "nb_nodes" ]
     num_elem         : Axis[ "nb_elems" ]
@@ -86,9 +93,12 @@ class Mesh( Distribution ):
             return CodimMesh( nodes, simplices, *args, **kwargs )
         return super().__new__( cls )
 
-    def __init__( self, nodes, simplices, values = None, target_mass = 1.0, **kwargs ):
+    def __init__( self, nodes, simplices, values = None, target_mass = 1.0, degree = 1, **kwargs ):
         """see the class docstring. The other keyword arguments are for the copies that `normalized_version` makes ( the geometry
         already prepared )"""
+        if int( degree ) not in ( 0, 1 ):
+            raise ValueError( f"Mesh : `degree` has to be 0 ( a constant per simplex ) or 1 ( affine ) ( got { degree } )" )
+        kwargs[ "degree" ] = int( degree )
         if "grads" in kwargs:
             self._bbox = kwargs.pop( "bbox" )
             self.__base_init__( nodes = nodes, simplices = simplices, values = values, target_mass = target_mass, **kwargs )
@@ -255,7 +265,7 @@ class Mesh( Distribution ):
             self.nodes, self.simplices, values = values, target_mass = self.target_mass,
             grads = self.grads, corner_weights = self.corner_weights, bvh_lo = self.bvh_lo, bvh_hi = self.bvh_hi, bvh_links = self.bvh_links,
             nb_nodes = self.nb_nodes.value, nb_elems = self.nb_elems.value, nb_corners = self.nb_corners.value,
-            nb_bnodes = self.nb_bnodes.value, nb_links = self.nb_links.value, nb_dims = self.nb_dims.value,
+            nb_bnodes = self.nb_bnodes.value, nb_links = self.nb_links.value, nb_dims = self.nb_dims.value, degree = self.degree.value,
             batch_axes = self.batch_axes, bbox = self._bbox, **( {} if current_mass is None else dict( current_mass = current_mass ) ),
         )
 
@@ -309,7 +319,7 @@ class Mesh( Distribution ):
         sx_all, G_all, src = sx_all[ perm ], G_all[ perm ], src[ perm ]
         values = getattr( self.values, "raw", self.values )
         return Mesh(
-            nodes_all, sx_all.astype( numpy.int32 ), values = values[ ..., src, : ], target_mass = self.target_mass,
+            nodes_all, sx_all.astype( numpy.int32 ), values = values[ ..., src, : ], target_mass = self.target_mass, degree = self.degree.value,
             grads = G_all, corner_weights = cw[ src ], bvh_lo = bvh_lo, bvh_hi = bvh_hi, bvh_links = links.astype( numpy.int32 ),
             batch_axes = self.batch_axes, bbox = ( P.min( axis = ( 0, 1 ) ), P.max( axis = ( 0, 1 ) ) ), current_mass = self.mass,
         )

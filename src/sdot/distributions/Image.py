@@ -134,11 +134,12 @@ class Image( Distribution ):
         # ( a geometry that is differentiated reads its value through `stop_gradient` -- outside a `jit`; under one, a constant
         # is read as it is: `stop_gradient` would make it a tracer )
         from loom import stop_gradient
-        def host( t ):
+        from loom.tensor.host import to_host
+        def host( t ):                                   # ( `to_host`: a Torch tensor on a card has no `__array__` )
             try:
-                return numpy.asarray( t.raw, dtype = float )
-            except ( TypeError, ValueError ):
-                return numpy.asarray( stop_gradient( t ).raw, dtype = float )
+                return numpy.asarray( to_host( t.raw ), dtype = float )
+            except ( TypeError, ValueError, RuntimeError ):
+                return numpy.asarray( to_host( stop_gradient( t ).raw ), dtype = float )
         try:
             d = int( self.nb_dims.value )
             shape = numpy.asarray( self.shape.value, dtype = int ).reshape( -1 )
@@ -150,7 +151,7 @@ class Image( Distribution ):
                 hi = numpy.array( [ knots[ a, shape[ a ] ] for a in range( d ) ] )
             else:
                 lo, hi = numpy.zeros( d ), shape.astype( float )
-        except ( TypeError, ValueError ):
+        except ( TypeError, ValueError, RuntimeError ):
             return None
         return d, frame, origin, lo, hi
 

@@ -4,6 +4,7 @@
 #include <loom/support/algorithms/CartesianIndices.h>
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <optional>
 #include <vector>
 #include "../Convolved.h"
@@ -161,7 +162,7 @@ struct Convolved<Image<T...>> {
     static void gauss_legendre( int m, std::vector<double> &x, std::vector<double> &w ) {
         x.resize( m ); w.resize( m );
         for ( int i = 0; i < m; ++i ) {
-            double z = std::cos( M_PI * ( i + 0.75 ) / ( m + 0.5 ) ), dp = 0;
+            double z = std::cos( std::numbers::pi * ( i + 0.75 ) / ( m + 0.5 ) ), dp = 0;
             for ( int it = 0; it < 100; ++it ) {
                 double p0 = 1, p1 = z;
                 for ( int k = 2; k <= m; ++k ) { const double p2 = ( ( 2 * k - 1 ) * z * p1 - ( k - 1 ) * p0 ) / k; p0 = p1; p1 = p2; }
@@ -205,8 +206,8 @@ struct Convolved<Image<T...>> {
                     }
                 }
                 // the kernel renormalized by its part inside the box ( the border: a constant stays a constant )
-                const double z = std::erf( ( hi - x ) / ( sig * M_SQRT2 ) ) - std::erf( ( lo - x ) / ( sig * M_SQRT2 ) );
-                const double norm = z > 0 ? 2 / ( z * sig * std::sqrt( 2 * M_PI ) ) : 0;
+                const double z = std::erf( ( hi - x ) / ( sig * std::numbers::sqrt2 ) ) - std::erf( ( lo - x ) / ( sig * std::numbers::sqrt2 ) );
+                const double norm = z > 0 ? 2 / ( z * sig * std::sqrt( 2 * std::numbers::pi ) ) : 0;
                 for ( PI v = start; v < r.vals.size(); ++v )
                     r.vals[ v ] *= norm;
             }

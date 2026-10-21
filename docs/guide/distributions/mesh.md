@@ -18,6 +18,7 @@ need not be convex, nor connected: it is the way to give a domain of any shape.
 target = sdot.Mesh( nodes, simplices )                  # nodes [ n, d ], simplices [ m, d + 1 ]: a constant density
 target = sdot.Mesh( nodes, simplices, values = rho )    # rho [ n ]: a value per node, continuous
 target = sdot.Mesh( nodes, simplices, values = rho )    # rho [ m, d + 1 ]: a value per corner of each simplex
+target = sdot.Mesh( nodes, simplices, degree = 0 )      # constant on each simplex ( the mean of its corner values )
 ```
 
 With fewer nodes per simplex ( segments, or triangles in 3D ), the measure is carried by lines or surfaces: see
@@ -157,7 +158,8 @@ cells, and the values keep their derivatives.
 
 A [partial transport](../ground-metrics/partial) ( a source lighter than the target ) integrates each cell inside its ball, in 2D:
 the density is affine on each piece, and a polygon inter a disc still has its integrals in closed form, as do the facets, the
-sphere and all the derivatives. The two combine.
+sphere and all the derivatives. The two combine. In 3D, a polyhedron inter a ball has them for a density **constant** on each
+piece: `Mesh( ..., degree = 0 )`, one value per tetrahedron.
 
 ## The continuation
 
@@ -184,5 +186,5 @@ python docs/guide/distributions/mesh_figures.py bands hole             # or some
 
 - 2D and 3D only.
 - No derivative with respect to the `nodes`.
-- [Partial transport](../ground-metrics/partial) in 2D only.
-- With a periodicity or a sink, the solve runs on the CPU.
+- [Partial transport](../ground-metrics/partial) in 3D: `degree = 0` only.
+- On a CUDA device, a periodicity takes a group of translations, a sink the 2D ( its linear systems solved on the host ).

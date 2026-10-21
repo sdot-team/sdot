@@ -1,6 +1,6 @@
 """Where the wheels are built -- one environment per operating system:
 
-    errand shell --env mac_wheels,lin_wheels,win_wheels --pull dist -- make local_wheels      # or: make wheels
+    errand run --env mac_wheels,lin_wheels,win_wheels --pull dist make local_wheels      # or: make wheels
 
 Each runs `make local_wheels` in its own copy of the tree ( the kernels of its frameworks, then the wheels ) and what
 `--pull` names comes back here. Nothing in this file is particular to a machine: the hosts and paths are in
@@ -16,7 +16,12 @@ Each runs `make local_wheels` in its own copy of the tree ( the kernels of its f
     win_host      = "an x86-64 machine with KVM and QEMU"   # where the Windows virtual machine boots
     win_root      = "a directory over there"
 """
+import os
 import errand
+
+# `errand run` starts errand again inside each environment ( except a virtual machine ): the checkout this one comes from
+# goes on the path there, pushed beside the project on another machine.
+ERRAND = os.path.dirname( os.path.dirname( os.path.abspath( errand.__file__ ) ) )
 
 # Kernels are compiled for every framework the catalogue covers: one interpreter that has them all.
 FRAMEWORKS = "jax numpy torch"
@@ -33,18 +38,18 @@ errand.envs[ "mac_wheels" ] = errand.Env( [
                        root_prefix = errand.value( "mamba_root" ),
                        pip = [ JAX, "numpy", "scipy", "torch", "pyyaml", "devtools", "typing_extensions", "ninja",
                                "pytest", "wheel", "twine" ] ),
-    errand.Vars( { "LOOM_CXX": "clang++", "LOOM_CXXFLAGS": "-std=c++23", "FRAMEWORKS": FRAMEWORKS } ),
+    errand.Vars( { "LOOM_CXX": "clang++", "LOOM_CXXFLAGS": "-std=c++23", "FRAMEWORKS": FRAMEWORKS, "PYTHONPATH": ERRAND } ),
 ] )
 
 host = errand.value( "linux_host" )
 if host:
     # manylinux_2_28 ( glibc 2.28 ) with clang, GCC 14 for nvcc, and the frameworks: scripts/manylinux.def
     errand.envs[ "lin_wheels" ] = errand.Env( [
-        errand.Ssh( host = host, root = errand.value( "linux_root", "errand/sdot-ffi" ), also = [ "../loom" ] ),
+        errand.Ssh( host = host, root = errand.value( "linux_root", "errand/sdot-ffi" ), also = [ "../loom", "../errand" ] ),
         errand.Apptainer( image = "manylinux.sif", recipe = "scripts/manylinux.def", fakeroot = True,
                           scratch = errand.value( "linux_scratch" ),
                           flags = [ "--nv", *[ f for b in errand.value( "linux_binds", [ ] ) for f in ( "--bind", b ) ] ] ),
-        errand.Vars( { "FRAMEWORKS": FRAMEWORKS + " cupy",
+        errand.Vars( { "FRAMEWORKS": FRAMEWORKS + " cupy", "PYTHONPATH": "../errand",
                        **( { "LOOM_CACHE_DIR": errand.value( "linux_cache" ) } if errand.value( "linux_cache" ) else { } ) } ),
     ], cuda = True )
 

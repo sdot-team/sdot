@@ -397,21 +397,30 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
 
     HD static TK first_band() { return TK( 16 ) * std::numeric_limits<TK>::epsilon(); }
 
+    /// the scale of the rounding of `dir . v_i - off`: `|off| + |dir|_1 max_d |v_d|`. Relative to the SIZE of the vertex, not to the
+    /// terms of the dot product: a vertex is exact to a few ulps of its largest coordinate, and the coordinate along the normal may
+    /// be only that rounding ( a vertex that should lie on `z = 0`, at `z = 1e-17` among coordinates of order 1 -- relative to its
+    /// own terms, the band vanished and the vertex counted as outside: a cut no plane carves, dropped, a pyramid left in the cell )
+    HD TK magnitude( const PlaneT &p, int i ) const {
+        TK nd = 0, mv = 0;
+        for ( int d = 0; d < D; ++d ) {
+            const TK a = p.dir[ d ] < 0 ? - p.dir[ d ] : p.dir[ d ];
+            const TK x = v[ d ][ i ] < 0 ? - v[ d ][ i ] : v[ d ][ i ];
+            nd += a;
+            mv = x > mv ? x : mv;
+        }
+        return ( p.off < 0 ? - p.off : p.off ) + nd * mv;
+    }
+
     /// `s[ i ] = 0` for the vertices that are outside but within `band` of the plane ( relative to
     /// the magnitude of the terms of `dir . v_i - off` ). Returns the number still outside. Only
     /// runs on a cut that has something to remove, never on the common `UNCHANGED` path.
     HD int on_the_plane( const PlaneT &p, TK band ) const {
-        const TK ao = p.off < 0 ? - p.off : p.off;
         int nb_out = 0;
         for ( int i = 0; i < nv; ++i ) {
             if ( ! ( s[ i ] > 0 ) )
                 continue;
-            TK mag = ao;
-            for ( int d = 0; d < D; ++d ) {
-                const TK t = p.dir[ d ] * v[ d ][ i ];
-                mag += t < 0 ? - t : t;
-            }
-            if ( s[ i ] <= band * mag )
+            if ( s[ i ] <= band * magnitude( p, i ) )
                 s[ i ] = 0;
             else
                 ++nb_out;
@@ -430,6 +439,28 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
             const int nb_out = on_the_plane( p, band );
             if ( nb_out == 0 )
                 return CutStatus::UNCHANGED;
+            if ( nb_out == nv ) {
+                nv = 0; nc = 0;
+                unbounded = false;
+                return CutStatus::EMPTY;
+            }
+            const int r = cut_classified( p );
+            if ( r != INCONSISTENT )
+                return r;
+        }
+
+        // THE OTHER TIE-BREAK: the vertices within the band count as OUTSIDE, and are made again on the plane ( a crossing edge
+        // of an inside vertex then ends at them ). What a degenerate cell needs -- on an exact grid, the bisector of a neighbor goes
+        // through vertices and edges of the cell that other bisectors made, and keeping the ties inside leaves an outside set that
+        // no plane carves; dropping the cut then left a whole pyramid of the neighbor in the cell.
+        signed_distances( p, s );
+        {
+            int nb_out = 0;
+            for ( int i = 0; i < nv; ++i ) {
+                if ( s[ i ] > - band * magnitude( p, i ) && ! ( s[ i ] > 0 ) )
+                    s[ i ] = std::numeric_limits<TK>::min();
+                nb_out += s[ i ] > 0;
+            }
             if ( nb_out == nv ) {
                 nv = 0; nc = 0;
                 unbounded = false;

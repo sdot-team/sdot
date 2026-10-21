@@ -313,18 +313,118 @@ if test( "periodicity_descriptions" ):
             assert "AXIS-ALIGNED" in str( e )
         else:
             raise AssertionError( bad )
-    for bad in ( [ [ 1, 0 ], [ 2, 0 ] ], [ ( 2 * numpy.eye( 2 ), [ 1, 0 ] ) ] ):
+    for bad in ( [ [ 1, 0 ], [ numpy.sqrt( 2 ), 0 ] ], [ [ 0, 0 ] ], [ ( 2 * numpy.eye( 2 ), [ 1, 0 ] ) ] ):
         try:
             generators_of( bad, 2 )
         except ValueError:
             pass
         else:
             raise AssertionError( bad )
+    # translations that are not independent: the basis of their lattice
+    assert numpy.allclose( translations( generators_of( [ [ 1, 0 ], [ 2, 0 ] ], 2 ) ), [ [ 1, 0 ] ] )
+    assert numpy.allclose( numpy.abs( translations( generators_of( [ [ 1, 0 ], [ 1.1, 0 ] ], 2 ) ) ), [ [ 0.1, 0 ] ] )
     assert numpy.allclose( wrap( [ [ 3.5, -0.25 ] ], True, img ), [ [ 1.5, 0.75 ] ] )
     # a Klein bottle: a point below the square comes back flipped
     klein = [ ( numpy.diag( [ 1.0, -1.0 ] ), [ 1.0, 1.0 ] ), [ 0.0, 1.0 ] ]
     unit = Image( values = numpy.ones( ( 1, 1 ) ), frame = [ 1.0, 1.0 ] )
     assert numpy.allclose( wrap( [ [ 1.25, 0.25 ] ], klein, unit ), [ [ 0.25, 0.75 ] ] )
+
+
+if test( "domain_gluings_match_the_copies" ):
+    # `periodicity = target.domain`: each facet is sent ONTO its opposite one -- along the side of a parallelogram, not across it --
+    # and the three pairs of sides of a hexagon give a lattice of rank 2
+    import numpy
+    from sdot.periodicity import generators_of
+    from sdot.distributions.Polytope import ConvexHull
+    from sdot.distributions.Image import Image
+    rng = numpy.random.default_rng( 9 )
+    t = numpy.arange( 6 ) * numpy.pi / 3
+    cases = (
+        ( ConvexHull( numpy.stack( [ numpy.cos( t ), numpy.sin( t ) ], -1 ) ), [ [ 1.5, numpy.sqrt( 3 ) / 2 ], [ 0.0, numpy.sqrt( 3 ) ] ] ),
+        ( ConvexHull( [ [ 0, 0 ], [ 1, 0 ], [ 1.5, 1 ], [ 0.5, 1 ] ] ), [ [ 1.0, 0.0 ], [ 0.5, 1.0 ] ] ),
+        # ( an image with an oblique frame: the block of its pixels is a parallelogram )
+        ( Image( values = rng.uniform( 0.5, 1.5, size = ( 4, 3 ) ), frame = [ [ 1.0, 0.0 ], [ 0.5, 1.0 ] ] ), [ [ 1.0, 0.0 ], [ 0.5, 1.0 ] ] ),
+    )
+    for hull, basis in cases:
+        g = generators_of( hull.domain, 2 )
+        assert len( g ) == 2 and numpy.allclose( g[ :, :, :2 ], numpy.eye( 2 ) )
+        # ( the same lattice: each basis has integer coordinates in the other, of determinant +-1 )
+        c = numpy.asarray( basis ) @ numpy.linalg.inv( g[ :, :, 2 ] )
+        assert numpy.allclose( c, numpy.round( c ), atol = 1e-9 ) and abs( abs( numpy.linalg.det( c ) ) - 1 ) < 1e-9, c
+        pos = rng.uniform( -1.0, 1.5, size = ( 12, 2 ) )
+        w = rng.uniform( -0.01, 0.01, size = 12 )
+        _compare( pos, w, hull, hull.domain, numpy.asarray( basis ), tol = 1e-9, length = 6 )
+
+
+if test( "periodicity_is_checked" ):
+    # a support that is not inside a fundamental domain, opposite sides that no translation glues, gaussians without their domain
+    import numpy
+    from sdot.PowerDiagram import PowerDiagram
+    from sdot.distributions.Box import Box
+    from sdot.distributions.Polytope import ConvexHull
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+
+    def raises( f, what ):
+        try:
+            f()
+        except ValueError as e:
+            assert what in str( e ), str( e )
+        else:
+            raise AssertionError( what )
+
+    pos = numpy.random.default_rng( 10 ).uniform( 0, 1, size = ( 6, 2 ) )
+    flip, rot = numpy.diag( [ 1.0, -1.0 ] ), numpy.array( [ [ 0.0, -1.0 ], [ 1.0, 0.0 ] ] )
+    for gens in ( [ [ 0.5, 0.0 ], [ 0.0, 1.0 ] ],                   # a period shorter than the box
+                  [ [ 1.0, 0.0 ], [ 0.5, 0.5 ] ],                   # a sheared lattice of covolume 1 / 2
+                  [ ( rot, [ 0.5, 0.5 ] ) ],                        # a quarter turn about the center
+                  [ ( flip, [ 0.5, 1.0 ] ), [ 0.0, 1.0 ] ] ):       # a Klein bottle of half the width
+        raises( lambda: PowerDiagram( pos, distribution = Box(), periodicity = gens ).measures, "not inside a fundamental domain" )
+    c72 = 2 * numpy.pi / 5
+    R72 = numpy.array( [ [ numpy.cos( c72 ), -numpy.sin( c72 ) ], [ numpy.sin( c72 ), numpy.cos( c72 ) ] ] )
+    R1 = numpy.array( [ [ numpy.cos( 1 ), -numpy.sin( 1 ) ], [ numpy.sin( 1 ), numpy.cos( 1 ) ] ] )
+    small = ConvexHull( [ [ 0, 0 ], [ 0.1, 0 ], [ 0.1, 0.01 ] ] )
+    for dist, gens, what in ( ( Box(), [ [ 1, 0 ], [ numpy.sqrt( 2 ), 0 ] ], "not discrete" ),          # dense translations
+                              ( Box(), [ [ 1, 0 ], [ 1.1, 0 ] ], "not inside a fundamental domain" ),     # steps of 0.1
+                              ( Box(), [ [ 0, 0 ] ], "identity" ),
+                              ( small, [ ( R1, [ 0, 0 ] ) ], "too many elements" ),                       # a turn of 1 radian
+                              ( small, [ ( R72, [ 0, 0 ] ), [ 1, 0 ] ], "not discrete" ),                 # a fivefold turn and a lattice
+                              ( small, [ ( flip, [ 0, 0 ] ), ( R1 @ flip @ R1.T, [ 0, 0 ] ) ], "too many elements" ),   # mirrors at 1 radian
+                              ( Box(), [ ( R72, [ 0, 0 ] ) ], "not inside a fundamental domain" ),
+                              ( Box(), [ ( - numpy.eye( 2 ), [ 1, 1 ] ) ], "not inside a fundamental domain" ) ):
+        raises( lambda: PowerDiagram( pos, distribution = dist, periodicity = gens ).measures, what )
+    # a hexagon whose opposite sides are parallel but not of the same length
+    hexa = ConvexHull( [ [ 0, 0 ], [ 3, 0 ], [ 4, 1 ], [ 4, 3 ], [ 2, 3 ], [ 0, 1 ] ] )
+    raises( lambda: PowerDiagram( pos, distribution = hexa, periodicity = hexa.domain ).measures, "not translates" )
+    raises( lambda: PowerDiagram( pos, distribution = SumOfGaussians( [ [ 0.5, 0.5 ] ], [ 0.1 ] ), periodicity = True ).measures, "support_box" )
+
+
+if test( "more_groups_match_the_copies" ):
+    # valid groups that the other tests do not cover: redundant translations, a fivefold cone, a glide, a point reflection, a mirror
+    # and a translation, quarter turns with an oblique translation, a screw by an eighth of a turn ( no translation in short words )
+    import numpy
+    from sdot.distributions.Box import Box
+    from sdot.distributions.Polytope import ConvexHull
+    from sdot.periodicity import support_box
+    def rot( a ):
+        return numpy.array( [ [ numpy.cos( a ), -numpy.sin( a ) ], [ numpy.sin( a ), numpy.cos( a ) ] ] )
+    c72 = 2 * numpy.pi / 5
+    rz = numpy.eye( 3 )
+    rz[ :2, :2 ] = rot( numpy.pi / 4 )
+    cases = (
+        ( Box( nb_dims = 2 ), [ [ 1, 0 ], [ 2, 0 ] ], 6 ),
+        ( ConvexHull( [ [ 0, 0 ], [ 0.1, 0 ], [ 0.1, 1 ], [ 0, 1 ] ] ), [ [ 1, 0 ], [ 1.1, 0 ] ], 6 ),
+        ( ConvexHull( [ [ 0, 0 ], [ 1, 0 ], [ numpy.cos( c72 ), numpy.sin( c72 ) ] ] ), [ ( rot( c72 ), [ 0, 0 ] ) ], 6 ),
+        ( Box( nb_dims = 2 ), [ ( numpy.diag( [ 1.0, -1.0 ] ), [ 1, 0 ] ) ], 6 ),
+        ( Box( nb_dims = 2 ), [ ( - numpy.eye( 2 ), [ 0, 0 ] ) ], 6 ),
+        ( ConvexHull( [ [ 0, 0 ], [ 0.5, 0 ], [ 0.5, 1 ], [ 0, 1 ] ] ), [ ( numpy.diag( [ -1.0, 1.0 ] ), [ 0, 0 ] ), [ 1, 0 ] ], 6 ),
+        ( ConvexHull( [ [ 0, 0 ], [ 0.3, 0 ], [ 0.3, 0.3 ], [ 0, 0.3 ] ] ), [ ( rot( numpy.pi / 2 ), [ 0, 0 ] ), [ 1, 0.3 ] ], 6 ),
+        ( Box( nb_dims = 3 ), [ ( rz, [ 0, 0, 1 ] ) ], 8 ),
+    )
+    rng = numpy.random.default_rng( 11 )
+    for dist, gens, length in cases:
+        lo, hi = support_box( dist.bounding_half_spaces(), len( numpy.asarray( gens[ 0 ][ 1 ] if isinstance( gens[ 0 ], tuple ) else gens[ 0 ] ) ) )
+        pos = lo + ( hi - lo ) * rng.uniform( 0.1, 0.9, size = ( 6, len( lo ) ) )
+        _compare( pos, rng.uniform( -1e-3, 1e-3, size = 6 ), dist, gens, gens, tol = 1e-8, length = length )
 
 
 if test( "isometry_groups_match_the_copies" ):
@@ -644,3 +744,23 @@ if test( "periodic_card_solve_of_gaussians_and_meshes" ):
         bary = numpy.asarray( f.value ).reshape( n, d ) / numpy.asarray( m.value ).reshape( n, 1 )
         assert numpy.allclose( numpy.asarray( m.value ).reshape( -1 ), 1 / n, atol = 1e-7 ), ( d, type( tgt ).__name__ )
         assert numpy.allclose( numpy.asarray( p.barycenters ).reshape( n, d ), bary, atol = 1e-6 ), ( d, type( tgt ).__name__ )
+
+
+if test( "exact_grids_on_a_torus" ):
+    # a grid of seeds on a torus: every cell is the cube of its seed. The bisectors of the neighbors go through vertices and edges
+    # that other bisectors made, exactly: a vertex that should lie on a plane is there up to the rounding of its LARGEST coordinate,
+    # and the band that tells "on the plane" must be relative to that ( `LocalN::magnitude` ) -- relative to the terms of the dot
+    # product, it vanished, the cut could not be carved and was dropped, and cells of 7 / 6 h^3 came out ( 14^3 was one )
+    import numpy
+    from sdot.Cell import set_kernel_dtype
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    for kd, tol in ( ( "FP64", 1e-9 ), ( "FP32", 1e-4 ) ):
+        set_kernel_dtype( kd )
+        for d in ( 2, 3 ):
+            for m in ( 4, 7, 8, 14, 16 ):
+                g = ( numpy.stack( numpy.meshgrid( *[ numpy.arange( m ) + 0.5 ] * d, indexing = "ij" ), -1 ).reshape( -1, d ) ) / m
+                for acc in ( None, "plain" ):
+                    pd = PowerDiagram( g, boundaries = box_half_spaces( numpy.zeros( d ), numpy.ones( d ) ), periodicity = True, accelerator = acc )
+                    mz = numpy.asarray( pd.measures ).reshape( -1 ) * m ** d
+                    assert numpy.abs( mz - 1 ).max() < tol, ( kd, d, m, acc, numpy.flatnonzero( numpy.abs( mz - 1 ) >= tol ) )
+    set_kernel_dtype( "FP64" )

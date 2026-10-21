@@ -150,6 +150,5 @@ python docs/guide/distributions/gaussians_figures.py spiral widths      # or som
   15 stages and the card took about 4.5 min. On the CPU, 46 min became 3.3 min ( a workstation ) when the cells were integrated
   by their edges rather than by tetrahedra. The 2D spiral takes 5 s.
 - No [partial transport](../ground-metrics/partial) yet: a gaussian over a polygon inter a disc has no closed form.
-- With a periodicity, the solve runs on the CPU ( the CUDA solve of a periodic problem takes constant densities only ). Under
-  `jax.jit`, where the centers cannot be read, the copies are those of the images that the diagram walks: tails reaching beyond
+- On a CUDA device, a periodicity takes a group of translations ( rotations and symmetries: the CPU ). Under `jax.jit`, where the centers cannot be read, the copies are those of the images that the diagram walks: tails reaching beyond
   them are lost.

@@ -113,6 +113,14 @@ class SumOfGaussians( Distribution ):
         viz.add_points( numpy.asarray( self.positions ), color = color )
         return viz
 
+    def periodic_support( self ):
+        """the fundamental domain of a periodicity: `support_box`, which a periodic mixture must declare -- the box of its
+        tails ( `support_sigmas` ) depends on the gaussians, and would make a period of them"""
+        if self.support_box is None:
+            raise ValueError( "a periodic SumOfGaussians needs `support_box = ( lo, hi )`: the fundamental domain that the group "
+                              "repeats ( the box of its tails is not a period )" )
+        return self.bounding_half_spaces()
+
     def bounding_half_spaces( self ):
         """the box `[ c_i - k s_i, c_i + k s_i ]` united over the gaussians ( see the class docstring ) -- `None` without
         `support_sigmas`. The DOMAIN is a constant of the transport ( nothing differentiates through it ): it is computed on

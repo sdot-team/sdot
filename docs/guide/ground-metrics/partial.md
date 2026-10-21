@@ -108,7 +108,7 @@ for it in range( 40 ):
 
 The cells are not changed: they stay the Laguerre cells, and it is the **integration** that is restricted to the balls, in closed
 form ( a polygon inter a disc, for a density constant or affine on it: an `Image`, a `Box`, a `Mesh` ), with the derivatives. In 3D,
-a polyhedron inter a ball, for a density constant on it: by the divergence theorem, the faces inter their discs ( the 2D closed
+a polyhedron inter a ball, for a density constant on it ( an `Image`, a `Box`, a `Mesh( degree = 0 )` ): by the divergence theorem, the faces inter their discs ( the 2D closed
 form, in the plane of each face ) and the solid angles of the sphere inside the cell ( `integration/InBall3.h` ). For Newton, the
 sink is **one more seed**, whose target mass is what the
 diracs leave of the target and whose weight, $0$, is the gauge: the solver and its linear solvers are those of the balanced
@@ -118,6 +118,12 @@ transport. The diagram takes it as `PowerDiagram( ..., sink_weight = 0 )`.
 
 * a source **heavier** than the target ( an explicit error ), and the penalized variant ( a sink of fixed weight );
 * targets that are neither constant nor affine on pieces ( `SumOfGaussians`, a polynomial `Image` ), and in 3D the affine ones
-  too ( `Mesh` ); the CUDA solve, the `"limits"` step.
+  too ( a `Mesh` of degree 1: `Mesh( degree = 0 )` is constant on each tetrahedron ); the CUDA solve of an `Image` that is not a constant, the `"limits"` step.
+
+## On a GPU
+
+The solve runs on a CUDA device in 2D for a constant density ( a `Box`, a `Polytope` ) or a `Mesh`, with or without a group of
+translations: the cells are integrated in their balls on the card, and the linear systems, bordered by the sink, are solved on the host
+( the CPU's solver, on a copy of the laplacian at each iteration ).
 
 The figures are written by [`docs/guide/ground-metrics/partial_figures.py`](https://github.com/sdot-team/sdot/blob/main/docs/guide/ground-metrics/partial_figures.py).

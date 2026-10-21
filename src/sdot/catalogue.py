@@ -7,7 +7,11 @@ the wheel -- is `loom.catalogue.build`.
 A kernel that is not triggered here is not in the catalogue: it will be compiled on the user's machine (`auto` mode), or
 will be missing (`LOOM_KERNELS=catalogue`). The list is therefore a DECISION: what a standard usage does, in 2D and 3D, in
 Voronoi and Laguerre, with both kernel floats, the uniform density and an image, and their derivatives.
+
+`level_workloads` is what decides which x86 levels are shipped at all ( see `loom.catalogue.build` ).
 """
+from pathlib import Path
+
 import numpy as np
 
 
@@ -70,7 +74,42 @@ def provoke():
         c.cut( [ 1.0 ] * d, 1.0 )
         wait( c.measure.value )
 
+    documented()
     timed()
+
+
+# What the documentation shows ( docs/snippets ): a user starts with these, so their kernels are in the catalogue -- whatever
+# settings they use by default. `scripts/validate_wheel.py` runs the same files on the installed wheel with
+# `LOOM_KERNELS=catalogue`, so a kernel missing here fails the release instead of compiling on a user's machine.
+DOCUMENTED = [ "hello_numpy.py", "hello_jax.py", "hello_torch.py", "hello_cupy.py", "plan.py", "ot_solve.py", "ot_problem.py",
+               "distributions.py", "distributions_1d.py", "duplicates_plan.py" ]
+SNIPPETS = Path( __file__ ).resolve().parents[ 2 ] / "docs" / "snippets"
+
+
+def documented():
+    """Run the snippets of `DOCUMENTED`, as a user would ( their numpy inputs go to the framework in force ), in a scratch
+    directory ( one writes a page ). A snippet of a framework that is not installed, or that does not run on this device ( the
+    numpy driver on a card ), is skipped; the `hello_<framework>` of each framework runs only under that framework."""
+    import contextlib, io, runpy, tempfile, os
+    from loom.drivers.Framework import UnsupportedDevice
+    from loom.drivers import framework_defaults
+    mine = str( framework_defaults.framework() )
+    if not SNIPPETS.is_dir():
+        raise SystemExit( f"sdot.catalogue: { SNIPPETS } is missing -- the catalogue is built from a checkout, with its docs" )
+    here = os.getcwd()
+    with tempfile.TemporaryDirectory() as scratch:
+        os.chdir( scratch )
+        try:
+            for name in DOCUMENTED:
+                if name.startswith( "hello_" ) and name != f"hello_{ mine }.py":
+                    continue                            # a framework's own hello: a user of that framework runs it
+                try:
+                    with contextlib.redirect_stdout( io.StringIO() ):
+                        runpy.run_path( str( SNIPPETS / name ), run_name = "__main__" )
+                except ( ModuleNotFoundError, UnsupportedDevice ) as e:
+                    print( f"   { name }: skipped ( { e } )", flush = True )
+        finally:
+            os.chdir( here )
 
 
 def timed():
@@ -120,6 +159,38 @@ def _vjp( f, x ):
     pullback( loom.random( out.shape, seed = 0 ) )
 
 
+def level_workloads():
+    """What decides which x86 levels the wheels carry ( `loom.catalogue.build( levels = ... )` ): the operations of a standard
+    use, at sizes where the kernels dominate, equal weights. Each is timed at every level; a level that gains too little on
+    them is not shipped, and its machines run the poorer one kept ( on lmo, 2026-10-20: v3 0.94 of the baseline, v4 0.98,
+    v2 1.00 ). Built when called: the arrays are those of the framework in force."""
+    from loom.benchmark import synchronise as wait
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracs import SumOfDiracs
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.OtProblem import Iterative, OtProblem
+    rng = np.random.default_rng( 0 )
+    own = _own_arrays()
+    p2, p3 = own( rng.uniform( 0.01, 0.99, ( 1000000, 2 ) ) ), own( rng.uniform( 0.01, 0.99, ( 200000, 3 ) ) )
+    w2 = own( rng.uniform( -0.3, 0.3, 1000000 ) / 1000000 )
+    b2, b3, b256 = box_half_spaces( [ 0 ] * 2, [ 1 ] * 2 ), box_half_spaces( [ 0 ] * 3, [ 1 ] * 3 ), box_half_spaces( [ 0 ] * 2, [ 256 ] * 2 )
+    img = own( rng.uniform( 0.5, 1.5, ( 256, 256 ) ) )
+    s1, i1 = own( np.sort( rng.uniform( 0, 1, 1000000 ) ) ), own( rng.uniform( 0.5, 1.5, 20000 ) )
+    ot = own( rng.uniform( 0.05, 0.95, ( 20000, 2 ) ) )
+    return {
+        "measures 2D 1e6 Laguerre": lambda: wait( PowerDiagram( p2, weights = w2, boundaries = b2 ).measures.value ),
+        "measures 3D 2e5":          lambda: wait( PowerDiagram( p3, boundaries = b3 ).measures.value ),
+        "moments 3D 2e5":           lambda: PowerDiagram( p3, boundaries = b3 ).moments,
+        "hessian 2D 1e6":           lambda: PowerDiagram( p2, weights = w2, boundaries = b2 ).hessian_rows(),
+        "image measures 2D 1e6":    lambda: wait( PowerDiagram( p2 * 256, boundaries = b256, distribution = Image( values = img ) ).measures.value ),
+        "SdotPlan1d 1e6":           lambda: float( SdotPlan1d( SumOfDiracs1d( positions = s1 ), Image( values = i1 ) ).cost ),
+        "OT solve 2D 2e4 image":    lambda: OtProblem( SumOfDiracs( ot ), Image( values = img, origin = [ 0.0, 0.0 ],
+                                                       pixel_frame = ( np.eye( 2 ) / 256 ).tolist() ) ).solve( Iterative( max_iter = 30 ) ),
+    }
+
+
 if __name__ == "__main__":
     import loom
-    loom.catalogue.build( "sdot", provoke )
+    loom.catalogue.build( "sdot", provoke, levels = level_workloads )

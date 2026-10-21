@@ -1,8 +1,9 @@
 """The pages of `mesh.md`: interactive pages of the HTML viewer ( `sdot.Visualizer`, `docs/public/guide/mesh-*.html` ).
 
-    python docs/guide/distributions/mesh_figures.py [ contours p1 bands hole tube ]
+    python docs/guide/distributions/mesh_figures.py [ contours p1 bands hole tube fluid ]
 
-`contours` and `hole` need `pygmsh` ( `Mesh.from_contours` ).
+`contours` and `hole` need `pygmsh` ( `Mesh.from_contours` ). `fluid` ( the card of the gallery: a fluid at rest in a knotted
+tube ) takes hours: on lmo, `exp_doc_figures_lmo.py fluid`.
 """
 import sys
 import time
@@ -66,6 +67,47 @@ def tube( nr = 3, nt = 48, nz = 8, r0 = 0.6, r1 = 1.0, h = 1.2 ):
                 for p in ( ( 1, 3 ), ( 3, 2 ), ( 2, 6 ), ( 6, 4 ), ( 4, 5 ), ( 5, 1 ) ):
                     tets.append( [ c[ 0 ], c[ p[ 0 ] ], c[ p[ 1 ] ], c[ 7 ] ] )
     return nodes, np.array( tets )
+
+
+def trefoil_curve( t ):
+    return np.stack( [ np.sin( t ) + 2 * np.sin( 2 * t ), np.cos( t ) - 2 * np.cos( 2 * t ), - np.sin( 3 * t ) ], -1 )
+
+
+def trefoil_tube( nt = 192, ns = 8, r = 0.5, every = 4 ):
+    """a tube of radius `r` around a trefoil knot ( `ns` sides, `nt` sections ) cut into tetrahedra: each slab between two sections
+    is a fan of `ns` triangular prisms about the center line, 3 tetrahedra each. `( nodes, tets, wire )`, `wire` the edges of a
+    wireframe of its border: the `ns` lines along the tube and a ring every `every` sections. The sections follow a frame that
+    minimizes the rotation, its twist over the loop spread along"""
+    t = 2 * np.pi * np.arange( nt ) / nt
+    c = trefoil_curve( t )
+    T = np.roll( c, -1, 0 ) - np.roll( c, 1, 0 )
+    T /= np.linalg.norm( T, axis = 1 )[ :, None ]
+    U = np.zeros_like( c )
+    u = np.cross( T[ 0 ], [ 0, 0, 1 ] )
+    U[ 0 ] = u / np.linalg.norm( u )
+    for i in range( 1, nt + 1 ):                        # ( the last one: the first section seen from the end of the loop )
+        u = U[ i - 1 ] - T[ i % nt ] * ( U[ i - 1 ] @ T[ i % nt ] )
+        u /= np.linalg.norm( u )
+        if i < nt:
+            U[ i ] = u
+    V0 = np.cross( T[ 0 ], U[ 0 ] )
+    phi = np.arctan2( u @ V0, u @ U[ 0 ] )
+    V = np.cross( T, U )
+    a = - phi * np.arange( nt ) / nt
+    U, V = np.cos( a )[ :, None ] * U + np.sin( a )[ :, None ] * V, - np.sin( a )[ :, None ] * U + np.cos( a )[ :, None ] * V
+    th = 2 * np.pi * np.arange( ns ) / ns
+    ring = c[ :, None ] + r * ( np.cos( th )[ None, :, None ] * U[ :, None ] + np.sin( th )[ None, :, None ] * V[ :, None ] )
+    nodes = np.concatenate( [ c, ring.reshape( -1, 3 ) ] )
+    C = lambda i: i % nt
+    R = lambda i, j: nt + ( i % nt ) * ns + j % ns
+    tets = []
+    for i in range( nt ):
+        for j in range( ns ):
+            a0, a1, a2, b0, b1, b2 = C( i ), R( i, j ), R( i, j + 1 ), C( i + 1 ), R( i + 1, j ), R( i + 1, j + 1 )
+            tets += [ [ a0, a1, a2, b2 ], [ a0, a1, b1, b2 ], [ a0, b0, b1, b2 ] ]
+    wire = [ [ R( i, j ), R( i + 1, j ) ] for i in range( nt ) for j in range( ns ) ]
+    wire += [ [ R( i, j ), R( i, j + 1 ) ] for i in range( 0, nt, every ) for j in range( ns ) ]
+    return nodes, np.array( tets ), np.array( wire )
 
 
 # -- drawing ----------------------------------------------------------------------------------------------------------------
@@ -151,12 +193,54 @@ def tube_lloyd( n = 3000 ):
     quantize( "tube", "Mesh in 3D: a tube of tetrahedra", target, n, depth_colors = True )
 
 
+def fluid( a = 0.2, eps = 0.05, sigma = 0.02, damping = 2.0, duration = 6.0, nb_frames = 12, r = 0.5 ):
+    """a fluid filling half of a tube knotted in a trefoil ( `Mesh( degree = 0 )`: partial transport in 3D ), released from the upper
+    half of the tube and damped until it rests in the three low loops: the free-surface scheme of `free-surface-fluid.md`. The page
+    draws the matter and the wireframe of the tube"""
+    sys.path.insert( 0, str( Path( __file__ ).resolve().parents[ 2 ] / "examples" ) )
+    from free_surface_fluid import Fluid
+    from scipy.spatial import cKDTree
+
+    nodes, tets, wire = trefoil_tube( r = r )
+    P = nodes[ tets ]
+    vol = float( np.abs( np.linalg.det( P[ :, 1: ] - P[ :, :1 ] ) ).sum() / 6 )
+    target = sdot.Mesh( nodes, tets, target_mass = vol, degree = 0 )
+
+    # the points of a cubic lattice inside the tube, the highest ones holding half of its volume
+    g = np.arange( -3.8, 3.8, a ) + 0.5 * a
+    p = np.stack( np.meshgrid( g, g, np.arange( -1.6, 1.6, a ) + 0.5 * a, indexing = "ij" ), -1 ).reshape( -1, 3 )
+    d, _ = cKDTree( trefoil_curve( np.linspace( 0, 2 * np.pi, 8000, endpoint = False ) ) ).query( p )
+    p = p[ d < r * np.cos( np.pi / 8 ) - 0.3 * a ]
+    nb = int( round( 0.5 * vol / a ** 3 ) )
+    p = p[ np.argsort( - p[ :, 2 ] )[ :nb ] ]
+    p += 1e-3 * a * np.random.default_rng( 0 ).uniform( -1, 1, p.shape )
+    masses = np.full( len( p ), 0.5 * vol / len( p ) )
+    print( f"fluid in a trefoil: { len( tets ) } tetrahedra, { len( p ) } particles", flush = True )
+
+    fluid = Fluid( target, masses, eps, gravity = ( 0.0, 0.0, -1.0 ), sigma = sigma )
+    fluid.start_weights = np.full( len( p ), 3 * a * a )   # ( balls that cover the cells of the lattice: none empty )
+    frames = fluid.run( p, dt = eps / 10, duration = duration, nb_frames = nb_frames, damping = damping )
+
+    viz = sdot.Visualizer( title = "A fluid at rest in a knotted tube", frame_axis = "time", frame_value = 0.0 )
+    for k, ( t, q, w, _ ) in enumerate( frames ):
+        if k:
+            viz.new_frame( round( t, 3 ) )
+        viz.add_edges( nodes, wire, color = "#888888" )         # ( a frame is a whole state; `nodes`, one array: one pool )
+        fluid.plan( q, weights0 = w ).add_to_viz( viz, seeds = False, opacity_beyond_balls = 0, ball_resolution = 10,
+                                                  support_only = False, domain = False )
+    viz.write_html( OUT / "mesh-fluid.html" )
+    np.savez( OUT / "mesh-fluid.npz", **{ f"p{ k }": f[ 1 ] for k, f in enumerate( frames ) }, **{ f"w{ k }": f[ 2 ] for k, f in enumerate( frames ) },
+              t = np.array( [ f[ 0 ] for f in frames ] ), energy = np.array( [ f[ 3 ] for f in frames ] ) )
+    return frames
+
+
 CASES = {
     "contours": contours,
     "p1"      : p1,
     "bands"   : bands,
     "hole"    : hole,
     "tube"    : tube_lloyd,
+    "fluid"   : fluid,
 }
 
 

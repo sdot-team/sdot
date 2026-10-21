@@ -26,6 +26,7 @@ import numpy as np
 from types import SimpleNamespace
 
 import loom
+from loom.drivers.framework_defaults import concrete
 
 
 #: the separation of scales that makes an aggregate: its linkage height at most `KAPPA` times the height at which it joins the rest
@@ -642,7 +643,7 @@ def virtual_weights( groups, weights ):
     s_idx[ has ] = g.agg_first[ pa ]
     inv2 = np.zeros( n )
     inv2[ has ] = 1.0 / g.scale[ pa ] ** 2
-    seed_v = ( w - w[ s_idx ] ) * loom.array( inv2 )
+    seed_v = ( w - w[ s_idx ] ) * _arr( w, inv2 )
     m = g.nb_aggregates
     kid = np.flatnonzero( g.agg_parent >= 0 )
     a_idx = np.array( g.agg_first, dtype = np.int64 )
@@ -650,7 +651,7 @@ def virtual_weights( groups, weights ):
     up[ kid ] = g.agg_first[ g.agg_parent[ kid ] ]
     ainv2 = np.zeros( m )
     ainv2[ kid ] = 1.0 / g.scale[ g.agg_parent[ kid ] ] ** 2
-    agg_v = ( w[ a_idx ] - w[ up ] ) * loom.array( ainv2 ) if m else w[ :0 ]
+    agg_v = ( w[ a_idx ] - w[ up ] ) * _arr( w, ainv2 ) if m else w[ :0 ]
     return seed_v, agg_v
 
 
@@ -971,7 +972,7 @@ class TreeSystem:
         ops = loom.ops( vals )
         # ( the tables as the backend's arrays: under a `jit`, constants of the program, which a traced index can read )
         cst = lambda a: a if isinstance( vals, np.ndarray ) else ops.concatenate( [ a ], axis = 0 )
-        I = lambda a: cst( loom.array( np.asarray( a, dtype = np.int64 ), loom.default_itype ) )
+        I = lambda a: cst( _arr( vals, np.asarray( a, dtype = np.int64 ), concrete( integer = True ) ) )
         F = lambda a: cst( _arr( vals, np.asarray( a, dtype = np.float64 ) ) )
         vals = ops.stop_gradient( vals )
         Q = int( ids.shape[ 1 ] )
@@ -1158,9 +1159,16 @@ def _pad( rows, fill, dtype = np.int64 ):
     return res
 
 
-def _arr( x, a ):
-    """`a` ( host ) in the framework of `x`"""
-    return a if isinstance( x, np.ndarray ) else loom.array( a )
+def _arr( x, a, dtype = None ):
+    """`a` ( host ) in the framework, on the device and in the float of `x` -- or in `dtype` ( a loom `Dtype` ): x's, not the
+    default framework's ( a Jax value under a Torch default stays Jax )"""
+    if isinstance( x, np.ndarray ):
+        return a if dtype is None else np.asarray( a, dtype = dtype.numpy_dtype )
+    from loom.tensor.storage.buffers import buffer_class_for
+    from loom.devices.Device import Device
+    ops, where = loom.ops( x ), buffer_class_for( x )( x ).device()        # `( "cuda", 0 )`, None for a traced value
+    device = None if where is None else Device.factory( "cpu" if where[ 0 ] == "cpu" else f"cuda:{ where[ 1 ] }" )
+    return ops.array( a, ops.dtype_of( x ) if dtype is None else dtype, device )
 
 
 def _gather_sum( x, idx, coef ):

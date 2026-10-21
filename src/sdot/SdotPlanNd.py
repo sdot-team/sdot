@@ -292,7 +292,8 @@ _CARD_OPTIONS = [ "tol_abs", "tol_rel", "t_min", "mult_ok", "factor", "maxit", "
                   "lin", "host_method", "lin_tol", "amg_variant", "mg_shift", "mg_recycle", "mg_rebuild", "mg_stop", "mg_nu", "mg_kcycle",
                   "lin_maxit", "trace", "mg_float", "mg_smoothed",
                   "continuation", "conv_threshold", "conv_s0", "conv_ratio", "conv_min", "conv_possible", "min_scale",
-                  "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny", "agg_margin", "agg_gap", "agg_nb_dups", "sink", "sink_w" ]
+                  "img_x0", "img_y0", "img_hx", "img_hy", "img_nx", "img_ny", "agg_margin", "agg_gap", "agg_nb_dups", "sink", "sink_w",
+                  "start_box", "start_lo0", "start_lo1", "start_lo2", "start_hi0", "start_hi1", "start_hi2" ]
 
 
 def card_density_call( dens, d ):
@@ -362,7 +363,8 @@ def _card_linear_solves( row, col, val, dia, rhs, method = "mg", tol = 1e-6, smo
         solution = loom.out( solution ),               # ( not `d`: a name loom's generated templates use )
         iterations = loom.out( iterations ),
     )
-    return np.asarray( solution.raw ).reshape( k, n ), np.asarray( iterations.raw ).reshape( -1 ).astype( int )
+    from loom.tensor.host import to_host
+    return to_host( solution.raw ).reshape( k, n ), to_host( iterations.raw ).reshape( -1 ).astype( int )
 
 
 #: the precision of the card multigrid's levels by default ( the outer flexible CG is in double either way ): float, the
@@ -434,7 +436,22 @@ class SdotPlanNd( Displayable ):
     def _solve( cls, problem, settings, verbose, warm = None ):
         """THE path: `OtProblem.solve()` and only it goes through here. `warm` is the last SOLUTION
         the problem returned -- the start when the settings do not impose one ( see
-        `_start_from_plan` )."""
+        `_start_from_plan` ).
+
+        The solve runs on the driver of its distributions, as their calls do ( `loom.ffi_call` ): Jax tracers in a Torch
+        process are solved by Jax, on its own device -- what is decided here from `loom.resolved_device()` ( the card's solver
+        and tree, or the CPU's ) follows them, not the default framework's card."""
+        from loom.calls import _framework_of
+        from loom.drivers import framework_defaults
+        framework = _framework_of( ( problem.source, problem.target ), framework_defaults.framework_name() )
+        if framework is None:
+            return cls._solve_here( problem, settings, verbose, warm )
+        with framework_defaults.using( framework ):
+            return cls._solve_here( problem, settings, verbose, warm )
+
+    @classmethod
+    def _solve_here( cls, problem, settings, verbose, warm = None ):
+        """`_solve`, on the driver in force"""
         if not getattr( problem, "_is_detached", False ) and cls._wants_derivatives( problem, settings ):
             # THE SOLVE IS NOT DIFFERENTIATED: it runs on detached inputs, and its outputs get their derivative from the implicit
             # function theorem ( `_attach_derivatives` )
@@ -726,7 +743,7 @@ class SdotPlanNd( Displayable ):
         self._aggregation_inputs( pos_raw, settings, n )
 
         if on_card:
-            return self._build_card( pd, settings, step, verbose )
+            return self._build_card( pd, settings, step, verbose, self._start_box( dst_dist, d ) )
 
         options = _Options(
             mass_tol = float( settings.tol ), mass_rtol = float( tun.mass_rtol ), t_min = float( tun.t_min ),
@@ -937,7 +954,7 @@ class SdotPlanNd( Displayable ):
                 first = first or e
         raise first
 
-    def _build_card( self, pd, settings, step, verbose ):
+    def _build_card( self, pd, settings, step, verbose, start_box ):
         """THE CARD'S SOLVE ( `src/sdot/include/sdot/gpu/Newton2D.cuh` ): the same Newton, the same options and outputs as the CPU's, in
         ONE ffi call whose handler drives the loop on the call's stream -- so it runs under `jax.jit` too. Taken in 2D and 3D,
         with the BSP tree and a box domain ( `PowerDiagram_Bsp._card_takes` ); anything else is refused here rather than solved
@@ -1020,6 +1037,11 @@ class SdotPlanNd( Displayable ):
         opts = [ 0.0 ] * len( _CARD_OPTIONS )
         def put( name, v ):
             opts[ _CARD_OPTIONS.index( name ) ] = float( v )
+        # the box where the similarity start packs the seeds ( `_start_box`: the target's inscribed box, flag 0 for the domain's )
+        sb = np.asarray( start_box.raw, dtype = float ).reshape( -1 )
+        put( "start_box", sb[ 0 ] )
+        for k in range( d ):
+            put( f"start_lo{ k }", sb[ 1 + k ] ); put( f"start_hi{ k }", sb[ 1 + d + k ] )
         put( "tol_abs", settings.tol ); put( "tol_rel", tun.mass_rtol ); put( "t_min", tun.t_min ); put( "mult_ok", tun.restart_factor )
         put( "factor", 0.9 ); put( "maxit", settings.max_iter ); put( "max_backtracks", tun.max_backtracks ); put( "step", _STEP[ step ] )
         put( "residual", _RESIDUAL[ tun.residual ] ); put( "power", tun.residual_power ); put( "switch", tun.residual_switch )

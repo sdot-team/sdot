@@ -45,14 +45,17 @@ from .OtProblem import Direct, Iterative, OtNotConverged, OtProblem
 from .distributions.SumOfDiracs import SumOfDiracs
 
 
-def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 200, callback = None, verbose = False, ot_tol = None,
-                  seed = None, **settings ):
+def quantization( target, positions, masses = None, *, periodicity = None, radial_func = None, target_mass = 1.0, tol = 2e-2,
+                  max_iter = 200, callback = None, verbose = False, ot_tol = None, seed = None, **settings ):
     """Positions of diracs that quantize `target` optimally, by Lloyd iterations: each dirac moves to the barycenter of its
     cell until the moves are small. Returns the positions, `[ n, d ]`.
 
     * `positions`: the starting positions `[ n, d ]`, or a number of diracs, then drawn uniformly in the support of
       `target` ( with `seed` ).
     * `masses`: the mass of each dirac `[ n ]`, equal by default.
+    * `periodicity`, `radial_func`: those of the transport ( see `OtProblem` ) -- Lloyd on a torus, a Klein bottle...; the
+      positions then stay next to where they started, possibly outside the support.
+    * `target_mass`: the share of `target` the diracs take ( a partial transport, see `SumOfDiracs` ), `1` by default.
     * `tol`: stop when the root mean square move is under `tol` times the size of the cells. `max_iter`: at most.
     * `callback( iteration, positions, plan )`: called after each solve -- to record the iterations.
     * `ot_tol` and the other keywords: the settings of the solver ( see `Iterative` ).
@@ -65,7 +68,8 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
     `positions` can also be a NUMBER of diracs: they then start uniformly at random in the support of
     `target` ( its `bounding_half_spaces` ), drawn with `numpy.random.default_rng( seed )`.
 
-    `masses` : `[ n ]`, the mass of each dirac ( kept during the iterations ) -- equal by default.
+    `masses` : `[ n ]`, the mass of each dirac ( kept during the iterations ) -- equal by default. `periodicity`, `radial_func`:
+    given to `OtProblem`; `target_mass`: to each `SumOfDiracs`.
     `tol` : the relative stopping criterion ( see the module ) -- the root mean square move must be
     lower than `tol` times the square root of the transport cost. `max_iter` : the number of
     iterations at most ( a warning is issued if it is reached first ). `callback( iteration, positions, plan )`
@@ -77,7 +81,7 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
     if isinstance( positions, numbers.Integral ):
         positions = _to_framework( uniform_in_support( target, int( positions ), seed ), universe_of( ( target, masses ) ) )
 
-    pb = OtProblem( SumOfDiracs( positions, masses ), target )
+    pb = OtProblem( SumOfDiracs( positions, masses, target_mass = target_mass ), target, periodicity = periodicity, radial_func = radial_func )
     nb_diracs = pb.source.nb_diracs.value
     if pb.regime == "direct":
         solver_settings = Direct( with_barycenters = True, **settings )
@@ -104,7 +108,7 @@ def quantization( target, positions, masses = None, *, tol = 2e-2, max_iter = 20
         if ratio <= tol or iteration == max_iter:
             break
 
-        pb.source = SumOfDiracs( b, masses )
+        pb.source = SumOfDiracs( b, masses, target_mass = target_mass )
         x = b
 
     if stagnations:

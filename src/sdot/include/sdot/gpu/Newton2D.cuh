@@ -107,6 +107,7 @@ enum Opt : int {
     O_IMG_X0, O_IMG_Y0, O_IMG_HX, O_IMG_HY, O_IMG_NX, O_IMG_NY,
     O_AGG_MARGIN, O_AGG_GAP, O_AGG_NB_DUPS,
     O_SINK, O_SINK_W,
+    O_START_BOX, O_START_LO0, O_START_LO1, O_START_LO2, O_START_HI0, O_START_HI1, O_START_HI2,
     NB_OPTS
 };
 enum ContinuationKind : int { CONT_NEVER = 0, CONT_AUTO = 1, CONT_ALWAYS = 2 };
@@ -1617,14 +1618,21 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         reduce( queue, n, ExtentOf<DIM,TF>{ pos }, red_ext.partials, red_ext.out );
         ExtentN<DIM> ext;
         read_back( queue, &ext, ( const ExtentN<DIM> * ) red_ext.out, 1 );
+        // into the box of the domain -- or, when the density is not positive on all of it, its inscribed box ( `Solve.h` )
+        double lo[ DIM ], hi[ DIM ];
+        for ( int k = 0; k < DIM; ++k ) {
+            const bool inscribed = o[ O_START_BOX ] > 0;
+            lo[ k ] = inscribed ? o[ O_START_LO0 + k ] : box_lo[ k ];
+            hi[ k ] = inscribed ? o[ O_START_HI0 + k ] : box_hi[ k ];
+        }
         double a = 1;
         for ( int k = 0; k < DIM; ++k ) {
-            const double span_dom = ( box_hi[ k ] - box_lo[ k ] ) * ( 1 - 2 * 0.1 ), span_pts = std::max( ext.hi[ k ] - ext.lo[ k ], 1e-300 );
+            const double span_dom = ( hi[ k ] - lo[ k ] ) * ( 1 - 2 * 0.1 ), span_pts = std::max( ext.hi[ k ] - ext.lo[ k ], 1e-300 );
             a = std::min( a, span_dom / span_pts );
         }
         Shift3 b{};
         for ( int k = 0; k < DIM; ++k )
-            b.v[ k ] = ( box_lo[ k ] + box_hi[ k ] ) / 2 - a * ( ext.lo[ k ] + ext.hi[ k ] ) / 2;
+            b.v[ k ] = ( lo[ k ] + hi[ k ] ) / 2 - a * ( ext.lo[ k ] + ext.hi[ k ] ) / 2;
         launch_kernel( queue, &similarity_weights<DIM,TF>, blocks_for( n ), BLOCK, 0, n, pos, a, b, w2 );
         if ( tree.on ) tree.to_slots( queue, w2, false );
         diagram( w2, *tri );
@@ -1681,7 +1689,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
         launch_kernel( queue, &pick_value, 1, 1, 0, ( const double * ) w, r0, gauge );
         launch_kernel( queue, &subtract_scalar, blocks_for( n ), BLOCK, 0, w, ( const double * ) gauge, 1.0, n );
     }
-    if ( can_continue && ! adaptive )                    // ( the start, for a continuation after a failed plain Newton )
+    if ( w_keep && ! adaptive )                          // ( the start, for a continuation after a failed plain Newton; none if the start already failed )
         cuda_check( cudaMemcpyAsync( w_keep, w, sizeof( double ) * n, cudaMemcpyDeviceToDevice, queue.stream ), "copy of the start" );
 
     /// the scale of a facet's coefficient ( `rho |facet| / 2 delta` ): in 2D `l ~ delta`, the density, or the mean density of
