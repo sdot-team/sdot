@@ -65,6 +65,7 @@ export default defineConfig({
               { text: 'Sums of Gaussians',      link: '/guide/distributions/gaussians' },
               { text: 'Meshes',                 link: '/guide/distributions/mesh' },
               { text: 'Lines and Surfaces',     link: '/guide/distributions/codim-mesh' },
+              { text: 'Projected Sources',      link: '/guide/distributions/projected' },
             ] },
             { text: 'Ground Metrics',           link: '/guide/ground-metrics/', collapsed: false, items: [
               { text: 'Periodicity',            link: '/guide/ground-metrics/periodicity' },

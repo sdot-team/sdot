@@ -193,15 +193,19 @@ class Visualizer:
     `new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
     the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.
 
+    `flat_points`: in 2D, the points are flat discs ( no sphere shading ) -- what a disc of the plane is, a particle of
+    a reconstruction for instance.
+
     `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
     density drawn under diracs.
     """
 
     def __init__( self, title = "sdot", background = None, frame_axis = "time",
                   playable = True, fps = 5.0, frame_value = 0.0, depth_colors = False, morph = 0, loop = False,
-                  autoplay = False, face_opacity = 1.0 ):
+                  autoplay = False, face_opacity = 1.0, flat_points = False ):
         self.title      = title
         self.face_opacity = float( face_opacity )
+        self.flat_points = flat_points
         self.depth_colors = depth_colors
         self.morph      = int( morph )
         self.loop       = loop
@@ -755,6 +759,7 @@ class Visualizer:
             "__FACE_OP__" : repr( self.face_opacity ),
             "__MORPH__"   : str( self.morph ),
             "__LOOP__"    : "true" if self.loop else "false",
+            "__FLATPTS__" : "1.0" if self.flat_points else "0.0",
             "__AUTOPLAY__": "true" if self.autoplay else "false",
         }
         return re.sub( r"__[A-Z0-9_]+__", lambda m: subs.get( m.group( 0 ), m.group( 0 ) ), _HTML )
@@ -1615,6 +1620,7 @@ void main() {
 precision highp float;
 in vec4 vCol; in vec3 vC; in float vR; out vec4 oCol;
 uniform mat4 uP; uniform float uSphere;
+const float FLATPTS = __FLATPTS__;
 // a light from the upper left, in front ( view space )
 const vec3 L = vec3(-0.45, 0.55, 0.70);
 void main() {
@@ -1632,7 +1638,7 @@ void main() {
     oCol = vec4(vCol.rgb * (0.32 + 0.68 * diff) + 0.28 * spec, vCol.a);
   } else {
     gl_FragDepth = gl_FragCoord.z;
-    float l = 0.55 + 0.45 * sqrt(max(0.0, 1.0 - q));   // sphere shading
+    float l = FLATPTS > 0.5 ? 1.0 : 0.55 + 0.45 * sqrt(max(0.0, 1.0 - q));   // sphere shading, or a flat disc
     oCol = vec4(vCol.rgb * l, vCol.a);
   }
 }`);

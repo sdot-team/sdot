@@ -90,6 +90,8 @@ struct ProviderAll {
     HD bool next( const State &, NothingLocal &, Plane<TK,D> &p ) {
         for ( ;; ) {
             if ( k == k0 && t == 0 ) ++k;                // we do not cut ourselves ( but our images do )
+            if constexpr ( has_groups<PD>() )            // ( a site of duplicates: one plane, that of its first member )
+                if ( t == 0 && k < n && pd.hidden_in_site( k0, k ) ) { ++k; continue; }
             if ( k < n ) break;
             if constexpr ( is_periodic<PD>() ) {
                 if ( ++t >= pd.image_count() ) return false;
@@ -178,6 +180,12 @@ struct ProviderBsp {
     /// GROUPS: a member of the group of `k0`, which the pre-pass proposes ( the tree's pruning reads the outer planes only )
     HD bool member( SI k ) const {
         if constexpr ( has_groups<PD>() ) return pd.same_group( k0, k );
+        else return false;
+    }
+
+    /// GROUPS: a member of a site of duplicates past its first, whose plane is the first's ( `hidden_in_site` ): not proposed
+    HD bool hidden( SI k ) const {
+        if constexpr ( has_groups<PD>() ) return k < n && pd.hidden_in_site( k0, k );
         else return false;
     }
 
@@ -283,7 +291,7 @@ struct ProviderBsp {
         if constexpr ( MEMO ) {                          // the pre-pass: yesterday's neighbors, without descending
             while ( l.ipre < npre ) {
                 const SI r = remembered( l.ipre++ );
-                if ( member( r ) )                       // ( already proposed )
+                if ( member( r ) || hidden( r ) )        // ( already proposed, or seen through the first of its site )
                     continue;
                 plane_of_rank( r, p );
                 return true;
@@ -294,7 +302,7 @@ struct ProviderBsp {
             // ---- a leaf is open: we return the next seed of its slice
             while ( l.k < l.stop ) {
                 const SI k = l.k++;
-                if ( k == k0 || member( k ) )
+                if ( k == k0 || member( k ) || hidden( k ) )
                     continue;
                 if constexpr ( MEMO ) {                  // already proposed? the cursor advances with `k`
                     while ( l.iskip < npre && remembered( l.iskip ) < k ) ++l.iskip;

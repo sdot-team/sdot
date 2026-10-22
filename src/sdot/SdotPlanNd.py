@@ -440,10 +440,19 @@ class SdotPlanNd( Displayable ):
 
         The solve runs on the driver of its distributions, as their calls do ( `loom.ffi_call` ): Jax tracers in a Torch
         process are solved by Jax, on its own device -- what is decided here from `loom.resolved_device()` ( the card's solver
-        and tree, or the CPU's ) follows them, not the default framework's card."""
-        from loom.calls import _framework_of
+        and tree, or the CPU's ) follows them, not the default framework's card. The SOURCE decides ( its positions and masses ):
+        a target is data, converted when it is another framework's -- and the detached solve of a derivative, whose positions are
+        Jax arrays beside a target Torch built, stays on Jax."""
+        from loom.calls import _scan
         from loom.drivers import framework_defaults
-        framework = _framework_of( ( problem.source, problem.target ), framework_defaults.framework_name() )
+        from loom.drivers.promotion import promote
+        default = framework_defaults.framework_name()
+        tracing, plain = set(), set()
+        _scan( problem.source, tracing, plain, set() )
+        if not tracing:                                  # ( nothing traces: the positions' -- the masses may be the default's, from numpy )
+            plain = set()
+            _scan( problem.source.positions, tracing, plain, set() )
+        framework = promote( tracing, plain, default )
         if framework is None:
             return cls._solve_here( problem, settings, verbose, warm )
         with framework_defaults.using( framework ):

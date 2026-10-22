@@ -56,19 +56,123 @@ struct GaussLegendre1d<5> {
     }
 };
 
-/// see the header. `Q`: the points of the Gauss-Legendre rule on each merged sub-piece.
+/// `transport_1d` for a source of LINEAR pieces ( or constant ) against a target of CONSTANT pieces -- the tents
+/// against an image. The same sweep and the same quadrature, with what a polynomial T allows: on a merged sub-piece,
+/// t = u - u0, the source density is a + b t, and T( t ) = x_d + ( dd + a t + b t^2 / 2 ) / rho is evaluated as a
+/// polynomial ( no inverse cdf at the quadrature points ); the sub-piece starts where the previous one ended; 1 / rho
+/// is taken once per target piece. One inverse cdf remains, where a target piece ends inside a source piece.
+template<int Q, class SrcStream, class DstStream, class OnEvent>
+SDOT_OT1D_HD Sums1d transport_1d_lin_const( SrcStream &&src, DstStream &&dst, OnEvent &&on_event, double dd0 ) {
+    using SP = typename std::decay_t<SrcStream>::Piece;
+    using GL = GaussLegendre1d<Q>;
+
+    Sums1d S;
+    typename std::decay_t<SrcStream>::Piece ps;
+    typename std::decay_t<DstStream>::Piece pd;
+    bool has_src = src.next( ps ), has_dst = dst.next( pd );
+    double sd = 0, us = 0;              // mass and local coordinate already taken in the current source piece
+    double dd = dd0;                    // mass already taken in the current target piece
+    bool fired = false;
+    double ms = has_src ? double( ps.mass() ) : 0.0;
+    double md = 0, xd = 0, Ld = 0, rd = 0;   // the current target piece: mass, start, length, 1 / density
+    auto load_dst = [&]() {
+        md = double( pd.mass() ); xd = double( pd.x0 ); Ld = double( pd.x1 ) - xd;
+        rd = pd.c[ 0 ] > 0 ? 1.0 / double( pd.c[ 0 ] ) : 0.0;
+    };
+    if ( has_dst )
+        load_dst();
+    auto next_src = [&]() {
+        has_src = src.next( ps ); sd = 0; us = 0; fired = false;
+        if ( has_src )
+            ms = double( ps.mass() );
+    };
+    auto target_at = [&]( double level ) -> double {   // as the generic version's, for a constant piece
+        level = level < 0 ? 0 : ( level > md ? md : level );
+        if ( !( level > 0 ) )
+            return xd;
+        if ( !( rd > 0 ) )
+            return xd + Ld;
+        const double u = level * rd;
+        return xd + ( u < Ld ? u : Ld );
+    };
+
+    while ( has_src ) {
+        if ( !fired && ps.event >= 0 )
+            on_event( ps.event, S );
+        fired = true;
+
+        if ( !( ms > 0 ) ) {
+            if ( has_dst && ps.length() > 0 ) {
+                const double T = target_at( dd );
+                const double a = double( ps.x0 ) - T, b = double( ps.x1 ) - T;
+                S.phi += b * b - a * a;
+            }
+            next_src();
+            continue;
+        }
+        if ( !has_dst ) {
+            next_src();
+            continue;
+        }
+        if ( !( md - dd > 0 ) ) {
+            has_dst = dst.next( pd ); dd = 0;
+            if ( has_dst )
+                load_dst();
+            continue;
+        }
+
+        const double take = ms - sd < md - dd ? ms - sd : md - dd;
+        const bool src_done = take >= ms - sd;
+        const double u0 = us;
+        const double u1 = src_done ? double( ps.length() ) : double( ps.inv_cdf( sd + take ) );
+
+        const double h = 0.5 * ( u1 - u0 );
+        if ( h > 0 ) {
+            const double a = double( ps.density( u0 ) );
+            double b = 0;
+            if constexpr ( SP::degree == 1 )
+                b = double( ps.c[ 1 ] );
+            const double T0 = xd + dd * rd, T1 = a * rd, T2 = 0.5 * b * rd;
+            const double y0 = double( ps.x0 ) + u0;
+            for ( int q = 0; q < Q; ++q ) {
+                const double t = h + h * GL::x( q );
+                const double y = y0 + t;
+                const double f = a + b * t;
+                const double T = T0 + t * ( T1 + t * T2 );
+                const double wq = h * GL::w( q );
+                const double e = y - T;
+                S.cost += wq * e * e * f;
+                S.P0 += wq * T;
+                S.P1 += wq * y * T;
+                S.P2 += wq * y * y * T;
+                S.phi += wq * 2 * e;
+            }
+        }
+
+        sd += take; dd += take; us = u1;
+        if ( src_done )
+            next_src();
+    }
+    return S;
+}
+
+/// see the header. `Q`: the points of the Gauss-Legendre rule on each merged sub-piece. `dd0`: the mass already taken in
+/// the target's first piece -- a chunk of a parallel sweep starts the target mid-way ( its sums are then local ).
 template<int Q = 3, class SrcStream, class DstStream, class OnEvent>
-SDOT_OT1D_HD Sums1d transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on_event ) {
+SDOT_OT1D_HD Sums1d transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on_event, double dd0 = 0 ) {
     using SP = typename std::decay_t<SrcStream>::Piece;
     using DP = typename std::decay_t<DstStream>::Piece;
     using GL = GaussLegendre1d<Q>;
+    if constexpr ( requires { SP::degree; DP::degree; } )
+        if constexpr ( SP::degree <= 1 && DP::degree == 0 )
+            return transport_1d_lin_const<Q>( src, dst, on_event, dd0 );
 
     Sums1d S;
     SP ps;
     DP pd;
     bool has_src = src.next( ps ), has_dst = dst.next( pd );
     double sd = 0;                      // mass already taken in the current source piece
-    double dd = 0;                      // mass already taken in the current target piece
+    double dd = dd0;                    // mass already taken in the current target piece
     bool fired = false;                 // the current source piece's event already reported
 
     auto target_at = [&]( double level ) -> double {   // T at the current target piece, `level` the mass taken in it

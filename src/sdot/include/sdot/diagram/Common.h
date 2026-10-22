@@ -83,6 +83,20 @@
         return a >= 0 && a == seed_parent( k1 ) && agg_of_duplicates( a ); \
     } \
     HD SI   next_member( SI k ) const { if constexpr ( has_groups ) return SI( group_next( k ) ); else return k; } \
+    /* a member `k` of a SITE of exact duplicates, which a cell of another group sees through the plane of the site's first \
+       member ( the smallest rank ): their planes are the same, and a cell that took both could keep a facet of length zero \
+       between them -- a vertex of two equal planes, whose share the adjoint cannot solve for ( `diagram::scatter_cell_grad` \
+       shares the kept plane among the members ). Which one stays was a matter of rounding: the card and the CPU differed */ \
+    HD bool hidden_in_site( SI k0, SI k ) const { \
+        if constexpr ( has_groups ) { \
+            if ( k >= nb_seeds() || k0 >= nb_seeds() || SI( group_rep( k0 ) ) == SI( group_rep( k ) ) ) return false; \
+            const SI a = seed_parent( k ); \
+            if ( a < 0 || ! agg_of_duplicates( a ) ) return false; \
+            for ( SI j = next_member( k ); j != k; j = next_member( j ) ) \
+                if ( j < k && same_site( k, j ) ) return true; \
+        } \
+        return false; \
+    } \
     /* `f( j )` for each member `j` of the site of `k` ( `k` itself included ), and their number */ \
     HD SI   for_each_in_site( SI k, auto &&f ) const { \
         if constexpr ( has_groups ) { \
@@ -193,6 +207,9 @@
     } \
     HD void moments( auto &&mass, auto &&first, auto &&second, const auto &dom, auto &&scratch, const auto &dist, SI thread_index, SI nb_threads ) const { \
         diagram::moments( *this, mass, first, second, dom, scratch, dist, thread_index, nb_threads ); \
+    } \
+    HD void potential_into_pixels( auto &&sink, const auto &dom, auto &&scratch, const auto &dist, SI thread_index, SI nb_threads ) const { \
+        diagram::potential_into_pixels( *this, sink, dom, scratch, dist, thread_index, nb_threads ); \
     } \
     HD void hessian_row( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist ) const { \
         diagram::hessian_row( *this, k, dom, res, scratch, thread_index, dist ); \

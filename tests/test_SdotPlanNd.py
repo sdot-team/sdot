@@ -852,7 +852,9 @@ if test( "the_plan_derives_on_the_card" ):
         check_grad( lambda p, v: getattr( OtProblem( SumOfDiracs( p ), Image( v, frame = [ 1.0, 1.0 ] ) ).solve( settings ), output ), pos, values, seed = 2, **tight )
         check_grad( lambda p, c: getattr( OtProblem( SumOfDiracs( p ), SumOfGaussians( c, s, weights = m, support_box = ( [ 0, 0 ], [ 1, 1 ] ) ) ).solve( settings ), output ),
                     pos, c, seed = 3, **tight )
-    # under a `jit`, the same
+    # under a `jit`, the same -- and under another driver, Jax's tracers in that process: the solve runs on Jax ( its device: the
+    # CPU in a Torch environment ), beside the target that driver built ( `SdotPlanNd._solve` )
+    jax.config.update( "jax_enable_x64", True )        # ( the test calls Jax itself: its doubles, which loom sets only for its Jax driver )
     f = lambda p: OtProblem( SumOfDiracs( p, weights = nu ), Box() ).solve( settings ).cost.raw
     assert numpy.abs( _host( jax.jit( jax.grad( f ) )( pos ) ) - _host( jax.grad( f )( pos ) ) ).max() < 1e-9
 
@@ -886,12 +888,15 @@ if test( "duplicates_derive_on_the_card" ):
     assert sorted( map( sorted, plan.groups.members().values() ) ) == [ [ 0, 1 ], [ 4, 7, 9 ], [ 11, 12 ] ], plan.groups.members()
     m = _host( plan.cell_masses ).reshape( -1 )
     b = _host( plan.barycenters ).reshape( n, -1 )
+    # ( `atol`: the split's derivative is that of one frozen Newton step, a few 1e-9 off here -- the same for any `eps`, under
+    #   every driver -- and the direction `check_grad` draws is the framework's: under Torch, one where a cell's mass moves 25
+    #   times less, whose `rtol` part no longer covers it )
     for output in ( "cost", "barycenters", "cell_masses" ):
-        check_grad( lambda ps, q: getattr( solve( ps, q ), output ), pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+        check_grad( lambda ps, q: getattr( solve( ps, q ), output ), pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 5e-9 )
     # ( the weights but those of the exact duplicates past the first: theirs, `W + r^2 v`, read the radius of their fan, which
     # follows the spacing of the neighbours and is frozen in the derivative -- the split does not depend on it )
     keep = numpy.array( [ i for i in range( n ) if i not in ( 1, 7, 9 ) ] )
-    check_grad( lambda ps, q: solve( ps, q ).weights.raw.reshape( -1 )[ keep ], pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+    check_grad( lambda ps, q: solve( ps, q ).weights.raw.reshape( -1 )[ keep ], pos[ sites ], nu, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 5e-9 )
     if _jax_driver():                                # ( through jax: see `_jax_driver` )
         # the envelope, member by member
         f = lambda p: OtProblem( SumOfDiracs( p, weights = nu ), _box_target() ).solve( settings ).cost.raw

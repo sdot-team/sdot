@@ -2,6 +2,13 @@
 from errand import Param, bench, experiment, test
 
 
+def _host( x, dtype = None ):
+    """`x` as a numpy array, wherever it lives: `numpy.asarray` refuses a Torch tensor on the card"""
+    import numpy
+    from loom.tensor.host import to_host
+    return numpy.asarray( x if isinstance( x, ( list, tuple, int, float ) ) else to_host( x ), dtype = dtype )
+
+
 # Geometry is cut in FP32 by default ( see `Cell.py` ), which is enough for an optimal transport
 # but not for comparing a sum of measures to 1e-10 nor a Jacobian to 1e-9: the CORRECTNESS
 # tests run with the double kernel, and the `float` kernel has its own tests further down
@@ -9,7 +16,7 @@ from errand import Param, bench, experiment, test
 
 
 def _measures( v ):
-    return numpy.asarray( v.measures.value ).reshape( -1 )
+    return _host( v.measures.value ).reshape( -1 )
 
 
 def _monte_carlo_measures( pos, mi, ma, weights = None, nb_samples = 200000, seed = 0 ):
@@ -22,11 +29,11 @@ def _monte_carlo_measures( pos, mi, ma, weights = None, nb_samples = 200000, see
     convention is written here a second time, and without a single plane.
     """
     rng = numpy.random.default_rng( seed )
-    mi, ma = numpy.asarray( mi, float ), numpy.asarray( ma, float )
+    mi, ma = _host( mi, float ), _host( ma, float )
     pts = rng.uniform( mi, ma, size = ( nb_samples, mi.size ) )
     d2 = ( ( pts[ :, None, : ] - pos[ None, :, : ] ) ** 2 ).sum( axis = 2 )
     if weights is not None:
-        d2 = d2 - numpy.asarray( weights, float )[ None, : ]
+        d2 = d2 - _host( weights, float )[ None, : ]
     nearest = d2.argmin( axis = 1 )
     volume = float( numpy.prod( ma - mi ) )
     return numpy.bincount( nearest, minlength = len( pos ) ) / nb_samples * volume
@@ -559,16 +566,16 @@ if test( "the_memory_changes_nothing_but_the_cost" ):
         box = box_half_spaces( numpy.zeros( d ), numpy.ones( d ) )
         ref = PowerDiagram( pos, weights = w, boundaries = box, memory = 0 )
         pd = PowerDiagram( pos, weights = w, boundaries = box, memory = 32 )
-        assert not numpy.asarray( pd.memo_counts ).any()          # nothing yet
+        assert not _host( pd.memo_counts ).any()          # nothing yet
         assert numpy.abs( _measures( pd ) - _measures( ref ) ).max() < 1e-12
-        counts = numpy.asarray( pd.memo_counts ).reshape( -1 )
+        counts = _host( pd.memo_counts ).reshape( -1 )
         assert counts.mean() > ( 4 if d == 2 else 10 )             # filled at the first call
         assert numpy.abs( _measures( pd ) - _measures( ref ) ).max() < 1e-12
         ref.weights = 2 * w
         pd.weights = 2 * w                                         # the stale memories remain useful
         assert numpy.abs( _measures( pd ) - _measures( ref ) ).max() < 1e-12
         pd.positions = pos[ ::-1 ]                                  # the tree is rebuilt: the memory goes away
-        assert not numpy.asarray( pd.memo_counts ).any()
+        assert not _host( pd.memo_counts ).any()
         ref.positions = pos[ ::-1 ]
         assert numpy.abs( _measures( pd ) - _measures( ref ) ).max() < 1e-12
 
@@ -629,8 +636,8 @@ def _facets_2d( pd, n ):
     the edge `[ v_c, v_c+1 ]`, so the facet between `i` and `cut_ids( c )` is that segment.
     """
     cs = pd.cells
-    nvs = numpy.asarray( cs.nb_vertices.value ).reshape( -1 )
-    cis = numpy.asarray( cs.cut_ids.raw )
+    nvs = _host( cs.nb_vertices.value ).reshape( -1 )
+    cis = _host( cs.cut_ids.raw )
 
     length = numpy.zeros( ( n, n ) )
     middle = numpy.zeros( ( n, n, 2 ) )
@@ -655,7 +662,7 @@ def _jacobian( f, x, nb_rows ):
     for i in range( nb_rows ):
         seed = numpy.zeros( nb_rows )
         seed[ i ] = 1.0
-        rows.append( numpy.asarray( pullback( seed )[ 0 ] ) )
+        rows.append( _host( pullback( seed )[ 0 ] ) )
     return numpy.array( rows )
 
 
@@ -834,7 +841,7 @@ if test( "the_domain_carries_no_gradient" ):
     try:
         _, pullback = loom.vjp(
             lambda o: PowerDiagram( pos, boundaries = ( dirs, o ) ).measures.value, offs )
-        numpy.asarray( pullback( numpy.ones( n ) )[ 0 ] )
+        _host( pullback( numpy.ones( n ) )[ 0 ] )
     except Exception as e:
         assert "the backward does not say it computes" in str( e ), str( e )
         assert "from_res.power_diagram" in str( e ), str( e )
@@ -869,7 +876,7 @@ if test( "cells_are_the_cells" ):
         v = Voronoi( pos, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ) )
 
         cs = v.cells
-        nvs = numpy.asarray( cs.nb_vertices.value )
+        nvs = _host( cs.nb_vertices.value )
         for i in range( len( pos ) ):
             ref = v.cell( i )
             nv = int( ref.nb_vertices.value )
@@ -900,7 +907,7 @@ if test( "cells_measure_like_measures" ):
         rng = numpy.random.default_rng( 11 )
         pos = rng.uniform( 0.1, 0.9, size = ( 20, d ) )
         v = Voronoi( pos, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ) )
-        got = numpy.asarray( v.cells.measure.value ).reshape( -1 )
+        got = _host( v.cells.measure.value ).reshape( -1 )
         assert numpy.allclose( got, _measures( v ) ), d
         assert abs( float( got.sum() ) - 1 ) < 1e-10
 
@@ -921,7 +928,7 @@ if test( "cells_of_an_unbounded_diagram" ):
     from sdot.Cell import set_kernel_dtype
     set_kernel_dtype( "FP64" )
     pos = numpy.array( [ [ x, y ] for x in ( 0.25, 0.5, 0.75 ) for y in ( 0.25, 0.5, 0.75 ) ] )
-    bounded = numpy.asarray( Voronoi( pos ).cells.is_bounded ).reshape( -1 )
+    bounded = _host( Voronoi( pos ).cells.is_bounded ).reshape( -1 )
     assert bounded[ 4 ] == 1                    # the one in the centre, surrounded
     assert bounded.sum() == 1                   # the other eight go off to infinity
 
@@ -948,7 +955,7 @@ if test( "weighted_cells_are_the_weighted_cells" ):
         w = rng.uniform( -0.06, 0.06, size = 14 )
         w[ 3 ] = -2.0                                  # this one wins nowhere
         pd = PowerDiagram( pos, weights = w, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ) )
-        got = numpy.asarray( pd.cells.measure.value ).reshape( -1 )
+        got = _host( pd.cells.measure.value ).reshape( -1 )
         assert numpy.allclose( got, _measures( pd ), atol = 1e-12 ), d
         assert abs( float( got[ 3 ] ) ) < 1e-14, ( d, got[ 3 ] )
         assert abs( float( got.sum() ) - 1 ) < 1e-10, d
@@ -968,8 +975,8 @@ def _cut_sets( pd ):
     precisely.
     """
     cs = pd.cells
-    nbc = numpy.asarray( cs.nb_cuts.value ).reshape( -1 )
-    ids = numpy.asarray( cs.cut_ids.raw )
+    nbc = _host( cs.nb_cuts.value ).reshape( -1 )
+    ids = _host( cs.cut_ids.raw )
     return [ frozenset( int( j ) for j in ids[ i, : int( nbc[ i ] ) ] if j >= 0 )
              for i in range( len( nbc ) ) ]
 
@@ -1001,12 +1008,12 @@ if test( "the_bsp_holds_every_seed_exactly_once" ):
         pos = rng.uniform( 0, 1, size = ( n, d ) )
         bsp = AaBsp( pos, max_seeds_per_leaf = leaf )
 
-        order = numpy.asarray( bsp.seed_indices ).reshape( -1 )
+        order = _host( bsp.seed_indices ).reshape( -1 )
         assert sorted( order.tolist() ) == list( range( n ) ), ( d, n, leaf )
 
-        left = numpy.asarray( bsp.node_left ).reshape( -1 )
-        beg = numpy.asarray( bsp.node_begin ).reshape( -1 )
-        end = numpy.asarray( bsp.node_end ).reshape( -1 )
+        left = _host( bsp.node_left ).reshape( -1 )
+        beg = _host( bsp.node_begin ).reshape( -1 )
+        end = _host( bsp.node_end ).reshape( -1 )
         # the leaves PARTITION `seed_indices`, in order: that is what makes a leaf
         # readable in one piece.
         slices = sorted( ( int( beg[ k ] ), int( end[ k ] ) ) for k in range( len( left ) ) if left[ k ] < 0 )
@@ -1051,7 +1058,7 @@ if test( "the_tree_shape_does_not_depend_on_the_data" ):
                         assert bsp.max_depth == want, ( n, leaf, d, kind, bsp.max_depth, want )
                     else:
                         assert bsp.max_depth <= want, ( n, leaf, d, kind, bsp.max_depth, want )
-                    nb = int( numpy.asarray( bsp.node_left ).size )
+                    nb = int( _host( bsp.node_left ).size )
                     assert nb <= AaBsp.max_nb_nodes_for( n, leaf ), ( n, leaf, d, kind, nb )
 
 
@@ -1074,13 +1081,13 @@ if test( "a_bsp_node_contains_its_subtree" ):
     pos = rng.normal( size = ( 300, 3 ) )
     bsp = AaBsp( pos, max_seeds_per_leaf = 7 )
 
-    left = numpy.asarray( bsp.node_left ).reshape( -1 )
-    right = numpy.asarray( bsp.node_right ).reshape( -1 )
-    beg = numpy.asarray( bsp.node_begin ).reshape( -1 )
-    end = numpy.asarray( bsp.node_end ).reshape( -1 )
-    box = numpy.asarray( bsp.node_box ).reshape( -1, 2, 3 )
+    left = _host( bsp.node_left ).reshape( -1 )
+    right = _host( bsp.node_right ).reshape( -1 )
+    beg = _host( bsp.node_begin ).reshape( -1 )
+    end = _host( bsp.node_end ).reshape( -1 )
+    box = _host( bsp.node_box ).reshape( -1, 2, 3 )
     lo, hi = box[ :, 0 ], box[ :, 1 ]
-    order = numpy.asarray( bsp.seed_indices ).reshape( -1 )
+    order = _host( bsp.seed_indices ).reshape( -1 )
 
     def seeds_of( k ):
         if left[ k ] < 0:
@@ -1125,13 +1132,13 @@ if test( "the_weight_majorant_majorates" ):
                           ( "noisy affine", pos, 0.5 * pos[ :, 0 ] + 0.02 * rng.normal( size = 400 ) ),
                           ( "clamped border", clamped, 0.1 * numpy.sin( 7 * clamped[ :, 1 ] ) + 0.02 * rng2.normal( size = 400 ) ) ):
         bsp = AaBsp( pos, w, max_seeds_per_leaf = 12 )
-        left = numpy.asarray( bsp.node_left ).reshape( -1 )
-        right = numpy.asarray( bsp.node_right ).reshape( -1 )
-        beg = numpy.asarray( bsp.node_begin ).reshape( -1 )
-        end = numpy.asarray( bsp.node_end ).reshape( -1 )
-        wa = numpy.asarray( bsp.node_wa )
-        wb = numpy.asarray( bsp.node_wb ).reshape( -1 )
-        order = numpy.asarray( bsp.seed_indices ).reshape( -1 )
+        left = _host( bsp.node_left ).reshape( -1 )
+        right = _host( bsp.node_right ).reshape( -1 )
+        beg = _host( bsp.node_begin ).reshape( -1 )
+        end = _host( bsp.node_end ).reshape( -1 )
+        wa = _host( bsp.node_wa )
+        wb = _host( bsp.node_wb ).reshape( -1 )
+        order = _host( bsp.seed_indices ).reshape( -1 )
 
         def seeds_of( k ):
             if left[ k ] < 0:
@@ -1459,8 +1466,8 @@ if test( "an_accelerator_built_on_other_weights_is_still_right" ):
     assert other.tree is tree
     ref2 = _measures( PowerDiagram( pos, weights = w[ ::-1 ], boundaries = box_half_spaces( *box ), accelerator = "plain" ) )
     assert numpy.allclose( ref2, _measures( other ), atol = 1e-9 )
-    assert numpy.allclose( numpy.asarray( other.weights ).reshape( -1 ), w[ ::-1 ] )
-    assert numpy.allclose( numpy.asarray( other.positions ).reshape( -1, 2 ), pos )
+    assert numpy.allclose( _host( other.weights ).reshape( -1 ), w[ ::-1 ] )
+    assert numpy.allclose( _host( other.positions ).reshape( -1, 2 ), pos )
 
 
 if test( "the_accelerator_changes_nothing_to_the_derivatives" ):
@@ -1529,8 +1536,8 @@ if test( "an_accelerated_diagram_draws_the_same_cells" ):
     pos = rng.uniform( 0.05, 0.95, size = ( 40, 2 ) )
     w = rng.uniform( -0.02, 0.02, 40 )
     plain, fast = _both_ways( pos, w, box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
-    a = numpy.asarray( plain.cells.measure.value ).reshape( -1 )
-    b = numpy.asarray( fast.cells.measure.value ).reshape( -1 )
+    a = _host( plain.cells.measure.value ).reshape( -1 )
+    b = _host( fast.cells.measure.value ).reshape( -1 )
     assert numpy.allclose( a, b, atol = 1e-9 )
     assert numpy.allclose( b, _measures( fast ), atol = 1e-9 )
 
@@ -1599,7 +1606,7 @@ if p := bench( "pd accelerated",
             t = time.perf_counter()
             if w is not None:
                 pd.weights = w
-            m = numpy.asarray( pd.measures.value )
+            m = _host( pd.measures.value )
             return time.perf_counter() - t, m.reshape( -1 )
         once()                                          # warm-up: this is the one that compiles
         once()                                          # and this one that fills the memory ( `memory` )
@@ -1673,7 +1680,7 @@ if p := experiment( "vor 2D",
     v = Voronoi( _seeds( 2, p.nb_points, p.seed ), boundaries = box_half_spaces( [ 0, 0 ], [ 1, 1 ] ) )
     viz = Visualizer( title = f"Voronoi 2D, { p.nb_points } seeds" )
     v.add_to_viz( viz )
-    viz.add_points( numpy.asarray( v.positions ), color = "#ffffff" )
+    viz.add_points( _host( v.positions ), color = "#ffffff" )
     _write_both( p, viz, "vor_2d" )
 
 if p := experiment( "vor 2D open",
@@ -1697,7 +1704,7 @@ if p := experiment( "vor 2D open",
     v = Voronoi( _seeds( 2, p.nb_points, p.seed ) )
     viz = Visualizer( title = f"Voronoi 2D unbounded, { p.nb_points } seeds" )
     v.add_to_viz( viz )
-    viz.add_points( numpy.asarray( v.positions ), color = "#ffffff" )
+    viz.add_points( _host( v.positions ), color = "#ffffff" )
     _write_both( p, viz, "vor_2d_open" )
 
 if p := experiment( "vor 3D",
@@ -1836,7 +1843,7 @@ if p := experiment( "pd 2D weights",
 def _unit_box_image( shape, values ):
     """An image over `[ 0, shape_0 ] x ...`: origin 0, pixels of 1, knots 0, 1, 2, ... -- so the box `k` is
     literally the unit cube at `k`."""
-    return Image( values = numpy.asarray( values, float ).reshape( shape ), pixel_frame = numpy.eye( len( shape ) ) )
+    return Image( values = _host( values, float ).reshape( shape ), pixel_frame = numpy.eye( len( shape ) ) )
 
 
 def _mc_image_measures( pos, values, weights = None, nb_samples = 300000, seed = 0 ):
@@ -1846,16 +1853,16 @@ def _mc_image_measures( pos, values, weights = None, nb_samples = 300000, seed =
     and the density is normalized to mass 1, which `PowerDiagram` does on its side
     (`normalized_version`). No geometry in common with the kernel: no cut, no piece,
     just "which seed wins" and "which box did I land in"."""
-    values = numpy.asarray( values, float )
+    values = _host( values, float )
     d = values.ndim
     mi = numpy.zeros( d )
-    ma = numpy.asarray( values.shape, float )
+    ma = _host( values.shape, float )
 
     rng = numpy.random.default_rng( seed )
     pts = rng.uniform( mi, ma, size = ( nb_samples, d ) )
     d2 = ( ( pts[ :, None, : ] - pos[ None, :, : ] ) ** 2 ).sum( axis = 2 )
     if weights is not None:
-        d2 = d2 - numpy.asarray( weights, float )[ None, : ]
+        d2 = d2 - _host( weights, float )[ None, : ]
     nearest = d2.argmin( axis = 1 )
 
     # the box of each point (the knots are 0, 1, 2, ... : the index is the integer part)
@@ -1989,14 +1996,14 @@ def _mc_image_measures_general( pos, values, origin, frame, knots, nb_samples = 
     and arbitrary knots. Drawing uniformly in `t` amounts to drawing uniformly in `x` (the
     Jacobian is constant), and `|det F|` disappears from the normalization -- it multiplies all the
     boxes equally."""
-    values = numpy.asarray( values, float )
+    values = _host( values, float )
     d = values.ndim
     lo = numpy.array( [ knots[ a ][ 0 ] for a in range( d ) ] )
     hi = numpy.array( [ knots[ a ][ values.shape[ a ] ] for a in range( d ) ] )
 
     rng = numpy.random.default_rng( seed )
     t = rng.uniform( lo, hi, size = ( nb_samples, d ) )
-    pts = numpy.asarray( origin ) + t @ numpy.asarray( frame )
+    pts = _host( origin ) + t @ _host( frame )
 
     d2 = ( ( pts[ :, None, : ] - pos[ None, :, : ] ) ** 2 ).sum( axis = 2 )
     nearest = d2.argmin( axis = 1 )
@@ -2008,7 +2015,7 @@ def _mc_image_measures_general( pos, values, origin, frame, knots, nb_samples = 
     # the mass of a box is `value * |det F| * product of the steps`; the `|det F|` cancels out
     spacing = numpy.ones( values.shape )
     for a in range( d ):
-        w = numpy.diff( numpy.asarray( knots[ a ][ : values.shape[ a ] + 1 ], float ) )
+        w = numpy.diff( _host( knots[ a ][ : values.shape[ a ] + 1 ], float ) )
         spacing = spacing * w.reshape( [ -1 if k == a else 1 for k in range( d ) ] )
     rho = values[ idx ] / float( ( values * spacing ).sum() )
 
@@ -2184,8 +2191,8 @@ if test( "the_support_of_a_distribution_bounds_the_cells" ):
     # the cells themselves are bounded, which is what an accelerator requires in order to prune
     # (`cell_may_be_cut` has nothing to bite on with an infinite cell) -- and what the cutting
     # requires in order to have a bounding box to read.
-    assert numpy.asarray( free.cells.is_bounded ).reshape( -1 ).all()
-    assert not numpy.asarray( PowerDiagram( pos ).cells.is_bounded ).reshape( -1 ).all()
+    assert _host( free.cells.is_bounded ).reshape( -1 ).all()
+    assert not _host( PowerDiagram( pos ).cells.is_bounded ).reshape( -1 ).all()
 
 
 if test( "the_support_intersects_a_given_domain" ):
@@ -2233,7 +2240,7 @@ def _mc_gaussian_measures( pos, centers, sigmas, weights, mi, ma, nb_samples = 4
     """Measures by sampling, Gaussian density included -- normalized to mass 1 as
     `PowerDiagram` does, and TRUNCATED to the domain as it does too (the tails that leave the
     box are in no cell)."""
-    mi, ma = numpy.asarray( mi, float ), numpy.asarray( ma, float )
+    mi, ma = _host( mi, float ), _host( ma, float )
     rng = numpy.random.default_rng( seed )
     pts = rng.uniform( mi, ma, size = ( nb_samples, mi.size ) )
 
@@ -2412,7 +2419,7 @@ def _brute_force_cell_integrals( pd, centers, sigmas, weights, depth = 5 ):
     the kernel produced. What is tested this way is the INTEGRATION alone, the geometry being the
     same on both sides."""
     cs = pd.cells
-    nvs = numpy.asarray( cs.nb_vertices.value ).reshape( -1 )
+    nvs = _host( cs.nb_vertices.value ).reshape( -1 )
     res = numpy.zeros( len( nvs ) )
     for i in range( len( nvs ) ):
         v = cs.vertices( i )
@@ -2677,7 +2684,7 @@ if test( "the_float_kernel_tiles_the_domain" ):
             m = _measures( pd )
             assert abs( float( m.sum() ) - 1 ) < 1e-6, ( d, kd, m.sum() )
             # the measure itself is in the float type of the positions, not in that of the kernel
-            assert numpy.asarray( pd.measures.value ).dtype == numpy.float64
+            assert _host( pd.measures.value ).dtype == numpy.float64
             ref = _measures( PowerDiagram( pos, weights = w, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ), kernel_dtype = "FP64" ) )
             assert numpy.abs( m - ref ).max() < 2e-6, ( d, kd )
 
@@ -2744,7 +2751,7 @@ if test( "laplacian_solve_is_the_hessian_solve_and_its_own_adjoint" ):
     n = 40
     pos = rng.uniform( 0.1, 0.9, size = ( n, 2 ) )
     dst = SumOfGaussians( numpy.array( [ [ 0.5, 0.5 ] ] ), numpy.array( [ 0.3 ] ), weights = numpy.array( [ 1.0 ] ), support_box = ( [ 0, 0 ], [ 1, 1 ] ) )
-    w = numpy.asarray( ot_solve( SumOfDiracs( pos ), dst, tol = 1e-12 ).weights ).reshape( -1 )
+    w = _host( ot_solve( SumOfDiracs( pos ), dst, tol = 1e-12 ).weights ).reshape( -1 )
     pd = PowerDiagram( pos, w, distribution = dst, memory = 0 )
     r = rng.normal( size = n )
     r -= r.mean()
@@ -2758,7 +2765,7 @@ if test( "laplacian_solve_is_the_hessian_solve_and_its_own_adjoint" ):
     ref = numpy.zeros( n )
     ref[ 1: ] = numpy.linalg.solve( L[ 1:, 1: ], r[ 1: ] )
     for method in ( "cholesky", "auto" ):
-        x = numpy.asarray( pd.laplacian_solve( r, linear_solver = method ) ).reshape( -1 )
+        x = _host( pd.laplacian_solve( r, linear_solver = method ) ).reshape( -1 )
         assert x[ 0 ] == 0 and numpy.abs( x - ref ).max() < 1e-4 * numpy.abs( ref ).max(), ( method, numpy.abs( x - ref ).max() )
     check_grad( lambda b: PowerDiagram( pos, w, distribution = dst, memory = 0 ).laplacian_solve( b, linear_solver = "cholesky" ), r, seed = 5 )
 
@@ -2785,8 +2792,8 @@ if test( "moments_of_a_diagram_are_differentiable_like_the_measures" ):
 
     for name, dist in ( ( "mesh", mesh( values ) ), ( "gaussians", gauss( centers, sigmas, masses ) ) ):
         pd = PowerDiagram( pos, w, boundaries = box, distribution = dist, memory = 0, kernel_dtype = "FP64" )
-        mass, first, second = [ numpy.asarray( t ) for t in pd.moments ]
-        got = [ numpy.asarray( pd.moment( k ) ).reshape( -1 ) for k in range( 4 ) ]
+        mass, first, second = [ _host( t ) for t in pd.moments ]
+        got = [ _host( pd.moment( k ) ).reshape( -1 ) for k in range( 4 ) ]
         assert numpy.abs( numpy.stack( got[ :2 ], 1 ) - first ).max() < 1e-12, name
         assert numpy.abs( got[ 2 ] - second ).max() < 1e-12, name
         assert numpy.abs( got[ 3 ] - mass ).max() < 1e-12, name
@@ -2842,11 +2849,11 @@ if test( "gaussians_in_3d_are_exact_and_differentiable" ):
             tot += masses[ g ] * v
         return tot / masses.sum()                        # ( the density is normalized )
     pd = PowerDiagram( pos, w, boundaries = box, distribution = gauss( centers, sigmas, masses ), memory = 0, kernel_dtype = "FP64" )
-    mass, first, second = [ numpy.asarray( t ) for t in pd.moments ]
-    got = [ numpy.asarray( pd.moment( k ) ).reshape( -1 ) for k in range( 5 ) ]
+    mass, first, second = [ _host( t ) for t in pd.moments ]
+    got = [ _host( pd.moment( k ) ).reshape( -1 ) for k in range( 5 ) ]
     for k in range( 5 ):
         assert abs( got[ k ].sum() / exact( k ) - 1 ) < 1e-12, ( k, got[ k ].sum(), exact( k ) )
-    assert abs( numpy.asarray( pd.measures ).sum() / exact( 4 ) - 1 ) < 1e-12
+    assert abs( _host( pd.measures ).sum() / exact( 4 ) - 1 ) < 1e-12
     assert numpy.abs( numpy.stack( got[ :3 ], 1 ) - first ).max() < 1e-13 and numpy.abs( got[ 3 ] - second ).max() < 1e-13
     assert numpy.abs( got[ 4 ] - mass ).max() < 1e-13
 
@@ -2878,7 +2885,7 @@ if test( "hessian_rows_beyond_3d_are_the_derivatives_of_the_measures" ):
             pos = rng.random( ( n, d ) )
             w = 1e-3 * rng.random( n )
             box = box_half_spaces( numpy.zeros( d ), numpy.ones( d ) )
-            measures = lambda q: numpy.asarray( PowerDiagram( pos, weights = q, boundaries = box ).measures.value ).reshape( -1 )
+            measures = lambda q: _host( PowerDiagram( pos, weights = q, boundaries = box ).measures.value ).reshape( -1 )
             cnt, ids, vals = PowerDiagram( pos, weights = w, boundaries = box ).hessian_rows()
             J = numpy.zeros( ( n, n ) )
             for i in range( n ):
@@ -2897,6 +2904,8 @@ if test( "hessian_rows_beyond_3d_are_the_derivatives_of_the_measures" ):
 
 
 if test( "the_scratch_grows_in_the_call_under_jit" ):
+    from loom.testing import need
+    need( "jax" )                                       # ( the test calls jax itself: `jax.jit` )
     import numpy
     import jax
     import jax.numpy as jnp
@@ -2914,4 +2923,4 @@ if test( "the_scratch_grows_in_the_call_under_jit" ):
     ref_v, ref_g = f( pos, 64 ), jax.grad( f )( jnp.asarray( pos ), 64 )
     v, g = jax.jit( jax.value_and_grad( f ), static_argnums = 1 )( jnp.asarray( pos ), 3 )
     assert abs( float( v ) - float( ref_v ) ) < 1e-12 * abs( float( ref_v ) ), ( float( v ), float( ref_v ) )
-    assert numpy.abs( numpy.asarray( g ) - numpy.asarray( ref_g ) ).max() < 1e-12 * numpy.abs( numpy.asarray( ref_g ) ).max()
+    assert numpy.abs( _host( g ) - _host( ref_g ) ).max() < 1e-12 * numpy.abs( _host( ref_g ) ).max()

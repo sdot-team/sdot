@@ -9,7 +9,7 @@ Pages to look at what was computed ( `show`, `write_html` of the objects use the
 ## `Visualizer`
 
 ```python
-Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0, frame_value=0.0, depth_colors=False, morph=0, loop=False, autoplay=False, face_opacity=1.0)
+Visualizer(title='sdot', background=None, frame_axis='time', playable=True, fps=5.0, frame_value=0.0, depth_colors=False, morph=0, loop=False, autoplay=False, face_opacity=1.0, flat_points=False)
 ```
 
 Collects geometric primitives; the outputs (`write_html`, ...) come afterwards.
@@ -26,6 +26,9 @@ each frame. `loop`: it starts again, morphing back to the first frame. `autoplay
 `frame_axis`: the name of the frame axis, or a tuple of names when the frames vary along several parameters (see
 `new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
 the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.
+
+`flat_points`: in 2D, the points are flat discs ( no sphere shading ) -- what a disc of the plane is, a particle of
+a reconstruction for instance.
 
 `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
 density drawn under diracs.

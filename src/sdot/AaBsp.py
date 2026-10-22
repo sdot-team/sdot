@@ -762,6 +762,10 @@ def builds_on_card( x ):
     import os
     if os.environ.get( "SDOT_CARD_TREE", "1" ).lower() in ( "0", "no", "false", "off" ):
         return False
+    # ( a Torch tensor left on the host: the card's build reads its positions by their address -- the host build then )
+    raw = getattr( x, "raw", x )
+    if "torch" in type( raw ).__module__ and getattr( getattr( raw, "device", None ), "type", "cuda" ) != "cuda":
+        return False
     return bool( getattr( loom.resolved_device(), "is_cuda_gpu", False ) ) and len( x.shape ) >= 2 and int( x.shape[ -1 ] ) in ( 2, 3 )
 
 
@@ -773,7 +777,7 @@ def take_rows( a, idx ):
         return a[ idx ]
     if "torch" in type( idx ).__module__:
         import torch
-        return torch.as_tensor( a, device = idx.device )[ idx ]
+        return torch.as_tensor( np.ascontiguousarray( a ) if isinstance( a, np.ndarray ) else a, device = idx.device )[ idx ]   # ( a view `[ ::-1 ]`: Torch takes no negative stride )
     if "cupy" in type( idx ).__module__:
         import cupy
         return cupy.asarray( a )[ idx ]

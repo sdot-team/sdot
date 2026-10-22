@@ -76,6 +76,61 @@ with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
 
 The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
 
+## `ProjectedSumOfTents`
+
+```python
+ProjectedSumOfTents(points, half_widths, normal, weights=None, target_mass=1.0, proj_dims=2, **kwargs)
+```
+
+1D TENTS that are the projections of shared points on a direction per item of a batch -- e.g. one per angle of a
+tomography: `points` `[ n, proj_dim ]`, `half_widths` `[ n ]`, `weights` `[ n ]` the masses, `normal` `[ proj_dim ]` per
+item. Tent i on the line has the density weights_i ( 1 - |y - s_i| / w_i )_+ / w_i, s_i = points_i . normal,
+w_i = half_widths_i. A continuous distribution: its transport against an `Image` ( `ContinuousOtPlan1d` ) is differentiable,
+with no kink when two tents cross -- what diracs lack.
+
+| Attribute | |
+|---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
+| `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
+
+### `.add_to_viz(viz, **kwargs)`
+
+What this distribution shows of itself in a `Visualizer` -- NOTHING by default; a
+subclass draws what is meaningful for it ( the centres of the gaussians, ... ) and grows
+with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
+
+### `.bounding_half_spaces()`
+
+The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
+
+## `ProjectedSumOfAnisotropicTents`
+
+```python
+ProjectedSumOfAnisotropicTents(points, matrices, normal, weights=None, target_mass=1.0, proj_dims=2, **kwargs)
+```
+
+1D TENTS of different widths at different directions: the projections of ELLIPTIC objects. Like `ProjectedSumOfTents`, with a
+matrix `matrices[ i ]` `[ proj_dim, proj_dim ]` per tent instead of a half-width: tent i on the line of direction `normal` is
+centered at s_i = points_i . normal, with the half-width w_i = | matrices_i^T normal |, so that an isotropic tent is
+`matrices_i = w_i * identity`. It is what an object whose shape is the image of a disk by `matrices_i` projects to
+( a transformed disk is an ellipse ). Differentiable with respect to `points` and `matrices`, through
+`ContinuousOtPlan1d` ( the exact method, on the host ). `ProjectedSumOfTents` is faster when all the tents are round.
+
+| Attribute | |
+|---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
+| `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
+
+### `.add_to_viz(viz, **kwargs)`
+
+What this distribution shows of itself in a `Visualizer` -- NOTHING by default; a
+subclass draws what is meaningful for it ( the centres of the gaussians, ... ) and grows
+with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
+
+### `.bounding_half_spaces()`
+
+The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
+
 ## `Box`
 
 ```python
@@ -204,10 +259,15 @@ the box `[ c_i - k s_i, c_i + k s_i ]` united over the gaussians ( see the class
 DETACHED parameters. Readable on the host, it is a numpy box; under a trace ( `jax.jit`, `jax.grad` ), its offsets are
 traced arrays of the framework -- a `PowerDiagram` cuts its domain with them where they are ( `_domain_cell` ).
 
+### `.periodic_support()`
+
+the fundamental domain of a periodicity: `support_box`, which a periodic mixture must declare -- the box of its
+tails ( `support_sigmas` ) depends on the gaussians, and would make a period of them
+
 ## `Mesh`
 
 ```python
-Mesh(nodes, simplices, values=None, target_mass=1.0, **kwargs)
+Mesh(nodes, simplices, values=None, target_mass=1.0, degree=1, **kwargs)
 ```
 
 A piecewise linear density on a mesh of simplices ( triangles in 2D, tetrahedra in 3D ), zero outside.
@@ -215,10 +275,12 @@ A piecewise linear density on a mesh of simplices ( triangles in 2D, tetrahedra 
 `nodes` `[ nb_nodes, d ]`, `simplices` `[ nb_simplices, d + 1 ]` ( indices of nodes ). `values`: `[ nb_nodes ]` for a
 continuous density ( one value per node ), or `[ nb_simplices, d + 1 ]` for a density discontinuous between simplices
 ( one value per corner of each simplex: zeros make a hole ). Constant by default. Differentiable with respect to
-`values`.
+`values`. `degree = 0`: a density CONSTANT on each simplex, the mean of its corner values ( what partial transport takes in
+3D: `PowerDiagram( sink_weight = ... )` ).
 
 | Attribute | |
 |---|---|
+| `constant_on_pieces` | ( partial transport in 3D: `integration/InBall3.h` ) |
 | `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
 | `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
 

@@ -301,6 +301,14 @@ class PowerDiagram( Aggregate, Displayable ):
             raise ValueError( f"`positions` has to be [ n, d ] ( got { tuple( pos.shape ) } )" )
         n, d = int( pos.shape[ 0 ] ), int( pos.shape[ 1 ] )
 
+        # float32 seeds go to float64 where the tree is built on the host ( `AaBsp._build_in_kernel`: its boxes and majorants
+        # are float64, and the C++ reads them in the float of the positions ) -- what was done before float32 tensors kept
+        # their float from one aggregate to the next ( `loom.Tensor.set` ). The card's tree takes float32 as it is
+        from .AaBsp import builds_on_card
+        if not builds_on_card( pos ):
+            pos = _as_float64( pos )
+            weights = None if weights is None else _as_float64( weights )
+
         # GROUPS: the outer weights take the place of the weights for everything that does not look inside a group
         self._groups, group_members = None, None
         if groups is not None:
@@ -892,6 +900,31 @@ class PowerDiagram( Aggregate, Displayable ):
         )
         return x
 
+    def potential_integrals( self ):
+        """per value of the distribution ( an `Image`'s pixels ), the integral over it of the Kantorovich potential
+        `|x - p_i|^2 - w_i` on the cell of `i`: the derivative of a transport cost with respect to the image's values, at
+        these weights, by the envelope theorem. One sweep, piece by piece ( cell x pixel ), on a piecewise-constant
+        distribution only. Not differentiable."""
+        if self.distribution is None or not hasattr( self.distribution, "values" ):
+            raise ValueError( "potential_integrals: an image ( a piecewise-constant distribution with `values` )" )
+        dom = self._domain_cell()
+        nb_words = self._scratch_words( self._scratch_capacity, self._nb_work_cells(), False )
+        kp = loom.kernel_parameters_for( "power_diagram_potential_integrals" )
+        nt = kp.nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ self.num_point ] )
+        num_thread = new_batch_axis( nt, prefix = "thread" )
+        res = RealTensor.like( self.distribution.values )
+        dist_expr, _, dist_kwargs = self._dist_for()
+        kp.ffi_call(
+            FfiCode.per_item( code = "inputs.power_diagram.potential_into_pixels( sdot::diagram::ValuesSink{ outputs.res }, "
+                           f"inputs.dom_cell, scratch.pool( batch_index ), { dist_expr }, thread_index, nb_threads );" ),
+            power_diagram = self,
+            dom_cell = dom,
+            res = loom.out( res ),
+            pool = CellScratch.for_call( nb_words, dom.kernel_dtype, batch_axes = [ num_thread ] ),
+            **dist_kwargs,
+        )
+        return res
+
     @property
     def moments( self ):
         """`( masses, first, second )`: for each cell, `int rho`, `int x rho` ( `[ n, d ]` ) and `int |x|^2 rho`. Not differentiable ( see `moment` ).
@@ -1283,6 +1316,18 @@ def _host_array( x ):
     """a host copy ( float64 ) of a value of any framework"""
     from loom.tensor.host import to_host
     return np.asarray( to_host( getattr( x, "raw", x ) ), dtype = np.float64 )
+
+
+def _as_float64( x ):
+    """`x` ( a `RealTensor`, numpy, Jax -- traced or not --, Torch ) in float64 when it is float32, in its own framework ( a
+    tracer stays traced, a Torch tensor keeps its tape ); anything else as it is"""
+    raw = getattr( x, "raw", x )
+    if not str( getattr( raw, "dtype", "" ) ).endswith( "float32" ):
+        return x
+    if "torch" in type( raw ).__module__:
+        import torch
+        return raw.to( torch.float64 )
+    return raw.astype( np.float64 )
 
 
 def _host_ints( x ):

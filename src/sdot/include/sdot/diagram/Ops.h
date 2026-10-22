@@ -388,6 +388,87 @@ HD void measures( const PD &pd, auto &&res, const auto &dom, auto &&scratch, con
     } );
 }
 
+/// where `potential_into_pixels` adds: the `values` the density's gradient sink writes to ( an image's pixels )
+template<class V>
+struct ValuesSink {
+    V values;
+};
+
+/// per PIECE of a piecewise-constant density ( Laguerre cell k x pixel of an image ), the integral over it of the
+/// Kantorovich potential |x - p_k|^2 - w_k, added to the piece's pixel through the density's gradient sink ( `sink.values` ):
+/// what the derivative of a transport cost with respect to the density's values is made of, by the envelope theorem
+/// ( `PowerDiagram.potential_integrals` ) -- in one sweep, where the four moments' adjoints take four
+template<class PD>
+HD void potential_into_pixels( const PD &pd, auto &&sink, const auto &dom, auto &&scratch, const auto &dist, SI thread_index, SI nb_threads ) {
+    using TF    = typename PD::TF;
+    using TK    = KernelType<DECAYED_TYPE_OF( scratch )>;
+    using Local = typename DECAYED_TYPE_OF( dom )::template Local<TK>;
+    constexpr int D = PD::ct_dim;
+    static_assert( D == 2 || D == 3, "potential_into_pixels: 2D or 3D" );
+    constexpr int nbc = nb_work_cells<DECAYED_TYPE_OF( dist )>();
+    Carver cv = carver_of( scratch );
+    const SI cap = cap_in<Local,TF>( cv.nb_words, nbc, false );
+    Local c, piece;
+    c.attach( cv, cap );
+    if constexpr ( nbc > 1 ) piece.attach( cv, cap );
+    else                     piece = c;
+
+    for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
+        if ( ! make_cell( pd, c, k, dom ) ) {
+            ask_more( scratch, cv );
+            return false;
+        }
+        const auto p = pd.point( k );
+        const TF w = pd.weight( k );
+        PieceWorkspace<Local> ws{ piece };
+        cell_dist( pd, k, dist ).for_each_piece( c, ws, [&]( const auto &pc, const auto &dens ) {
+            if constexpr ( DECAYED_TYPE_OF( dens )::is_constant ) {
+                if ( ! pc.bounded() )
+                    return;
+                // int over a simplex of |x - p|^2 = vol ( sum_i |v_i|^2 + |sum_i v_i|^2 ) / ( ( D + 1 ) ( D + 2 ) ), v_i = vertex - p
+                TF acc = 0, vol_tot = 0;
+                pc.for_each_simplex( [&]( const auto &chain ) {
+                    const auto pts = simplex_points<TF,D>( pc, chain );
+                    TF v[ D + 1 ][ D ];
+                    for ( int i = 0; i <= D; ++i )
+                        for ( int d = 0; d < D; ++d )
+                            v[ i ][ d ] = TF( pts[ i ][ d ] ) - TF( p[ d ] );
+                    TF e[ D ][ D ];
+                    for ( int i = 0; i < D; ++i )
+                        for ( int d = 0; d < D; ++d )
+                            e[ i ][ d ] = v[ i + 1 ][ d ] - v[ 0 ][ d ];
+                    TF det;
+                    if constexpr ( D == 2 )
+                        det = e[ 0 ][ 0 ] * e[ 1 ][ 1 ] - e[ 0 ][ 1 ] * e[ 1 ][ 0 ];
+                    else
+                        det = e[ 0 ][ 0 ] * ( e[ 1 ][ 1 ] * e[ 2 ][ 2 ] - e[ 1 ][ 2 ] * e[ 2 ][ 1 ] )
+                            - e[ 0 ][ 1 ] * ( e[ 1 ][ 0 ] * e[ 2 ][ 2 ] - e[ 1 ][ 2 ] * e[ 2 ][ 0 ] )
+                            + e[ 0 ][ 2 ] * ( e[ 1 ][ 0 ] * e[ 2 ][ 1 ] - e[ 1 ][ 1 ] * e[ 2 ][ 0 ] );
+                    const TF vol = ( det < 0 ? -det : det ) / ( D == 2 ? TF( 2 ) : TF( 6 ) );
+                    TF sq = 0, s[ D ];
+                    for ( int d = 0; d < D; ++d )
+                        s[ d ] = 0;
+                    for ( int i = 0; i <= D; ++i )
+                        for ( int d = 0; d < D; ++d ) {
+                            sq += v[ i ][ d ] * v[ i ][ d ];
+                            s[ d ] += v[ i ][ d ];
+                        }
+                    for ( int d = 0; d < D; ++d )
+                        sq += s[ d ] * s[ d ];
+                    acc += vol * sq / TF( ( D + 1 ) * ( D + 2 ) );
+                    vol_tot += vol;
+                } );
+                dens.add_value_grad( sink, acc - w * vol_tot );
+            }
+        } );
+        if ( ws.overflow ) {
+            ask_more( scratch, cv );
+            return false;
+        }
+        return true;
+    } );
+}
+
 /// the moments of each cell ( see `integrate_moments_into` ), same sweep as `measures`
 template<class PD>
 HD void moments( const PD &pd, auto &&mass, auto &&first, auto &&second, const auto &dom, auto &&scratch, const auto &dist,

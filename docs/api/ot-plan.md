@@ -213,6 +213,34 @@ angle of a sinogram ) and differentiable end to end. It is requested from an `Ot
 
 `cost` is `W_2^2`; `barycenters` ( `[ n, 1 ]` ) is stored only with `Direct( with_barycenters = True )`.
 
+## `ContinuousOtPlan1d`
+
+```python
+ContinuousOtPlan1d(src_dist, dst_dist, with_barycenters=False, with_potentials=False, with_gradient=False, method='exact', scale=8)
+```
+
+THE TRANSPORT between two CONTINUOUS distributions on a line: today a `ProjectedSumOfTents` ( the source ) against
+an `Image` ( the target ), batched over the items of both ( e.g. the angles of a sinogram ), differentiable with
+respect to the tents' points and half-widths.
+
+`cost` is W2^2 ( both sides normalized to mass 1 ); `barycenters` ( b_i = int T t_i, `[ n ]` ) and `potentials` ( the
+derivative with respect to the mass of each tent, centered ) are stored only when asked for.
+
+### `.update_outputs()`
+
+`sdot::continuous_ot_1d` ( `ContinuousOtPlan1d.h` ): on the host, the views split between the threads; on a
+card, the views by chunks, each by device-wide launches ( segmented sort, scans, sweep by chunks ). Its memory
+is taken from the call's pool, at the size the call knows ( `args.allocator` ).
+
+## `RadialExp`
+
+```python
+RadialExp(eps)
+```
+
+`exp( ( w_i - |x - p_i|² ) / ( 2 eps ) )` around each seed ( see the module ): a gaussian of variance `eps` centered on the seed,
+whose height grows with its weight.
+
 ## `quantization`
 
 ```python

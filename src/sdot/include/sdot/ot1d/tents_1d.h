@@ -68,7 +68,7 @@ struct FuncStream0 {
     using Piece = PolyPiece1d<double,0>;
     F  piece;
     long nb;
-    long k = 0;
+    long k = 0;     // the next piece
     SDOT_OT1D_HD bool next( Piece &p ) {
         if ( k >= nb )
             return false;
@@ -78,8 +78,27 @@ struct FuncStream0 {
 };
 
 template<class F>
-SDOT_OT1D_HD FuncStream0<F> func_stream0( F piece, long nb ) {
-    return { piece, nb };
+SDOT_OT1D_HD FuncStream0<F> func_stream0( F piece, long nb, long first = 0 ) {
+    return { piece, nb, first };
+}
+
+/// the stream of the linear pieces k in [ k0, k1 ) given by `piece( k )` -> `PolyPiece1d<double,1>` ( a chunk )
+template<class F>
+struct FuncStream1 {
+    using Piece = PolyPiece1d<double,1>;
+    F  piece;
+    long k, k1;
+    SDOT_OT1D_HD bool next( Piece &p ) {
+        if ( k >= k1 )
+            return false;
+        p = piece( k++ );
+        return true;
+    }
+};
+
+template<class F>
+SDOT_OT1D_HD FuncStream1<F> func_stream1( F piece, long k0, long k1 ) {
+    return { piece, k0, k1 };
 }
 
 /// per tent ( see the header ): b, Q, phi, from the sums at its left / center / right breakpoints

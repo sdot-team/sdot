@@ -1,3 +1,5 @@
+import jax.numpy as jnp
+
 from loom.tensor import CtShapeVar
 from loom.tensor import ShapeVar
 from loom.tensor import Tensor
@@ -43,13 +45,16 @@ class ProjectedSumOfTents( Distribution ):
                             target_mass = target_mass, nb_dims = 1, proj_dims = proj_dims, **kwargs )
 
     def normalized_version( self, nb_dims = None ):
-        # the weights only ( SHARED across the batch, as for `ProjectedSumOfDiracs` )
+        # the weights only ( SHARED across the batch, as for `ProjectedSumOfDiracs` ), in the points' float: a float64
+        # weight or mass would promote float32 points ( and their kernels ) to float64
         mass = self.mass
         if self.target_mass.is_defined:
+            dt = self.points.value.dtype
+            bits = dict( size = 8 * dt.itemsize )
             if self.weights.is_defined:
                 weights = self.target_mass / mass * self.weights
             else:
-                weights = RealTensor[ self.num_dirac ].full( self.target_mass / self.nb_diracs.value )
+                weights = RealTensor[ self.num_dirac, bits ].full( self.target_mass / self.nb_diracs.value )
             return ProjectedSumOfTents(
                 nb_diracs = self.nb_diracs.value,
                 proj_dims = self.proj_dims.value,
@@ -57,7 +62,7 @@ class ProjectedSumOfTents( Distribution ):
                 half_widths = self.half_widths,
                 normal = self.normal,
                 weights = weights,
-                current_mass = self.target_mass,
+                current_mass = RealTensor[ bits ]( jnp.asarray( self.target_mass.value, dt ) ),
                 batch_axes = self.batch_axes,
             )
         return self

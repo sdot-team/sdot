@@ -4,6 +4,8 @@
 #include <loom/support/common_macros.h>
 #include <loom/support/atomic_add.h>
 
+#include <type_traits>
+
 namespace sdot {
 
 SDOT_TEMPLATE_DECL_FOR_ProjectedSumOfTents
@@ -20,6 +22,8 @@ struct ProjectedSumOfTents {
             s += TF( points( ::num_dirac = i, proj_dim = d ) ) * TF( normal( proj_dim = d ) );
         return s;
     }
+    /// coordinate d of the shared ambient point i
+    HD TF point( SI i, SI d ) const { return TF( points( ::num_dirac = i, proj_dim = d ) ); }
     HD TF half_width( SI i ) const { return TF( half_widths( ::num_dirac = i ) ); }
     HD TF mass( SI i ) const { return TF( weights( ::num_dirac = i ) ); }
     HD SI nb_tents() const { return SI( weights.size() ); }
@@ -48,15 +52,23 @@ struct ProjectedSumOfTents {
     HD void add_position_grad( auto &&grad_src, SI i, TF g ) const {
         if constexpr ( DECAYED_TYPE_OF( grad_src.points )::is_valid )
             for ( SI d = 0; d < ct_proj; ++d )
-                atomic_add( grad_src.points( ::num_dirac = i, proj_dim = d ).ref(), TF( g * TF( normal( proj_dim = d ) ) ) );
+                atomic_add( grad_src.points( ::num_dirac = i, proj_dim = d ).ref(),
+                            std::decay_t<decltype( grad_src.points( ::num_dirac = i, proj_dim = d ).ref() )>( g * TF( normal( proj_dim = d ) ) ) );
     }
     HD void add_half_width_grad( auto &&grad_src, SI i, TF g ) const {
         if constexpr ( DECAYED_TYPE_OF( grad_src.half_widths )::is_valid )
-            atomic_add( grad_src.half_widths( ::num_dirac = i ).ref(), g );
+            atomic_add( grad_src.half_widths( ::num_dirac = i ).ref(), std::decay_t<decltype( grad_src.half_widths( ::num_dirac = i ).ref() )>( g ) );
+    }
+
+    /// the d-th component of this item's direction, and the gradient of the shared ambient point i along d ( atomic )
+    HD TF normal_component( SI d ) const { return TF( normal( proj_dim = d ) ); }
+    HD void add_point_grad( auto &&grad_src, SI i, SI d, TF g ) const {
+        if constexpr ( DECAYED_TYPE_OF( grad_src.points )::is_valid )
+            atomic_add( grad_src.points( ::num_dirac = i, proj_dim = d ).ref(), std::decay_t<decltype( grad_src.points( ::num_dirac = i, proj_dim = d ).ref() )>( g ) );
     }
 
     /// clear the shared gradient buffers ONCE before the atomic adds ( a fresh FFI buffer is not zeroed )
-    HD void zero_grads( auto &&queue, auto &&grad_src ) const {
+    void zero_grads( auto &&queue, auto &&grad_src ) const {
         if constexpr ( DECAYED_TYPE_OF( grad_src.points )::is_valid )
             grad_src.points.fill_with( queue, TF( 0 ) );
         if constexpr ( DECAYED_TYPE_OF( grad_src.half_widths )::is_valid )

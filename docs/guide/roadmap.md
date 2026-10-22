@@ -22,6 +22,10 @@ What we are working on. Nothing on this page is available yet: names and interfa
 
 - **`PolynomialCells`**: piecewise polynomial densities on a polyhedral cell decomposition, the most general target.
 
+## Tomography
+
+- **Anisotropic tents on the card**, with `with_gradient`, and in 3D from 2D projections ( [Projected Sources](./distributions/projected) ).
+
 ## Frameworks
 
 - **Dask**: problems larger than the memory of a GPU, with the power diagram distributed across workers.
