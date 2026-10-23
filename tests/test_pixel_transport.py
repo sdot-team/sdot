@@ -63,3 +63,20 @@ if test( "the cost: smaller on the image's own pyramids, derivatives by finite d
     pt.cost( uv + 1e-3 * d, hw )
     warm = int( pt.stats[ "nb_iter" ] )
     assert warm < cold, ( warm, cold )
+
+
+if test( "split pixels: several diracs per pixel, the same raster grid, a cost between the pixel one and the continuous one" ):
+    import jax
+    jax.config.update( "jax_enable_x64", True )
+    from sdot.pixel_transport import PixelTransport2d
+    rng = np.random.default_rng( 4 )
+    img = rng.random( ( 10, 8 ) ) + 0.2
+    uv = rng.uniform( 0.1, 0.7, ( 200, 2 ) )
+    costs = [ ]
+    for split in ( 1, 2, 4 ):
+        pt = PixelTransport2d( img, [ 0.0, 0.0 ], ( 0.08, 0.1 ), scale = 4, dirac_split = split, tol = 1e-12, max_iter = 200 )
+        assert pt.shape == ( 40, 32 ) and pt.centers.shape[ 0 ] == 80 * split * split
+        c, ( g, _ ) = pt.value_and_grad( uv, 0.04 )
+        costs.append( c )
+    # the finer the target, the smaller its own spread ( the part of the cost the discretization adds )
+    assert costs[ 0 ] > costs[ 1 ] > costs[ 2 ], costs

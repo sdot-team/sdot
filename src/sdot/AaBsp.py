@@ -157,7 +157,9 @@ class AaBsp( SpatialAccelerator ):
         reads its shape without touching its data), so seeds that live on the GPU stay there.
         Only a SHAPE is read here, and a shape is not data.
         """
-        pos = positions if hasattr( positions, "shape" ) else np.asarray( positions, dtype = float )
+        # ( float64, as the diagram's seeds: see `PowerDiagram.__init__` )
+        pos = as_float64( positions ) if hasattr( positions, "shape" ) else np.asarray( positions, dtype = float )
+        weights = None if weights is None else as_float64( weights )
         # ON A CUDA CARD, in 2D and 3D: the whole tree in ONE ffi call ( `gpu/Bsp2D.cuh` ), nothing read back -- traced positions
         # included ( under a `jit` the tree is then built in the jitted program )
         if builds_on_card( pos ):
@@ -752,6 +754,18 @@ def _build_in_kernel( pos, w, leaf_size ):
 
 
 # -- the construction ON THE CARD ( `gpu/Bsp2D.cuh` ) --------------------------------------------------------------------
+
+
+def as_float64( x ):
+    """`x` ( a `RealTensor`, numpy, Jax -- traced or not --, Torch ) in float64 when it is float32, in its own framework ( a
+    tracer stays traced, a Torch tensor keeps its tape ); anything else as it is"""
+    raw = getattr( x, "raw", x )
+    if not str( getattr( raw, "dtype", "" ) ).endswith( "float32" ):
+        return x
+    if "torch" in type( raw ).__module__:
+        import torch
+        return raw.to( torch.float64 )
+    return raw.astype( np.float64 )
 
 
 def builds_on_card( x ):

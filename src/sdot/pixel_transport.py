@@ -171,10 +171,26 @@ def potential_means( weights, origin, pixel_size, scale ):
 class PixelTransport2d:
     """see the module"""
 
-    def __init__( self, values, origin, pixel_size, scale = 4, tol = 1e-10, max_iter = 100, precision = "fp64", background = 1e-3 ):
+    def __init__( self, values, origin, pixel_size, scale = 4, tol = 1e-10, max_iter = 100, precision = "fp64", background = 1e-3,
+                  dirac_split = 1 ):
         values = np.asarray( values, dtype = np.float64 )
         # the same background on the image as on the pyramids ( see `background` ): its pixels never empty
         values = values + float( background ) * values.mean()
+        #: `dirac_split` x `dirac_split` diracs per pixel, its mass shared evenly: a finer target. One dirac per pixel PULLS
+        #: the pyramids to the pixels' centers ( the cost is lower on a dirac ), which every view does alike along a common
+        #: axis ( the rotation axis of a tomography: the points' z snap to the detector rows ); the fine grid keeps its
+        #: cells ( `scale` per pixel, a multiple of the split )
+        self.dirac_split = s = int( dirac_split )
+        if scale % s:
+            raise ValueError( f"PixelTransport2d: `scale` ( { scale } ) must be a multiple of `dirac_split` ( { s } )" )
+        #: split: the same problem with one dirac per pixel, whose solved weights start the first solve ( a cold Newton on
+        #: split x split times more diracs crawls; a pixel's weight is a close guess for its sub-diracs )
+        self._coarse = PixelTransport2d( values, origin, pixel_size, scale = scale, tol = tol * s * s, max_iter = max_iter,
+                                         precision = precision, background = 0.0 ) if s > 1 else None
+        if s > 1:
+            values = np.repeat( np.repeat( values, s, axis = 0 ), s, axis = 1 )
+            pixel_size = ( float( pixel_size[ 0 ] ) / s, float( pixel_size[ 1 ] ) / s )
+            scale = scale // s
         self.N0, self.N1 = values.shape
         self.origin = np.asarray( origin, dtype = np.float64 )
         self.du, self.dv = float( pixel_size[ 0 ] ), float( pixel_size[ 1 ] )
@@ -197,10 +213,22 @@ class PixelTransport2d:
         #: the solver's statistics of the last solve ( `nb_iter`, `status`... )
         self.stats = None
 
+    def _solve_into( self, density ):
+        """a solve whose weights are kept ( the warm start of the next one )"""
+        plan = self._solve( density )
+        self.weights = np.asarray( plan.weights.raw )
+        return plan
+
     def _put( self, x ):
         return jnp.asarray( x )
 
     def _solve( self, density ):
+        if self.weights is None and self._coarse is not None:
+            # ( the coarse problem has the same fine grid: the same density )
+            self._coarse._solve_into( density )
+            s = self.dirac_split
+            wc = self._coarse.weights.reshape( self._coarse.N0, self._coarse.N1 )
+            self.weights = np.repeat( np.repeat( wc, s, axis = 0 ), s, axis = 1 ).ravel()
         w0 = None if self.weights is None else self._put( self.weights )
         it = Iterative( weights0 = w0, on_failure = "ignore", **self.settings )
         img = Image( values = self._put( density ), origin = list( self.origin ), pixel_frame = [ [ self.cell[ 0 ], 0.0 ], [ 0.0, self.cell[ 1 ] ] ] )

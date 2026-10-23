@@ -1,10 +1,10 @@
 {
  "cpu": "Apple M4 Pro",
- "date": "2026-10-22",
+ "date": "2026-10-23",
  "experiments": [
   {
    "seconds": {
-    "armv8-a": 0.303207
+    "armv8-a": 0.259954
    },
    "weight": 1.0
   }

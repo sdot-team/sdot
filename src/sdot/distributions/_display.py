@@ -25,10 +25,11 @@ def pack_blocks( dirs, offs, ids ):
 def cell_vertices( cells ):
     """`( vp [ n, cap, d ], live [ n, cap ], nv [ n ] )`: the vertices of each item of a batched `Cell`, read once from its
     padded storage -- `live` says which rows are vertices"""
+    from loom.tensor.host import to_host                 # ( a Torch tensor on a card has no `__array__` )
     n = cells.nb_items
-    vp = numpy.asarray( cells.vertex_positions.raw, dtype = float )
+    vp = numpy.asarray( to_host( cells.vertex_positions.raw ), dtype = float )
     vp = vp.reshape( ( -1, ) + vp.shape[ -2: ] )[ : n ]
-    nv = numpy.atleast_1d( numpy.asarray( cells.nb_vertices.value ) ).reshape( -1 ).astype( int )
+    nv = numpy.atleast_1d( numpy.asarray( to_host( cells.nb_vertices.value ) ) ).reshape( -1 ).astype( int )
     nv = nv[ : n ] if nv.size >= n else numpy.full( n, int( nv[ 0 ] ) )
     live = numpy.arange( vp.shape[ 1 ] )[ None, : ] < nv[ :, None ]
     return vp, live, nv
