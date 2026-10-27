@@ -98,8 +98,8 @@ struct PdAlphaBsp {
     int  memo_counts( SI ) const { return nb_hot; }
     int  memo_nbrs( SI, int q ) const { return hot[ q ]; }
 
-    template<class TK>
-    auto provider( SI k0 ) const { return ProviderBsp<PdAlphaBsp,TK,ct_dim,true,true>( *this, k0 ); }
+    template<class TK,bool SLACK = false>
+    auto provider( SI k0 ) const { return ProviderBsp<PdAlphaBsp,TK,ct_dim,true,true,SLACK>( *this, k0 ); }
 };
 
 /// THE FLAT STORAGE at `w + alpha d`: all the seeds, no warm start

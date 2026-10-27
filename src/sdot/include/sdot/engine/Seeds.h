@@ -52,6 +52,32 @@ template<class T> HD V3<T> view3( const auto &t ) {
              SI( t.shape( Ct<int,0>() ) ), SI( t.shape( Ct<int,1>() ) ), SI( t.shape( Ct<int,2>() ) ) };
 }
 
+// THE SAME VIEWS WITH THEIR STRIDES KNOWN AT COMPILE TIME, for the storages whose every array is laid out contiguously
+// ( `CONTIG`, decided by the caller from the view types: `dense_view` ). `N1`, `N2`: the trailing extents. The run-time byte
+// strides cost an `imul` per index -- 10 % of the instructions of a 2D diagram, 4-8 % of its time. Otherwise the plain view.
+template<class T,bool CONTIG> struct __attribute__(( visibility( "default" ) )) A1 {
+    V1<T> v;
+    HD T  operator()( SI i ) const { if constexpr ( CONTIG ) return reinterpret_cast<const T *>( v.p )[ i ]; else return v( i ); }
+    HD SI shape( int d ) const { return v.shape( d ); }
+};
+template<class T,int N1,bool CONTIG> struct __attribute__(( visibility( "default" ) )) A2 {
+    V2<T> v;
+    HD T  operator()( SI i, SI j ) const { if constexpr ( CONTIG ) return reinterpret_cast<const T *>( v.p )[ i * N1 + j ]; else return v( i, j ); }
+    HD SI shape( int d ) const { return v.shape( d ); }
+};
+template<class T,int N1,int N2,bool CONTIG> struct __attribute__(( visibility( "default" ) )) A3 {
+    V3<T> v;
+    HD T  operator()( SI i, SI j, SI k ) const { if constexpr ( CONTIG ) return reinterpret_cast<const T *>( v.p )[ ( i * N1 + j ) * N2 + k ]; else return v( i, j, k ); }
+    HD SI shape( int d ) const { return v.shape( d ); }
+};
+
+/// a view of the call whose strides are the contiguous ones BY ITS TYPE ( an unbound member counts as one ): what `CONTIG` asks
+template<class V>
+HD constexpr bool dense_view() {
+    if constexpr ( ! V::is_valid ) return true;
+    else return std::is_same_v<typename V::Strides,DECAYED_TYPE_OF( contiguous_strides<typename V::TF>( typename V::Shape{} ) )>;
+}
+
 // the same for a member that may be unbound ( a `NoneTensor`: no weights, no memory ): an empty view
 template<class T> HD V1<T> opt_view1( const auto &t ) { if constexpr ( DECAYED_TYPE_OF( t )::is_valid ) return view1<T>( t ); else return {}; }
 template<class T> HD V2<T> opt_view2( const auto &t ) { if constexpr ( DECAYED_TYPE_OF( t )::is_valid ) return view2<T>( t ); else return {}; }
@@ -76,7 +102,7 @@ struct __attribute__(( visibility( "default" ) )) PlainSeeds {
 };
 
 /// the seeds in the order of the tree, and the tree ( `PowerDiagram_Bsp` )
-template<class TR,class TI,int D,bool WEIGHTED,bool MEMO>
+template<class TR,class TI,int D,bool WEIGHTED,bool MEMO,bool CONTIG = false>
 struct __attribute__(( visibility( "default" ) )) BspSeeds {
     static constexpr int  ct_dim      = D;
     static constexpr bool on_cpu      = true;
@@ -84,18 +110,18 @@ struct __attribute__(( visibility( "default" ) )) BspSeeds {
     using TF = TR;
 
     struct Tree {
-        V1<TI> node_begin, node_end;
-        V3<TR> node_box;
-        V2<TR> node_wa;
-        V1<TR> node_wb;
+        A1<TI,CONTIG>     node_begin, node_end;
+        A3<TR,2,D,CONTIG> node_box;
+        A2<TR,D,CONTIG>   node_wa;
+        A1<TR,CONTIG>     node_wb;
     };
-    V2<TR>  positions;
-    V1<TR>  weights;
+    A2<TR,D,CONTIG> positions;
+    A1<TR,CONTIG>   weights;
     Tree    tree;
     V2<int> memo_nbrs;
     V1<int> memo_counts;
 
-    HD SI   nb_seeds() const { return positions.n0; }
+    HD SI   nb_seeds() const { return positions.v.n0; }
     HD auto point( SI k ) const { return Vector<TF,D>::with_func( [&]( PI d ) { return TF( positions( k, d ) ); } ); }
     HD TF   weight( SI k ) const { if constexpr ( WEIGHTED ) return weights( k ); else return TF( 0 ); }
 

@@ -33,8 +33,8 @@ struct PowerDiagram_Bsp {
     /// the memory ( `memo_nbrs / memo_counts`, see `ProviderBsp` ): named or `Unbound`, at compile time
     static constexpr bool has_memo = DECAYED_TYPE_OF( memo_counts )::is_valid;
 
-    template<class TK>
-    HD auto provider( SI k0 ) const { return ProviderBsp<PowerDiagram_Bsp,TK,ct_dim,has_weights,has_memo>( *this, k0 ); }
+    template<class TK,bool SLACK = false>
+    HD auto provider( SI k0 ) const { return ProviderBsp<PowerDiagram_Bsp,TK,ct_dim,has_weights,has_memo,SLACK>( *this, k0 ); }
 
     /// the same seeds and tree without tensor types, for the cell engine compiled as a unit ( `engine/Cells.h` ).
     /// The unit is built for the element types of the tree: floats like the positions, ranks of the integer type of `node_begin`.
@@ -43,7 +43,13 @@ struct PowerDiagram_Bsp {
         // tensors spell depends on the platform: the unit is built for `SI` or `int`, whatever the spelling )
         using TI = std::conditional_t<( sizeof( typename DECAYED_TYPE_OF( tree.node_begin )::TF ) == 8 ), SI, int>;
         static_assert( std::is_same_v<std::remove_cv_t<typename DECAYED_TYPE_OF( tree.node_box )::TF>,TF>, "the tree's boxes are of the float of the positions" );
-        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo>;
+        // every array the walk reads laid out contiguously, by type: the unit reads them with compile-time strides ( `PowerDiagram.py`
+        // names the same variant, from the call's arguments )
+        constexpr bool contig = engine::dense_view<DECAYED_TYPE_OF( sorted_positions )>() && engine::dense_view<DECAYED_TYPE_OF( sorted_weights )>()
+            && engine::dense_view<DECAYED_TYPE_OF( tree.node_begin )>() && engine::dense_view<DECAYED_TYPE_OF( tree.node_end )>()
+            && engine::dense_view<DECAYED_TYPE_OF( tree.node_box )>() && engine::dense_view<DECAYED_TYPE_OF( tree.node_wa )>()
+            && engine::dense_view<DECAYED_TYPE_OF( tree.node_wb )>();
+        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo,contig>;
         return S{ engine::view2<TF>( sorted_positions ), engine::opt_view1<TF>( sorted_weights ),
                   typename S::Tree{ engine::view1<TI>( tree.node_begin ), engine::view1<TI>( tree.node_end ), engine::view3<TF>( tree.node_box ),
                                     engine::opt_view2<TF>( tree.node_wa ), engine::opt_view1<TF>( tree.node_wb ) },

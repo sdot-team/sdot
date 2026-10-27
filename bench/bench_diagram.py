@@ -58,14 +58,20 @@ if p := bench( "diagram",
                warmup    = Param( 0.3, help = "GPU: seconds of `measures` in a loop before the timed runs ( the old GPU bench: 0.3 )" ),
                accuracy  = Param( "auto", choices = [ "auto", "yes", "no" ], help = "compare with a `double` kernel run of the same diagram ( auto: on a GPU, for --kernel=float )" ),
                seed      = Param( 0, help = "seed of the uniform draw" ),
+               kernels   = Param( "catalogue", choices = [ "catalogue", "compile" ],
+                                  help = "`catalogue`: what loom serves ( a held build, or this machine behaving as the richest held level ); "
+                                         "`compile`: compiled for this machine ( `LOOM_KERNELS=compile` )" ),
+               target    = Param( "", help = "a CPU level to run as ( `LOOM_TARGET`: x86-64, x86-64-v2, x86-64-v3, x86-64-v4 ); empty: this machine" ),
                witness   = Param( "card", choices = [ "card", "generic" ],
                                   help = "the reference of --accuracy: `card` the card's double kernel, `generic` the generic double path "
                                          "( `use_card_cells = False`: the CPU's cell code, compiled for the card; slow in 3D ) -- with `generic` "
                                          "the double kernel is compared too" ),
-               output    = Param( "measures", choices = [ "measures", "facets", "vjp", "moments" ],
+               output    = Param( "measures", choices = [ "measures", "facets", "vjp", "moments", "adjacency", "complex" ],
                                   help = "GPU, 2D card kernel: what one call computes -- `measures`; `facets`: the measures AND the laplacian's CSR "
                                          "( Newton's turn: `_card_cells`, cells + COO + assembly ); `vjp`: the adjoint of the measures alone "
-                                         "( the pullback, wrt the weights, or the positions without weights ); `moments`: measures + barycentres + costs" ) ):
+                                         "( the pullback, wrt the weights, or the positions without weights ); `moments`: measures + barycentres + costs. "
+                                         "CPU and GPU: `adjacency`: the neighbours of every cell and their facets ( `hessian_rows`, what CGAL's "
+                                         "triangulation + adjacency gives ); `complex`: the whole cell complex ( `cell_complex()` )" ) ):
     import numpy
     import benchlib
     import cases
@@ -73,6 +79,7 @@ if p := bench( "diagram",
     import reference_lmo_gpu
     benchlib.set_threads( p.threads, p.pin )          # BEFORE the first kernel: the pool reads them once
     benchlib.set_kernel_timing()                      # BEFORE the first kernel too: each library reads it once
+    benchlib.set_kernels( p.kernels, p.target )     # BEFORE importing loom: the served level is decided once
     from sdot import AaBsp, PowerDiagram, box_half_spaces
     import loom
     import time
@@ -85,6 +92,7 @@ if p := bench( "diagram",
     kernel = "FP64" if p.kernel == "double" else "FP32"
     memory = None if p.memory < 0 else p.memory
     print( "  " + benchlib.env_report() + "; " + benchlib.driver_line() )
+    print( "  CPU level: " + benchlib.served_level() )
 
     unweighted = p.weights == "auto" and not numpy.any( w )
     w_arg = None if unweighted else w
@@ -103,7 +111,7 @@ if p := bench( "diagram",
     print( f"  positions as { benchlib.dtype_of( pd.sorted_positions ) } ( TF ), kernel { kernel }" )
 
     timing = benchlib.KernelTiming() if on_gpu else None
-    if p.output != "measures" and not ( on_gpu and pd._card_variant() is not None ):
+    if p.output not in ( "measures", "adjacency", "complex" ) and not ( on_gpu and pd._card_variant() is not None ):
         raise ValueError( f"--output={ p.output }: the card kernel only ( a CUDA device, 2D or 3D )" )
     pullback = None
     if p.output == "vjp":                             # the forward once: what is timed is the pullback
@@ -111,23 +119,28 @@ if p := bench( "diagram",
         if unweighted:
             def fwd( x ):
                 return PowerDiagram( x, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ), accelerator = bsp,
-                                     kernel_dtype = kernel ).measures.value
+                                     kernel_dtype = kernel ).measures
             _, pullback = jax.vjp( fwd, pos )
         else:
             def fwd( x ):
                 pd.weights = x
-                return pd.measures.value
+                return pd.measures
             _, pullback = jax.vjp( fwd, w )
         cot = numpy.random.default_rng( 1 ).normal( size = n )
 
     def call():
         if p.output == "measures":
-            return pd.measures.value                  # the cells: what the old `diagramme` times
+            return pd.measures                  # the cells: what the old `diagramme` times
         if p.output == "vjp":
             return pullback( cot )[ 0 ]
+        if p.output == "adjacency":                   # the neighbours per cell ( their count stands for the measures )
+            return pd.hessian_rows()[ 0 ]
+        if p.output == "complex":                     # the number of facets per dimension stands for the measures
+            cc = pd.cell_complex()
+            return numpy.array( [ cc.nb_faces( k ) for k in range( d + 1 ) ], dtype = float )
         out = pd._card_cells( facets = p.output == "facets", moments = p.output == "moments" )
-        benchlib.block_until_ready( out[ "val" ].raw if p.output == "facets" else out[ "cost" ].raw )
-        return out[ "measures" ].value
+        benchlib.block_until_ready( out[ "val" ] if p.output == "facets" else out[ "cost" ] )
+        return out[ "measures" ]
 
     def once():
         t0 = time.perf_counter()
@@ -176,7 +189,7 @@ if p := bench( "diagram",
                 pd64.use_card_cells = False
                 print( "  accuracy witness: the generic double path ( `use_card_cells = False` )" )
             pd64.measures                             # the memory, as for the timed one
-            m64 = numpy.asarray( pd64.measures.value ).reshape( -1 )
+            m64 = numpy.asarray( pd64.measures ).reshape( -1 )
             acc = benchlib.accuracy( m, m64 )
 
     # -- the old number to compare with
@@ -210,13 +223,17 @@ if p := bench( "diagram",
             p.results[ "ratio_new_old" ] = ns / ref[ "ns_per_seed" ]
 
         header = [ "case", "n", "threads", "kernel", "time s", "ns/seed", "old ns/seed", "new/old", "old = " ]
-        row = [ name + ( f" w~{ p.wscale }h2" if p.wscale else "" ), n, benchlib.nb_threads(), p.kernel, f"{ best :.4f}", f"{ ns :.0f}",
+        if p.output != "measures":
+            ref = None                                # the old numbers are for the measures
+            p.results.pop( "ref_seconds", None ); p.results.pop( "ref_ns_per_seed", None ); p.results.pop( "ratio_new_old", None )
+        row = [ name + ( f" w~{ p.wscale }h2" if p.wscale else "" ) + ( "" if p.output == "measures" else f" [{ p.output }]" ), n, benchlib.nb_threads(), p.kernel, f"{ best :.4f}", f"{ ns :.0f}",
                 "-" if not ref else f"{ ref[ 'ns_per_seed' ] :.0f}",
                 benchlib.ratio( ns, ref and ref[ "ns_per_seed" ] ), "-" if not ref else f"{ ref[ 'stage' ] } { ref[ 'source' ] }" ]
         print( benchlib.table( header, [ row ] ) )
         print( f"  min of { reps }; apart from the cells: weights set { t_weights * 1e3 :.1f} ms ( { t_weights / n * 1e9 :.0f} ns/seed ), "
                f"copy to numpy { t_convert * 1e3 :.1f} ms; tree built in { t_build * 1e3 :.0f} ms, diagram built in { t_ctor * 1e3 :.0f} ms, "
-               f"sum of the measures { m.sum() :.6f}"
+               + ( f"sum of the measures { m.sum() :.6f}" if p.output == "measures" else
+                   f"neighbours per cell { m.mean() :.2f}" if p.output == "adjacency" else f"faces per dimension { m.astype( int ).tolist() }" )
                + ( "" if ref else "  ( no old number at this n )" ) )
         if acc:
             print( "  accuracy against a double kernel: " + benchlib.accuracy_line( acc ) )

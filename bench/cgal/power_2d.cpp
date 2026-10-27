@@ -136,11 +136,13 @@ bool load_cloud( const std::string &path, std::vector<Wp> &pts ) {
 
 int main( int argc, char **argv ) {
     int n = 1000000, reps = 3;
+    bool adjacency = false;   // `--adjacency`: the triangulation and the neighbour lists only, no cell ( a lower bound )
     std::string load;
     for ( int i = 1; i < argc; ++i ) {
         const std::string s = argv[ i ];
         if ( s == "--load" && i + 1 < argc )       load = argv[ ++i ];
         else if ( s == "--reps" && i + 1 < argc )  reps = std::atoi( argv[ ++i ] );
+        else if ( s == "--adjacency" )             adjacency = true;
         else                                       n = std::atoi( s.c_str() );
     }
 
@@ -169,6 +171,20 @@ int main( int argc, char **argv ) {
         // one would mostly measure the cost of localization.
         Rt rt;
         rt.insert( pts.begin(), pts.end() );
+
+        // `--adjacency`: the neighbours of each vertex, counted ( what a connectivity costs, without the cells )
+        if ( adjacency ) {
+            std::size_t nb = 0;
+            for ( auto v = rt.finite_vertices_begin(); v != rt.finite_vertices_end(); ++v ) {
+                Rt::Vertex_circulator c = rt.incident_vertices( v ), done( c );
+                if ( c != nullptr )
+                    do { nb += ! rt.is_infinite( c ); } while ( ++c != done );
+            }
+            const double dt = std::chrono::duration<double>( std::chrono::steady_clock::now() - t0 ).count();
+            best = std::min( best, dt );
+            last_sum = double( nb ) / double( rt.number_of_vertices() );
+            continue;
+        }
 
         // the cells, one per finite vertex : the dual polygon, then the clip to the unit square.
         double sum = 0;
@@ -204,7 +220,11 @@ int main( int argc, char **argv ) {
         last_sum = sum;
     }
 
-    std::printf( "  %d seeds in 2D : %.3f s (%.0f ns/seed), sum of measures %.6f\n",
-                 n, best, best / n * 1e9, last_sum );
+    if ( adjacency )
+        std::printf( "  %d seeds in 2D, adjacency : %.3f s (%.0f ns/seed), neighbours per vertex %.3f\n",
+                     n, best, best / n * 1e9, last_sum );
+    else
+        std::printf( "  %d seeds in 2D : %.3f s (%.0f ns/seed), sum of measures %.6f\n",
+                     n, best, best / n * 1e9, last_sum );
     return 0;
 }

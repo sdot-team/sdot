@@ -77,6 +77,7 @@ export default defineConfig({
             { text: 'Performance',              link: '/guide/performance' },
             { text: 'Background',               link: '/guide/background' },
             { text: 'Roadmap',                  link: '/guide/roadmap' },
+            { text: 'The Visualizer',           link: '/guide/visualizer' },
           ]
         }
       ],

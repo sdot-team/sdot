@@ -183,10 +183,6 @@ class PixelTransport2d:
         self.dirac_split = s = int( dirac_split )
         if scale % s:
             raise ValueError( f"PixelTransport2d: `scale` ( { scale } ) must be a multiple of `dirac_split` ( { s } )" )
-        #: split: the same problem with one dirac per pixel, whose solved weights start the first solve ( a cold Newton on
-        #: split x split times more diracs crawls; a pixel's weight is a close guess for its sub-diracs )
-        self._coarse = PixelTransport2d( values, origin, pixel_size, scale = scale, tol = tol * s * s, max_iter = max_iter,
-                                         precision = precision, background = 0.0 ) if s > 1 else None
         if s > 1:
             values = np.repeat( np.repeat( values, s, axis = 0 ), s, axis = 1 )
             pixel_size = ( float( pixel_size[ 0 ] ) / s, float( pixel_size[ 1 ] ) / s )
@@ -223,14 +219,13 @@ class PixelTransport2d:
         return jnp.asarray( x )
 
     def _solve( self, density ):
-        if self.weights is None and self._coarse is not None:
-            # ( the coarse problem has the same fine grid: the same density )
-            self._coarse._solve_into( density )
-            s = self.dirac_split
-            wc = self._coarse.weights.reshape( self._coarse.N0, self._coarse.N1 )
-            self.weights = np.repeat( np.repeat( wc, s, axis = 0 ), s, axis = 1 ).ravel()
         w0 = None if self.weights is None else self._put( self.weights )
-        it = Iterative( weights0 = w0, on_failure = "ignore", **self.settings )
+        # split, the first solve: the width continuation. The pyramids leave deserts ( the background only ) that the mass
+        # crosses through many sub-diracs, where a direct Newton stalls ( damped to steps of 1e-5, 200 iterations without
+        # progress, measured on a 256 x 34 view split 4: 140 000 diracs ); the continuation converges ( 33 s ). Starting from
+        # the weights of one dirac per pixel does not help: they empty sub-cells, and the solver falls back to the Voronoi
+        cont = "always" if w0 is None and self.dirac_split > 1 else "auto"
+        it = Iterative( weights0 = w0, on_failure = "ignore", continuation = cont, **self.settings )
         img = Image( values = self._put( density ), origin = list( self.origin ), pixel_frame = [ [ self.cell[ 0 ], 0.0 ], [ 0.0, self.cell[ 1 ] ] ] )
         return OtProblem( SumOfDiracs( self._put( self.centers ), weights = self._put( self.masses ) ), img ).solve( it )
 

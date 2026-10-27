@@ -163,6 +163,8 @@ def _is_pair( color ):
 
 
 def _darker( color, factor = 0.72 ):
+    if _is_pair( color ):
+        return tuple( _darker( c, factor ) for c in color )
     return tuple( c * factor for c in _rgb( color ) )
 
 

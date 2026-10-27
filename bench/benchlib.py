@@ -20,7 +20,7 @@ import socket
 #: the variables that change what is measured, and are therefore printed with each result
 ENV_VARS = ( "LOOM_NB_THREADS", "SDOT_NB_THREADS", "SDOT_PIN_THREADS", "SDOT_CPU_VARIANT", "SDOT_NO_MARCH_NATIVE", "SDOT_CXXFLAGS",
              "LOOM_CXX", "LOOM_CXXFLAGS", "LOOM_FRAMEWORK", "LOOM_DEVICE", "SDOT_KTYPE", "SDOT_CATALOGUE_DIR",
-             "SDOT_CASES_DIR", "LOOM_KERNEL_TIMING", "LOOM_BUILD_DIR", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS" )
+             "SDOT_CASES_DIR", "LOOM_KERNEL_TIMING", "LOOM_KERNELS", "LOOM_TARGET", "LOOM_PREFER_CATALOGUE", "LOOM_BUILD_DIR", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS" )
 
 
 def set_threads( threads, pin ):
@@ -116,6 +116,26 @@ class KernelTiming:
     def missing():
         from loom.devices import kernel_timing
         return kernel_timing.missing()
+
+
+def set_kernels( kernels = "catalogue", target = "" ):
+    """which kernels run: `compile` compiles them for this machine ( `LOOM_KERNELS=compile` ) instead of serving the catalogue;
+    `target` makes the CPU run as that level ( `LOOM_TARGET` ). Before loom is imported."""
+    import os
+    if kernels == "compile":
+        os.environ[ "LOOM_KERNELS" ] = "compile"
+    if target:
+        os.environ[ "LOOM_TARGET" ] = target
+
+
+def served_level():
+    """the CPU level the kernels run as: the machine's, the one it behaves as, the catalogue tag"""
+    import loom
+    dev = loom.resolved_device()
+    try:
+        return f"real { dev.real_target() }, runs as { dev.catalogue_target() }, tag { dev.current_catalogue_tag() }"
+    except Exception as e:                            # ( a device without levels )
+        return f"? ( { e } )"
 
 
 def block_until_ready( x ):

@@ -438,6 +438,57 @@ ASIMD_X86_EXT_256( SI32, 8, ASIMD_X86_ID,        ASIMD_X86_ID );
 ASIMD_X86_EXT_256( PI32, 8, ASIMD_X86_ID,        ASIMD_X86_ID );
 ASIMD_X86_EXT_256( SI64, 4, ASIMD_X86_ID,        ASIMD_X86_ID );
 ASIMD_X86_EXT_256( PI64, 4, ASIMD_X86_ID,        ASIMD_X86_ID );
+
+// ---- `double x 8` on AVX2: TWO ymm for the values, ONE ymm for an `SI32 x 8` index or a 32-bit lane
+// mask. The split rank cannot serve these: it wants the index and the mask split like the values, and
+// takes them apart through `values` -- memory -- when they are not; and its half-permutation would need
+// a `double x 4` permute, which AVX2 does not have ( `vpermpd` with a register index is AVX-512VL ).
+// Measured on the 2D register kernel ( `Engine2Reg.h`, eight `permute` and four `select` of this shape
+// per cut ): both fell to the generic form, and AVX2 ran the kernel no faster than SSE2.
+//
+// permute: a double is two 32-bit lanes, so each output half is two `vpermps` -- one per source
+// register -- on the PAIR index `2 i, 2 i + 1`, and a `blendvpd` on bit 2 of `i` ( which source ).
+// `vpermps` reads the low three bits only, so `2 i + j` needs no mask, and the index wraps modulo 8
+// as every register permute does. The pair index is built from the 32-bit index by duplicating each
+// lane ( one `vpermd` ), doubling and adding `0, 1`; bit 2 of `i`, shifted to bit 31 of the high
+// 32-bit lane, is the sign bit `blendvpd` reads. Seven instructions per half, no memory.
+template<class Arch> requires ( ASIMD_OPS_REQ_EXCL( AVX2, AVX512 ) )
+struct sel::Variant<ops::permute,Key<FP64,8,Arch>,sel::REGISTER> {
+    using V = internal::SimdVecImpl<FP64,8,Arch>;
+    using I = internal::SimdVecImpl<SI32,8,Arch>;
+    static constexpr bool available = ! internal::HasSplit<I> && internal::HasSplit<V>;
+    static __m256d half( __m256d lo, __m256d hi, __m256i dup ) {
+        const __m256i pair = _mm256_add_epi32( _mm256_slli_epi32( dup, 1 ), _mm256_setr_epi32( 0, 1, 0, 1, 0, 1, 0, 1 ) );
+        const __m256  a    = _mm256_permutevar8x32_ps( _mm256_castpd_ps( lo ), pair );
+        const __m256  b    = _mm256_permutevar8x32_ps( _mm256_castpd_ps( hi ), pair );
+        return _mm256_blendv_pd( _mm256_castps_pd( a ), _mm256_castps_pd( b ), _mm256_castsi256_pd( _mm256_slli_epi32( dup, 29 ) ) );
+    }
+    static V run( const V &v, const I &idx ) {
+        const __m256d lo = v.data.split.v0.data.reg, hi = v.data.split.v1.data.reg;
+        V res;
+        res.data.split.v0.data.reg = half( lo, hi, _mm256_permutevar8x32_epi32( idx.data.reg, _mm256_setr_epi32( 0, 0, 1, 1, 2, 2, 3, 3 ) ) );
+        res.data.split.v1.data.reg = half( lo, hi, _mm256_permutevar8x32_epi32( idx.data.reg, _mm256_setr_epi32( 4, 4, 5, 5, 6, 6, 7, 7 ) ) );
+        return res;
+    }
+};
+
+// select with a 32-bit lane mask ( what `mask_from_bits< 8 >` and the `SI32 x 8` comparisons give ):
+// each half of the mask widened to 64-bit lanes ( `vpmovsxdq`, which keeps all ones / all zeros ), then
+// one `blendvpd` per half.
+template<class Arch> requires ( ASIMD_OPS_REQ_EXCL( AVX2, AVX512 ) )
+struct sel::Variant<ops::select,Key<FP64,8,Arch,32>,sel::REGISTER> {
+    using V = internal::SimdVecImpl<FP64,8,Arch>;
+    using M = internal::SimdBoolImpl<8,32,Arch>;
+    static constexpr bool available = ! internal::HasSplit<M> && internal::HasSplit<V>;
+    static V run( const M &m, const V &a, const V &b ) {
+        const __m256i m0 = _mm256_cvtepi32_epi64( _mm256_castsi256_si128( m.data.reg ) );
+        const __m256i m1 = _mm256_cvtepi32_epi64( _mm256_extracti128_si256( m.data.reg, 1 ) );
+        V res;
+        res.data.split.v0.data.reg = _mm256_blendv_pd( b.data.split.v0.data.reg, a.data.split.v0.data.reg, _mm256_castsi256_pd( m0 ) );
+        res.data.split.v1.data.reg = _mm256_blendv_pd( b.data.split.v1.data.reg, a.data.split.v1.data.reg, _mm256_castsi256_pd( m1 ) );
+        return res;
+    }
+};
 #undef ASIMD_X86_EXT_256
 #endif // ASIMD_X86_HAS_AVX2
 

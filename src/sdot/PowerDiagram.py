@@ -622,7 +622,17 @@ class PowerDiagram( Aggregate, Displayable ):
         weights = int( bound( "sorted_weights" if bsp else "weights" ) )
         if bsp:
             ti = "SI" if m[ "tree" ].attributes[ "node_begin" ].itemsize == 8 else "int"
-            seeds = f"BspSeeds<{ tr },{ ti },{ self.dim_count },bool( { weights } ),bool( { int( bound( 'memo_counts' ) ) } )>"
+            # the arrays the walk reads, all laid out contiguously ( `engine::dense_view`, the same test on the C++ side ): the variant
+            # that reads them with compile-time strides
+            def dense( ca ):
+                if ca is None or getattr( ca, "io_category", None ) is None or not ca.io_category.is_bound:
+                    return True
+                return not getattr( ca, "runtime_strides", False ) and ca.layout.is_identity
+            tree = m[ "tree" ].attributes
+            contig = all( dense( c ) for c in ( positions, m.get( "sorted_weights" ), tree[ "node_begin" ], tree[ "node_end" ],
+                                                tree[ "node_box" ], tree.get( "node_wa" ), tree.get( "node_wb" ) ) )
+            seeds = ( f"BspSeeds<{ tr },{ ti },{ self.dim_count },bool( { weights } ),bool( { int( bound( 'memo_counts' ) ) } ),"
+                      f"bool( { int( contig ) } )>" )
         else:
             seeds = f"PlainSeeds<{ tr },{ self.dim_count },bool( { weights } )>"
         return [ _engine_unit( self.dim_count, seeds ) ]

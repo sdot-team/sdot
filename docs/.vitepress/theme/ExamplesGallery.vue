@@ -20,10 +20,11 @@ function toggleTag( tag ) {
 function clearTags() { activeTags.value = [] }
 function isActive( tag ) { return activeTags.value.includes( tag ) }
 
-const sections = computed( () => allSections
-  .map( s => ( { ...s, cards: s.cards.filter( e => activeTags.value.every( t => e.tags.includes( t ) ) ) } ) )
-  .filter( s => s.cards.length > 0 )
-)
+// one flat list: the first card of each section carries the section, labelled above it in the grid
+const cards = computed( () => allSections.flatMap( s => s.cards
+  .filter( e => activeTags.value.every( t => e.tags.includes( t ) ) )
+  .map( ( e, i ) => ( { ...e, section: i === 0 ? s : null } ) )
+) )
 </script>
 
 <template>
@@ -45,46 +46,41 @@ const sections = computed( () => allSections
       <button v-if="activeTags.length > 0" class="clear-chip" @click="clearTags">✕ clear</button>
     </div>
 
-    <template v-for="section in sections" :key="section.key">
-      <header class="gallery-header gallery-subheader">
-        <h2>{{ section.text }}</h2>
-        <p>{{ section.blurb }}</p>
-      </header>
-
-      <!-- Card grid -->
-      <section class="card-grid">
-        <a
-          v-for="ex in section.cards"
-          :key="ex.link"
-          :href="withBase( ex.link )"
-          class="card"
-        >
-          <div class="card-img-wrap">
-            <img
-              :src="imgSrc( ex.image )"
-              :alt="ex.title"
-              class="card-img"
-              @error="e => e.target.src = PLACEHOLDER"
-            />
+    <!-- Card grid -->
+    <section class="card-grid">
+      <a
+        v-for="ex in cards"
+        :key="ex.link"
+        :href="withBase( ex.link )"
+        class="card"
+        :class="{ 'section-start': ex.section }"
+      >
+        <div v-if="ex.section" class="section-label" :title="ex.section.blurb">{{ ex.section.text }}</div>
+        <div class="card-img-wrap">
+          <img
+            :src="imgSrc( ex.image )"
+            :alt="ex.title"
+            class="card-img"
+            @error="e => e.target.src = PLACEHOLDER"
+          />
+        </div>
+        <div class="card-body">
+          <div class="card-title">{{ ex.title }}</div>
+          <p class="card-desc">{{ ex.description }}</p>
+          <div class="card-tags">
+            <span
+              v-for="tag in ex.tags"
+              :key="tag"
+              class="card-chip"
+              :class="{ active: isActive( tag ) }"
+              @click.prevent="toggleTag( tag )"
+            >{{ tag }}</span>
           </div>
-          <div class="card-body">
-            <div class="card-title">{{ ex.title }}</div>
-            <p class="card-desc">{{ ex.description }}</p>
-            <div class="card-tags">
-              <span
-                v-for="tag in ex.tags"
-                :key="tag"
-                class="card-chip"
-                :class="{ active: isActive( tag ) }"
-                @click.prevent="toggleTag( tag )"
-              >{{ tag }}</span>
-            </div>
-          </div>
-        </a>
-      </section>
-    </template>
+        </div>
+      </a>
+    </section>
 
-    <div v-if="sections.length === 0" class="empty">
+    <div v-if="cards.length === 0" class="empty">
       No examples match the selected tags.
       <button @click="clearTags" class="clear-chip">✕ clear</button>
     </div>
@@ -102,8 +98,6 @@ const sections = computed( () => allSections
 .gallery-header { margin-bottom: 1.25rem; }
 .gallery-header h1 { font-size: 2rem; font-weight: 700; margin: 0 0 0.3rem; }
 .gallery-header p  { color: var(--vp-c-text-2); margin: 0; }
-.gallery-subheader { margin-top: 2rem; }
-.gallery-subheader h2 { font-size: 1.4rem; font-weight: 700; margin: 0 0 0.3rem; border-top: none; padding-top: 0; }
 
 /* ── Tag bar ────────────────────────────────────────── */
 .tag-bar {
@@ -151,7 +145,9 @@ const sections = computed( () => allSections
 .card-grid {
   display: grid;
   grid-template-columns: repeat( auto-fill, minmax( 210px, 1fr ) );
-  gap: 1.25rem;
+  gap: 2.1rem 1.25rem;   /* the row gap holds the section labels */
+  padding-top: 1.6rem;
+  overflow-x: clip;
 }
 
 .card {
@@ -213,6 +209,24 @@ const sections = computed( () => allSections
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
   font-weight: 600;
+}
+
+/* ── Section labels, above the first card of each section ── */
+.card { position: relative; overflow: visible; }
+.card-img-wrap { border-radius: 10px 10px 0 0; }
+.section-label {
+  position: absolute;
+  left: 0;
+  width: 100vw;   /* the rule runs to the end of the row, clipped by the grid */
+  bottom: calc( 100% + 0.35rem );
+  padding-bottom: 0.2rem;
+  border-bottom: 2px solid var(--vp-c-brand-1);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vp-c-brand-1);
+  white-space: nowrap;
 }
 
 /* ── Empty state ────────────────────────────────────── */

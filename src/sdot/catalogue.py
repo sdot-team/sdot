@@ -162,8 +162,8 @@ def _vjp( f, x ):
 def level_workloads():
     """What decides which x86 levels the wheels carry ( `loom.catalogue.build( levels = ... )` ): the operations of a standard
     use, at sizes where the kernels dominate, equal weights. Each is timed at every level; a level that gains too little on
-    them is not shipped, and its machines run the poorer one kept ( on lmo, 2026-10-20: v3 0.94 of the baseline, v4 0.98,
-    v2 1.00 ). Built when called: the arrays are those of the framework in force."""
+    them is not shipped, and its machines run the poorer one kept ( on lmo, 2026-10-20, before the `cells` workloads: v3 0.94 of the
+    baseline, v4 0.98, v2 1.00 ). Built when called: the arrays are those of the framework in force."""
     from loom.benchmark import synchronise as wait
     from sdot.PowerDiagram import PowerDiagram, box_half_spaces
     from sdot.distributions.Image import Image
@@ -180,6 +180,12 @@ def level_workloads():
     s1, i1 = own( np.sort( rng.uniform( 0, 1, 1000000 ) ) ), own( rng.uniform( 0.5, 1.5, 20000 ) )
     ot = own( rng.uniform( 0.05, 0.95, ( 20000, 2 ) ) )
     return {
+        # THE CELLS, the diagram prepared once per level: what a solve repeats, and what the level changes ( the 2D register
+        # kernel is `SimdVec<double,8>`: x86-64 has no register permute for it, AVX2 two ymm, AVX-512 one zmm ). A new
+        # diagram per call would time the tree as well, which the level barely moves and which then hides the cells.
+        "cells 2D 1e6 Voronoi":     _cells( p2, None, b2 ),
+        "cells 2D 1e6 Laguerre":    _cells( p2, w2, b2 ),
+        "cells 3D 2e5":             _cells( p3, None, b3 ),
         "measures 2D 1e6 Laguerre": lambda: wait( PowerDiagram( p2, weights = w2, boundaries = b2 ).measures.value ),
         "measures 3D 2e5":          lambda: wait( PowerDiagram( p3, boundaries = b3 ).measures.value ),
         "moments 3D 2e5":           lambda: PowerDiagram( p3, boundaries = b3 ).moments,
@@ -189,6 +195,25 @@ def level_workloads():
         "OT solve 2D 2e4 image":    lambda: OtProblem( SumOfDiracs( ot ), Image( values = img, origin = [ 0.0, 0.0 ],
                                                        pixel_frame = ( np.eye( 2 ) / 256 ).tolist() ) ).solve( Iterative( max_iter = 30 ) ),
     }
+
+
+def _cells( positions, weights, boundaries ):
+    """a workload that times the measures of ONE diagram per level: built on the first call at a level ( the warm-up of
+    `_time_levels`, which also compiles ), then measured again with the weights set anew ( what a Newton step does ).
+    Keyed by the level the device behaves as: a diagram lays out its buffers for the level it was built at."""
+    import loom
+    from loom.benchmark import synchronise as wait
+    from sdot.PowerDiagram import PowerDiagram
+    built = {}
+    def run():
+        level = loom.resolved_device().catalogue_target()
+        if level not in built:
+            built[ level ] = PowerDiagram( positions, weights = weights, boundaries = boundaries )
+        pd = built[ level ]
+        if weights is not None:
+            pd.weights = weights
+        return wait( pd.measures.value )
+    return run
 
 
 if __name__ == "__main__":

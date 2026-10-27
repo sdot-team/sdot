@@ -1,0 +1,227 @@
+diff --git a/src/sdot/AaBsp.py b/src/sdot/AaBsp.py
+index fca0b28..eb3dd76 100644
+--- a/src/sdot/AaBsp.py
++++ b/src/sdot/AaBsp.py
+@@ -137,15 +137,24 @@ class AaBsp( SpatialAccelerator ):
+     node_wa      : RealTensor[ "num_bsp_node", "dim" ]
+     node_wb      : RealTensor[ "num_bsp_node" ]
+ 
++    # THE CONSTANT PART OF A NODE IN ONE CACHE LINE, for the walk of the CPU cells ( `ProviderBsp` ): `lo`, `hi` ( the
++    # box, as `node_box` lays it out ), then `begin`, `end` ( exact in a double ), padded to EIGHT doubles -- 64 bytes, one
++    # line, in dimensions 1 to 3. The split arrays above cost three lines per popped node ( `node_begin`, `node_end`,
++    # `node_box` ), and a 2D cell pops 47 of them. The majorants stay apart: the solver rewrites them at each trial.
++    # Built by the host construction; `Unbound` on the card ( its cells read the split arrays ) and beyond 3D.
++    node_pack    : RealTensor[ "num_bsp_node", "num_pack" ]
++
+     num_bsp_seed : Axis[ "nb_bsp_seeds" ]
+     num_bsp_node : Axis[ "nb_bsp_nodes" ]
+     num_lohi     : Axis[ "nb_lohi" ]
+     dim          : Axis[ "nb_dims" ]
++    num_pack     : Axis[ "nb_pack" ]
+ 
+     nb_bsp_seeds : ShapeVar
+     nb_bsp_nodes : ShapeVar
+     nb_lohi      : CtShapeVar
+     nb_dims      : CtShapeVar
++    nb_pack      : CtShapeVar
+ 
+ 
+     def __init__( self, positions, weights = None, max_seeds_per_leaf = 10 ):
+@@ -216,8 +225,10 @@ class AaBsp( SpatialAccelerator ):
+         if w is not None:
+             kwargs[ "node_wa" ] = tree[ "node_wa" ]
+             kwargs[ "node_wb" ] = tree[ "node_wb" ]
++        if int( pos.shape[ 1 ] ) <= 3:
++            kwargs[ "node_pack" ] = _packed_nodes( tree[ "node_box" ], tree[ "node_begin" ], tree[ "node_end" ] )
+ 
+-        self.__base_init__( nb_dims = int( pos.shape[ 1 ] ), nb_lohi = 2, **kwargs )
++        self.__base_init__( nb_dims = int( pos.shape[ 1 ] ), nb_lohi = 2, nb_pack = PACK_WIDTH, **kwargs )
+ 
+         self._majorant_weights = weights
+         if traced_w:
+@@ -248,7 +259,7 @@ class AaBsp( SpatialAccelerator ):
+         self._nb_leaves = None                           # ( a host read: counted when asked, see `nb_leaves` )
+         self._rank = tree.pop( "rank_of" ).raw
+         # ( an adopted tensor does not make the counts pull from it: they are prescribed, both functions of `n` and `leaf` )
+-        self.__base_init__( nb_dims = d, nb_lohi = 2, nb_bsp_seeds = n, nb_bsp_nodes = 2 ** self.max_depth - 1, **tree )
++        self.__base_init__( nb_dims = d, nb_lohi = 2, nb_pack = PACK_WIDTH, nb_bsp_seeds = n, nb_bsp_nodes = 2 ** self.max_depth - 1, **tree )
+         if w is not None:
+             order = tree[ "seed_indices" ].raw
+             self.refresh_weight_majorants( take_rows( getattr( pos, "raw", pos ), order ), take_rows( getattr( w, "raw", w ), order ) )
+@@ -753,6 +764,24 @@ def _build_in_kernel( pos, w, leaf_size ):
+     )
+ 
+ 
++#: the doubles of a packed node ( `AaBsp.node_pack` ): one 64-byte line
++PACK_WIDTH = 8
++
++
++def _packed_nodes( node_box, node_begin, node_end ):
++    """`AaBsp.node_pack`: per node, its box ( `lo` then `hi` ) then `begin` and `end` as doubles, padded to `PACK_WIDTH`"""
++    box = np.asarray( node_box, dtype = np.float64 )
++    nb_nodes = box.shape[ 0 ]
++    # on a 64-byte boundary, or a record straddles two lines ( a large `np.zeros` is page-aligned plus a header )
++    buf = np.zeros( nb_nodes * PACK_WIDTH + PACK_WIDTH )
++    off = ( -buf.ctypes.data % 64 ) // 8
++    res = buf[ off: off + nb_nodes * PACK_WIDTH ].reshape( nb_nodes, PACK_WIDTH )
++    res[ :, :box[ 0 ].size ] = box.reshape( nb_nodes, -1 )
++    res[ :, box[ 0 ].size ] = np.asarray( node_begin ).reshape( -1 )
++    res[ :, box[ 0 ].size + 1 ] = np.asarray( node_end ).reshape( -1 )
++    return res
++
++
+ # -- the construction ON THE CARD ( `gpu/Bsp2D.cuh` ) --------------------------------------------------------------------
+ 
+ 
+diff --git a/src/sdot/PowerDiagram.py b/src/sdot/PowerDiagram.py
+index d0978ea..7ab1323 100644
+--- a/src/sdot/PowerDiagram.py
++++ b/src/sdot/PowerDiagram.py
+@@ -622,7 +622,10 @@ class PowerDiagram( Aggregate, Displayable ):
+         weights = int( bound( "sorted_weights" if bsp else "weights" ) )
+         if bsp:
+             ti = "SI" if m[ "tree" ].attributes[ "node_begin" ].itemsize == 8 else "int"
+-            seeds = f"BspSeeds<{ tr },{ ti },{ self.dim_count },bool( { weights } ),bool( { int( bound( 'memo_counts' ) ) } )>"
++            tree = m[ "tree" ].attributes
++            packed = int( tree.get( "node_pack" ) is not None and getattr( tree[ "node_pack" ], "io_category", None ) is not None
++                          and tree[ "node_pack" ].io_category.is_bound )
++            seeds = f"BspSeeds<{ tr },{ ti },{ self.dim_count },bool( { weights } ),bool( { int( bound( 'memo_counts' ) ) } ),bool( { packed } )>"
+         else:
+             seeds = f"PlainSeeds<{ tr },{ self.dim_count },bool( { weights } )>"
+         return [ _engine_unit( self.dim_count, seeds ) ]
+diff --git a/src/sdot/include/sdot/PowerDiagram_Bsp.h b/src/sdot/include/sdot/PowerDiagram_Bsp.h
+index e1f2364..afae9d7 100644
+--- a/src/sdot/include/sdot/PowerDiagram_Bsp.h
++++ b/src/sdot/include/sdot/PowerDiagram_Bsp.h
+@@ -43,10 +43,11 @@ struct PowerDiagram_Bsp {
+         // tensors spell depends on the platform: the unit is built for `SI` or `int`, whatever the spelling )
+         using TI = std::conditional_t<( sizeof( typename DECAYED_TYPE_OF( tree.node_begin )::TF ) == 8 ), SI, int>;
+         static_assert( std::is_same_v<std::remove_cv_t<typename DECAYED_TYPE_OF( tree.node_box )::TF>,TF>, "the tree's boxes are of the float of the positions" );
+-        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo>;
++        constexpr bool packed = DECAYED_TYPE_OF( tree.node_pack )::is_valid;
++        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo,packed>;
+         return S{ engine::view2<TF>( sorted_positions ), engine::opt_view1<TF>( sorted_weights ),
+                   typename S::Tree{ engine::view1<TI>( tree.node_begin ), engine::view1<TI>( tree.node_end ), engine::view3<TF>( tree.node_box ),
+-                                    engine::opt_view2<TF>( tree.node_wa ), engine::opt_view1<TF>( tree.node_wb ) },
++                                    engine::opt_view2<TF>( tree.node_wa ), engine::opt_view1<TF>( tree.node_wb ), engine::opt_view2<TF>( tree.node_pack ) },
+                   engine::opt_view2<int>( memo_nbrs ), engine::opt_view1<int>( memo_counts ) };
+     }
+ 
+@@ -56,14 +57,14 @@ struct PowerDiagram_Bsp {
+     /// that of `PowerDiagram_Bsp.py` / `AaBsp.py` ( the same as `kernel_form` above ).
+     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_ ) const {
+         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
+-                                    tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
++                                    tree.node_box, node_wa_, node_wb_, tree.node_pack, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims, tree.nb_pack };
+         return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
+                                          tree_, sorted_positions, sorted_weights_, memo_nbrs, memo_counts, nb_memo };
+     }
+     /// ... and the memory also read elsewhere ( the solver writes it at each sweep )
+     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_, auto &&memo_nbrs_, auto &&memo_counts_ ) const {
+         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
+-                                    tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
++                                    tree.node_box, node_wa_, node_wb_, tree.node_pack, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims, tree.nb_pack };
+         return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
+                                          tree_, sorted_positions, sorted_weights_, memo_nbrs_, memo_counts_, nb_memo };
+     }
+diff --git a/src/sdot/include/sdot/cell/Providers.h b/src/sdot/include/sdot/cell/Providers.h
+index c55cc9c..3765339 100644
+--- a/src/sdot/include/sdot/cell/Providers.h
++++ b/src/sdot/include/sdot/cell/Providers.h
+@@ -46,9 +46,26 @@ HD constexpr bool has_groups() {
+     else return false;
+ }
+ 
++/// THE PACKED NODES ( `AaBsp.node_pack` ): the box and the slice of a node in one cache line, when the storage has them --
++/// the engine's seeds say so at compile time ( `has_pack` ), a diagram by whether its tree binds the tensor
++template<class PD>
++HD constexpr bool tree_packed() {
++    if constexpr ( requires { PD::has_pack; } ) return PD::has_pack;
++    else if constexpr ( requires ( const PD &pd ) { pd.tree.node_pack; } ) return DECAYED_TYPE_OF( std::declval<const PD &>().tree.node_pack )::is_valid;
++    else return false;
++}
++
+ /// THE PLANE BETWEEN `k0` AND `j`: the power bisector ( `p0`, `w0`: the point and the weight of `k0` ), or, for two members of
+ /// the same group, the plane the group gives them ( `group_plane` ) -- rounded once to the kernel's float, like `bisector`
++///
++/// INLINED BY FORCE: left out of line, gcc called it once per proposed neighbour from the 2D register kernel, 6 % of the
++/// diagram; inlined, the 2D cells went 1 340 -> 1 190 ns per seed on one thread ( lmo, AVX-512, 2026-10-26 ).
+ template<class TK,int D,class PD>
++#ifdef __CUDACC__
++__forceinline__
++#else
++[[gnu::always_inline]] inline
++#endif
+ HD Plane<TK,D> seed_plane( const PD &pd, SI k0, const typename PD::TF *p0, typename PD::TF w0, SI j ) {
+     using TF = typename PD::TF;
+     if constexpr ( has_groups<PD>() ) {
+@@ -150,6 +167,12 @@ struct ProviderBsp {
+     TF  p0[ D ], w0;
+     TK  q0[ D ], v0;                                     ///< the same, for the pruning
+ 
++    /// a node's slice and box: from its packed record when there is one ( `lo`, `hi`, `begin`, `end` ), else from the split arrays
++    static constexpr bool packed = tree_packed<PD>();
++    HD SI nbeg( SI m ) const { if constexpr ( packed ) return SI( pd.tree.node_pack( m, 2 * D ) ); else return SI( pd.tree.node_begin( m ) ); }
++    HD SI nend( SI m ) const { if constexpr ( packed ) return SI( pd.tree.node_pack( m, 2 * D + 1 ) ); else return SI( pd.tree.node_end( m ) ); }
++    HD TF nbox( SI m, int lh, int d ) const { if constexpr ( packed ) return TF( pd.tree.node_pack( m, lh * D + d ) ); else return TF( pd.tree.node_box( m, lh, d ) ); }
++
+     HD ProviderBsp( const PD &pd, SI k0 ) : pd( pd ), k0( k0 ), n( pd.nb_seeds() ) {
+         const auto p = pd.point( k0 );
+         for ( int d = 0; d < D; ++d ) {
+@@ -207,7 +230,7 @@ struct ProviderBsp {
+                 for ( int r = 0; r < D; ++r ) {
+                     TF c = shift( t, r ), h = 0;
+                     for ( int q = 0; q < D; ++q ) {
+-                        const TF a = TF( pd.tree.node_box( n, 0, q ) ), b = TF( pd.tree.node_box( n, 1, q ) ), m = linear( t, r, q );
++                        const TF a = nbox( n, 0, q ), b = nbox( n, 1, q ), m = linear( t, r, q );
+                         c += m * ( a + b ) / 2;
+                         h += ( m < 0 ? -m : m ) * ( b - a ) / 2;
+                     }
+@@ -219,8 +242,8 @@ struct ProviderBsp {
+         }
+         for ( int d = 0; d < D; ++d ) {
+             const TF s = shift( t, d );
+-            lo[ d ] = TF( pd.tree.node_box( n, 0, d ) ) + s;
+-            hi[ d ] = TF( pd.tree.node_box( n, 1, d ) ) + s;
++            lo[ d ] = nbox( n, 0, d ) + s;
++            hi[ d ] = nbox( n, 1, d ) + s;
+         }
+     }
+ 
+@@ -328,8 +351,8 @@ struct ProviderBsp {
+             const SI h  = en & 63;
+ 
+             // an EMPTY slot: the right child of a node that had nothing left to share
+-            const SI beg = SI( pd.tree.node_begin( n ) );
+-            const SI end = SI( pd.tree.node_end( n ) );
++            const SI beg = nbeg( n );
++            const SI end = nend( n );
+             if ( beg >= end )
+                 continue;
+ 
+diff --git a/src/sdot/include/sdot/engine/Seeds.h b/src/sdot/include/sdot/engine/Seeds.h
+index 01a94f3..7c4f643 100644
+--- a/src/sdot/include/sdot/engine/Seeds.h
++++ b/src/sdot/include/sdot/engine/Seeds.h
+@@ -76,11 +76,12 @@ struct __attribute__(( visibility( "default" ) )) PlainSeeds {
+ };
+ 
+ /// the seeds in the order of the tree, and the tree ( `PowerDiagram_Bsp` )
+-template<class TR,class TI,int D,bool WEIGHTED,bool MEMO>
++template<class TR,class TI,int D,bool WEIGHTED,bool MEMO,bool PACKED = false>
+ struct __attribute__(( visibility( "default" ) )) BspSeeds {
+     static constexpr int  ct_dim      = D;
+     static constexpr bool on_cpu      = true;
+     static constexpr bool has_weights = WEIGHTED;
++    static constexpr bool has_pack    = PACKED;      ///< `node_pack` is bound ( `AaBsp.py` ): the walk reads it
+     using TF = TR;
+ 
+     struct Tree {
+@@ -88,6 +89,7 @@ struct __attribute__(( visibility( "default" ) )) BspSeeds {
+         V3<TR> node_box;
+         V2<TR> node_wa;
+         V1<TR> node_wb;
++        V2<TR> node_pack;
+     };
+     V2<TR>  positions;
+     V1<TR>  weights;

@@ -48,7 +48,15 @@ HD constexpr bool has_groups() {
 
 /// THE PLANE BETWEEN `k0` AND `j`: the power bisector ( `p0`, `w0`: the point and the weight of `k0` ), or, for two members of
 /// the same group, the plane the group gives them ( `group_plane` ) -- rounded once to the kernel's float, like `bisector`
+///
+/// INLINED BY FORCE: left out of line, gcc called it once per proposed neighbour from the 2D register kernel, 6 % of the
+/// diagram; inlined, the 2D cells went 1 340 -> 1 190 ns per seed on one thread ( lmo, AVX-512, 2026-10-26 ).
 template<class TK,int D,class PD>
+#ifdef __CUDACC__
+__forceinline__
+#else
+[[gnu::always_inline]] inline
+#endif
 HD Plane<TK,D> seed_plane( const PD &pd, SI k0, const typename PD::TF *p0, typename PD::TF w0, SI j ) {
     using TF = typename PD::TF;
     if constexpr ( has_groups<PD>() ) {
@@ -122,7 +130,10 @@ struct ProviderAll {
 /// memories -- those of Voronoi on a Laguerre diagram -- still yield -18 %: a false
 /// memory only costs one first pass. A seed without memory ( `memo_counts == 0` ) takes
 /// the ordinary path, up to the comparison.
-template<class PD,class TK,int D,bool WEIGHTED,bool MEMO = false>
+///
+/// `SLACK`: the boxes widened by `slack` ( the canonical cell: a plane through a vertex is never pruned ). A compile-time
+/// choice: a margin read at run time, even zero, kept the compiler from folding the pruning test -- 5 % of a 2D diagram.
+template<class PD,class TK,int D,bool WEIGHTED,bool MEMO = false,bool SLACK = false>
 struct ProviderBsp {
     using TF = typename PD::TF;
 
@@ -146,7 +157,7 @@ struct ProviderBsp {
     SI  n;                                               ///< the number of seeds: image `t` of rank `k` is `k + n t`
     SI  depth;                                           ///< `nb_nodes == 2^depth - 1`
     int npre = 0;                                        ///< MEMO: how many memories for `k0`
-    TK  slack = 0;                                       ///< the boxes widened by this much ( the canonical cut: a plane through a vertex is never pruned )
+    TK  slack = 0;                                       ///< `SLACK`: the boxes widened by this much ( the canonical cut: a plane through a vertex is never pruned )
     TF  p0[ D ], w0;
     TK  q0[ D ], v0;                                     ///< the same, for the pruning
 
@@ -231,8 +242,12 @@ struct ProviderBsp {
         TF lo[ D ], hi[ D ];
         image_box( n, t, lo, hi );
         for ( int d = 0; d < D; ++d ) {
-            B.lo[ d ] = TK( lo[ d ] ) - slack;
-            B.hi[ d ] = TK( hi[ d ] ) + slack;
+            B.lo[ d ] = TK( lo[ d ] );
+            B.hi[ d ] = TK( hi[ d ] );
+            if constexpr ( SLACK ) {
+                B.lo[ d ] -= slack;
+                B.hi[ d ] += slack;
+            }
             B.a[ d ] = 0;
         }
         B.b = 0;

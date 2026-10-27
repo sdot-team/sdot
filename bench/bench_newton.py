@@ -141,7 +141,7 @@ if p := bench( "newton",
         target = lambda: Image( values = numpy.ones( ( 1, ) * d ), origin = [ 0.0 ] * d, pixel_frame = numpy.eye( d ) )
 
     def settings( n_points, max_iter ):
-        return Iterative( tol = p.tol, max_iter = max_iter, continuation = continuation,
+        return Iterative( tol = p.tol, max_iter = max_iter, continuation = continuation, on_failure = "ignore",
                           precision = { "double": "fp64", "float": "fp32", "mixed": "mixed" }[ p.kernel ],
                           weights0 = w_file[ :n_points ] if p.start == "file" else None,
                           aggregate = p.aggregate == "yes",
@@ -186,7 +186,7 @@ if p := bench( "newton",
             if kt: kt.reset()
             t = time.perf_counter()
             sol = OtProblem( SumOfDiracs( pos ), target() ).solve( settings( n, p.max_iter ), verbose = p.trace == "yes" )
-            benchlib.block_until_ready( sol.weights.raw )
+            benchlib.block_until_ready( sol.weights )
             wall = time.perf_counter() - t
             k = kt.read() if kt else None
             if best is None or wall < best[ 0 ]:
@@ -202,7 +202,7 @@ if p := bench( "newton",
         def solve_masses( masses ):
             plan = OtProblem( SumOfDiracs( pos, masses ), target() ).solve( settings( n, p.max_iter ), verbose = p.trace == "yes" )
             from sdot.SdotPlanNd import _STATS
-            return plan.weights.raw, { k: plan.stats[ k ] for k in _STATS }
+            return plan.weights, { k: plan.stats[ k ] for k in _STATS }
         f = jax.jit( solve_masses )
         masses = numpy.ones( n )
         out = f( masses )

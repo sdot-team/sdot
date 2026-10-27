@@ -2,6 +2,7 @@
 title: Gaussian Mixture Fit
 description: Fit the parameters of Gaussians to a point cloud by minimizing W2, by gradient descent then L-BFGS. Demonstrates the use of gradients.
 tags: [gradient, jax, torch, learning]
+image: /examples/img/gaussian-mixture-fit.png
 order: 2
 ---
 
