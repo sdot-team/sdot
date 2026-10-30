@@ -434,11 +434,11 @@ HD void potential_into_pixels( const PD &pd, auto &&sink, const auto &dom, auto 
                 TF acc = 0, vol_tot = 0;
                 pc.for_each_simplex( [&]( const auto &chain ) {
                     const auto pts = simplex_points<TF,D>( pc, chain );
-                    TF v[ D + 1 ][ D ];
+                    TF v[ PD::ct_dim + 1 ][ PD::ct_dim ]; // PD::ct_dim, not D: g++ 14 does not see a captured constexpr local as constant here
                     for ( int i = 0; i <= D; ++i )
                         for ( int d = 0; d < D; ++d )
                             v[ i ][ d ] = TF( pts[ i ][ d ] ) - TF( p[ d ] );
-                    TF e[ D ][ D ];
+                    TF e[ PD::ct_dim ][ PD::ct_dim ];
                     for ( int i = 0; i < D; ++i )
                         for ( int d = 0; d < D; ++d )
                             e[ i ][ d ] = v[ i + 1 ][ d ] - v[ 0 ][ d ];
@@ -450,7 +450,7 @@ HD void potential_into_pixels( const PD &pd, auto &&sink, const auto &dom, auto 
                             - e[ 0 ][ 1 ] * ( e[ 1 ][ 0 ] * e[ 2 ][ 2 ] - e[ 1 ][ 2 ] * e[ 2 ][ 0 ] )
                             + e[ 0 ][ 2 ] * ( e[ 1 ][ 0 ] * e[ 2 ][ 1 ] - e[ 1 ][ 1 ] * e[ 2 ][ 0 ] );
                     const TF vol = ( det < 0 ? -det : det ) / ( D == 2 ? TF( 2 ) : TF( 6 ) );
-                    TF sq = 0, s[ D ];
+                    TF sq = 0, s[ PD::ct_dim ];
                     for ( int d = 0; d < D; ++d )
                         s[ d ] = 0;
                     for ( int i = 0; i <= D; ++i )
@@ -942,7 +942,8 @@ HD typename PD::TF group_distance2( const PD &pd, SI k, SI id ) {
 /// for a facet between groups, and for two members of a group their weights `V` in the frame of their lowest common aggregate
 /// ( `group_distance2`: the distance then that of their virtual diracs in that frame ).
 template<class PD>
-HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist ) {
+HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist,
+                    auto &&memo_nbrs, auto &&memo_counts ) {
     using TF    = typename PD::TF;
     using TK    = KernelType<DECAYED_TYPE_OF( scratch )>;
     using Local = typename DECAYED_TYPE_OF( dom )::template Local<TK>;
@@ -959,6 +960,7 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
         return;
     }
     c.tidy();
+    memorize( c, k, memo_nbrs, memo_counts );            // the neighbour memory, as `measures` leaves it ( `0, 0`: none )
 
     // the neighbors of the cell are its live cuts: one slot per cut, accumulated piece
     // by piece ( a piece carries the same identifiers, plus those of its tile )
@@ -1009,6 +1011,10 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
                     on_facet = TF( dens.facet_mass( pc, cut ) );
                 }
                 const TF val = on_facet / ( 2 * sdot::sqrt( d2 ) );
+                if ( cut < nc && c.cid[ cut ] == id ) {      // the piece is the cell itself ( a constant density ): same slots
+                    res.vals( cut ) += val;
+                    return;
+                }
                 for ( int q = 0; q < nc; ++q )
                     if ( c.cid[ q ] == id ) {
                         res.vals( q ) += val;
@@ -1041,6 +1047,718 @@ HD void hessian_row( const PD &pd, SI k, const auto &dom, auto &&res, auto &&scr
                 }
         }
     }
+}
+
+/// THE FILTER OF `dual`: a provider that passes on the planes of another and notes whether one of them passes within `rel` ( of
+/// the size of its terms ) of a vertex of the cell as it stands -- a plane that cuts there, or that misses by a rounding.
+template<class Inner,class TK,int D>
+struct NearProvider {
+    using Local = LocalOf<Inner>;
+    Inner &f;
+    TK     rel;
+    bool   near = false;
+
+    template<class State>
+    HD bool next( const State &e, Local &l, Plane<TK,D> &p ) {
+        if ( ! f.next( e, l, p ) )
+            return false;
+        if ( ! near )
+            near = passes_near( e, p );
+        return true;
+    }
+
+    template<class State>
+    HD bool passes_near( const State &e, const Plane<TK,D> &p ) const {
+        if constexpr ( requires { e.bounded; } )
+            if ( ! e.bounded )
+                return true;
+        const TK ao = p.off < 0 ? - p.off : p.off;
+#ifndef __CUDACC__
+        if constexpr ( requires { e.vx + e.vx; } ) {     // 2D, the eight lanes of the registers
+            using V = typename State::V;
+            const V zero( TK( 0 ) ), d0( p.dir[ 0 ] ), d1( p.dir[ 1 ] );
+            const V s = asimd::fma( d0, e.vx, asimd::fma( d1, e.vy, V( - p.off ) ) );
+            const V m = asimd::fma( asimd::max( d0, zero - d0 ), asimd::max( e.vx, zero - e.vx ),
+                                    asimd::fma( asimd::max( d1, zero - d1 ), asimd::max( e.vy, zero - e.vy ), V( ao ) ) );
+            const unsigned b = unsigned( asimd::to_bits( asimd::ge( V( rel ) * m, asimd::max( s, zero - s ) ) ) );
+            return ( b & ( ( 1u << State::nb ) - 1 ) ) != 0;
+        } else
+#endif
+        {
+            const TK *x[ D ];
+            if constexpr ( requires { e.vy; } ) { x[ 0 ] = e.vx; x[ 1 ] = e.vy; }
+            else for ( int d = 0; d < D; ++d ) x[ d ] = e.v[ d ];
+            TK ad[ D ];
+            for ( int d = 0; d < D; ++d ) ad[ d ] = p.dir[ d ] < 0 ? - p.dir[ d ] : p.dir[ d ];
+#ifndef __CUDACC__
+            using V = asimd::SimdVec<TK,8>;              // eight vertices per step, as `can_cut_box`
+            const V zero( TK( 0 ) ), vrel( rel ), vao( ao );
+            auto near8 = [&]( auto load ) {
+                V s( - p.off ), m = vao;
+                for ( int d = 0; d < D; ++d ) {
+                    const V xi = load( d );
+                    s = asimd::fma( V( p.dir[ d ] ), xi, s );
+                    m = asimd::fma( V( ad[ d ] ), asimd::max( xi, zero - xi ), m );
+                }
+                return asimd::ge( vrel * m, asimd::max( s, zero - s ) );
+            };
+            const int full = e.nb & ~7;
+            int i = 0;
+            for ( ; i < full; i += 8 )
+                if ( asimd::to_bits( near8( [&]( int d ) { return V::load_unaligned( x[ d ] + i ); } ) ) )
+                    return true;
+            if ( i < e.nb ) {
+                const auto q = asimd::LaneRange<0>( e.nb - i );
+                return asimd::to_bits( near8( [&]( int d ) { return V::load_partial( x[ d ] + i, q ); } ), q ) != 0;
+            }
+            return false;
+#endif
+            bool any = false;
+            for ( int i = 0; i < e.nb; ++i ) {
+                TK s = - p.off, m = ao;
+                for ( int d = 0; d < D; ++d ) {
+                    const TK xi = x[ d ][ i ];
+                    s += p.dir[ d ] * xi;
+                    m += ad[ d ] * ( xi < 0 ? - xi : xi );
+                }
+                any |= ( s < 0 ? - s : s ) <= rel * m;
+            }
+            return any;
+        }
+    }
+};
+
+/// the band of the filter, relative to the size of the terms: well above the rounding of a vertex cut many times in doubles, well
+/// below what the widened boxes of the walk let through ( `1e-8` of the extent: a seed that passes this close is never pruned )
+HD inline constexpr double dual_filter_band() { return 1e-11; }
+
+/// the most cuts a cell may have to be certified ( a bigger one is cut canonically )
+static constexpr int dual_filter_max_cuts = 128;
+
+/// THE FAST CELL OF `dual`, CERTIFIED: `1` if its vertices are those of the canonical cell, `0` if it cannot say ( a plane passed
+/// within the band of a vertex during the walk, a vertex is within the band of a cut that is not its own, or its cuts are nearly
+/// parallel ), `-1` if the scratch was not enough.
+///
+/// Why it is enough: a vertex of the cell clear of every other plane by more than the rounding is a vertex of the exact cell, with
+/// the same seeds ( the perturbation of the canonical predicates moves nothing that is not tied ); and the exact cell has no vertex
+/// that this one lacks, since the plane that would make it cuts the cell, hence removes a vertex of it -- which then was not clear.
+/// The planes that are never proposed are pruned by the walk with its boxes widened: they are far from every vertex.
+template<class PD,class Local>
+HD int certified_cell( const PD &pd, Local &c, SI k0, const auto &dom ) {
+    using TK = typename Local::TKernel;
+    using TF = typename PD::TF;
+    constexpr int D = PD::ct_dim;
+    if ( ! c.load( dom ) )
+        return -1;
+    auto fc = [ & ] {
+        if constexpr ( requires { pd.template provider<TK,true>( k0 ); } ) return pd.template provider<TK,true>( k0 );
+        else return pd.template provider<TK>( k0 );
+    }();
+    if constexpr ( requires { fc.slack; pd.tree.node_box( 0, 0, 0 ); } ) {
+        TK ext = 0;
+        for ( int d = 0; d < D; ++d ) {
+            const TK e = TK( pd.tree.node_box( 0, 1, d ) ) - TK( pd.tree.node_box( 0, 0, d ) );
+            ext = e > ext ? e : ext;
+        }
+        fc.slack = TK( 1e-8 ) * ext;
+    }
+    NearProvider<decltype( fc ),TK,D> w{ fc, TK( dual_filter_band() ) };
+    if ( run<PD::on_cpu>( c, w ) == CutStatus::NO_ROOM )
+        return -1;
+    if ( w.near || ! c.bounded() )
+        return 0;
+    c.tidy();
+
+    // the planes of the cuts once ( the bisectors rebuilt from the seeds ), their sizes, and their unit normals
+    const int nv = c.nb_vertices(), nc = c.nb_cuts();
+    if ( nc > dual_filter_max_cuts )
+        return 0;
+    TF pl[ D + 1 ][ dual_filter_max_cuts ], un[ D ][ dual_filter_max_cuts ];
+    for ( int q = 0; q < nc; ++q ) {
+        TF dir[ D ], off, l = 0;
+        plane_of( pd, c, k0, q, dir, off );
+        for ( int d = 0; d < D; ++d ) { pl[ d ][ q ] = dir[ d ]; l += dir[ d ] * dir[ d ]; }
+        pl[ D ][ q ] = off;
+        l = l > 0 ? 1 / std::sqrt( l ) : TF( 0 );
+        for ( int d = 0; d < D; ++d ) un[ d ][ q ] = dir[ d ] * l;
+    }
+
+    // every vertex against every cut that is not its own ( `D + 1` planes through a point ), and its own cuts not nearly parallel
+    const TF band = TF( dual_filter_band() );
+    for ( int v = 0; v < nv; ++v ) {
+        int own[ D ];
+        for ( int r = 0; r < D; ++r ) own[ r ] = c.vertex_cut( v, r );
+        TF det;
+        if constexpr ( D == 2 ) det = un[ 0 ][ own[ 0 ] ] * un[ 1 ][ own[ 1 ] ] - un[ 1 ][ own[ 0 ] ] * un[ 0 ][ own[ 1 ] ];
+        else {
+            const int a = own[ 0 ], b = own[ 1 ], e = own[ 2 ];
+            det = un[ 0 ][ a ] * ( un[ 1 ][ b ] * un[ 2 ][ e ] - un[ 2 ][ b ] * un[ 1 ][ e ] )
+                - un[ 1 ][ a ] * ( un[ 0 ][ b ] * un[ 2 ][ e ] - un[ 2 ][ b ] * un[ 0 ][ e ] )
+                + un[ 2 ][ a ] * ( un[ 0 ][ b ] * un[ 1 ][ e ] - un[ 1 ][ b ] * un[ 0 ][ e ] );
+        }
+        if ( ! ( std::fabs( det ) > 1e-3 ) )
+            return 0;
+        TF x[ D ];
+        for ( int d = 0; d < D; ++d )
+            x[ d ] = TF( c.coord( v, d ) );
+        bool near = false;                               // branch-free: the loop vectorizes
+        for ( int q = 0; q < nc; ++q ) {
+            TF s = - pl[ D ][ q ], m = std::fabs( pl[ D ][ q ] );
+            bool mine = false;
+            for ( int d = 0; d < D; ++d ) {
+                s += pl[ d ][ q ] * x[ d ];
+                m += std::fabs( pl[ d ][ q ] * x[ d ] );
+                mine |= own[ d ] == q;
+            }
+            near |= ! mine & ( std::fabs( s ) <= band * m );
+        }
+        if ( near )
+            return 0;
+    }
+    return 1;
+}
+
+/// the simplices of the vertices of `c` ( the cell of `k` ) between seeds only, `k` the smallest of their seeds, appended to `ids`
+/// from `o`. Returns the new end, or `-( what it would have been )` if it does not fit in `cap`.
+template<class PD,class Local>
+HD SI append_owned_simplices( const PD &pd, const Local &c, SI k, auto &&ids, SI o, SI cap ) {
+    constexpr int D = PD::ct_dim;
+    const int uk = int( pd.user_id( k ) );
+    auto owned = [&]( int v ) {
+        for ( int r = 0; r < D; ++r ) {
+            const SI id = c.cid[ c.vertex_cut( v, r ) ];
+            if ( id < 0 || int( pd.user_id( id ) ) <= uk )
+                return false;
+        }
+        return true;
+    };
+    const int nv = c.nb_vertices();
+    int nb = 0;
+    for ( int v = 0; v < nv; ++v )
+        nb += owned( v );
+    const SI e = o + nb * ( D + 1 );
+    if ( cap >= 0 && e > cap )
+        return - e;
+    for ( int v = 0; v < nv; ++v ) {
+        if ( ! owned( v ) )
+            continue;
+        ids( o++ ) = uk;
+        for ( int r = 0; r < D; ++r )
+            ids( o++ ) = int( pd.user_id( c.cid[ c.vertex_cut( v, r ) ] ) );
+    }
+    return e;
+}
+
+/// THE DUAL of the diagram restricted to its domain, for the seeds of a work-item ( `for_each_seed` ): the simplices ( `D + 1` seeds,
+/// user indices ) of the vertices of each cell whose `D` cuts all face seeds, each written by the cell of its SMALLEST seed -- once in
+/// all --, appended to `res` ( one list per work-item: its size follows the number of simplices, not the most a cell has ). The cells
+/// must be CANONICAL ( `cell/Canonical.h` ): every cell then decides alike about every vertex it shares ( the ties broken by the same
+/// symbolic perturbation ), so the simplices written by different cells form one triangulation, with no gluing.
+///
+/// THE FILTER ( 2D and 3D, `filter` ): each cell is first cut in plain doubles from `dom_fast`, and taken as it is when it is
+/// CERTIFIED ( `certified_cell` ) -- its vertices then are those of the canonical cell. Only the doubtful ones ( near ties: a grid,
+/// seeds on a sphere ) are cut again from `dom`, canonically. `filter == false`: all of them ( what the tests compare the filter with ).
+template<class PD>
+HD void dual( const PD &pd, bool filter, const auto &dom_fast, const auto &dom, auto &&res, auto &&scratch, SI thread_index, SI nb_threads ) {
+    using TF    = typename PD::TF;
+    using TK    = KernelType<DECAYED_TYPE_OF( scratch )>;
+    using Local = typename DECAYED_TYPE_OF( dom )::template Local<TK>;
+    using Fast  = typename DECAYED_TYPE_OF( dom_fast )::template Local<TK>;
+    constexpr int D = PD::ct_dim;
+    constexpr bool filtered = D == 2 || D == 3;
+
+    // the two cells share the words: the canonical one, when needed, overwrites the fast one
+    Carver cv = carver_of( scratch ), cf = cv;
+    Local c;
+    c.attach( cv, cap_in<Local,TF>( cv.nb_words, 1, false ) );
+    Fast f;
+    if constexpr ( filtered )
+        f.attach( cf, cap_in<Fast,TF>( cf.nb_words, 1, false ) );
+
+    const SI cap = res.nb_ids.max;
+    SI o = 0;
+    for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
+        if constexpr ( filtered ) {
+            if ( filter ) {
+                const int st = certified_cell( pd, f, k, dom_fast );
+                if ( st < 0 ) {
+                    ask_more( scratch, cf );
+                    return false;
+                }
+                if ( st > 0 ) {
+                    o = append_owned_simplices( pd, f, k, res.ids, o, cap );
+                    return o >= 0;
+                }
+            }
+        }
+        if ( ! make_cell( pd, c, k, dom ) ) {
+            ask_more( scratch, cv );
+            return false;
+        }
+        c.tidy();
+        o = append_owned_simplices( pd, c, k, res.ids, o, cap );
+        return o >= 0;
+    } );
+    // too many for the capacity: the size it took so far, doubled ( loom grows the list and runs the call again )
+    res.nb_ids.set( o >= 0 ? o : 2 * ( - o ) );
+}
+
+// ---- 2D: THE DUAL BY REPAIR ----------------------------------------------------------------------
+
+/// PASS 1 OF THE REPAIRED DUAL: the STAR of each seed of the work-item ( `for_each_seed` ) -- its cell cut in plain doubles from
+/// `dom_fast`, read as the cyclic list of its cuts ( storage ranks, `< 0` for the domain ), in counter-clockwise order.
+/// `star_nb( k )` is the length of the star even when it exceeds the width of `star_ids` ( only the first ones are written: the
+/// host then runs the call again, wider ). An unbounded cell has an empty star.
+template<class PD>
+HD void dual_stars( const PD &pd, const auto &dom_fast, auto &&star_ids, auto &&star_nb, auto &&scratch, SI thread_index, SI nb_threads ) {
+    using TF   = typename PD::TF;
+    using TK   = KernelType<DECAYED_TYPE_OF( scratch )>;
+    using Fast = typename DECAYED_TYPE_OF( dom_fast )::template Local<TK>;
+    Carver cv = carver_of( scratch );
+    Fast f;
+    f.attach( cv, cap_in<Fast,TF>( cv.nb_words, 1, false ) );
+    const int width = int( star_ids.shape( 1 ) );
+    for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI k ) {
+        if ( ! make_cell( pd, f, k, dom_fast ) ) {
+            ask_more( scratch, cv );
+            return false;
+        }
+        const int nc = f.bounded() ? f.nb_cuts() : 0;
+        for ( int q = 0; q < nc && q < width; ++q )
+            star_ids( k, q ) = f.cid[ q ];
+        star_nb( k ) = nc;
+        return true;
+    } );
+}
+
+/// PASS 2 OF THE REPAIRED DUAL ( 2D ): from the stars of the float cells, a TRIANGULATION -- consistent by construction, whatever
+/// the stars say. The connectivity decides; a float only RANKS the choices, and each choice is made ONCE ( by a computation that
+/// does not depend on who makes it ), so that no two seeds can disagree.
+///
+/// 1. E = the edges both seeds list. Two edges of E may cross ( both diagonals of a cocircular quad, each listed by its two seeds ):
+///    the one that is not regular leaves, by the float power test of the quad, evaluated from the smaller edge ( `dead` ).
+/// 2. The faces of the planar map of E: around each seed, its own star order ( `rot`, the domain as one vertex OUT ). A face is a
+///    closed walk, or a chain of seeds that ends on OUT ( along the domain ).
+/// 3. Each face is triangulated by its OWNER ( its smallest dart; for a chain, its first dart ): a triangle that all three of its
+///    cells propose is kept as it is; any other face -- a hole, a chain -- loses its spikes and pinches, then each simple loop is
+///    triangulated by a dynamic program that minimises the integral of the lifted heights ( the regular triangulation of a convex
+///    polygon ), with diagonals that cross no side, and a triangle is kept when its power centre lies in the domain.
+/// A seed whose star is consistent all around ( the fast path: all of them on seeds in general position ) writes its owned
+/// triangles directly. A seed nobody agrees on is hidden. Too large a face, or a walk that cannot close, counts in `nb_bad`
+/// ( the host then falls back on the certified dual ). So does a loop with no triangulation: what an exact tie of hidden seeds can
+/// give -- a seed exactly on the segment between two neighbours that do not list it, while others do: the conflict between that
+/// segment and its edges is seen from one side only, and the hole touches itself ( a T ).
+template<class PD,class SIds,class SNb,int K,class RIds = int,class RNb = int>
+struct DualRepair {
+    using TF = typename PD::TF;
+    static constexpr int OUT = -1;
+    static constexpr int MAX_STAR = 64, MAX_DOM = 64;
+
+    const PD   &pd;
+    const SIds &ids;
+    const SNb  &nbs;
+    int         nd = 0;                                  ///< the sides of the domain: `dx x + dy y <= off`
+    TF          ddx[ MAX_DOM ], ddy[ MAX_DOM ], doff[ MAX_DOM ];
+    const RIds *rids = nullptr;                          ///< the rotations kept by `dual_rots`: `rnb( v )` = their length,
+    const RNb  *rnb  = nullptr;                          ///< `| FAST` for a seed of the fast path, `-1` for one that gave up
+    static constexpr int FAST = 1 << 20;
+
+    HD int  nb  ( int k ) const { return int( nbs( k ) ); }
+    HD int  at  ( int k, int i ) const { return int( ids( k, i ) ); }
+    HD int  find( int k, int x ) const { const int m = nb( k ); for ( int i = 0; i < m; ++i ) if ( at( k, i ) == x ) return i; return -1; }
+    HD bool sym ( int a, int b ) const { return find( a, b ) >= 0 && find( b, a ) >= 0; }
+    HD TF   px  ( int k ) const { return TF( pd.point( k )[ 0 ] ); }
+    HD TF   py  ( int k ) const { return TF( pd.point( k )[ 1 ] ); }
+    HD TF   lift( int k ) const { const TF x = px( k ), y = py( k ); return x * x + y * y - TF( pd.weight( k ) ); }
+    HD TF   orient( int a, int b, int c ) const {
+        return ( px( b ) - px( a ) ) * ( py( c ) - py( a ) ) - ( py( b ) - py( a ) ) * ( px( c ) - px( a ) );
+    }
+
+    /// the star of `i` around `j` says the same as the star of `j` around `i`, and both triangles at the edge are proposed by all
+    /// their cells ( a domain side for a domain side ): a CLEAN edge, never crossed, never removed
+    HD bool clean( int i, int j ) const {
+        const int ni = nb( i ), nj = nb( j ), pi = find( i, j ), pj = find( j, i );
+        if ( pi < 0 || pj < 0 )
+            return false;
+        const int p = at( i, pi ? pi - 1 : ni - 1 ), q = at( i, pi + 1 < ni ? pi + 1 : 0 );
+        const int p2 = at( j, pj + 1 < nj ? pj + 1 : 0 ), q2 = at( j, pj ? pj - 1 : nj - 1 );
+        if ( ( p < 0 ? p2 >= 0 : p2 != p ) || ( q < 0 ? q2 >= 0 : q2 != q ) )
+            return false;
+        return ( p < 0 || proposes( p, i, j ) ) && ( q < 0 || proposes( q, i, j ) );
+    }
+
+    /// the segments `( a, b )` and `( c, d )` ( no common end ) meet: they cross, or an end of one lies inside the other
+    HD bool conflict( int a, int b, int c, int d ) const {
+        const TF o1 = orient( a, b, c ), o2 = orient( a, b, d ), o3 = orient( c, d, a ), o4 = orient( c, d, b );
+        if ( o1 * o2 > 0 || o3 * o4 > 0 )
+            return false;
+        if ( o1 == 0 && o2 == 0 ) {                      // on one line: they meet when their interiors overlap
+            const TF ux = px( b ) - px( a ), uy = py( b ) - py( a );
+            const TF tc = ( px( c ) - px( a ) ) * ux + ( py( c ) - py( a ) ) * uy, td = ( px( d ) - px( a ) ) * ux + ( py( d ) - py( a ) ) * uy;
+            const TF tb = ux * ux + uy * uy, lo = tc < td ? tc : td, hi = tc < td ? td : tc;
+            return lo < tb && hi > 0;
+        }
+        return ( o1 * o2 < 0 || o3 * o4 < 0 );
+    }
+
+    /// of two conflicting edges ( `a < b`, `c < d`, `( a, b ) < ( c, d )`: the same expression whoever asks ), whether the FIRST
+    /// one leaves. A clean edge stays; otherwise the power test of the quad: `( a, b )` is not regular when the farther of `c, d`
+    /// from its line, `x`, has the other in the power circle of `( a, b, x )`. A tie: the larger one leaves.
+    HD bool first_loses( int a, int b, int c, int d ) const {
+        const bool ca = clean( a, b ), cc = clean( c, d );
+        if ( ca != cc )
+            return cc;
+        TF oc = orient( a, b, c ), od = orient( a, b, d );
+        int x = c, y = d;
+        if ( ( oc < 0 ? -oc : oc ) < ( od < 0 ? -od : od ) ) { x = d; y = c; oc = od; }
+        int u = a, v = b;
+        if ( oc < 0 ) { u = b; v = a; }                  // ( u, v, x ) counter-clockwise
+        const TF hy = lift( y );
+        const TF m[ 3 ][ 3 ] = {
+            { px( u ) - px( y ), py( u ) - py( y ), lift( u ) - hy },
+            { px( v ) - px( y ), py( v ) - py( y ), lift( v ) - hy },
+            { px( x ) - px( y ), py( x ) - py( y ), lift( x ) - hy } };
+        const TF val = m[ 0 ][ 0 ] * ( m[ 1 ][ 1 ] * m[ 2 ][ 2 ] - m[ 1 ][ 2 ] * m[ 2 ][ 1 ] )
+                     - m[ 0 ][ 1 ] * ( m[ 1 ][ 0 ] * m[ 2 ][ 2 ] - m[ 1 ][ 2 ] * m[ 2 ][ 0 ] )
+                     + m[ 0 ][ 2 ] * ( m[ 1 ][ 0 ] * m[ 2 ][ 1 ] - m[ 1 ][ 1 ] * m[ 2 ][ 0 ] );
+        return val > 0;
+    }
+
+    /// `x` among the seeds of the stars of `i` and `j`
+    HD bool near( int i, int j, int x ) const { return find( i, x ) >= 0 || find( j, x ) >= 0; }
+
+    /// the edge `( i, j )` of E leaves: a clean one never; otherwise it meets an edge of E between seeds of its stars ( whose stars
+    /// hold `i` and `j`: the pair is found from both edges ), and loses
+    HD bool dead( int i, int j ) const {
+        if ( clean( i, j ) || nb( i ) > MAX_STAR || nb( j ) > MAX_STAR )   // ( a star too long: its seed gives up, see `rot` )
+            return false;
+        int C[ 2 * MAX_STAR ], m = 0;
+        for ( int e = 0; e < 2; ++e ) {
+            const int z = e ? j : i, n = nb( z );
+            for ( int q = 0; q < n; ++q ) {
+                const int k = at( z, q );
+                if ( k < 0 || k == i || k == j ) continue;
+                bool seen = false;
+                for ( int r = 0; r < m && ! seen; ++r ) seen = C[ r ] == k;
+                if ( ! seen ) C[ m++ ] = k;
+            }
+        }
+        const int a = i < j ? i : j, b = i < j ? j : i;
+        // the side of the line ( a, b ) of each, and for those on it whether they are inside the segment: a pair can meet the segment
+        // only from both sides, through a point inside it, or along it ( the same expressions as `conflict`: nothing it would see is
+        // skipped, whichever edge asks )
+        TF o[ 2 * MAX_STAR ];
+        bool in[ 2 * MAX_STAR ];
+        const TF ux = px( b ) - px( a ), uy = py( b ) - py( a ), tb = ux * ux + uy * uy;
+        for ( int x = 0; x < m; ++x ) {
+            o[ x ] = orient( a, b, C[ x ] );
+            const TF t = ( px( C[ x ] ) - px( a ) ) * ux + ( py( C[ x ] ) - py( a ) ) * uy;
+            in[ x ] = o[ x ] == 0 && t > 0 && t < tb;
+        }
+        for ( int x = 0; x < m; ++x ) {
+            for ( int y = x + 1; y < m; ++y ) {
+                if ( ! ( o[ x ] * o[ y ] < 0 || in[ x ] || in[ y ] || ( o[ x ] == 0 && o[ y ] == 0 ) ) )
+                    continue;
+                const int c = C[ x ] < C[ y ] ? C[ x ] : C[ y ], d = C[ x ] < C[ y ] ? C[ y ] : C[ x ];
+                const bool ab_first = a < c || ( a == c && b < d );
+                if ( ab_first ? ! conflict( a, b, c, d ) : ! conflict( c, d, a, b ) )
+                    continue;
+                if ( ! sym( c, d ) || ! near( c, d, a ) || ! near( c, d, b ) )
+                    continue;
+                if ( ab_first ? first_loses( a, b, c, d ) : ! first_loses( c, d, a, b ) )
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    HD bool alive( int i, int j ) const { return sym( i, j ) && ! dead( i, j ); }
+
+    /// the neighbours of `v` along E in its star order, a run of domain cuts as one OUT. `-1`: too long.
+    HD int rot( int v, int *r, bool all_alive = false ) const {
+        const int n = nb( v );
+        if ( n > MAX_STAR )
+            return -1;
+        int m = 0;
+        for ( int q = 0; q < n; ++q ) {
+            const int x = at( v, q );
+            if ( x < 0 ) {
+                if ( m == 0 || r[ m - 1 ] != OUT ) r[ m++ ] = OUT;
+            } else if ( all_alive || alive( v, x ) )
+                r[ m++ ] = x;
+        }
+        if ( m > 1 && r[ 0 ] == OUT && r[ m - 1 ] == OUT )
+            --m;
+        return m;
+    }
+
+    /// `p` and `q` side by side in the star of `x` ( a cell that proposes the triangle `x, p, q` )
+    HD bool proposes( int x, int p, int q ) const {
+        const int n = nb( x ), i = find( x, p );
+        if ( i < 0 || n < 2 ) return false;
+        return at( x, i + 1 < n ? i + 1 : 0 ) == q || at( x, i ? i - 1 : n - 1 ) == q;
+    }
+    HD bool by_all( int a, int b, int c ) const { return proposes( a, b, c ) && proposes( b, c, a ) && proposes( c, a, b ); }
+
+    /// the power centre of `( a, b, c )` in the domain
+    HD bool centre_inside( int a, int b, int c ) const {
+        const TF ux = 2 * ( px( b ) - px( a ) ), uy = 2 * ( py( b ) - py( a ) ), vx = 2 * ( px( c ) - px( a ) ), vy = 2 * ( py( c ) - py( a ) );
+        const TF ru = lift( b ) - lift( a ), rv = lift( c ) - lift( a ), det = ux * vy - uy * vx;
+        if ( ! ( det != 0 ) )
+            return false;
+        const TF x = ( ru * vy - uy * rv ) / det, y = ( ux * rv - ru * vx ) / det;
+        for ( int q = 0; q < nd; ++q )
+            if ( ! ( ddx[ q ] * x + ddy[ q ] * y <= doff[ q ] ) )
+                return false;
+        return true;
+    }
+
+    /// the loop `l[ 0 .. k )` ( simple, counter-clockwise ) triangulated: `emit( a, b, c )` for each triangle kept. `false`: no
+    /// triangulation ( the loop was not simple ).
+    HD bool triangulate( const int *l, int k, bool all_propose, auto &&emit ) const {
+        if ( k == 3 ) {
+            if ( ! ( orient( l[ 0 ], l[ 1 ], l[ 2 ] ) > 0 ) )  // a loop turned inside out ( around a hidden seed ): no triangle
+                return true;
+            if ( ( all_propose && by_all( l[ 0 ], l[ 1 ], l[ 2 ] ) ) || centre_inside( l[ 0 ], l[ 1 ], l[ 2 ] ) )
+                emit( l[ 0 ], l[ 1 ], l[ 2 ] );
+            return true;
+        }
+        signed char ok[ K ][ K ];                        // the diagonal crosses no side: -1 not known yet
+        TF cost[ K ][ K ];
+        unsigned char arg[ K ][ K ];
+        TF h[ K ];
+        for ( int i = 0; i < k; ++i ) {
+            h[ i ] = lift( l[ i ] );
+            for ( int j = 0; j < k; ++j ) ok[ i ][ j ] = -1;
+        }
+        auto diag = [&]( int i, int j ) {
+            if ( j - i == 1 || ( i == 0 && j == k - 1 ) ) return true;
+            if ( ok[ i ][ j ] < 0 ) {
+                const int a = l[ i ], b = l[ j ];
+                bool good = true;
+                for ( int s = 0; s < k && good; ++s ) {
+                    const int c = l[ s ], d = l[ s + 1 < k ? s + 1 : 0 ];
+                    if ( c == a || c == b || d == a || d == b ) continue;
+                    good = ! ( orient( a, b, c ) * orient( a, b, d ) < 0 && orient( c, d, a ) * orient( c, d, b ) < 0 );
+                }
+                ok[ i ][ j ] = good;
+            }
+            return ok[ i ][ j ] > 0;
+        };
+        const TF INF = std::numeric_limits<TF>::infinity();
+        for ( int i = 0; i + 1 < k; ++i ) cost[ i ][ i + 1 ] = 0;
+        for ( int L = 2; L < k; ++L ) {
+            for ( int i = 0; i + L < k; ++i ) {
+                const int j = i + L;
+                TF best = INF;
+                int bm = -1;
+                for ( int m = i + 1; m < j; ++m ) {
+                    if ( cost[ i ][ m ] == INF || cost[ m ][ j ] == INF ) continue;
+                    const TF ar = orient( l[ i ], l[ m ], l[ j ] );
+                    if ( ! ( ar > 0 ) || ! diag( i, m ) || ! diag( m, j ) || ! diag( i, j ) ) continue;
+                    const TF v = cost[ i ][ m ] + cost[ m ][ j ] + ar * ( h[ i ] + h[ m ] + h[ j ] );
+                    if ( v < best ) { best = v; bm = m; }
+                }
+                cost[ i ][ j ] = best;
+                arg[ i ][ j ] = (unsigned char)( bm < 0 ? 255 : bm );
+            }
+        }
+        if ( cost[ 0 ][ k - 1 ] == INF )
+            return false;
+        int st[ 2 * K ], ns = 0;                         // the ranges still to split
+        st[ ns++ ] = 0; st[ ns++ ] = k - 1;
+        while ( ns ) {
+            const int j = st[ --ns ], i = st[ --ns ];
+            if ( j - i < 2 ) continue;
+            const int m = arg[ i ][ j ];
+            if ( centre_inside( l[ i ], l[ m ], l[ j ] ) )
+                emit( l[ i ], l[ m ], l[ j ] );
+            st[ ns++ ] = i; st[ ns++ ] = m;
+            st[ ns++ ] = m; st[ ns++ ] = j;
+        }
+        return true;
+    }
+
+    /// a face walk `f[ 0 .. k )` ( OUT already removed ) as simple loops: the spikes `x, y, x` removed, then cut at its repeated seeds
+    HD bool triangulate_face( int *f, int k, bool closed, auto &&emit ) const {
+        for ( bool changed = true; changed && k >= 3; ) {
+            changed = false;
+            for ( int i = 0; i < k; ++i ) {
+                const int i2 = i >= 2 ? i - 2 : i + k - 2;
+                if ( f[ i2 ] != f[ i ] ) continue;
+                const int i1 = i ? i - 1 : k - 1;        // drop positions i1 and i
+                int o = 0;
+                for ( int j = 0; j < k; ++j )
+                    if ( j != i1 && j != i ) f[ o++ ] = f[ j ];
+                k = o;
+                changed = true;
+                break;
+            }
+        }
+        if ( k < 3 )
+            return true;
+        int stack[ K ], ns = 0;
+        bool good = true;
+        const bool tri = closed && k == 3;              // a triangle face: kept as it is when its three cells propose it
+        for ( int j = 0; j < k; ++j ) {
+            const int x = f[ j ];
+            int r = -1;
+            for ( int q = 0; q < ns; ++q ) if ( stack[ q ] == x ) { r = q; break; }
+            if ( r < 0 ) { stack[ ns++ ] = x; continue; }
+            if ( ns - r >= 3 ) good &= triangulate( stack + r, ns - r, false, emit );
+            ns = r + 1;
+        }
+        if ( ns >= 3 ) good &= triangulate( stack, ns, tri, emit );
+        return good;
+    }
+
+    /// THE FAST PATH, on the star alone: around each pair of neighbours ( v, w ) side by side, the stars of v and w close the triangle
+    /// ( s, v, w ) -- or say the domain where s says it. Every edge of s is then CLEAN ( alive for every seed that asks ) and the faces
+    /// around s are these triangles and chains [ s, v, OUT ].
+    HD bool fast( int s ) const {
+        const int n = nb( s );
+        for ( int i = 0; i < n; ++i ) {
+            const int v = at( s, i ), w = at( s, i + 1 < n ? i + 1 : 0 );
+            if ( v >= 0 ) {                              // around v, just before s: w ( or the domain )
+                const int nv = nb( v ), pv = find( v, s );
+                const int p = pv < 0 ? s : at( v, pv ? pv - 1 : nv - 1 );
+                if ( w >= 0 ? p != w : p >= 0 ) return false;
+            }
+            if ( w >= 0 ) {                              // around w, just after s: v ( or the domain )
+                const int nw = nb( w ), pw = find( w, s );
+                const int q = pw < 0 ? s : at( w, pw + 1 < nw ? pw + 1 : 0 );
+                if ( v >= 0 ? q != v : q >= 0 ) return false;
+            }
+        }
+        return true;
+    }
+
+    /// the rotation of `v` kept by `dual_rots`, into `r`; `-1` if `v` gave up
+    HD int stored( int v, int *r ) const {
+        const int c = int( ( *rnb )( v ) );
+        if ( c < 0 )
+            return -1;
+        const int m = c & ( FAST - 1 );
+        for ( int q = 0; q < m; ++q )
+            r[ q ] = int( ( *rids )( v, q ) );
+        return m;
+    }
+
+    /// the faces owned by seed `s` ( every face has one owner ), triangulated: `emit( a, b, c )` -- from the rotations kept by
+    /// `dual_rots`. What went wrong, as bits: 1 a star too long, 2 a walk that does not come back, 4 a face too long, 8 a loop with
+    /// no triangulation ( 0: nothing ).
+    HD int faces_of( int s, auto &&emit ) const {
+        int rs[ MAX_STAR ], rb[ MAX_STAR ];
+        const int ms = stored( s, rs );
+        if ( ms < 0 )
+            return 1;
+        if ( int( ( *rnb )( s ) ) & FAST ) {
+            for ( int i = 0; i < ms; ++i ) {
+                const int v = rs[ i ], w = rs[ i + 1 < ms ? i + 1 : 0 ];
+                if ( v != OUT && w != OUT && s < v && s < w )
+                    emit( s, v, w );
+            }
+            return 0;
+        }
+        auto rot_of = [&]( int v, const int *&r ) { r = rb; return stored( v, rb ); };
+
+        // THE WALKS: from each dart s -> v, the face on its left; s owns it when the dart is its smallest ( or a chain's first )
+        int bad = 0;
+        int f[ K + 1 ];
+        for ( int i = 0; i < ms; ++i ) {
+            const int v = rs[ i ];
+            if ( v == OUT ) continue;
+            const bool start = rs[ i + 1 < ms ? i + 1 : 0 ] == OUT && ms > 1;
+            int a = s, b = v, k = 0;
+            bool closed = false, mine = true;
+            int fail = 0;
+            while ( true ) {
+                if ( k == K ) { fail = 4; break; }
+                f[ k++ ] = a;
+                if ( b == OUT ) break;
+                const int *r;
+                const int mb = rot_of( b, r );
+                if ( mb < 0 ) { fail = 1; break; }
+                int pa = -1;
+                for ( int q = 0; q < mb; ++q ) if ( r[ q ] == a ) { pa = q; break; }
+                if ( pa < 0 ) { fail = 2; break; }
+                const int c = r[ pa ? pa - 1 : mb - 1 ];
+                a = b; b = c;
+                if ( b != OUT && ( a < s || ( a == s && b < v ) ) ) mine = false;    // a smaller dart
+                if ( a == s && b == v ) { closed = true; break; }
+            }
+            if ( fail ) { bad |= fail; continue; }
+            if ( closed ? ! mine : ! start ) continue;
+            if ( ! triangulate_face( f, k, closed, emit ) ) bad |= 8;
+        }
+        return bad;
+    }
+};
+
+/// THE REPAIRED DUAL ( 2D ), pass 2: the ROTATION of each seed of the work-item ( `DualRepair::rot`: its neighbours along E, in
+/// its star order ), written once so that the walks of pass 3 read it instead of deciding each edge again. A seed of the fast path
+/// ( `DualRepair::fast` ) keeps its star as it is, marked `FAST`. `rot_nb( s ) = -1`: a star too long.
+template<class PD>
+HD void dual_rots( const PD &pd, const auto &star_ids, const auto &star_nb, auto &&rot_ids, auto &&rot_nb, SI thread_index, SI nb_threads ) {
+    using R = DualRepair<PD,DECAYED_TYPE_OF( star_ids ),DECAYED_TYPE_OF( star_nb ),1>;
+    R r{ pd, star_ids, star_nb };
+    for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI s ) {
+        int buf[ R::MAX_STAR ];
+        const bool fast = r.nb( int( s ) ) <= R::MAX_STAR && r.fast( int( s ) );
+        const int m = r.rot( int( s ), buf, fast );
+        for ( int q = 0; q < m; ++q )
+            rot_ids( s, q ) = buf[ q ];
+        rot_nb( s ) = m < 0 ? -1 : m | ( fast ? R::FAST : 0 );
+        return true;
+    } );
+}
+
+/// THE REPAIRED DUAL ( 2D ), pass 3: the triangles owned by the seeds of the work-item ( `DualRepair::faces_of` ), appended to `res` as
+/// in `dual` ( user indices ); `nb_bad( thread_index )` = what went wrong ( `DualRepair::faces_of`, 16: the domain ), 0 if nothing.
+template<class PD,int K = PD::on_cpu ? 64 : 16>
+HD void dual_repair( const PD &pd, const auto &dom_fast, const auto &star_ids, const auto &star_nb, const auto &rot_ids, const auto &rot_nb,
+                     auto &&res, auto &&nb_bad, auto &&scratch, SI thread_index, SI nb_threads ) {
+    using TF   = typename PD::TF;
+    using TK   = KernelType<DECAYED_TYPE_OF( scratch )>;
+    using Fast = typename DECAYED_TYPE_OF( dom_fast )::template Local<TK>;
+    using R    = DualRepair<PD,DECAYED_TYPE_OF( star_ids ),DECAYED_TYPE_OF( star_nb ),K,DECAYED_TYPE_OF( rot_ids ),DECAYED_TYPE_OF( rot_nb )>;
+    R r{ pd, star_ids, star_nb };
+    r.rids = &rot_ids;
+    r.rnb  = &rot_nb;
+
+    // the sides of the domain, from its cell
+    Carver cv = carver_of( scratch );
+    Fast f;
+    f.attach( cv, cap_in<Fast,TF>( cv.nb_words, 1, false ) );
+    int bad = 0;
+    if ( ! f.load( dom_fast ) || f.nb_cuts() > R::MAX_DOM || ! f.bounded() )
+        bad = 16;
+    else {
+        r.nd = f.nb_cuts();
+        for ( int q = 0; q < r.nd; ++q ) {
+            TK dx, dy, off;
+            f.plane_of_edge( q, dx, dy, off );
+            r.ddx[ q ] = TF( dx ); r.ddy[ q ] = TF( dy ); r.doff[ q ] = TF( off );
+        }
+    }
+
+    const SI cap = res.nb_ids.max;
+    SI o = 0, want = 0;
+    auto emit = [&]( int a, int b, int c ) {
+        want += 3;
+        if ( cap >= 0 && o + 3 > cap ) return;
+        res.ids( o++ ) = int( pd.user_id( a ) );
+        res.ids( o++ ) = int( pd.user_id( b ) );
+        res.ids( o++ ) = int( pd.user_id( c ) );
+    };
+    if ( ! bad )
+        for_each_seed<PD>( pd.nb_seeds(), thread_index, nb_threads, [&]( SI s ) {
+            bad |= r.faces_of( int( s ), emit );
+            return true;
+        } );
+    nb_bad( thread_index ) = bad;
+    // too many for the capacity: what it took, doubled ( loom grows the list and runs the call again )
+    res.nb_ids.set( want <= cap || cap < 0 ? want : 2 * want );
 }
 
 } // namespace diagram

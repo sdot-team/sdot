@@ -451,3 +451,125 @@ if test( "torch_tensors" ):
     assert isinstance( m, torch.Tensor ) and m.requires_grad, ( type( m ), getattr( m, 'requires_grad', None ) )
     ( m.sum() + cx.cells.centroids.sum() ).backward()
     assert p.grad is not None and torch.isfinite( p.grad ).all()
+
+
+if test( "the_dual_is_the_restricted_regular_triangulation" ):
+    # `dual()`: the regular triangulation of the seeds whose dual vertex lies in the domain, read off the lower hull of the lifted
+    # seeds ( scipy ), with and without weights; a grid ( degenerate everywhere ) still gives a triangulation of its hull
+    import importlib.util
+    if importlib.util.find_spec( "scipy" ) is None:
+        skip( "scipy is not installed" )
+    import numpy
+    from collections import Counter
+    from scipy.spatial import ConvexHull
+    from sdot.PowerDiagram import PowerDiagram
+    for d in ( 2, 3 ):
+        for wscale in ( 0.0, 0.3 ):
+            rng = numpy.random.default_rng( d )
+            n = 500
+            pos = rng.uniform( 0, 1, ( n, d ) )
+            w = wscale * rng.uniform( -1, 1, n ) / n ** ( 2 / d )
+            S = _np( PowerDiagram( pos, weights = w, boundaries = _box( d ) ).dual() ).astype( int )
+            h = ConvexHull( numpy.c_[ pos, ( pos ** 2 ).sum( 1 ) - w ] )
+            low = h.simplices[ h.equations[ :, d ] < 0 ]
+            P, W = pos[ low ], w[ low ]
+            A = 2 * ( P[ :, 1: ] - P[ :, :1 ] )
+            b = ( P[ :, 1: ] ** 2 ).sum( -1 ) - W[ :, 1: ] - ( P[ :, :1 ] ** 2 ).sum( -1 ) + W[ :, :1 ]
+            c = numpy.linalg.solve( A, b[ ..., None ] )[ ..., 0 ]
+            ref = numpy.sort( low[ ( ( c >= 0 ) & ( c <= 1 ) ).all( 1 ) ], axis = 1 )
+            assert len( S ) == len( set( map( tuple, S ) ) ), ( d, wscale, "a simplex twice" )
+            assert set( map( tuple, S ) ) == set( map( tuple, ref ) ), ( d, wscale, len( S ), len( ref ) )
+    for d in ( 2, 3 ):
+        g = numpy.stack( numpy.meshgrid( *[ ( numpy.arange( 5 ) + .5 ) / 5 ] * d ), -1 ).reshape( -1, d )
+        S = _np( PowerDiagram( g, boundaries = _box( d ) ).dual() ).astype( int )
+        F = Counter( tuple( numpy.delete( s, i ) ) for s in S for i in range( d + 1 ) )
+        vol = sum( abs( numpy.linalg.det( g[ s[ 1: ] ] - g[ s[ 0 ] ] ) ) for s in S ) / ( 2 if d == 2 else 6 )
+        assert max( F.values() ) == 2 and abs( vol - 0.8 ** d ) < 1e-12, ( d, max( F.values() ), vol )
+
+
+if test( "the_repaired_dual_is_a_triangulation" ):
+    # 2D `dual()` by repair of the float stars: on seeds in general position the same simplices as all cells canonical; on ties ( grids,
+    # rings, a circle, weights that hide seeds exactly, grids nudged at every scale ) a triangulation all the same -- no simplex twice,
+    # no edge in more than two triangles, none folded, no point covered twice, and ( away from ties on the box ) the same area
+    import numpy
+    from collections import defaultdict
+    from sdot.PowerDiagram import PowerDiagram
+    rng = numpy.random.default_rng( 3 )
+    m = 30
+    g = numpy.stack( numpy.meshgrid( *[ ( numpy.arange( m ) + .5 ) / m ] * 2 ), -1 ).reshape( -1, 2 )
+    u = numpy.arange( m ) / ( m - 1 )
+    t = 2 * numpy.pi * numpy.arange( 12 ) / 12
+    r = ( numpy.arange( 1, m // 2 ) + .5 ) / m
+    tr = 2 * numpy.pi * numpy.arange( 4 * ( m // 2 ) ) / ( 4 * ( m // 2 ) )
+    c, s_ = numpy.cos( .3 ), numpy.sin( .3 )
+    q = ( numpy.stack( numpy.meshgrid( *[ numpy.arange( -m, 2 * m ) / m ] * 2 ), -1 ).reshape( -1, 2 ) - .5 ) @ [ [ c, -s_ ], [ s_, c ] ] + .5
+    hx = numpy.stack( numpy.meshgrid( numpy.arange( m ), numpy.arange( m ) ), -1 ).reshape( -1, 2 ).astype( float )
+    hx[ :, 0 ] += .5 * ( hx[ :, 1 ] % 2 ); hx[ :, 1 ] *= 3 ** .5 / 2
+    generic = { "uniform": ( rng.uniform( 0, 1, ( 900, 2 ) ), None ),
+                "weighted": ( rng.uniform( 0, 1, ( 900, 2 ) ), 0.3 * rng.uniform( -1, 1, 900 ) / 900 ),
+                "hidden": ( rng.uniform( 0, 1, ( 900, 2 ) ), rng.uniform( 0, 1e-2, 900 ) ),
+                "hex": ( ( hx + .25 ) / ( m + .5 ), None ),
+                "grid+1e-9": ( g + 1e-9 * rng.uniform( -1, 1, g.shape ), None ),
+                "grid+1e-6": ( g + 1e-6 * rng.uniform( -1, 1, g.shape ), None ) }
+    ties = { "grid": ( g, None ), "grid on the box": ( numpy.stack( numpy.meshgrid( u, u ), -1 ).reshape( -1, 2 ), None ),
+             "rotated grid": ( q[ numpy.all( ( q > 0 ) & ( q < 1 ), 1 ) ], None ),
+             "rings": ( numpy.concatenate( [ [ [ .5, .5 ] ], ( .5 + r[ :, None, None ] * numpy.stack( [ numpy.cos( tr ), numpy.sin( tr ) ], 1 )[ None ] ).reshape( -1, 2 ) ] ), None ),
+             "circle": ( .5 + .3 * numpy.stack( [ numpy.cos( t ), numpy.sin( t ) ], 1 ), None ),
+             "grid+1e-15": ( g + 1e-15 * rng.uniform( -1, 1, g.shape ), None ),
+             "grid+1e-13": ( g + 1e-13 * rng.uniform( -1, 1, g.shape ), None ),
+             "grid+1e-11": ( g + 1e-11 * rng.uniform( -1, 1, g.shape ), None ) }
+    box_ties = { "weights tied": ( g, 1 / m ** 2 * rng.integers( 0, 3, len( g ) ) ),
+                 "weights tied/2": ( g, .25 / m ** 2 * rng.integers( 0, 3, len( g ) ) ) }
+    def orient( P, a, b, c ):
+        return ( P[ b, 0 ] - P[ a, 0 ] ) * ( P[ c, 1 ] - P[ a, 1 ] ) - ( P[ b, 1 ] - P[ a, 1 ] ) * ( P[ c, 0 ] - P[ a, 0 ] )
+    for name, ( pos, w ) in { **generic, **ties, **box_ties }.items():
+        pd = PowerDiagram( pos, weights = w, boundaries = _box( 2 ) )
+        S = pd._dual_repaired()
+        # an exact tie of hidden seeds may give a hole that touches itself: `dual()` then takes the certified path
+        assert S is not None or name in box_ties, ( name, "the repair gave up" )
+        S = _np( S if S is not None else pd.dual() ).astype( int )
+        T = set( map( tuple, S ) )
+        assert len( T ) == len( S ), ( name, "a simplex twice" )
+        ed = defaultdict( list )
+        for a, b, c in S:
+            for e, o in ( ( ( a, b ), c ), ( ( b, c ), a ), ( ( a, c ), b ) ):
+                ed[ e ].append( o )
+        assert max( len( v ) for v in ed.values() ) <= 2, ( name, "an edge in three triangles" )
+        folded = [ e for e, v in ed.items() if len( v ) == 2 and orient( pos, *e, v[ 0 ] ) * orient( pos, *e, v[ 1 ] ) >= 0 ]
+        assert not folded, ( name, "folded", folded[ :3 ] )
+        X = rng.uniform( 0, 1, ( 3000, 2 ) )            # no point in two triangles
+        A, B, C = pos[ S[ :, 0 ] ], pos[ S[ :, 1 ] ], pos[ S[ :, 2 ] ]
+        def side( P, Q ):
+            return ( Q[ None, :, 0 ] - P[ None, :, 0 ] ) * ( X[ :, None, 1 ] - P[ None, :, 1 ] ) - ( Q[ None, :, 1 ] - P[ None, :, 1 ] ) * ( X[ :, None, 0 ] - P[ None, :, 0 ] )
+        s1, s2, s3 = side( A, B ), side( B, C ), side( C, A )
+        inside = ( ( s1 > 0 ) & ( s2 > 0 ) & ( s3 > 0 ) ) | ( ( s1 < 0 ) & ( s2 < 0 ) & ( s3 < 0 ) )
+        assert inside.sum( 1 ).max( initial = 0 ) <= 1, ( name, "a point covered twice" )
+        ref = set( map( tuple, _np( pd.dual( _method = "canonical" ) ).astype( int ) ) )
+        if name in generic:
+            assert T == ref, ( name, len( T ), len( ref ), len( T ^ ref ) )
+        elif name in ties:
+            area = lambda U: sum( abs( orient( pos, *x ) ) for x in U ) / 2
+            assert abs( area( T ) - area( ref ) ) < 1e-12, ( name, area( T ), area( ref ) )
+        pd._nb_dual_capacity, pd._dual_star_width = 3, 3   # lists too short: both calls run again, wider
+        assert set( map( tuple, _np( pd.dual() ).astype( int ) ) ) == T or name in box_ties, ( name, "after an overflow" )
+
+
+if test( "the_filter_of_dual_changes_nothing" ):
+    # `dual()` keeps the fast cells it can certify and cuts the others canonically: the same simplices as all cells canonical, on
+    # seeds in general position, on a grid, and on a grid nudged at every scale between the rounding and the band of the filter
+    import numpy
+    from sdot.PowerDiagram import PowerDiagram
+    for d in ( 2, 3 ):
+        rng = numpy.random.default_rng( 7 + d )
+        g = numpy.stack( numpy.meshgrid( *[ ( numpy.arange( 6 ) + .5 ) / 6 ] * d ), -1 ).reshape( -1, d )
+        cases = { "uniform": ( rng.uniform( 0, 1, ( 400, d ) ), None ),
+                  "weighted": ( rng.uniform( 0, 1, ( 400, d ) ), 0.3 * rng.uniform( -1, 1, 400 ) / 400 ** ( 2 / d ) ),
+                  "grid": ( g, None ) }
+        for e in ( 1e-15, 1e-13, 1e-11, 1e-9, 1e-6 ):
+            cases[ f"grid+{ e }" ] = ( g + e * rng.uniform( -1, 1, g.shape ), None )
+        for name, ( pos, w ) in cases.items():
+            pd = PowerDiagram( pos, weights = w, boundaries = _box( d ) )
+            a, b = ( set( map( tuple, _np( pd.dual( _method = m ) ).astype( int ) ) ) for m in ( "certified", "canonical" ) )
+            assert a == b, ( d, name, len( a ), len( b ), len( a ^ b ) )
+            pd._nb_dual_capacity = d + 1                 # a list too short: the call runs again with a longer one
+            assert set( map( tuple, _np( pd.dual( _method = "certified" ) ).astype( int ) ) ) == a, ( d, name, "after an overflow" )

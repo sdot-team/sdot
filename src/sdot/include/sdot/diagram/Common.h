@@ -212,7 +212,23 @@
         diagram::potential_into_pixels( *this, sink, dom, scratch, dist, thread_index, nb_threads ); \
     } \
     HD void hessian_row( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist ) const { \
-        diagram::hessian_row( *this, k, dom, res, scratch, thread_index, dist ); \
+        diagram::hessian_row( *this, k, dom, res, scratch, thread_index, dist, 0, 0 ); \
+    } \
+    HD void hessian_row( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, const auto &dist, auto &&memo_nbrs, auto &&memo_counts ) const { \
+        diagram::hessian_row( *this, k, dom, res, scratch, thread_index, dist, memo_nbrs, memo_counts ); \
+    } \
+    HD void dual( bool filter, const auto &dom_fast, const auto &dom, auto &&res, auto &&scratch, SI thread_index, SI nb_threads ) const { \
+        diagram::dual( *this, filter, dom_fast, dom, res, scratch, thread_index, nb_threads ); \
+    } \
+    HD void dual_stars( const auto &dom_fast, auto &&star_ids, auto &&star_nb, auto &&scratch, SI thread_index, SI nb_threads ) const { \
+        diagram::dual_stars( *this, dom_fast, star_ids, star_nb, scratch, thread_index, nb_threads ); \
+    } \
+    HD void dual_rots( const auto &star_ids, const auto &star_nb, auto &&rot_ids, auto &&rot_nb, SI thread_index, SI nb_threads ) const { \
+        diagram::dual_rots( *this, star_ids, star_nb, rot_ids, rot_nb, thread_index, nb_threads ); \
+    } \
+    HD void dual_repair( const auto &dom_fast, const auto &star_ids, const auto &star_nb, const auto &rot_ids, const auto &rot_nb, auto &&res, \
+                         auto &&nb_bad, auto &&scratch, SI thread_index, SI nb_threads ) const { \
+        diagram::dual_repair( *this, dom_fast, star_ids, star_nb, rot_ids, rot_nb, res, nb_bad, scratch, thread_index, nb_threads ); \
     } \
     HD void build_cell( SI k, const auto &dom, auto &&res, auto &&scratch, SI thread_index, bool keep_images = false ) const { \
         diagram::build_cell( *this, k, dom, res, scratch, thread_index, keep_images ); \

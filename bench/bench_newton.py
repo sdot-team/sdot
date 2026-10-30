@@ -61,7 +61,7 @@ if p := bench( "newton",
                case          = Param( "uniform", choices = CASE_CHOICES, help = "the case ( see cases.py ); `uniform` uses --dim" ),
                dim           = Param( 2, help = "dimension of the `uniform` case ( 2 to 6; beyond 3D: CPU only, no reference row )" ),
                n             = Param( 0, help = "number of seeds ( 0: the case of the campaign: 1e5 for the uniform ones, the file's size otherwise )" ),
-               threads       = Param( 0, help = "workers ( 0: all the cores; the campaign: 8 )" ),
+               threads       = Param( 0, help = "workers ( 0: all the cores, -1: the physical ones; the campaign: 8 )" ),
                pin           = Param( "yes", choices = [ "yes", "no", "env" ], help = "pin worker w to core w ( SDOT_PIN_THREADS ); `env`: leave the variable alone" ),
                kernel        = Param( "double", choices = [ "double", "float", "mixed" ], help = "the kernel float type ( the campaign: double; mixed: the card's float then double )" ),
                step          = Param( "trials", choices = [ "trials", "limits", "auto" ], help = "trials = KMT damping ( the old base ), limits = the limits step ( 2D ), auto = the library's choice" ),
@@ -91,6 +91,8 @@ if p := bench( "newton",
                ref           = Param( "", help = "variant of reference_lmo.NEWTON to compare with ( kmt, kmt_log, best, model; default: kmt for trials, best for limits )" ),
                reps          = Param( 3, help = "repetitions ( we keep the fastest )" ),
                seed          = Param( 0, help = "seed of the uniform draw" ),
+               device        = Param( "auto", choices = [ "auto", "cpu" ], help = "`cpu`: the CPU even where there is a card ( `LOOM_DEVICE=cpu`, `JAX_PLATFORMS=cpu` ); `auto`: loom's choice" ),
+               kernels       = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`catalogue`: what loom serves; `compile`: compiled for this machine ( `LOOM_KERNELS=compile` )" ),
                jit           = Param( "both", choices = [ "no", "yes", "both" ], help = "ON THE CARD: time the eager solve, the jitted one, or both" ),
                linear_host   = Param( "no", choices = [ "no", "yes" ], help = "ON THE CARD: the linear solver on the host ( the CPU's, through a copy )" ),
                mg_precision  = Param( "auto", choices = [ "auto", "float", "double" ], help = "ON THE CARD: the precision of the multigrid's levels" ),
@@ -103,6 +105,8 @@ if p := bench( "newton",
                all_slots     = Param( "no", choices = [ "no", "yes" ], help = "ON THE CARD: print every timed kernel slot ( index, ms, launches, registers )" ),
                save_weights  = Param( "", help = "save the final weights ( .npy )" ),
                compare       = Param( "", help = "compare the final weights with a saved .npy ( max |w - w_ref| after the gauge, relative to 1 / n )" ) ):
+    benchlib.set_device( p.device )                # BEFORE importing loom: the device is decided once
+    benchlib.set_kernels( p.kernels )                 # BEFORE importing loom
     benchlib.set_threads( p.threads, p.pin )          # BEFORE the first kernel: the pool reads them once
     benchlib.set_kernel_timing()                      # ( the card only: events around each launch, read once per library )
     if p.card_graphs == "no":
@@ -259,6 +263,7 @@ if p := bench( "newton",
         others = [ r for r in reference_lmo.newton_variants( name ) if abs( n - 100_000 ) <= 1000 and p.start == "zero" ]
 
     res_rel = st[ "residual" ] * n                    # max|a - nu| / nu, with nu = 1 / n
+    p.results.update( benchlib.hardware() )
     p.results.update( n = n, dim = d, threads = benchlib.nb_threads(), kernel = p.kernel, step = p.step,
                       residual = p.residual, linear_solver = p.linear_solver, amg_variant = p.amg_variant, linear_tol = p.linear_tol,
                       it_switch = st[ "it_switch" ], lin_nb_hierarchies = st[ "lin_nb_hierarchies" ], status = st[ "status" ],

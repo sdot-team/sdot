@@ -25,6 +25,9 @@
 
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Regular_triangulation_3.h>
+#ifdef CGAL_LINKED_WITH_TBB
+#include <tbb/global_control.h>
+#endif
 
 // OUR headers, taken as is in the bench. They have no dependency -- that is the whole point of
 // `2d_des_familles` -- so including them here brings in neither CGAL nor gmp: the dependency goes
@@ -44,6 +47,14 @@ using K    = CGAL::Exact_predicates_inexact_constructions_kernel;
 using Rt   = CGAL::Regular_triangulation_3<K>;
 using Wp   = Rt::Weighted_point;
 using Bare = Rt::Bare_point;
+
+#ifdef CGAL_LINKED_WITH_TBB
+// `--threads k` ( k > 1 ): CGAL's PARALLEL triangulation ( `Parallel_tag`, TBB, a grid of locks over the box ) -- the
+// triangulation only, what the exact dual costs
+using Tds_par = CGAL::Triangulation_data_structure_3<CGAL::Regular_triangulation_vertex_base_3<K>,
+                                                     CGAL::Regular_triangulation_cell_base_3<K>, CGAL::Parallel_tag>;
+using Rt_par  = CGAL::Regular_triangulation_3<K, Tds_par>;
+#endif
 
 namespace {
 
@@ -96,18 +107,20 @@ bool load_cloud( const std::string &path, std::vector<Wp> &pts ) {
 } // namespace
 
 int main( int argc, char **argv ) {
-    int n = 200000, reps = 3;
+    int n = 200000, reps = 3, threads = 1;
     bool cells = false, tri = false;
     std::string load;
     for ( int i = 1; i < argc; ++i ) {
         const std::string s = argv[ i ];
         if ( s == "--load" && i + 1 < argc ) load = argv[ ++i ];
         else if ( s == "--reps" && i + 1 < argc ) reps = std::atoi( argv[ ++i ] );
+        else if ( s == "--threads" && i + 1 < argc ) threads = std::atoi( argv[ ++i ] );
         else if ( s == "--cells" ) cells = true;
         else if ( s == "--sort" ) { cells = true; tri = true; }
         else if ( s == "--help" ) {
-            std::printf( "usage: power_3d [n] [--load FILE] [--reps R] [--cells]\n"
-                         "  --cells  also builds the cells with OUR kernel, and sums\n" );
+            std::printf( "usage: power_3d [n] [--load FILE] [--reps R] [--cells] [--threads K]\n"
+                         "  --cells    also builds the cells with OUR kernel, and sums\n"
+                         "  --threads  K > 1: the parallel triangulation ( TBB ), the tour and the cells over K threads ( OpenMP )\n" );
             return 0;
         } else n = std::atoi( argv[ i ] );
     }
@@ -121,6 +134,83 @@ int main( int argc, char **argv ) {
         std::uniform_real_distribution<double> u( 0.0, 1.0 );
         pts.reserve( n );
         for ( int i = 0; i < n; ++i ) pts.emplace_back( Bare( u( gen ), u( gen ), u( gen ) ), 0.0 );
+    }
+
+    if ( threads > 1 ) {
+#ifdef CGAL_LINKED_WITH_TBB
+        // CGAL's PARALLEL triangulation, then the tour of the vertices and the cells over the threads ( OpenMP; the neighbours by
+        // `incident_edges_threadsafe`, the tour that marks no cell )
+        tbb::global_control gc( tbb::global_control::max_allowed_parallelism, std::size_t( threads ) );
+        CGAL::Bbox_3 box = pts[ 0 ].point().bbox();
+        for ( const auto &p : pts ) box += p.point().bbox();
+        double tt = 1e30, ta = 1e30, tc = 1e30, neighbors = 0, sum = 0;
+        std::size_t vertices = 0;
+        for ( int r = 0; r < reps; ++r ) {
+            Rt_par::Lock_data_structure locks( box, 50 );
+            const double t0 = now();
+            Rt_par rt( pts.begin(), pts.end(), &locks );
+            const double t1 = now();
+            std::vector<Rt_par::Vertex_handle> vh;
+            vh.reserve( rt.number_of_vertices() );
+            for ( auto v = rt.finite_vertices_begin(); v != rt.finite_vertices_end(); ++v ) vh.push_back( v );
+            auto run = [ & ]( bool cut ) {
+                double vs = 0, sv = 0;
+                #pragma omp parallel num_threads( threads ) reduction( + : vs, sv )
+                {
+                    std::vector<Rt_par::Edge> ed;
+                    #pragma omp for schedule( dynamic, 1024 )
+                    for ( long i = 0; i < long( vh.size() ); ++i ) {
+                        const auto v = vh[ i ];
+                        ed.clear();
+                        rt.tds().incident_edges_threadsafe( v, std::back_inserter( ed ) );
+                        const auto &wp0 = v->point();
+                        const double x0 = wp0.x(), y0 = wp0.y(), z0 = wp0.z(), w0 = wp0.weight();
+                        pd::Cell3T<128> c;
+                        if ( cut ) c.init_as_unit_cube();
+                        pd::SI id = 0;
+                        for ( const auto &e : ed ) {
+                            const auto a = e.first->vertex( e.second ), b = e.first->vertex( e.third );
+                            const auto u = a == v ? b : a;
+                            if ( rt.is_infinite( u ) ) continue;
+                            vs += 1;
+                            if ( ! cut ) continue;
+                            const auto &wp1 = u->point();
+                            const double dx = wp1.x() - x0, dy = wp1.y() - y0, dz = wp1.z() - z0;
+                            const double off = ( w0 - wp1.weight() ) / 2 + dx * ( x0 + wp1.x() ) / 2 + dy * ( y0 + wp1.y() ) / 2
+                                             + dz * ( z0 + wp1.z() ) / 2;
+                            c.cut( pd::Vec<3>{ dx, dy, dz }, off, id++ );
+                        }
+                        if ( cut ) sv += c.measure();
+                    }
+                }
+                return std::pair{ vs, sv };
+            };
+            const auto [ vs, unused ] = run( false );
+            const double t2 = now();
+            double sv = 0;
+            if ( cells ) sv = run( true ).second;
+            const double t3 = now();
+            tt = std::min( tt, t1 - t0 );
+            ta = std::min( ta, t2 - t1 );
+            if ( cells ) { tc = std::min( tc, t3 - t2 ); sum = sv; }
+            vertices = rt.number_of_vertices();
+            neighbors = vs / double( vertices );
+        }
+        std::printf( "%-46s n=%d threads=%d\n", load.empty() ? "uniform" : load.c_str(), n, threads );
+        std::printf( "   triangulation  %7.3f s (%7.0f ns/seed)\n", tt, 1e9 * tt / n );
+        std::printf( "   adjacency      %7.3f s (%7.0f ns/seed)\n", ta, 1e9 * ta / n );
+        if ( cells ) {
+            std::printf( "   cut + measure  %7.3f s (%7.0f ns/seed)\n", tc, 1e9 * tc / n );
+            std::printf( "   WHOLE CHAIN    %7.3f s (%7.0f ns/seed)   neighbors %.2f   hidden %zu   sum %.9f\n",
+                         tt + tc, 1e9 * ( tt + tc ) / n, neighbors, std::size_t( n ) - vertices, sum );
+        } else
+            std::printf( "   LOWER BOUND    %7.3f s (%7.0f ns/seed)   neighbors %.2f   hidden %zu\n",
+                         tt + ta, 1e9 * ( tt + ta ) / n, neighbors, std::size_t( n ) - vertices );
+        return 0;
+#else
+        std::printf( "power_3d: built without TBB ( CGAL_LINKED_WITH_TBB ), no parallel triangulation\n" );
+        return 1;
+#endif
     }
 
     double tt = 1e30, ta = 1e30, tc = 1e30;
@@ -192,9 +282,10 @@ int main( int argc, char **argv ) {
     std::printf( "   adjacency      %7.3f s (%7.0f ns/seed)\n", ta, 1e9 * ta / n );
     if ( cells ) {
         std::printf( "   cut + measure  %7.3f s (%7.0f ns/seed)\n", tc, 1e9 * tc / n );
+        // ( the cut loop makes its own tour of the vertices: the tour timed apart is not added again )
         std::printf( "   WHOLE CHAIN    %7.3f s (%7.0f ns/seed)   neighbors %.2f   hidden %zu"
                      "   sum %.9f\n",
-                     tt + ta + tc, 1e9 * ( tt + ta + tc ) / n, neighbors, hidden, sum );
+                     tt + tc, 1e9 * ( tt + tc ) / n, neighbors, hidden, sum );
     } else
         std::printf( "   LOWER BOUND    %7.3f s (%7.0f ns/seed)   neighbors %.2f   hidden %zu\n",
                      tt + ta, 1e9 * ( tt + ta ) / n, neighbors, hidden );

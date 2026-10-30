@@ -22,16 +22,20 @@ if p := bench( "sequence",
                n         = Param( 0, help = "number of seeds ( 0: 1e6 for the uniform ones, the file's size otherwise )" ),
                sequence  = Param( 10, help = "K, the number of diagrams per preparation" ),
                wscale    = Param( 0.3, help = "the final weights when the case has none: uniform in [ -w h^2, w h^2 ]" ),
-               threads   = Param( 0, help = "workers ( 0: all the cores )" ),
+               threads   = Param( 0, help = "workers ( 0: all the cores, -1: the physical ones )" ),
                pin       = Param( "yes", choices = [ "yes", "no", "env" ], help = "pin worker w to core w" ),
                kernel    = Param( "double", choices = [ "double", "float" ], help = "the kernel float type" ),
                memory    = Param( -1, help = "neighbour memories per seed ( -1: the default of the dimension, 0: none )" ),
                reps      = Param( 3, help = "runs from scratch, we keep the fastest" ),
                seed      = Param( 0, help = "seed of the uniform draw" ),
+               device    = Param( "auto", choices = [ "auto", "cpu" ], help = "`cpu`: the CPU even where there is a card ( `LOOM_DEVICE=cpu`, `JAX_PLATFORMS=cpu` ); `auto`: loom's choice" ),
+               kernels   = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`catalogue`: what loom serves; `compile`: compiled for this machine ( `LOOM_KERNELS=compile` )" ),
                dump      = Param( "", help = "write the cloud with the final weights to this file ( the `cases/` format )" ) ):
     import numpy
     import benchlib
     import cases
+    benchlib.set_device( p.device )                # BEFORE importing loom: the device is decided once
+    benchlib.set_kernels( p.kernels )                 # BEFORE importing loom
     benchlib.set_threads( p.threads, p.pin )
     from sdot import AaBsp, PowerDiagram, box_half_spaces
     import time
@@ -76,6 +80,7 @@ if p := bench( "sequence",
     total = t_prep + t_first + ( K - 1 ) * t_next
 
     ns = lambda t: f"{ t / n * 1e9 :.0f}"
+    p.results.update( benchlib.hardware() )
     p.results.update( n = n, dim = d, threads = benchlib.nb_threads(), kernel = p.kernel, sequence = K, t_prepare = t_prep, t_first = t_first,
                       t_next = t_next, t_total = total, ns_per_seed_next = t_next / n * 1e9, ns_per_seed_mean = total / K / n * 1e9,
                       sum_of_measures = float( m.sum() ) )

@@ -445,6 +445,8 @@ bisector and the excursion past eight vertices, ~2 % each ).
 
 ### Building the CGAL programs on lmo
 
+Now `build_baselines.py` ( `cgal/build.sh`, the old campaign's headers copied into `cgal/nsdot-src/` ); the first build, by hand:
+
 ```bash
 ssh lmo 'bash -s' <<'B'
 mkdir -p /data/cgal-bench && cd /data/cgal-bench
@@ -457,3 +459,144 @@ for b in power_2d power_3d; do
 done
 B
 ```
+
+# geogram ( A3, B9 ), 2026-10-27
+
+## What geogram has, and what is compared
+
+geogram 6d674b93 ( 2026-10-24 ) + exploragram 9550cc6 ( 2026-04-21 ). **The transport code is not in the geogram
+repository**: it is exploragram ( https://github.com/BrunoLevy/exploragram ), to clone into `src/lib/exploragram`, where
+geogram's CMake picks it up.
+
+| piece | what it computes | notes |
+|---|---|---|
+| `geogram/voronoi/RVD.h` `RestrictedVoronoiDiagram` | the cells of a Voronoi diagram of dimension d+1 restricted to a simplicial mesh ( surface or tetrahedra ), with callbacks per cell ∩ simplex | a power diagram is the Voronoi diagram of the lifted seeds `( p, sqrt( W - w ) )`, `W = max w`: the same cells as sdot's `|x - p|² - w` |
+| `delaunay "BPOW2d"` | 2D regular triangulation ( the 3D lifted Delaunay ) | sequential |
+| `delaunay "PDEL"` | 3D regular triangulation, parallel | 1.7x on 8 threads at 1e6 ( 9.8 -> 5.6 µs per seed ) |
+| exploragram `OptimalTransportMap2d / 3d` | semi-discrete OT from a mesh ( constant or P1 density, vertex attribute `weight` ) to diracs | `optimize()`: L-BFGS ( HLBFGS, m = 7 ) by default; `set_Newton( true )`: KMT damped Newton ( `optimize_full_Newton` ); `optimize_levels()`: the multilevel scheme ( BRIO levels, the weights of a level fitted on the previous one by local quadratic least squares ) |
+| `OptimalTransportOnSurface` | the same, the target a triangulated surface in 3D | not compared ( sdot's surfaces: `CodimMesh` ) |
+| `examples/exploragram/compute_OTM` | a tet mesh to a tet mesh ( it samples the second by a CVT ), morph output | multilevel L-BFGS, `epsilon = 0.01`; it cannot load a point cloud and prints no per-part timings: hence the driver `geogram/geogram_ot.cpp` |
+
+exploragram's Newton ( `optimal_transport.cpp::optimize_full_Newton` ):
+
+* direction: the Hessian ( the P1 Laplacian of the cells ) assembled by OpenNL, solved by **Jacobi-preconditioned CG to
+  `|Ax - b| / |b| <= 1e-3`, 1000 iterations at most** ( `OT_PRECG`, the default; `OT_SUPERLU` / `OT_CHOLMOD` are OpenNL
+  extensions loaded at run time, not built here );
+* step: KMT, halve from 1 until the smallest cell is `>= epsilon0` ( half the smallest of the first diagram, or of nu ) and
+  `|g| <= ( 1 - alpha / 2 ) |g_k|`, 100 halvings at most ( `linesearch_init_iter` can start lower, off by default );
+* stop: `|m - nu|_2 < sqrt( n ) eps nu`, **an RMS of the relative error**, `eps = 0.01` by default -- sdot stops on the max;
+* an empty cell at the start of an iteration is fatal ( "There were empty cells", the solve returns );
+* each iteration evaluates the Hessian on the triangulation of the accepted step ( no new triangulation ), then one
+  triangulation + cells per step trial: `diagrams = 1 + trials`.
+
+Threads: the cells are computed in parallel over a Hilbert partition of the domain mesh into `Process::max_threads()` parts
+( a mesh of 2 triangles gives no parallelism: the driver meshes the box finer, see below ); PDEL is parallel, BPOW2d is
+not; OpenNL's CG uses OpenMP; the rest ( lifting, line search ) is sequential.
+
+## The driver and the bench
+
+`geogram/geogram_ot.cpp` ( built by `geogram/build.sh` into `/data/geogram-bench` on lmo: static, `-O3 -march=native`, the
+library's own `-ffp-contract=off` ) loads a binary cloud, meshes the unit box in `g^d` sub-boxes ( 2 triangles / 6 Kuhn
+tetrahedra each; `g` the smallest giving 4 simplices per thread: 1 thread 2D g = 2 / 3D g = 1, 8 threads g = 4 / 2; g = 8
+was not faster ), and times:
+
+* `--level=diagram`: `delaunay->set_vertices` ( the regular triangulation ) + `funcgrad` ( the restricted cells, their
+  measures ), min of 3 after a warm-up. **No tree / triangulation is reused between repetitions**: it is "from scratch",
+  to put next to sdot's cells + tree.
+* `--level=newton`: a copy of `optimize_full_Newton` that changes ONLY the stop, to sdot's `max |m - nu| / nu <= 1e-6`;
+  wall time of the solve from zero weights, the mesh and the OTM object built before the clock ( 1-40 ms ).
+
+`bench_geogram.py` ( same params as `bench_cgal.py`, plus `level`, `threads`, `grid`, `multilevel`, `linsolve_eps`, `rtol`,
+`max_iter`, `check` ) recomputes with sdot, untimed: the measures at the same weights ( diagram ), the residual at the weights
+geogram returns ( newton ).
+
+**Same result on both sides** ( `--check=yes`, sdot `kernel_dtype = FP64` ): max `|m_geogram - m_sdot| * n` is 1e-13 ( 3D ) to
+3e-10 ( 2D, the lifting `sqrt( W - w )` costs a few digits ), the same empty cells in Laguerre diagrams ( 68 252 of 1e6 at
+`wscale = 0.3` ); `lines_equal` 5e-6 ( the coincident seeds of that file, which sdot separates by symbolic perturbation and
+geogram by its own ). The residuals of the Newton runs below are sdot's.
+
+## Results, lmo ( Xeon W-2145, 8 cores ), double
+
+Caveat: another session's test runs ( `--no-queue` ) compiled on lmo during these runs ( load 1-4 ). The 1-thread diagram
+numbers repeat to 3 % over three runs; the Newton times are one run each ( min of 3 for the uniform ones ) and could be a
+little pessimistic.
+
+### A3: one diagram, ns per seed ( geogram: triangulation + cells )
+
+sdot: `lmo.json` ( cells, the tree apart: `t_bsp_build / n` in parentheses ); CGAL: the A1 CELLS table.
+
+| case | n | geogram 1 thr | geogram 8 thr | sdot 1 thr ( + tree ) | sdot 8 thr ( + tree ) | CGAL |
+|---|---|---|---|---|---|---|
+| 2D uniform, Voronoi | 1e6 | 3 060 ( 2 072 + 985 ) | 1 476 ( 1 323 + 150 ) | 1 074 ( + 1 543 ) | 156 ( + 502 ) | 1 499 |
+| 2D uniform, Laguerre 0.3 | 1e6 | 2 933 ( 1 975 + 942 ) | 1 549 ( 1 359 + 189 ) | | | |
+| 2D lines, Voronoi | 1e5 | 2 037 ( 1 403 + 633 ) | 1 547 ( 1 254 + 269 ) | 1 048 ( + 1 693 ) | 197 ( + 1 210 ) | 1 357 |
+| 2D lines, equal | 1e5 | 2 132 ( 1 433 + 698 ) | 1 452 ( 1 165 + 209 ) | 4 298 ( + 2 050 ) | 657 ( + 1 442 ) | 1 099 |
+| 3D uniform, Voronoi | 1e6 | 17 177 ( 9 793 + 7 380 ) | 6 944 ( 5 581 + 1 346 ) | 9 755 ( + 1 885 ) | 1 367 ( + 512 ) | 13 660 |
+| 3D planes, Voronoi | 1e5 | 16 252 ( 9 001 + 7 250 ) | 7 298 ( 5 486 + 1 686 ) | 9 515 ( + 2 026 ) | 1 411 ( + 1 404 ) | 13 335 |
+| 3D planes, equal | 1e5 | 16 229 ( 8 585 + 7 644 ) | 7 291 ( 5 638 + 1 652 ) | 18 269 ( + 2 353 ) | 2 804 ( + 1 650 ) | 13 269 |
+
+* Sequential, from scratch, geogram is a little behind sdot ( 2D 3.1 against 2.6 µs, 3D 17.2 against 11.6 ) and behind CGAL,
+  except on the `equal` clouds where sdot's cells are slow ( 2D 6.3, 3D 20.6 µs ).
+* On 8 threads geogram's cells scale ( 6-7x ) but its triangulation does not ( 2D sequential, 3D 1.7x ): 3D uniform 6.9
+  µs against sdot 1.9 ( 3.7x ), 2D 1.5 against 0.66 ( 2.2x ). Where sdot wins comes from not triangulating.
+* geogram does not reuse anything between diagrams ( no SEQUENCE scenario: each Newton trial re-triangulates ), so its
+  per-diagram cost in a solve is the "from scratch" one.
+
+### B9: Newton from zero weights, 1e5, 8 threads, stop `max |m - nu| / nu <= 1e-6`
+
+| case | geogram KMT | iterations / diagrams | time split ( triangulations, cells, Hessian, CG ) | sdot ( `lmo.json`, `--step=auto` ) |
+|---|---|---|---|---|
+| 2D uniform | 7.26 s | 6 / 8 | 0.97, 0.16, 0.26, **5.85** ( 5 673 CG iterations ) | 2.45 s ( 6 / 7 ) |
+| 3D uniform | 8.56 s | 5 / 8 | 4.42, 1.24, 1.12, 1.77 | 2.48 s ( 5 / 6 ) |
+| 2D lines, Voronoi | **not converged**: 100 iterations, 639 diagrams, 200 s, residual 1.8e-5 | | 79.6, 17.0, 4.3, 98.9 | 3.83 s ( 12 / 19 ) |
+| 3D planes, Voronoi | 27.4 s | 13 / 27 | 15.0, 4.6, 3.0, 4.8 | 6.71 s ( 9 / 17 ) |
+| 2D lines, equal ( from 0 ) | **fails**: 100 iterations, 5 715 diagrams, 952 s, residual 1.6e3 | | | ( ablation: 14.2 s with aggregation ) |
+| 3D planes, equal ( from 0 ) | 26.4 s | 13 / 27 | | ( ablation: 14.7 s ) |
+
+With the CG at 1e-6 ( `--linsolve-eps=1e-6` ) nothing changes: 2D uniform 7.80 s ( 6 / 8 ), lines still not converged
+( 100 iterations, 676 diagrams, 205 s, residual 2.1e-4 ). **The CG stops on its 1000-iteration cap, not on its tolerance**:
+100 000 CG iterations for 100 Newton steps on the lines, 6 000 for 6 on the uniform cloud ( 5 673 at 1e-3 ). Jacobi CG on this
+Laplacian at 1e5 unknowns needs more; the direction is truncated, which also explains part of the stall on the lines. A
+fairer B9 row would give geogram a direct solver ( CHOLMOD through OpenNL ) or a higher cap ( `set_linsolve_maxiter` ).
+
+* The multilevel scheme ( `optimize_levels` with `set_Newton( true )`, `--multilevel=yes` ) **fails on every case**: after
+  the fit of the weights from one level to the next, the first diagram of the finer level has empty cells, which stops
+  exploragram's Newton ( "There were empty cells" ) -- with L-BFGS ( `compute_OTM`'s default ) an empty cell is not fatal.
+  To ask Lévy: whether his multilevel Newton ( the cosmology code ) uses another fit or a damping of the fitted weights.
+* KMT on the lines needs many halvings ( 6.4 trials per iteration ) and stalls at 1e-5: sdot's limits step and log
+  residual are what gets it there in 19 diagrams ( ablation, B1-B3 ). On the duplicates of `lines_equal` it cannot work
+  ( no aggregation ).
+* In 2D the CG ( Jacobi, 1e-3 ) is 80 % of the time; in 3D the sequential-ish triangulation is half.
+
+## What is fair, what is not
+
+Fair: the same clouds, the same box, the same cells ( checked to 1e-10 ), double on both sides, threads given to both, times
+without I/O, the residual of both measured by sdot.
+
+To say with the numbers:
+
+* **stopping rule**: geogram's own is an RMS at 1 %; the driver swaps in sdot's max at 1e-6 ( one line of the loop ).
+  With geogram's rule ( `eps = 1e-6` RMS ) it would stop earlier, never later; at its default 1 % it is not the same problem.
+* **domain**: geogram integrates over a simplicial mesh, sdot over a box ( half-spaces ). The mesh is part of geogram's
+  method ( it gives it any domain and P1 densities, sdot's `Mesh` / `Image` do the same ); its cost per simplex boundary is
+  small here ( g = 8 instead of 2: +8 % in 3D at 8 threads ).
+* **threads**: geogram's 2D triangulation is sequential; its parallelism is the RVD's and PDEL's. sdot is given 8 pinned
+  threads, geogram 8 threads ( its own pool ) and 8 OpenMP threads for its CG.
+* **linear solver**: exploragram's default ( Jacobi CG, 1e-3 ) is what is timed; CHOLMOD / SuperLU are possible through
+  OpenNL extensions ( not built ). sdot uses AMG / Cholesky.
+* **what geogram is for**: its recommended path is multilevel L-BFGS at 1 % ( `compute_OTM` ), not a 1e-6 Newton. A table
+  "geogram's defaults, time to 1 % RMS" against sdot at the same rule would be the fair "as the author uses it" row; not run.
+* Before publishing: send Lévy the driver and the numbers ( the protocol of the common rules ).
+
+## Building
+
+```bash
+errand run --env lmo-numpy -x sdot-ffi/bench/build_baselines.py only=geogram   # what page.py does before its jobs
+```
+
+( lmo's first build was by hand, `GEOGRAM_SRC=/data/Code/geogram build.sh /data/geogram-bench`; a `SOURCES` stamp there
+tells `build_baselines.py` it is current. )
+
+`build.sh` clones exploragram into the geogram tree if missing, initialises the submodules, builds `geogram` and `exploragram`
+( `Linux64-gcc` platform, Release, no graphics, no Lua ) and links the driver ( `-ltbb`: the system's libstdc++ parallel
+algorithms ). `VERSION` next to the binary records both commits; `bench_geogram.py` stores it in the results.

@@ -135,14 +135,17 @@ bool load_cloud( const std::string &path, std::vector<Wp> &pts ) {
 } // namespace
 
 int main( int argc, char **argv ) {
-    int n = 1000000, reps = 3;
+    int n = 1000000, reps = 3, threads = 1;   // `--threads k`: the cells over k threads ( OpenMP; CGAL's 2D triangulation is sequential )
     bool adjacency = false;   // `--adjacency`: the triangulation and the neighbour lists only, no cell ( a lower bound )
+    bool triangulation = false;   // `--triangulation`: the triangulation alone ( what the exact dual costs )
     std::string load;
     for ( int i = 1; i < argc; ++i ) {
         const std::string s = argv[ i ];
         if ( s == "--load" && i + 1 < argc )       load = argv[ ++i ];
         else if ( s == "--reps" && i + 1 < argc )  reps = std::atoi( argv[ ++i ] );
         else if ( s == "--adjacency" )             adjacency = true;
+        else if ( s == "--triangulation" )         triangulation = true;
+        else if ( s == "--threads" && i + 1 < argc ) threads = std::atoi( argv[ ++i ] );
         else                                       n = std::atoi( s.c_str() );
     }
 
@@ -172,6 +175,12 @@ int main( int argc, char **argv ) {
         Rt rt;
         rt.insert( pts.begin(), pts.end() );
 
+        if ( triangulation ) {
+            best = std::min( best, std::chrono::duration<double>( std::chrono::steady_clock::now() - t0 ).count() );
+            last_sum = double( rt.number_of_faces() );
+            continue;
+        }
+
         // `--adjacency`: the neighbours of each vertex, counted ( what a connectivity costs, without the cells )
         if ( adjacency ) {
             std::size_t nb = 0;
@@ -186,33 +195,43 @@ int main( int argc, char **argv ) {
             continue;
         }
 
-        // the cells, one per finite vertex : the dual polygon, then the clip to the unit square.
+        // the cells, one per finite vertex : the dual polygon, then the clip to the unit square ( over `threads`: the circulators
+        // mark nothing, the tours are independent )
+        std::vector<Rt::Vertex_handle> vh;
+        vh.reserve( rt.number_of_vertices() );
+        for ( auto v = rt.finite_vertices_begin(); v != rt.finite_vertices_end(); ++v )
+            vh.push_back( v );
         double sum = 0;
-        std::vector<P2> poly, tmp;
-        for ( auto v = rt.finite_vertices_begin(); v != rt.finite_vertices_end(); ++v ) {
-            poly.clear();
-            poly.push_back( { 0, 0 } ); poly.push_back( { 1, 0 } );
-            poly.push_back( { 1, 1 } ); poly.push_back( { 0, 1 } );
+        #pragma omp parallel num_threads( threads ) reduction( + : sum )
+        {
+            std::vector<P2> poly, tmp;
+            #pragma omp for schedule( dynamic, 1024 )
+            for ( long i = 0; i < long( vh.size() ); ++i ) {
+                const auto v = vh[ i ];
+                poly.clear();
+                poly.push_back( { 0, 0 } ); poly.push_back( { 1, 0 } );
+                poly.push_back( { 1, 1 } ); poly.push_back( { 0, 1 } );
 
-            // cut by the power bisector with each neighbour. Going through the NEIGHBOURS
-            // rather than the power centers of the faces avoids having to handle the infinite
-            // faces separately : a half-plane is a half-plane, bounded or not.
-            const auto &p0 = v->point();
-            Rt::Vertex_circulator c = rt.incident_vertices( v ), done( c );
-            if ( c != nullptr ) {
-                do {
-                    if ( rt.is_infinite( c ) )
-                        continue;
-                    const auto &p1 = c->point();
-                    const double dx = p1.x() - p0.x(), dy = p1.y() - p0.y();
-                    const double off = dx * ( p0.x() + p1.x() ) / 2 + dy * ( p0.y() + p1.y() ) / 2
-                                     + ( p0.weight() - p1.weight() ) / 2;
-                    clip_half( poly, dx, dy, off, tmp );
-                    if ( poly.size() < 3 )
-                        break;
-                } while ( ++c != done );
+                // cut by the power bisector with each neighbour. Going through the NEIGHBOURS
+                // rather than the power centers of the faces avoids having to handle the infinite
+                // faces separately : a half-plane is a half-plane, bounded or not.
+                const auto &p0 = v->point();
+                Rt::Vertex_circulator c = rt.incident_vertices( v ), done( c );
+                if ( c != nullptr ) {
+                    do {
+                        if ( rt.is_infinite( c ) )
+                            continue;
+                        const auto &p1 = c->point();
+                        const double dx = p1.x() - p0.x(), dy = p1.y() - p0.y();
+                        const double off = dx * ( p0.x() + p1.x() ) / 2 + dy * ( p0.y() + p1.y() ) / 2
+                                         + ( p0.weight() - p1.weight() ) / 2;
+                        clip_half( poly, dx, dy, off, tmp );
+                        if ( poly.size() < 3 )
+                            break;
+                    } while ( ++c != done );
+                }
+                sum += poly.size() >= 3 ? area( poly ) : 0.0;
             }
-            sum += poly.size() >= 3 ? area( poly ) : 0.0;
         }
 
         const double dt = std::chrono::duration<double>( std::chrono::steady_clock::now() - t0 ).count();
@@ -220,7 +239,9 @@ int main( int argc, char **argv ) {
         last_sum = sum;
     }
 
-    if ( adjacency )
+    if ( triangulation )
+        std::printf( "  %d seeds in 2D, triangulation : %.3f s (%.0f ns/seed), %.0f faces\n", n, best, best / n * 1e9, last_sum );
+    else if ( adjacency )
         std::printf( "  %d seeds in 2D, adjacency : %.3f s (%.0f ns/seed), neighbours per vertex %.3f\n",
                      n, best, best / n * 1e9, last_sum );
     else

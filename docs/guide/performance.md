@@ -1,129 +1,151 @@
 # Performance
 
-This page gives the measured cost of sdot: a single power diagram, a whole Newton solve, CPU against GPU, and how both
-scale with the number of diracs and with the dimension. Every number comes from the scripts in
-[`bench/`](https://github.com/sdot-team/sdot/tree/main/bench). The [Reproducing](#reproducing) section gives the commands.
+This page gives the measured cost of sdot: a single power diagram, a sequence of diagrams on the same diracs, a whole
+Newton solve, CPU against GPU, and how both scale with the number of diracs and with the dimension. Every table is read
+from the result files of [`bench/page.py`](https://github.com/sdot-team/sdot/tree/main/bench/page.py), one per machine:
+the [Reproducing](#reproducing) section says how to add one.
 
 ## Setup
 
-| machine | hardware | used for |
-|---|---|---|
-| `1` | Xeon W-2145 (8 cores, 8 pinned threads), RTX 2080 Ti (Turing, FP64 at 1/32) | CPU, 2D GPU |
-| `2` | RTX A6000 (Ampere, 48 GB, FP64 at 1/64) | 3D GPU, 2D GPU at 1e6 |
+<BenchTable table="setup" />
 
 Protocol:
 
-* A Newton solve starts cold, from the Voronoi diagram (zero weights), tree build included. It stops when
-  `max |mass - target| / target <= 1e-6`.
-* GPU times are for a **jitted** call (JAX). An eager call costs about 0.1 s more.
-* `mixed` (the GPU default) runs the float kernel and switches to the double kernel when float precision is no longer
+* Times are the minimum over a few runs ( one for the long solves ). CPU threads are pinned, one per physical core, and
+  the CPU kernels are compiled for the machine ( the wheels serve a precompiled level, at most a few percent slower ).
+* A Newton solve starts cold, from the Voronoi diagram ( zero weights ), tree build included. It stops when
+  `max |mass - target| / target <= 1e-6`. Steps, linear solvers and continuation are the library's defaults.
+* GPU times are for a **jitted** call ( JAX ). An eager call costs about 0.1 s more.
+* `mixed` ( the GPU default ) runs the float kernel and switches to the double kernel when float precision is no longer
   enough. The final accuracy is the double one.
 
 ## In short
 
-| problem | n | CPU (8 threads) | GPU | speed-up |
-|---|---|---|---|---|
-| 2D, uniform, Lebesgue | 1e5 | 1.02 s | 0.072 s (2080 Ti) | 14x |
-| 2D, clustered (5 lines) | 1e5 | 4.0 s | 0.29 s (2080 Ti) | 14x |
-| 2D, uniform, Lebesgue | 1e6 | – | 0.38 s (A6000) | – |
-| 3D, uniform, Lebesgue | 1e5 | 2.29 s | 0.135 s (A6000) | 17x |
-| 3D, clustered (4 planes) | 1e5 | 6.67 s | 0.47 s (A6000) | 14x |
-| 2D, 512² image target | 1e5 | 29.2 s | 1.88 s (2080 Ti) | 16x |
-| 2D, 4 gaussians (σ = 0.02) | 1e5 | 62.7 s | 7.2 s (2080 Ti) | 9x |
+<BenchTable table="newton" />
 
-The image and gaussian targets include a width continuation (16 to 22 smoothing stages), which explains why they cost
+The image and gaussian targets include a width continuation ( 16 to 22 smoothing stages ), which explains why they cost
 more than the Lebesgue cases.
 
 ## One power diagram
 
-This is the cost of computing every cell's measure for fixed weights. It is the inner loop of every solver, measured in
-nanoseconds per dirac (kernel time only).
+The cost of computing every cell's measure for fixed weights: the inner loop of every solver, in nanoseconds per dirac.
+On the CPU, the same clouds go through CGAL ( `Regular_triangulation_2/3`, bulk insertion ), which then rebuilds and clips
+every cell so that both sides give the same result. CGAL's 2D triangulation is sequential, its 3D one runs in parallel
+( TBB ); the cells are rebuilt over the threads. They also go
+through geogram ( Lévy's `exploragram`: Delaunay triangulation of the lifted seeds, then the cells restricted to a mesh of
+the box ), whose cell measures match sdot's to 1e-10. geogram builds the cells in parallel, but its triangulation is
+sequential in 2D and scales poorly in 3D ( about 1.7× on 8 cores ), and it is most of the cost.
 
-| case | n | GPU float | GPU double |
-|---|---|---|---|
-| 2D uniform | 1e6 | **9.3** (2080 Ti) | 57 (2080 Ti) |
-| 2D lines, Voronoi | 1e5 | 25 (2080 Ti) | 80 (2080 Ti) |
-| 2D lines, equal areas | 1e5 | 52 (2080 Ti) | 289 (2080 Ti) |
-| 3D uniform | 1e6 | **118** (A6000) | 457 (A6000) |
-| 3D planes, Voronoi | 1e5 | 128 (A6000) | 451 (A6000) |
-| 3D planes, equal volumes | 1e5 | 217 (A6000) | 1190 (A6000) |
+<BenchTable table="diagram" />
 
-So a 2D diagram with one million diracs takes about **10 ms** on a gaming GPU, and a 3D one about **120 ms**.
+On the GPU ( kernel time only ):
 
-In float, the cell measures match the double kernel to a median relative error of 1e-14 in 2D (max 1e-8). In 3D the
-median error is 0 and the maximum 7e-5. The `mixed` mode then finishes the solve in double.
+<BenchTable table="gpu_diagram" />
+
+In float, the cell measures match the double kernel to a median relative error of about 1e-14 in 2D. The `mixed` mode
+then finishes the solve in double.
+
+### Prepared once, many diagrams
+
+A Newton solve, a Lloyd step or a gradient flow at fixed positions computes many diagrams on the same diracs. sdot builds
+its tree and its structures once, then each new diagram reuses them, and the neighbours found by the previous one. CGAL
+has nothing to reuse: each new weight vector costs its whole chain again ( the CGAL columns of the table above ).
+
+<BenchTable table="sequence" />
 
 ## Scaling with the number of diracs
 
-The number of Newton iterations barely depends on `n` (5 iterations and 6 diagrams for a uniform cloud at 1e5 and 1e6).
-The total cost therefore follows the cost of one diagram plus one linear solve, which are both close to linear in `n`.
+The number of Newton iterations barely depends on `n`. The total cost therefore follows the cost of one diagram plus one
+linear solve, which are both close to linear in `n`.
 
-| dim | n | GPU, mixed | time per dirac |
-|---|---|---|---|
-| 2D | 1e5 | 0.073 s (A6000) | 0.73 µs |
-| 2D | 1e6 | 0.383 s (A6000) | 0.38 µs |
-| 2D | 1e7 | 8.4 s eager (2080 Ti, 6.6 GB) | 0.84 µs |
-| 3D | 1e5 | 0.135 s (A6000) | 1.35 µs |
-| 3D | 1e6 | 1.31 s (A6000) | 1.31 µs |
-| 3D | 1e7 | 55 s eager (A6000) | 5.5 µs |
+<BenchTable table="scaling" />
 
-At 1e7 diracs in 3D, the float kernel can no longer resolve the cells (each cell is about 4.6e-3 wide in a unit box), so
+At 1e7 diracs in 3D, the float kernel can no longer resolve the cells ( each cell is about 4.6e-3 wide in a unit box ), so
 the solve switches to the double kernel. On cards with slow FP64 this switch costs half of the total time.
 
 GPU memory is about 900 bytes per dirac in 2D and 1300 in 3D at 1e6. A solve that does not fit raises a `MemoryError`
 before it starts.
 
-<!-- TODO: a plot of time vs n (1e3 .. 1e7), CPU and GPU, 2D and 3D, with the O(n log n) slope. -->
-
 ## Scaling with the dimension
 
-Lebesgue on the unit hypercube, diracs drawn uniformly, a cold start, `rtol = 1e-6`. CPU `1`, 8 pinned threads,
-double kernel, `step = trials`. One run per row (3 for 4D at 1e5). 6D at 1e3: 9 min (5 / 7).
+<BenchTable table="dims" />
 
-| dim | total, n = 1e4 | Newton it. / diagrams | one diagram, per dirac (n = 1e4) | vertices per cell |
-|---|---|---|---|---|
-| 2 | 0.20 s | 5 / 6 | 0.9 µs | 6 |
-| 3 | 0.40 s | 5 / 6 | 3.6 µs | ~25 |
-| 4 | 5.1 s  | 5 / 6 | 80 µs | ~120 |
-| 5 | 103 s  | 5 / 6 | 1.7 ms | ~670 |
-| 6 | 52 min | 4 / 5 | 63 ms | ~3300 |
+Newton is not affected by the dimension: the iteration count and the cost of the linear solves stay the same up to 6D.
+The whole cost is in the cells. A Laguerre cell of a uniform cloud has a number of vertices that grows very fast with `d`
+( about 6 in 2D, 25 in 3D, 120 in 4D, 670 in 5D, 3300 in 6D ), and the cell is cut, measured and triangulated vertex by
+vertex. Each added dimension multiplies the cost of a diagram by about 20, then by about 40 from 5D to 6D.
 
-Newton is not affected by the dimension: the iteration count (5 iterations, 6 diagrams) and the cost of the linear
-solves (under 2.5 s at 1e5) stay the same up to 6D. The whole cost is in the cells. A Laguerre cell of a uniform cloud
-has a number of vertices that grows very fast with `d` (the last column, averaged over a few thousand diracs), and the
-cell is cut, measured and triangulated vertex by vertex. Each added dimension multiplies the cost of a diagram by
-about 20 (3D to 4D, 4D to 5D), then by about 40 from 5D to 6D.
-
-In practice, 4D is comfortable up to a few 10⁵ diracs and 5D up to about 10⁵. 6D is limited to about 10⁴ diracs (an hour on 8 cores).
+In practice, 4D is comfortable up to a few 10⁵ diracs and 5D up to about 10⁵. 6D is limited to about 10⁴ diracs.
 Beyond that, the cost comes from the geometry of the cells, not from the solver.
 
-<!-- ## Comparison with other libraries
+## Semi-discrete OT: sdot and geogram
 
-::: warning To be measured
-**CGAL** (`Regular_triangulation_2/3`): the programs in `bench/cgal/` already build the same power diagrams as
-`PowerDiagram.measures` (same weight convention, unit box). Their timings remain to be added here.
+geogram ( Bruno Lévy's [exploragram](https://github.com/BrunoLevy/exploragram), `OptimalTransportMap2d / 3d` ) solves the
+same problem with a damped Newton method of the same family ( Kitagawa, Mérigot and Thibert ). Here it gets the same
+clouds, the same box, the same stopping criterion and the same cores:
 
-**Geogram** (Lévy's semi-discrete OT, `OptimalTransportMap3d`): to be added.
+<BenchTable table="ot_geogram" />
 
-The previous C++ implementation of sdot (CPU, same machine, same cases) gives the following Newton totals: 2D uniform
-1.08 s, 3D uniform 2.25 s, 3D planes 7.19 s. The current CPU path takes 0.9 to 1.15 times as long.
-::: -->
+How it was run:
 
-<!-- TODO: table: n, dim, sdot CPU / sdot GPU / CGAL (triangulation only, then + cell measures) / geogram (whole OT). -->
+* geogram's own Newton loop ( `optimize_full_Newton` ) was kept as it is, with one change: it stops on sdot's
+  `max |mass - target| / target <= 1e-6` instead of its own criterion, a relative RMS error of 1 %. Its default use, a
+  multilevel L-BFGS to 1 %, solves an easier problem and is not timed here.
+* Its linear solver is the default one: a conjugate gradient with a Jacobi preconditioner, tolerance 1e-3, at most 1000
+  iterations. It reaches the cap at every step: in 2D the linear solves take most of the time, in 3D the diagrams do.
+  A tighter tolerance does not change the time or the number of steps.
+* The box is integrated as a mesh of simplices. Its cells match sdot's to 1e-10 ( table [One power diagram](#one-power-diagram) ).
+* On the 2D clustered cloud, geogram's step control stalls: after 100 steps the residual is still a few 1e-6.
+  Lévy's multilevel scheme, run with a Newton solver, stops after the first level: interpolating the weights to the next
+  level leaves cells empty, and exploragram's Newton stops on an empty cell. The `equal` clouds have coincident seeds,
+  which geogram does not merge.
 
-<!-- ## Reproducing
+## Exact connectivity
 
-The benchmarks run through `errand`. The complete list of options is in
-[`bench/README.md`](https://github.com/sdot-team/sdot/tree/main/bench/README.md).
+sdot is not built for this: its cells are cut in floating point, and two cells may disagree about a vertex where several
+seeds are almost on a sphere. `dual()` gives the regular triangulation restricted to the box, checked against qhull's on
+random clouds. Where seeds are tied ( a grid, rings, seeds on a circle ) it gives one of the valid triangulations of the
+tie.
+
+In 2D, the connectivity is REPAIRED. Each cell is cut in floating point and only gives its list of neighbours. An edge is
+kept when both of its seeds list it. When two kept edges cross ( the two diagonals of a square of a grid ), a single power
+test removes one. The faces left are triangulated by one seed each. A triangle that its three cells propose is kept as it
+is; a larger face is cut by the triangulation of its polygon that lies lowest on the lifted paraboloid. Each choice is made
+once, so no two cells can disagree, and the floats only rank the choices. On random clouds almost every seed takes the
+direct path, where its neighbours agree all around it. A tie of hidden seeds that leaves a face touching itself sends the
+call to the certified path below.
+
+In 3D each cell is cut in floating point, then CERTIFIED. A cell passes when no plane came within `1e-11` ( relative ) of
+one of its vertices during the cut, and no vertex lies that close to a plane that is not its own. Its vertices are then
+those of the exact cell. Only the doubtful cells are cut again with canonical predicates ( in double-double, with a
+symbolic perturbation of the ties ). On random clouds, about one cell in ten thousand is cut again. On a grid, every cell
+is. Double-double is not always enough: on a 2D grid of 10⁶ seeds nudged by 1e-14, a square is cocircular to 4e-35 and two
+canonical cells take different diagonals ( the repair does not depend on such a precision ).
+
+<BenchTable table="dual" />
+
+A triangulation is what CGAL and geogram are made for. In 2D sdot is in the same range, on a grid as well ( 4.3 µs per seed
+on one thread, against 16 µs with the certified cells ). In 3D the certification still costs about a cell's worth on top of
+the cell itself ( table [One power diagram](#one-power-diagram) ). On a grid, where every cell is cut canonically, it is ten
+times slower.
+
+## Reproducing
+
+The benchmarks run through errand, on any machine it has an environment for.
+`bench/page.py` runs the suite of this page in the environments it is given ( the CPU jobs where there is no card, the
+GPU jobs where the driver runs on one ) and writes `docs/guide/bench/<machine>.json`, which these tables read:
 
 ```bash
-# one diagram, ns / dirac
-errand -k bench --env lmo-jax   bench_diagram --case=uniform2d,lines_voronoi,lines_equal --kernel=float,double
-# whole Newton solve, CPU then GPU
-errand -k bench --env lmo-numpy bench_newton --case=uniform2d,uniform3d,planes_voronoi --threads=8
-errand -k bench --env lmo-jax   bench_newton --case=uniform2d,uniform3d,planes_voronoi --kernel=mixed --jit=yes
-# the dimension scan ( Lebesgue on the unit hypercube )
-errand -k bench --env lmo-numpy bench_newton --case=uniform --dim=2,3,4,5,6 --n=10000 --threads=8 --reps=1
-# densities (image, gaussians) with continuation
-errand -k bench --env lmo-jax   bench_newton --case=image,gauss4 --sigma=0.02 --step=trials,limits
-``` -->
+cd ~/Projects                                             # the errand root
+python sdot-ffi/bench/page.py lmo-numpy lmo-jax           # CPU, then GPU: docs/guide/bench/lmo.json
+python sdot-ffi/bench/page.py n22-jax --name n22          # another machine: one more column group
+python sdot-ffi/bench/page.py lmo-numpy --quick           # a smoke run ( lmo-quick.json, not shown )
+python sdot-ffi/bench/page.py xyz-numpy --threads=1,8,-1  # 1, 8 threads and all the cores ( default 1,-1 )
+```
+
+`--full` adds the long rows ( 6D, 1e7 on the card ), `--only diagram,cgal` reruns some jobs ( the others keep their last
+run ). The CGAL and geogram columns run programs built on the machine: `page.py` first builds what is missing or out of date
+( `bench/build_baselines.py`: CGAL's and geogram's sources cloned into `~/.cache/sdot`, the libraries in a micromamba
+environment of their own; Linux ). A new machine needs only its errand environments; the docstring of `page.py` lists the
+steps. Each bench can also be run alone, with every
+option: see [`bench/README.md`](https://github.com/sdot-team/sdot/tree/main/bench/README.md).

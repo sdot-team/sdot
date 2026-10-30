@@ -1000,8 +1000,18 @@ class PowerDiagram( Aggregate, Displayable ):
         all_ranks = _host_ints( self._ranks_of_items() ).reshape( -1 )
         sel = all_ranks if items is None else all_ranks[ np.asarray( items, dtype = np.int64 ).reshape( -1 ) ]
         n = len( sel )
+        # the cells are built in the STORAGE order ( neighbors in the tree are neighbors in memory: twice as fast at 1e6 seeds ),
+        # each row written at its place in the result: `rows[ b ]` for the `b`-th rank
+        if items is None and n and int( sel.max() ) < n:     # all the seeds: `sel` is a permutation of the ranks
+            rows = np.empty( n, dtype = np.int32 )
+            rows[ sel ] = np.arange( n, dtype = np.int32 )
+            sel = np.arange( n, dtype = sel.dtype )
+        else:
+            rows = np.argsort( sel, kind = "stable" ).astype( np.int32 )
+            sel = sel[ rows ]
         num_cell = new_batch_axis( n, prefix = "cell" )
         ranks = IntTensor[ num_cell ]( sel )
+        rows = IntTensor[ num_cell ]( rows )
 
         dom = self._domain_cell()
         cap = self._scratch_capacity
@@ -1010,19 +1020,26 @@ class PowerDiagram( Aggregate, Displayable ):
         nb_words = self._scratch_words( cap, self._nb_work_cells(), False )
         nt = loom.resolved_device().nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ num_cell ] )
         dist_expr, _, dist_kwargs = self._dist_for()
+        # all the cells: the neighbour memory is read and written as `measures` does ( the cells start from their last neighbors )
+        memo_expr, memo_args, memo_produced = self._memo_for_call() if items is None else ( "0, 0", {}, None )
 
         loom.ffi_call(
             "power_diagram_hessian_rows",
             FfiCode.per_item( code = "inputs.power_diagram.hessian_row( SI( inputs.ranks( batch_index ) ), inputs.dom_cell, "
-                           f"outputs.nbrs( batch_index ), scratch.pool, thread_index, { dist_expr } );",
+                           f"outputs.nbrs( SI( inputs.rows( batch_index ) ) ), scratch.pool, thread_index, { dist_expr }, { memo_expr } );",
                 max_nb_threads = "return scratch.pool.words.shape( 0 );" ),
             power_diagram = self,
             dom_cell = dom,
             ranks = ranks,
+            rows = rows,
             pool = CellScratch.for_call( nb_words, dom.kernel_dtype, nb_threads = nt ),
-            nbrs = loom.out( nbrs, capacities = { "nb_nbrs": 16 } ),
+            nbrs = loom.out( nbrs, capacities = { "nb_nbrs": self._nbrs_capacity() } ),
             **dist_kwargs,
+            **memo_args,
         )
+        self._memo_after_call( memo_produced )
+        # what loom grew it to: the next call starts there, rather than running the whole batch again at each doubling
+        self._nb_nbrs_capacity = int( nbrs.ids.raw.reshape( nbrs.ids.raw.shape[ 0 ], -1 ).shape[ 1 ] )
         if not host:
             # ( the raw buffers may hold more rows than the cells: a device rounds its batches up )
             raw = lambda x: x.reshape( x.shape[ 0 ], -1 )[ :n ]
@@ -1031,6 +1048,140 @@ class PowerDiagram( Aggregate, Displayable ):
         ids = np.asarray( nbrs.ids ).reshape( n, -1 )
         vals = np.asarray( nbrs.vals ).reshape( n, -1 )
         return counts, ids, vals
+
+    def _nbrs_capacity( self ):
+        """The number of neighbor slots per cell `hessian_rows` starts from: what the last call needed, else enough for nearly
+        every cell of a uniform cloud ( 2D: 6 on average; 3D: 15.5, rarely more than 40 ) -- loom runs the WHOLE batch again
+        when a single cell overflows, so a guess too small costs a call per doubling."""
+        cap = getattr( self, "_nb_nbrs_capacity", None )
+        return cap if cap is not None else { 1: 4, 2: 16, 3: 40 }.get( self.dim_count, 16 << self.dim_count )
+
+    def dual( self, _method = None ):
+        """THE DUAL of the diagram in its domain: `[ m, d + 1 ]` int32, the seeds ( indices of `positions` ) of each simplex -- the
+        regular triangulation of the seeds restricted to the domain, one simplex per vertex of the diagram between `d + 1` cells
+        ( the vertices on the boundary of the domain are not simplices ). Each simplex once, its seeds in increasing order.
+
+        Always a triangulation. On seeds in general position, THE regular one. Where seeds are tied ( `d + 2` or more on a sphere,
+        a grid ), a valid choice among the triangulations of the tie -- in 2D the one rounding leans to ( the same on every call
+        with the same seeds and the same device ), in 3D the one of a symbolic perturbation. Not with a periodicity nor groups.
+
+        = Internals
+
+        2D, BY REPAIR ( `_method = "repair"`, the default ): three calls. The first cuts every cell in plain doubles and keeps its
+        STAR, the cyclic list of its neighbours ( `diagram::dual_stars` ). The two others make a triangulation of the stars
+        ( `diagram::DualRepair` ): the edges both seeds list, conflicts decided by one power test ( `dual_rots`: each seed's
+        rotation along them, once ), the faces of that planar map triangulated by their owners ( `dual_repair` ) -- each choice
+        made once, so nothing can disagree, and the floats only rank the choices.
+        Where the stars agree all around a seed ( almost everywhere on seeds in general position ) its triangles are written as
+        they are. A face too large for the kernel ( `nb_bad` ) sends the call to the certified dual.
+
+        3D ( and `_method = "certified"` ): one call, a sweep per work-item over the cells ( `diagram::dual` ): each cell appends
+        the simplices of its vertices of which it holds the SMALLEST seed, so that a simplex is written once with no gluing, to the
+        list of its work-item; the lists are concatenated host side. A list has a capacity that loom grows ( by rerunning the whole
+        call: the last one is kept ) -- per work-item and not per cell, so the output follows the number of simplices and not the
+        most a cell has ( the outputs are zeroed at each call, and a per-cell width was most of the time ). Each cell is first cut
+        in plain doubles, and kept when no plane came within `1e-11` ( relative ) of one of its vertices -- its vertices are then
+        those of the canonical cell ( CANONICAL PREDICATES: double-double and a symbolic perturbation, `cell_complex()` ). Only the
+        doubtful cells are cut canonically, ten times dearer: on seeds in general position, almost none; on a grid, all of them.
+        `_method = "canonical"`: every cell canonically ( what the tests compare with ). The canonical predicates are not exact
+        either: a tie closer than double-double ( relative to the coordinates ) can still be decided differently by two cells."""
+        if self._periodic is not None or self._groups is not None:
+            raise NotImplementedError( "PowerDiagram.dual: not with a periodicity or groups ( `cell_complex()` handles them )" )
+        n, d = int( self.nb_points.value ), self.dim_count
+        method = _method or ( "repair" if d == 2 else "certified" )
+        if method == "repair":
+            if d != 2:
+                raise ValueError( "PowerDiagram.dual: the repair is 2D only" )
+            res = self._dual_repaired()
+            if res is not None:
+                return res
+            method = "certified"
+        _filter = method == "certified"
+
+        dom = self._domain_cell( "FP64", True )
+        dom_fast = self._domain_cell( "FP64", False )
+        nb_words = self._scratch_words( self._scratch_capacity, 1, False, "FP64", True )
+        # one wave of threads: a canonical cell holds double-doubles, its scratch is large ( 5 GB on a card for 1e6 3D cells at the
+        # default 4 waves )
+        nt = loom.resolved_device().nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ self.num_point ], nb_waves = 1 )
+        num_thread = new_batch_axis( nt, prefix = "thread" )
+        simp = DualSimplices( batch_axes = [ num_thread ] )
+        # the simplices per seed: 2 in 2D, 6.6 in 3D ( Poisson-Delaunay ), with a margin for the spread between work-items
+        per_seed = { 2: 2.2, 3: 7.5 }.get( d, 2.0 ** d )
+        cap_ids = getattr( self, "_nb_dual_capacity", None ) or int( ( d + 1 ) * per_seed * ( -( -n // nt ) ) + 64 * ( d + 1 ) )
+        loom.ffi_call(
+            "power_diagram_dual",
+            FfiCode.per_item( code = f"inputs.power_diagram.dual( { 'true' if _filter else 'false' }, inputs.dom_fast, inputs.dom_cell, "
+                           "outputs.simp( batch_index ), scratch.pool( batch_index ), SI( inputs.thread_rank( batch_index ) ), "
+                           "SI( inputs.thread_rank.shape( 0 ) ) );" ),
+            power_diagram = self,
+            dom_fast = dom_fast,
+            dom_cell = dom,
+            pool = CellScratch.for_call( nb_words, dom.kernel_dtype, batch_axes = [ num_thread ] ),
+            thread_rank = IntTensor[ num_thread ]( np.arange( nt, dtype = np.int32 ) ),
+            simp = loom.out( simp, capacities = { "nb_ids": cap_ids } ),
+        )
+        self._nb_dual_capacity = int( simp.ids.raw.reshape( simp.ids.raw.shape[ 0 ], -1 ).shape[ 1 ] )
+        counts = np.asarray( simp.nb_ids.value ).reshape( -1 )[ :nt ].astype( np.int64 )
+        ids = np.asarray( simp.ids ).reshape( nt, -1 )
+        return np.sort( ids[ np.arange( ids.shape[ 1 ] )[ None, : ] < counts[ :, None ] ].reshape( -1, d + 1 ), axis = 1 )
+
+    def _dual_repaired( self ):
+        """`dual()` in 2D, by repair ( see there ): the stars, then their triangulation. `None` if a face did not fit the kernel."""
+        n = int( self.nb_points.value )
+        dom_fast = self._domain_cell( "FP64", False )
+        nb_words = self._scratch_words( self._scratch_capacity, 1, False, "FP64", False )
+        nt = loom.resolved_device().nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ self.num_point ] )
+        num_thread = new_batch_axis( nt, prefix = "thread" )
+        rank = "SI( inputs.thread_rank( batch_index ) ), SI( inputs.thread_rank.shape( 0 ) )"
+        thread_rank = IntTensor[ num_thread ]( np.arange( nt, dtype = np.int32 ) )
+        pool = CellScratch.for_call( nb_words, dom_fast.kernel_dtype, batch_axes = [ num_thread ] )
+        width = getattr( self, "_dual_star_width", 12 )
+        while True:                                      # the stars: wider if one did not fit
+            num_star = Axis( ShapeVar( width ), name = "num_star" )
+            star_ids = IntTensor[ self.num_point, num_star, dict( size = 32 ) ]()
+            star_nb = IntTensor[ self.num_point, dict( size = 32 ) ]()
+            loom.ffi_call(
+                "power_diagram_dual_stars",
+                FfiCode.per_item( code = "inputs.power_diagram.dual_stars( inputs.dom_fast, outputs.star_ids, outputs.star_nb, "
+                                         "scratch.pool( batch_index ), " + rank + " );" ),
+                power_diagram = self, dom_fast = dom_fast, pool = pool, thread_rank = thread_rank,
+                star_ids = loom.out( star_ids ), star_nb = loom.out( star_nb ),
+            )
+            longest = int( np.asarray( star_nb ).max( initial = 0 ) )
+            if longest <= width:
+                break
+            width = longest + 4
+        self._dual_star_width = width
+
+        rot_ids = IntTensor[ self.num_point, num_star, dict( size = 32 ) ]()
+        rot_nb = IntTensor[ self.num_point, dict( size = 32 ) ]()
+        loom.ffi_call(
+            "power_diagram_dual_rots",
+            FfiCode.per_item( code = "inputs.power_diagram.dual_rots( inputs.star_ids, inputs.star_nb, outputs.rot_ids, outputs.rot_nb, "
+                                     + rank + " );" ),
+            power_diagram = self, thread_rank = thread_rank, star_ids = star_ids, star_nb = star_nb,
+            pool = pool,                                 # ( unused: it carries the work-item axis )
+            rot_ids = loom.out( rot_ids ), rot_nb = loom.out( rot_nb ),
+        )
+
+        simp = DualSimplices( batch_axes = [ num_thread ] )
+        nb_bad = IntTensor[ num_thread, dict( size = 32 ) ]()
+        cap_ids = getattr( self, "_nb_dual_capacity", None ) or int( 3 * 2.2 * ( -( -n // nt ) ) + 64 * 3 )
+        loom.ffi_call(
+            "power_diagram_dual_repair",
+            FfiCode.per_item( code = "inputs.power_diagram.dual_repair( inputs.dom_fast, inputs.star_ids, inputs.star_nb, inputs.rot_ids, "
+                                     "inputs.rot_nb, outputs.simp( batch_index ), outputs.nb_bad, scratch.pool( batch_index ), " + rank + " );" ),
+            power_diagram = self, dom_fast = dom_fast, pool = pool, thread_rank = thread_rank,
+            star_ids = star_ids, star_nb = star_nb, rot_ids = rot_ids, rot_nb = rot_nb,
+            simp = loom.out( simp, capacities = { "nb_ids": cap_ids } ), nb_bad = loom.out( nb_bad ),
+        )
+        self._nb_dual_capacity = int( simp.ids.raw.reshape( simp.ids.raw.shape[ 0 ], -1 ).shape[ 1 ] )
+        if int( np.asarray( nb_bad ).reshape( -1 )[ :nt ].sum() ):
+            return None
+        counts = np.asarray( simp.nb_ids.value ).reshape( -1 )[ :nt ].astype( np.int64 )
+        ids = np.asarray( simp.ids ).reshape( nt, -1 )
+        return np.sort( ids[ np.arange( ids.shape[ 1 ] )[ None, : ] < counts[ :, None ] ].reshape( -1, 3 ), axis = 1 )
 
     @property
     def cells( self ) -> Cell:
@@ -1450,6 +1601,14 @@ class Neighbors( Aggregate ):
     vals    : RealTensor[ "num_nbr" ]
     num_nbr : Axis[ "nb_nbrs" ]
     nb_nbrs : ShapeVar
+
+
+class DualSimplices( Aggregate ):
+    """the simplices of the dual that ONE cell writes ( see `PowerDiagram.dual` ), `d + 1` seeds each, flattened -- batched over
+    the cells, `nb_ids` per cell"""
+    ids    : IntTensor [ "num_id", dict( size = 32 ) ]
+    num_id : Axis[ "nb_ids" ]
+    nb_ids : ShapeVar
 
 
 # ---- the domain, read off half-spaces ------------------------------------------------------------

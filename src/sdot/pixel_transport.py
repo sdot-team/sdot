@@ -208,6 +208,8 @@ class PixelTransport2d:
         self.weights = None
         #: the solver's statistics of the last solve ( `nb_iter`, `status`... )
         self.stats = None
+        #: how many warm solves failed and were redone cold
+        self.nb_cold_retries = 0
 
     def _solve_into( self, density ):
         """a solve whose weights are kept ( the warm start of the next one )"""
@@ -220,14 +222,29 @@ class PixelTransport2d:
 
     def _solve( self, density ):
         w0 = None if self.weights is None else self._put( self.weights )
-        # split, the first solve: the width continuation. The pyramids leave deserts ( the background only ) that the mass
+        # The first solve: the width continuation. With split, the pyramids leave deserts ( the background only ) that the mass
         # crosses through many sub-diracs, where a direct Newton stalls ( damped to steps of 1e-5, 200 iterations without
         # progress, measured on a 256 x 34 view split 4: 140 000 diracs ); the continuation converges ( 33 s ). Starting from
         # the weights of one dirac per pixel does not help: they empty sub-cells, and the solver falls back to the Voronoi
-        cont = "always" if w0 is None and self.dirac_split > 1 else "auto"
-        it = Iterative( weights0 = w0, on_failure = "ignore", continuation = cont, **self.settings )
+        # Without split too, a cold "auto" solve can end at max iterations ( residual 1e-3, measured on the card ), and a
+        # failed solve is a wrong cost: a line search that meets one gives up ( L-BFGS stopped after 2 steps, split 4 ).
+        # So every cold solve takes the continuation, and a warm one that fails ( a long trial step: the warm start
+        # rejected, Voronoi without continuation ) is redone cold
         img = Image( values = self._put( density ), origin = list( self.origin ), pixel_frame = [ [ self.cell[ 0 ], 0.0 ], [ 0.0, self.cell[ 1 ] ] ] )
-        return OtProblem( SumOfDiracs( self._put( self.centers ), weights = self._put( self.masses ) ), img ).solve( it )
+        pb = OtProblem( SumOfDiracs( self._put( self.centers ), weights = self._put( self.masses ) ), img )
+        plan = pb.solve( Iterative( weights0 = w0, on_failure = "ignore", continuation = "always" if w0 is None else "auto", **self.settings ) )
+        if w0 is not None and not self._converged( plan ):
+            self.nb_cold_retries += 1
+            plan = pb.solve( Iterative( weights0 = None, on_failure = "ignore", continuation = "always", **self.settings ) )
+        return plan
+
+    @staticmethod
+    def _converged( plan ):
+        """the status of a solve, `True` when it cannot be read ( traced )"""
+        try:
+            return str( np.asarray( plan.stats[ "status" ] ) ) == "converged"
+        except Exception:
+            return True
 
     def raster( self, uv, half_widths, masses = None, max_half_width = None ):
         n = jnp.asarray( uv ).shape[ 0 ]

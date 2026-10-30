@@ -643,6 +643,10 @@ mx = mg_max( n, [&]( SI i ) {
         const SI n = lev[ 0 ].n;
         d.assign( n, 0.0 );
         cr.assign( b.begin(), b.begin() + n );
+        // ROW 0 IS NOT AN EQUATION ( `LinearSolver::solves`: rows 1.. hold, `d[ 0 ] = 0` ): its right-hand side becomes the one
+        // that makes the system consistent, `-sum( b[ 1.. ] )`. A Newton step has it already; an adjoint's right-hand side does
+        // not ( `Adjoint.h` ), and centering it instead solves another system ( wrong derivatives, measured: n = 24 )
+        if ( n > 0 ) cr[ 0 ] = cr[ 0 ] - mg_sum( n, [&]( SI i ) { return cr[ i ]; } );
         center( cr );
         cz.assign( n, 0.0 ); cp.assign( n, 0.0 ); cq.assign( n, 0.0 );
 

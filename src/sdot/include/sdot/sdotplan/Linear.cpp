@@ -201,13 +201,14 @@ static bool cholesky_fits( SI n, int dim ) {
 
 std::unique_ptr<LinearSolver> linear_solver( Lin method, SI n, int dim, const LinearOptions &opts ) {
     // AUTO. 3D: the in-house multigrid ( `Multigrid.h` ) -- the Cholesky takes minutes there ( 4 s against 800 s of linear algebra at
-    // n = 1e5 ). 2D: the Cholesky up to the crossover below, if its factor fits in the memory; the multigrid otherwise.
-    // The crossover in 2D ( 8 pinned threads, whole Newton solves, linear part ): uniform 1.7 s / 3.0 s ( Cholesky / multigrid ) at 1e5,
-    // 11.4 / 15.1 at 3e5, 89 / 75 at 1e6 -- the Cholesky is O( n^1.5 ) in time, the multigrid O( n ); the lines clouds keep the Cholesky
-    // ahead much longer ( 2.2 s against 12 s at 1e5 ). Its factor weighs ~35 bytes x n log2 n ( 0.7 GB over the multigrid at 1e6 ).
+    // n = 1e5 ). 2D: the Cholesky ON ONE THREAD only, up to the crossover below and if its factor fits in the memory; the multigrid
+    // otherwise. The Cholesky is sequential, the multigrid is not ( node20, Xeon Gold 5220, whole Newton solves, linear part,
+    // Cholesky / multigrid ): uniform 1e5 1.81 / 2.35 s on 1 thread, 1.81 / 0.83 on 4, 1.81 / 0.65 on 8; uniform 3e5 9.4 / 14.0 on 1,
+    // 9.6 / 2.6 on 8; lines 1e5 2.4 / 9.5 on 1, 2.5 / 2.3 on 8; uniform 1e6 74 / 69 on 1, 76 / 7.9 on 16. Its factor weighs
+    // ~35 bytes x n log2 n ( 0.7 GB over the multigrid at 1e6 ).
     constexpr SI CHOLESKY_MAX_AUTO_2D = 600000;
     if ( method == Lin::AUTO )
-        method = dim >= 3 || n > CHOLESKY_MAX_AUTO_2D ? Lin::MG : Lin::CHOLESKY;
+        method = dim >= 3 || n > CHOLESKY_MAX_AUTO_2D || cpu_thread_pool().nb_workers() > 1 ? Lin::MG : Lin::CHOLESKY;
     // `AMG` was AMGCL, which is gone: its place is taken by the multigrid ( `LinearOptions::amg_variant` is ignored )
     if ( method == Lin::AMG )
         method = Lin::MG;

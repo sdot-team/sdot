@@ -9,8 +9,9 @@ its creation, i.e. at the FIRST kernel call of the process:
                     on it, 'the two must agree' ); both are set here
   SDOT_PIN_THREADS  `1`: worker `w` is pinned to core `w` ( Linux only; the calling thread, worker 0, is not pinned )
 
-so `set_threads` must be called before anything is computed -- errand runs each entry in its own process, which is
-what makes a sweep over `--threads` correct.
+so `set_threads` must be called before anything is computed. errand runs the combinations of a matrix one after the other
+IN ONE PROCESS ( only `-j` gives each its own ): a sweep over `--threads` ( or `--kernels` ) needs one errand call per value,
+otherwise every combination runs with the pool of the first ( `page.py` splits them ).
 """
 
 import os
@@ -20,15 +21,92 @@ import socket
 #: the variables that change what is measured, and are therefore printed with each result
 ENV_VARS = ( "LOOM_NB_THREADS", "SDOT_NB_THREADS", "SDOT_PIN_THREADS", "SDOT_CPU_VARIANT", "SDOT_NO_MARCH_NATIVE", "SDOT_CXXFLAGS",
              "LOOM_CXX", "LOOM_CXXFLAGS", "LOOM_FRAMEWORK", "LOOM_DEVICE", "SDOT_KTYPE", "SDOT_CATALOGUE_DIR",
-             "SDOT_CASES_DIR", "LOOM_KERNEL_TIMING", "LOOM_KERNELS", "LOOM_TARGET", "LOOM_PREFER_CATALOGUE", "LOOM_BUILD_DIR", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS" )
+             "SDOT_CASES_DIR", "LOOM_KERNEL_TIMING", "LOOM_KERNELS", "LOOM_TARGET", "LOOM_PREFER_CATALOGUE", "LOOM_BUILD_DIR", "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "JAX_PLATFORMS" )
+
+
+def allowed_cpus():
+    """the CPUs this process may run on: fewer than the machine's in a Slurm allocation"""
+    if hasattr( os, "sched_getaffinity" ):
+        return len( os.sched_getaffinity( 0 ) ) or 1
+    return os.cpu_count() or 1
+
+
+def physical_cores():
+    """the cores, without their hyperthreads, among those this process may run on ( `os.cpu_count()` otherwise )"""
+    try:
+        if platform.system() == "Linux":
+            allowed = os.sched_getaffinity( 0 )
+            ids, cur = set(), {}
+            with open( "/proc/cpuinfo" ) as f:
+                for l in f:
+                    k, _, v = l.partition( ":" )
+                    k = k.strip()
+                    if k in ( "processor", "physical id", "core id" ):
+                        cur[ k ] = v.strip()
+                    elif not k:
+                        if cur.get( "processor", "" ).isdigit() and int( cur[ "processor" ] ) in allowed:
+                            ids.add( ( cur.get( "physical id" ), cur.get( "core id" ) ) )
+                        cur = {}
+            ids.discard( ( None, None ) )
+            if ids:
+                return len( ids )
+        elif platform.system() == "Darwin":
+            import subprocess
+            return int( subprocess.run( [ "sysctl", "-n", "hw.physicalcpu" ], capture_output = True, text = True ).stdout )
+    except Exception:
+        pass
+    return os.cpu_count() or 1
+
+
+def set_device( device ):
+    """`cpu`: loom computes on the CPU even in an environment with a card ( `LOOM_DEVICE`, and `JAX_PLATFORMS` so that jax
+    leaves the card alone ); `auto`: loom's choice. Before loom is imported."""
+    if device == "cpu":
+        os.environ[ "LOOM_DEVICE" ] = "cpu"
+        os.environ[ "JAX_PLATFORMS" ] = "cpu"
 
 
 def set_threads( threads, pin ):
-    """`threads`: 0 = all the cores. `pin`: `"yes"` | `"no"` | `"env"` ( leave `SDOT_PIN_THREADS` as it is )."""
+    """`threads`: 0 = all the cores ( hyperthreads included ), -1 = the physical cores. `pin`: `"yes"` | `"no"` | `"env"`
+    ( leave `SDOT_PIN_THREADS` as it is )."""
+    if threads < 0:
+        threads = physical_cores()
     if threads > 0:
         os.environ[ "SDOT_NB_THREADS" ] = os.environ[ "LOOM_NB_THREADS" ] = str( threads )
     if pin in ( "yes", "no" ):
         os.environ[ "SDOT_PIN_THREADS" ] = "1" if pin == "yes" else "0"
+
+
+def hardware():
+    """what the numbers were measured on: CPU model, cores, memory and the cards ( `nvidia-smi` ), for the results file"""
+    import subprocess
+    cpu = platform.processor() or platform.machine()
+    try:
+        if platform.system() == "Linux":
+            with open( "/proc/cpuinfo" ) as f:
+                cpu = next( l.split( ":", 1 )[ 1 ].strip() for l in f if l.startswith( "model name" ) )
+        elif platform.system() == "Darwin":
+            cpu = subprocess.run( [ "sysctl", "-n", "machdep.cpu.brand_string" ], capture_output = True, text = True ).stdout.strip() or cpu
+    except Exception:
+        pass
+    try:
+        ram = os.sysconf( "SC_PAGE_SIZE" ) * os.sysconf( "SC_PHYS_PAGES" ) / 2**30
+    except ( ValueError, OSError, AttributeError ):
+        ram = 0.0
+    try:
+        out = subprocess.run( [ "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader" ],
+                              capture_output = True, text = True, timeout = 20 ).stdout
+        gpus = "; ".join( l.strip() for l in out.splitlines() if l.strip() )
+    except Exception:
+        gpus = ""
+    try:
+        import loom
+        dev = loom.resolved_device()
+        level = "compiled for this machine" if os.environ.get( "LOOM_KERNELS" ) == "compile" else dev.current_catalogue_tag()
+    except Exception:
+        level = ""
+    return dict( hw_host = socket.gethostname(), hw_cpu = cpu, hw_cores = allowed_cpus(), hw_physical_cores = physical_cores(),
+                 hw_ram_gb = round( ram, 1 ), hw_gpus = gpus, hw_kernels = level )
 
 
 def set_openmp( omp_threads ):
@@ -51,7 +129,7 @@ def nb_threads():
         n = int( os.environ.get( "LOOM_NB_THREADS", os.environ.get( "SDOT_NB_THREADS", "0" ) ) )
     except ValueError:
         n = 0
-    return n if n > 0 else ( os.cpu_count() or 1 )
+    return n if n > 0 else allowed_cpus()
 
 
 def env_report():

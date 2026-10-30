@@ -48,7 +48,7 @@ if p := bench( "diagram",
                dim       = Param( 2, help = "dimension of the `uniform` case ( 2 to 6; beyond 3D: CPU only, no reference row )" ),
                n         = Param( 0, help = "number of seeds ( 0: the case of the campaign: 1e6 for the uniform ones, the file's size otherwise )" ),
                wscale    = Param( 0.0, help = "uniform case: weights in [ -w h^2, w h^2 ] ( 0: Voronoi; the old bench's `--weights`; 0.3 is a Laguerre one )" ),
-               threads   = Param( 0, help = "workers ( 0: all the cores; the campaign: 8 )" ),
+               threads   = Param( 0, help = "workers ( 0: all the cores, -1: the physical ones; the campaign: 8 )" ),
                pin       = Param( "yes", choices = [ "yes", "no", "env" ], help = "pin worker w to core w ( SDOT_PIN_THREADS ); `env`: leave the variable alone" ),
                kernel    = Param( "double", choices = [ "double", "float" ], help = "the kernel float type ( the CPU campaign: double )" ),
                leaf_size = Param( 10, help = "seeds per BSP leaf ( the campaign: 10 )" ),
@@ -58,6 +58,7 @@ if p := bench( "diagram",
                warmup    = Param( 0.3, help = "GPU: seconds of `measures` in a loop before the timed runs ( the old GPU bench: 0.3 )" ),
                accuracy  = Param( "auto", choices = [ "auto", "yes", "no" ], help = "compare with a `double` kernel run of the same diagram ( auto: on a GPU, for --kernel=float )" ),
                seed      = Param( 0, help = "seed of the uniform draw" ),
+               device    = Param( "auto", choices = [ "auto", "cpu" ], help = "`cpu`: the CPU even where there is a card ( `LOOM_DEVICE=cpu`, `JAX_PLATFORMS=cpu` ); `auto`: loom's choice" ),
                kernels   = Param( "catalogue", choices = [ "catalogue", "compile" ],
                                   help = "`catalogue`: what loom serves ( a held build, or this machine behaving as the richest held level ); "
                                          "`compile`: compiled for this machine ( `LOOM_KERNELS=compile` )" ),
@@ -66,12 +67,13 @@ if p := bench( "diagram",
                                   help = "the reference of --accuracy: `card` the card's double kernel, `generic` the generic double path "
                                          "( `use_card_cells = False`: the CPU's cell code, compiled for the card; slow in 3D ) -- with `generic` "
                                          "the double kernel is compared too" ),
-               output    = Param( "measures", choices = [ "measures", "facets", "vjp", "moments", "adjacency", "complex" ],
+               output    = Param( "measures", choices = [ "measures", "facets", "vjp", "moments", "adjacency", "complex", "dual" ],
                                   help = "GPU, 2D card kernel: what one call computes -- `measures`; `facets`: the measures AND the laplacian's CSR "
                                          "( Newton's turn: `_card_cells`, cells + COO + assembly ); `vjp`: the adjoint of the measures alone "
                                          "( the pullback, wrt the weights, or the positions without weights ); `moments`: measures + barycentres + costs. "
                                          "CPU and GPU: `adjacency`: the neighbours of every cell and their facets ( `hessian_rows`, what CGAL's "
-                                         "triangulation + adjacency gives ); `complex`: the whole cell complex ( `cell_complex()` )" ) ):
+                                         "triangulation + adjacency gives ); `complex`: the whole cell complex ( `cell_complex()` ); `dual`: the exact dual, the restricted regular "
+                                         "triangulation ( `dual()`, what CGAL's triangulation gives )" ) ):
     import numpy
     import benchlib
     import cases
@@ -79,6 +81,7 @@ if p := bench( "diagram",
     import reference_lmo_gpu
     benchlib.set_threads( p.threads, p.pin )          # BEFORE the first kernel: the pool reads them once
     benchlib.set_kernel_timing()                      # BEFORE the first kernel too: each library reads it once
+    benchlib.set_device( p.device )                # BEFORE importing loom: the device is decided once
     benchlib.set_kernels( p.kernels, p.target )     # BEFORE importing loom: the served level is decided once
     from sdot import AaBsp, PowerDiagram, box_half_spaces
     import loom
@@ -111,7 +114,7 @@ if p := bench( "diagram",
     print( f"  positions as { benchlib.dtype_of( pd.sorted_positions ) } ( TF ), kernel { kernel }" )
 
     timing = benchlib.KernelTiming() if on_gpu else None
-    if p.output not in ( "measures", "adjacency", "complex" ) and not ( on_gpu and pd._card_variant() is not None ):
+    if p.output not in ( "measures", "adjacency", "complex", "dual" ) and not ( on_gpu and pd._card_variant() is not None ):
         raise ValueError( f"--output={ p.output }: the card kernel only ( a CUDA device, 2D or 3D )" )
     pullback = None
     if p.output == "vjp":                             # the forward once: what is timed is the pullback
@@ -135,6 +138,8 @@ if p := bench( "diagram",
             return pullback( cot )[ 0 ]
         if p.output == "adjacency":                   # the neighbours per cell ( their count stands for the measures )
             return pd.hessian_rows()[ 0 ]
+        if p.output == "dual":                        # the simplices, `[ m, d + 1 ]`
+            return pd.dual()
         if p.output == "complex":                     # the number of facets per dimension stands for the measures
             cc = pd.cell_complex()
             return numpy.array( [ cc.nb_faces( k ) for k in range( d + 1 ) ], dtype = float )
@@ -194,6 +199,7 @@ if p := bench( "diagram",
 
     # -- the old number to compare with
     ns = best / n * 1e9
+    p.results.update( benchlib.hardware() )
     p.results[ "n" ] = n
     p.results[ "dim" ] = d
     p.results[ "threads" ] = benchlib.nb_threads()
@@ -209,6 +215,8 @@ if p := bench( "diagram",
     p.results[ "sum_of_measures" ] = float( m.sum() )
     p.results[ "reps" ] = reps
     p.results[ "output" ] = p.output
+    if p.output == "dual":
+        p.results[ "simplices" ] = len( m ) // ( d + 1 )
     if acc:
         for key, v in acc.items():
             p.results[ f"acc_{ key }" ] = v
@@ -233,7 +241,8 @@ if p := bench( "diagram",
         print( f"  min of { reps }; apart from the cells: weights set { t_weights * 1e3 :.1f} ms ( { t_weights / n * 1e9 :.0f} ns/seed ), "
                f"copy to numpy { t_convert * 1e3 :.1f} ms; tree built in { t_build * 1e3 :.0f} ms, diagram built in { t_ctor * 1e3 :.0f} ms, "
                + ( f"sum of the measures { m.sum() :.6f}" if p.output == "measures" else
-                   f"neighbours per cell { m.mean() :.2f}" if p.output == "adjacency" else f"faces per dimension { m.astype( int ).tolist() }" )
+                   f"neighbours per cell { m.mean() :.2f}" if p.output == "adjacency" else
+                   f"{ len( m ) // ( d + 1 ) } simplices ( { len( m ) / ( d + 1 ) / n :.2f} per seed )" if p.output == "dual" else f"faces per dimension { m.astype( int ).tolist() }" )
                + ( "" if ref else "  ( no old number at this n )" ) )
         if acc:
             print( "  accuracy against a double kernel: " + benchlib.accuracy_line( acc ) )

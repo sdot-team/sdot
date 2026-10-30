@@ -10,9 +10,14 @@ the python package `sdot`, so that a number measured here can be set next to the
 | `reference_lmo_gpu.py` | the same for the old GPU campaign (`nsdot/gpu_des_familles`, kernel-only ns/seed), each with its doc line |
 | `bench_diagram.py` | errand `bench`: the cost of **one diagram** ( ns/seed ) |
 | `bench_newton.py` | errand `bench`: a **whole Newton solve** ( iterations, diagrams, time split ) |
+| `bench_sequence.py` | errand `bench`: **K diagrams per preparation** ( the weights changing, the positions fixed ) |
+| `bench_cgal.py` | errand `bench`: the CGAL programs of `cgal/` on the same clouds ( cells or adjacency ) |
+| `bench_geogram.py` | errand `bench`: geogram's programs ( `geogram/geogram_ot.cpp` ) on the same clouds ( cells, adjacency, Newton ) |
+| `build_baselines.py` | builds the CGAL and geogram programs on the machine ( into `~/.cache/sdot`, when missing or out of date ); `page.py` runs it |
+| `page.py` | runs the suite of the documentation's performance page in errand environments, writes `docs/guide/bench/<machine>.json` |
 | `benchlib.py` | threads, environment report, table printing, kernel timing and accuracy helpers (declares no work) |
 
-`cgal/` and `cuda/` are older, unrelated comparison programs.
+`cuda/` holds older, unrelated comparison programs; `cgal/` the CGAL programs `bench_cgal.py` runs, `geogram/` the geogram driver of `bench_geogram.py` ( both built by their `build.sh`, which `build_baselines.py` calls ).
 
 ## The cases
 

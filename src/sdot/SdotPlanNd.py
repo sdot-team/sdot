@@ -131,6 +131,15 @@ _DUPLICATE_GAP = 1e-6
 _DERIVED = ( "weights", "cell_masses", "cost", "barycenters" )
 
 
+def _traced( v ):
+    """whether an input ( an `Aggregate`, searched through, or a `Tensor` ) is traced -- `storage.traces`: what an autodiff RECORDS,
+    a jax tracer, but also a torch tensor that `requires_grad`, which `loom.is_traced` leaves out ( for torch, it only means a
+    `torch.func` transform )"""
+    if isinstance( v, Aggregate ):
+        return any( _traced( w ) for w in vars( v ).values() )
+    return isinstance( v, Tensor ) and v.is_defined and bool( v.storage.traces or loom.is_traced( v.raw ) )
+
+
 def _origin_as_shift( problem ):
     """THE DERIVATIVE WITH RESPECT TO THE ORIGIN OF THE TARGET ( an `Image`, a `Box` ), by translation: the cost is invariant under a
     translation of everything, so the target moved by `s` is the diracs moved by `- s` -- same weights, masses and cost, and the
@@ -469,13 +478,12 @@ class SdotPlanNd( Displayable ):
             moved, shift = _origin_as_shift( problem )
             plan._attach_derivatives( moved, settings )
             if shift is not None:
-                plan.barycenters = RealTensor[ plan._pd.num_point, plan._pd.dim ]( plan.barycenters.raw + shift[ None, : ] )
+                plan._map_output( "barycenters", lambda b: RealTensor[ plan._pd.num_point, plan._pd.dim ]( b.raw + shift[ None, : ] ) )
             # THE VALUES ARE THE SOLVER'S, to the bit: what is attached carries the derivative ( its value differs by the rounding of
             # its own diagrams -- a `jit` that nobody differentiates must give what the eager solve gives )
             ops = loom.ops()
             for name, value in solved.items():
-                attached = getattr( plan, name ).raw
-                setattr( plan, name, type( value )( value.raw + ( attached - ops.stop_gradient( attached ) ), axes = value.axes ) )
+                plan._map_output( name, lambda a, value = value: type( value )( value.raw + ( a.raw - ops.stop_gradient( a.raw ) ), axes = value.axes ) )
             return plan
         spreads = cls._spreads( problem, settings )
         if spreads:
@@ -505,18 +513,7 @@ class SdotPlanNd( Displayable ):
         flag = getattr( settings, "differentiable", "auto" )
         if flag != "auto":
             return bool( flag )
-        from loom.tensor import Tensor
-        def traced( agg ):
-            for v in vars( agg ).values():
-                if isinstance( v, Aggregate ):
-                    if traced( v ):
-                        return True
-                # `storage.traces`: what an autodiff RECORDS -- a jax tracer, but also a torch tensor that `requires_grad`, which
-                # `loom.is_traced` leaves out ( for torch, it only means a `torch.func` transform )
-                elif isinstance( v, Tensor ) and v.is_defined and ( v.storage.traces or loom.is_traced( v.raw ) ):
-                    return True
-            return False
-        return traced( problem.source ) or traced( problem.target )
+        return _traced( problem.source ) or _traced( problem.target )
 
     @staticmethod
     def _spreads( problem, settings ):
@@ -1550,44 +1547,92 @@ class SdotPlanNd( Displayable ):
             acc = AaBsp( frozen_pos, fit_w ) if on_card and per is None and builds_on_card( frozen_pos ) else None
             frozen = PowerDiagram( frozen_pos, fit_w, accelerator = acc, distribution = self.problem.target, kernel_dtype = kd, memory = 0,
                                    periodicity = per, sink_weight = sk, radial_func = rf )
-        live = PowerDiagram( live_pos, fit_w, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
-        m = RealTensor[ axc ]( live.measures.raw )
+        # ( on a card, a tree for the live diagrams too: under a trace, without one they would be the plain O( n^2 ) diagram )
+        from .AaBsp import AaBsp, builds_on_card
+        live_tree = on_card and per is None and builds_on_card( live_pos )
         nu = RealTensor[ axc ]( nu_raw )
+        if layout is None and not _traced( src.positions ) and not _traced( problem.target ):
+            # only the masses are live: the measures are a constant, the solver's ( their sweep would add nothing to the derivative )
+            m = RealTensor[ axc ]( self.cell_masses.raw )
+        else:
+            live = PowerDiagram( live_pos, fit_w, accelerator = AaBsp( live_pos, fit_w ) if live_tree else None, distribution = dst,
+                                 kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
+            m = RealTensor[ axc ]( live.measures.raw )
         # ( partial: no rescaling -- the sink takes the rest of the density; radial: the masses are not a partition )
         residual = m - nu if sk is not None or rf is not None else m - nu * ( m.sum() / nu.sum() )
         step = RealTensor[ axc ]( frozen.laplacian_solve( residual.raw, linear_solver = settings.tuning.linear_solver ).raw )
         weights = RealTensor[ axc ]( fit_w ) - step
-        at = PowerDiagram( live_pos, weights.raw, distribution = dst, kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
-        m = RealTensor[ axc ]( at.measures.raw )
+        # ( back to the members of the clusters )
+        self.weights = weights if layout is None else RealTensor[ ax ]( weights.raw[ inv ] + gap )
 
-        # the moments at the live weights: `first_c`, `second`, and the mass by the SAME quadrature
-        d = int( at.dim_count )
-        first = [ RealTensor[ axc ]( at.moment( c ).raw ) for c in range( d ) ]
-        second = RealTensor[ axc ]( at.moment( d ).raw )
-        mass = RealTensor[ axc ]( at.moment( d + 1 ).raw )
-        # the moments are those of the cells around the FOLDED seeds ( periodicity ): the cost reads the same positions
-        folded = live_pos if per is None else at._periodic.fold( live_pos )[ 0 ]
-        pos = [ RealTensor[ axc ]( folded[ :, c ] ) for c in range( d ) ]
-        pp = sum( ( p * p for p in pos[ 1: ] ), pos[ 0 ] * pos[ 0 ] )
-        px = sum( ( p * f for p, f in zip( pos[ 1: ], first[ 1: ] ) ), pos[ 0 ] * first[ 0 ] )
-        nu_eff = nu if sk is not None or rf is not None else nu * ( m.sum() / nu.sum() )
-        self.cost = ( second - 2 * px + pp * mass ).sum() + ( weights * ( nu_eff - m ) ).sum()
+        def outputs():
+            """the other outputs, on the live diagram at the live weights ( `_defer`: computed when one of them is read )"""
+            at = PowerDiagram( live_pos, weights.raw, accelerator = AaBsp( live_pos, weights.raw ) if live_tree else None, distribution = dst,
+                               kernel_dtype = kd, memory = 0, periodicity = per, sink_weight = sk, radial_func = rf )
+            m = RealTensor[ axc ]( at.measures.raw )
 
-        # an empty cell keeps its seed as barycenter ( there is nothing else to say )
-        full = loom.ops().stack( [ loom.ops().where( mass.raw > 0, f.raw / loom.ops().where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 )
-        if per is not None:
-            full = at.unfold( full )
+            # the moments at the live weights: `first_c`, `second`, and the mass by the SAME quadrature
+            d = int( at.dim_count )
+            first = [ RealTensor[ axc ]( at.moment( c ).raw ) for c in range( d ) ]
+            second = RealTensor[ axc ]( at.moment( d ).raw )
+            mass = RealTensor[ axc ]( at.moment( d + 1 ).raw )
+            # the moments are those of the cells around the FOLDED seeds ( periodicity ): the cost reads the same positions
+            folded = live_pos if per is None else at._periodic.fold( live_pos )[ 0 ]
+            pos = [ RealTensor[ axc ]( folded[ :, c ] ) for c in range( d ) ]
+            pp = sum( ( p * p for p in pos[ 1: ] ), pos[ 0 ] * pos[ 0 ] )
+            px = sum( ( p * f for p, f in zip( pos[ 1: ], first[ 1: ] ) ), pos[ 0 ] * first[ 0 ] )
+            nu_eff = nu if sk is not None or rf is not None else nu * ( m.sum() / nu.sum() )
+            cost = ( second - 2 * px + pp * mass ).sum() + ( weights * ( nu_eff - m ) ).sum()
 
-        if layout is None:
-            self.weights = weights
-            self.cell_masses = m
-            self.barycenters = RealTensor[ ax, self._pd.dim ]( full )
-            self._live_diagram = at                      # ( `sphere_areas`, read from it when asked: the derivative goes through `weights` )
-            return
-        # back to the members of the clusters
-        self.weights = RealTensor[ ax ]( weights.raw[ inv ] + gap )
-        self.cell_masses = RealTensor[ ax ]( m.raw[ inv ] * src.weights.raw / nu_raw[ inv ] )
-        self.barycenters = RealTensor[ ax, self._pd.dim ]( full[ inv ] )
+            # an empty cell keeps its seed as barycenter ( there is nothing else to say )
+            full = loom.ops().stack( [ loom.ops().where( mass.raw > 0, f.raw / loom.ops().where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 )
+            if per is not None:
+                full = at.unfold( full )
+
+            if layout is None:
+                # ( `_live_diagram`: `sphere_areas`, read from it when asked -- the derivative goes through `weights` )
+                return dict( cost = cost, cell_masses = m, barycenters = RealTensor[ ax, self._pd.dim ]( full ), _live_diagram = at )
+            return dict( cost = cost, cell_masses = RealTensor[ ax ]( m.raw[ inv ] * src.weights.raw / nu_raw[ inv ] ),
+                         barycenters = RealTensor[ ax, self._pd.dim ]( full[ inv ] ) )
+        self._defer( outputs, ( "cost", "cell_masses", "barycenters", "_live_diagram" ) )
+
+    #: the outputs of `_defer` not computed yet: name -> a function that gives it
+    _lazy_outputs = {}
+
+    def _defer( self, outputs, names ):
+        """`names` computed by `outputs()` ( a dict ) when one of them is first read ( `__getattr__` ): under a `jit` that reads none
+        of them ( the weights alone ), their sweeps never enter the program -- XLA could not drop them, the run-time error check of
+        a kernel ( a `jax.debug.callback` ) keeps it alive. They are computed in the framework of the solve."""
+        from loom.drivers import framework_defaults
+        framework = framework_defaults.framework()
+        done = {}
+        def get( name ):
+            if not done:
+                with framework_defaults.using( framework ):
+                    done.update( outputs() )
+            return done.get( name )
+        for name in names:
+            self.__dict__.pop( name, None )
+        self._lazy_outputs = { **self._lazy_outputs, **{ name: ( lambda name = name: get( name ) ) for name in names } }
+
+    def _map_output( self, name, f ):
+        """`name = f( name )`, when it is computed if it is deferred ( `_defer` )"""
+        lazy = self._lazy_outputs
+        if name in lazy:
+            g = lazy[ name ]
+            self._lazy_outputs = { **lazy, name: lambda: f( g() ) }
+        else:
+            setattr( self, name, f( getattr( self, name ) ) )
+
+    def __getattr__( self, name ):
+        # ( only for what is not found: a deferred output, computed now and kept )
+        lazy = self.__dict__.get( "_lazy_outputs", {} )
+        if name not in lazy:
+            raise AttributeError( f"'{ type( self ).__name__ }' object has no attribute '{ name }'" )
+        value = lazy[ name ]()
+        self._lazy_outputs = { k: v for k, v in lazy.items() if k != name }
+        setattr( self, name, value )
+        return value
 
     def _attach_split_derivatives( self, problem, settings ):
         """THE DERIVATIVE OF A PLAN WITH GROUPS ( `duplicates = "split"`: a tree of aggregates ), by the implicit function theorem
