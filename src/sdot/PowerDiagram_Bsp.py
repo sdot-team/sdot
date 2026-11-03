@@ -66,7 +66,9 @@ class PowerDiagram_Bsp( PowerDiagram ):
             self._order = np.asarray( tree.seed_indices ).reshape( -1 ).astype( np.int64 )
         else:
             self._order = getattr( tree.seed_indices, "raw", tree.seed_indices ).reshape( -1 )
-        res = { "tree": tree, "sorted_positions": self._gather( positions ) }
+        # ( the positions in the tree's order: those its construction wrote, when it was built on this very array -- else gathered )
+        sorted_pos = tree.take_sorted_positions( positions )
+        res = { "tree": tree, "sorted_positions": self._gather( positions ) if sorted_pos is None else sorted_pos }
         if weights is not None:
             res[ "sorted_weights" ] = self._gather( weights )
             # a tree coming from outside may have been built on other weights, or none: its majorant

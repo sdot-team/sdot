@@ -20,6 +20,8 @@
 // =====================================================================================
 
 #include <loom/support/common_types.h>
+#include <loom/support/kernels/CpuThreadPool.h>
+#include <algorithm>
 #include <vector>
 
 namespace sdot {
@@ -37,29 +39,67 @@ struct Laplacian {
     std::vector<double> c;
     std::vector<double> dia;       ///< `L_ii`, the sum of the row
 
+    struct Run { SI b, e, i; };      ///< facets `[ b, e )` of row `i`
+    std::vector<std::vector<Run>> runs;   ///< ( scratch of `assemble`, per slice )
+    std::vector<SI>     at;
+
+    /// THE PARALLEL ASSEMBLY: the facets come cell by cell ( each sweep thread emits its cells' facets in a row ), so they are
+    /// cut into RUNS of the same row, found in parallel slices; the runs are placed in the order of the facets ( two short
+    /// sequential passes, one entry per run ), copied in parallel, and the diagonals summed in parallel in the order of the
+    /// row. The result is the one of the sequential assembly, bit for bit, whatever the number of threads.
     void assemble( SI nb, const std::vector<Facet> &fa ) {
         n = nb;
+        const SI nf = SI( fa.size() );
+        const int T = nf < 65536 ? 1 : std::max( cpu_thread_pool().nb_workers(), 1 );
+        auto run = [&]( auto &&slice ) { if ( T == 1 ) slice( 0 ); else cpu_thread_pool().run_threads( T, slice ); };
+
+        runs.resize( T );
+        run( [&]( int t ) {
+            auto &rs = runs[ t ];
+            rs.clear();
+            const SI e = nf * ( t + 1 ) / T;
+            for ( SI k = nf * t / T; k < e; ) {
+                const SI b = k, i = fa[ k ].i;
+                while ( ++k < e && fa[ k ].i == i ) {}
+                rs.push_back( Run{ b, k, i } );
+            }
+        } );
+
         row.assign( n + 1, 0 );
-        for ( const Facet &e : fa )
-            ++row[ e.i + 1 ];
+        for ( const auto &rs : runs )
+            for ( const Run &r : rs )
+                row[ r.i + 1 ] += r.e - r.b;
         for ( SI i = 0; i < n; ++i )
             row[ i + 1 ] += row[ i ];
+        at.assign( row.begin(), row.end() - 1 );
+        for ( auto &rs : runs )
+            for ( Run &r : rs ) {
+                const SI dst = at[ r.i ];
+                at[ r.i ] += r.e - r.b;
+                r.i = dst;                               // from here on, `i` is where the run goes
+            }
 
         col.resize( row[ n ] );
         c.resize( row[ n ] );
-        dia.assign( n, 0.0 );
-        std::vector<SI> at( row.begin(), row.end() - 1 );
-        for ( const Facet &e : fa ) {
-            const SI p = at[ e.i ]++;
-            col[ p ] = e.j;
-            c[ p ] = e.c;
-            dia[ e.i ] += e.c;
-        }
+        dia.resize( n );
+        run( [&]( int t ) {
+            for ( const Run &r : runs[ t ] )
+                for ( SI k = r.b, p = r.i; k < r.e; ++k, ++p ) {
+                    col[ p ] = fa[ k ].j;
+                    c[ p ] = fa[ k ].c;
+                }
+        } );
         // a cell without a neighbor cannot happen as long as none is empty, but a zero row
         // would make the system singular WITHOUT SAYING SO: we neutralize it.
-        for ( SI i = 0; i < n; ++i )
-            if ( ! ( dia[ i ] > 0 ) )
-                dia[ i ] = 1;
+        run( [&]( int t ) {
+            const SI e = n * ( t + 1 ) / T;
+            for ( SI i = n * t / T; i < e; ++i ) {
+                double s = 0;
+                for ( SI k = row[ i ]; k < row[ i + 1 ]; ++k )
+                    s += c[ k ];
+                dia[ i ] = s > 0 ? s : 1;
+            }
+        } );
     }
 
     /// `y = L x` ( the full system, gauge included )

@@ -1157,8 +1157,10 @@ if test( "the_weight_majorant_majorates" ):
             assert slack.min() >= 0, ( name, k, slack.min() )
             # RAISED until it touches: a bound that never touches is a loose bound. What
             # keeps it from touching exactly is the rounding margin of `_weight_majorant`,
-            # relative -- so that is what we compare against, not zero.
-            room = 1e-4 * ( 1 + numpy.abs( w[ sub ] ).max() )
+            # relative -- so that is what we compare against, not zero. The margin also follows
+            # `|a . y|` ( the clamped border keeps a slope of ~1e6 along its 1e-8 of extent, `|a . y|` ~ 150:
+            # still tighter than the constant, margin included )
+            room = 1e-4 * ( 1 + numpy.abs( w[ sub ] ).max() ) + 2e-6 * numpy.abs( pos[ sub ] @ wa[ k ] ).max()
             assert slack.min() < room, ( name, k, slack.min(), room )
             nb_affine += bool( numpy.abs( wa[ k ] ).max() > 0 )
 
@@ -1172,6 +1174,52 @@ if test( "the_weight_majorant_majorates" ):
             assert frac < 0.2, ( name, frac )
         elif name != "clamped border":
             assert frac > 0.5, ( name, frac )
+
+if test( "the_weight_majorant_keeps_the_slope_of_small_nodes" ):
+    # the rounding margin of `b` grows with `|a . y|`, hence with the distance of the node to the ORIGIN: a slope is kept
+    # while its slack, margin included, stays below the constant's. A fixed `|a . y| <= 100 spread` dropped it on every
+    # node smaller than a hundredth of the box -- the leaves of any grid finer than ~300^2 -- and the walk then proposed
+    # ten times the seeds ( 347 instead of 36 per cell at 2048^2 with the weights of an OT solve ). Smooth weights of that
+    # kind on a 256^2 grid of the unit square: the host's rule ( `_weight_majorant` ) and the kernel's ( `bsp_build_level.h`,
+    # one call and per level ), valid and with their slope on the leaves.
+    import sys
+    import numpy
+    import sdot
+    A = sys.modules[ "sdot.AaBsp" ]
+    n = 256
+    u = ( numpy.arange( n ) + 0.5 ) / n
+    X, Y = numpy.meshgrid( u, u, indexing = "ij" )
+    P = numpy.stack( [ X.ravel(), Y.ravel() ], axis = 1 )
+    W = 0.3 * P[ :, 0 ] ** 2 - 0.2 * P[ :, 0 ] * P[ :, 1 ] + 0.1 * P[ :, 1 ]
+
+    # the host: 4 x 4 patches, near the origin and in the far corner
+    for c in ( ( 0, 0 ), ( n - 4, n - 4 ), ( n // 2, n - 4 ) ):
+        sub = ( ( X.ravel() * n - 0.5 >= c[ 0 ] ) & ( X.ravel() * n - 0.5 < c[ 0 ] + 4 ) & ( Y.ravel() * n - 0.5 >= c[ 1 ] ) & ( Y.ravel() * n - 0.5 < c[ 1 ] + 4 ) )
+        a, b = A._weight_majorant( P[ sub ], W[ sub ] )
+        assert numpy.abs( a ).max() > 0, c
+        slack = P[ sub ] @ a + b - W[ sub ]
+        assert slack.min() >= 0, ( c, slack.min() )
+        assert slack.max() < 0.1 * ( W[ sub ].max() - W[ sub ].min() ), ( c, slack.max() )
+
+    # the kernel
+    for one_call in ( True, False ):
+        try:
+            A._ONE_CALL = one_call
+            t = A._build_in_kernel( P, W, 10 )
+        finally:
+            A._ONE_CALL = True
+        si = numpy.asarray( t[ "seed_indices" ] )
+        wa, wb = numpy.asarray( t[ "node_wa" ] ), numpy.asarray( t[ "node_wb" ] )
+        nb_leaves = nb_sloped = 0
+        for i in numpy.flatnonzero( numpy.asarray( t[ "node_left" ] ) < 0 ):
+            b, e = int( t[ "node_begin" ][ i ] ), int( t[ "node_end" ][ i ] )
+            if e <= b:
+                continue
+            s_ = si[ b:e ]
+            assert numpy.all( W[ s_ ] <= P[ s_ ] @ wa[ i ] + wb[ i ] + 1e-12 ), ( one_call, i )
+            nb_leaves += 1
+            nb_sloped += bool( numpy.abs( wa[ i ] ).max() > 0 )
+        assert nb_sloped > 0.9 * nb_leaves, ( one_call, nb_sloped, nb_leaves )
 
 
 if test( "an_accelerator_for_other_seeds_is_refused" ):
@@ -2924,3 +2972,45 @@ if test( "the_scratch_grows_in_the_call_under_jit" ):
     v, g = jax.jit( jax.value_and_grad( f ), static_argnums = 1 )( jnp.asarray( pos ), 3 )
     assert abs( float( v ) - float( ref_v ) ) < 1e-12 * abs( float( ref_v ) ), ( float( v ), float( ref_v ) )
     assert numpy.abs( _host( g ) - _host( ref_g ) ).max() < 1e-12 * numpy.abs( _host( ref_g ) ).max()
+
+if test( "the_tree_in_one_call_is_the_tree_per_level" ):
+    # ON THE CPU the tree is built in ONE call ( `bsp_build_tree.h` ) instead of one per level: the same nodes, the same boxes,
+    # the same leaves as sets -- the top levels, shared by groups of workers, leave the halves of a cut in another order, so
+    # the order inside a leaf and the majorants may differ. With ties ( a tenth of the seeds at one place ),
+    # weights, from 1D to 4D, and clouds large enough for several levels of groups.
+    import sys
+    import numpy
+    import sdot
+    A = sys.modules[ "sdot.AaBsp" ]
+    rng = numpy.random.default_rng( 0 )
+    for n, d, with_w in [ ( 1, 2, False ), ( 7, 2, True ), ( 20000, 2, True ), ( 30000, 3, True ), ( 5000, 1, False ), ( 3000, 4, True ),
+                          ( 300000, 2, False ), ( 200000, 3, True ) ]:
+        P = rng.random( ( n, d ) )
+        P[ : n // 10 ] = P[ 0 ]
+        W = rng.random( n ) if with_w else None
+        try:
+            A._ONE_CALL = True
+            one = A._build_in_kernel( P, W, 10 )
+            A._ONE_CALL = False
+            per_level = A._build_in_kernel( P, W, 10 )
+        finally:
+            A._ONE_CALL = True
+        for k in one:
+            if k in ( "seed_indices", "node_wa", "node_wb", "sorted_positions" ):
+                continue
+            assert numpy.array_equal( numpy.asarray( one[ k ] ), numpy.asarray( per_level[ k ] ) ), ( n, d, k )
+        if W is not None:                             # ( the majorants: valid, `w <= a . y + b` over each node -- an affine fit of a
+            si = numpy.asarray( one[ "seed_indices" ] )  # near-degenerate node is taken or not depending on the order of its sums )
+            for i in range( len( one[ "node_begin" ] ) ):
+                b, e = int( one[ "node_begin" ][ i ] ), int( one[ "node_end" ][ i ] )
+                if e > b:
+                    s_ = si[ b:e ]
+                    assert numpy.all( W[ s_ ] <= P[ s_ ] @ one[ "node_wa" ][ i ] + one[ "node_wb" ][ i ] + 1e-12 ), ( n, d, i )
+        leaves = numpy.flatnonzero( numpy.asarray( one[ "node_left" ] ) < 0 )
+        for i in leaves:
+            b, e = int( one[ "node_begin" ][ i ] ), int( one[ "node_end" ][ i ] )
+            # ( as positions: which of the seeds at one place go left is the partition's choice )
+            pos_of = lambda t: numpy.unique( P[ numpy.asarray( t[ "seed_indices" ][ b:e ] ) ], axis = 0, return_counts = True )
+            ( u1, c1 ), ( u2, c2 ) = pos_of( one ), pos_of( per_level )
+            assert numpy.array_equal( u1, u2 ) and numpy.array_equal( c1, c2 ), ( n, d, i )
+        assert numpy.array_equal( numpy.sort( one[ "seed_indices" ] ), numpy.arange( n ) )

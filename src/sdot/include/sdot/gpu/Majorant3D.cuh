@@ -135,8 +135,7 @@ __global__ void __launch_bounds__( BLOCK ) majorant_up( int depth, int h, TN nb,
                 bool well_behaved = true;
                 for ( int d = 0; d < D; ++d ) {
                     const double lo = double( box( n, 0, d ) ), hi = double( box( n, 1, d ) );
-                    const double reach = fmax( fabs( lo ), fabs( hi ) );
-                    if ( ! isfinite( fit[ d ] ) || fabs( fit[ d ] ) * ( hi - lo ) > 8 * spread || fabs( fit[ d ] ) * reach > 100 * spread )
+                    if ( ! isfinite( fit[ d ] ) || fabs( fit[ d ] ) * ( hi - lo ) > 8 * spread )   // ( the margin: `majorant_of` )
                         well_behaved = false;
                 }
                 if ( well_behaved )
@@ -202,9 +201,12 @@ __device__ __forceinline__ void majorant_of( const MajStatsN<D> &s, const MajRed
     if ( any ) {
         const double rmin = gpu2d::double_of( r.rmin ), rmax = gpu2d::double_of( r.rmax );
         const double u = 1 - double( D ) / ( s.m - 1 ), by_chance = sqrt( u > 0 ? u : 0.0 );
-        if ( rmax - rmin < 0.85 * by_chance * spread ) {
+        const double ra = gpu2d::double_of( r.amax );
+        // the slack of each candidate, margin included ( see `bsp_weight_majorant` )
+        const double slack_affine = rmax - rmin + 1e-6 * ( fabs( rmax ) + spread + ra ), slack_constant = spread + 1e-6 * ( fabs( s.wmax ) + spread );
+        if ( rmax - rmin < 0.85 * by_chance * spread && slack_affine < slack_constant ) {
             bb = rmax;
-            amax = gpu2d::double_of( r.amax );
+            amax = ra;
         } else
             for ( int d = 0; d < D; ++d ) a[ d ] = 0;
     }

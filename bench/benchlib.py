@@ -16,6 +16,7 @@ otherwise every combination runs with the pool of the first ( `page.py` splits t
 
 import os
 import platform
+import time
 import socket
 
 #: the variables that change what is measured, and are therefore printed with each result
@@ -77,8 +78,128 @@ def set_threads( threads, pin ):
         os.environ[ "SDOT_PIN_THREADS" ] = "1" if pin == "yes" else "0"
 
 
+class _Clock:
+    """THE CLOCK THE WORK RAN AT, sampled in the background ( `start_clock` ) until `hardware` reads it: the page plots cycles,
+    time times this clock, so that a single core running faster than 24 busy ones ( turbo ) is not taken for scaling.
+
+    CPU ( Linux ): every `dt`, the busy jiffies of each allowed CPU ( `/proc/stat` ) and its current frequency
+    ( `scaling_cur_freq`, an APERF / MPERF average with intel_pstate and amd-pstate ). Each interval where at least half a
+    core was busy gives the frequency of its busy CPUs ( weighted by their busy time ), and the clock is the mean over these
+    intervals: a sequential part counts at the turbo of one core, a parallel one at the clock of all the busy cores, each for
+    its duration. Child processes count ( CGAL's and geogram's programs ). Start it right before the timed part: what runs
+    before ( loading, compiling ) would count too.
+
+    The card: `nvidia-smi` streams the SM clock and the utilization of every card; the clock is the mean of the SM clock of
+    the busiest card over the samples where it is at least half busy."""
+
+    def __init__( self, dt = 0.2 ):
+        import threading
+        self.dt, self.samples, self.gpu = dt, [ ], [ ]
+        self.cpus = sorted( os.sched_getaffinity( 0 ) ) if hasattr( os, "sched_getaffinity" ) else [ ]
+        self.stop = threading.Event()
+        self.smi = None
+        if os.environ.get( "LOOM_DEVICE" ) != "cpu":
+            import subprocess
+            try:
+                self.smi = subprocess.Popen( [ "nvidia-smi", "--query-gpu=index,clocks.sm,utilization.gpu", "--format=csv,noheader,nounits",
+                                               f"-lms={ int( dt * 1000 ) }" ], stdout = subprocess.PIPE, stderr = subprocess.DEVNULL, text = True )
+                threading.Thread( target = self._read_smi, daemon = True ).start()
+            except OSError:
+                self.smi = None
+        if self.cpus and os.path.exists( "/proc/stat" ):
+            self.sampler = threading.Thread( target = self._sample_cpus, daemon = True )
+            self.sampler.start()
+
+    def _busy( self ):
+        busy = { }
+        with open( "/proc/stat" ) as f:
+            for l in f:
+                k, *v = l.split()
+                if k.startswith( "cpu" ) and k[ 3: ].isdigit():
+                    v = [ int( x ) for x in v ]
+                    busy[ int( k[ 3: ] ) ] = sum( v[ :3 ] ) + sum( v[ 5:8 ] )    # user nice system ( idle iowait ) irq softirq steal
+        return busy
+
+    def _freqs( self ):
+        f = { }
+        for c in self.cpus:
+            try:
+                with open( f"/sys/devices/system/cpu/cpu{ c }/cpufreq/scaling_cur_freq" ) as h:
+                    f[ c ] = int( h.read() ) * 1e-6                               # kHz -> GHz
+            except ( OSError, ValueError ):
+                pass
+        return f
+
+    def _sample_cpus( self ):
+        self.prev, self.t_prev = self._busy(), time.perf_counter()
+        while not self.stop.wait( self.dt ):
+            self._sample()
+
+    def _sample( self ):
+        """the interval since the last sample: ( its duration, { cpu: ( busy jiffies, GHz ) } )"""
+        cur, fr, t = self._busy(), self._freqs(), time.perf_counter()
+        self.samples.append( ( t - self.t_prev, { c: ( cur[ c ] - self.prev.get( c, cur[ c ] ), fr[ c ] ) for c in self.cpus if c in cur and c in fr } ) )
+        self.prev, self.t_prev = cur, t
+
+    def _read_smi( self ):
+        for l in self.smi.stdout:
+            try:
+                i, clk, util = ( float( x ) for x in l.split( "," ) )
+            except ValueError:
+                continue
+            self.gpu.append( ( int( i ), clk * 1e-3, util ) )
+
+    def read( self ):
+        """`{ clock_ghz, sm_clock_ghz }`: what could be measured"""
+        self.stop.set()
+        if self.smi:
+            self.smi.terminate()
+        res = { }
+        hz = os.sysconf( "SC_CLK_TCK" ) if hasattr( os, "sysconf" ) else 100
+        if hasattr( self, "sampler" ):
+            self.sampler.join()
+            self._sample()                                                          # the last interval: all a short run has
+        kept = [ s for d, s in self.samples if sum( b for b, _ in s.values() ) >= 0.5 * d * hz ]
+        if kept:
+            res[ "clock_ghz" ] = round( sum( sum( b * f for b, f in s.values() ) / sum( b for b, _ in s.values() ) for s in kept ) / len( kept ), 3 )
+        if self.gpu:
+            card = max( { i for i, _, _ in self.gpu }, key = lambda i: sum( u for j, _, u in self.gpu if j == i ) )
+            busy = [ c for i, c, u in self.gpu if i == card and u >= 50 ]
+            if busy:
+                res[ "sm_clock_ghz" ] = round( sum( busy ) / len( busy ), 3 )
+        return res
+
+
+_clock = None
+
+
+def start_clock():
+    """start sampling the clocks ( `_Clock` ), read by `hardware`: call it before the measured work"""
+    global _clock
+    _clock = _Clock()
+
+
+def card_sms():
+    """the number of SMs of the card the framework computes on ( jax, torch or cupy, whichever is already imported )"""
+    import sys
+    try:
+        if "jax" in sys.modules:
+            import jax
+            return int( jax.devices()[ 0 ].core_count )
+        if "torch" in sys.modules:
+            import torch
+            return int( torch.cuda.get_device_properties( 0 ).multi_processor_count )
+        if "cupy" in sys.modules:
+            import cupy
+            return int( cupy.cuda.Device().attributes[ "MultiProcessorCount" ] )
+    except Exception:
+        pass
+    return None
+
+
 def hardware():
-    """what the numbers were measured on: CPU model, cores, memory and the cards ( `nvidia-smi` ), for the results file"""
+    """what the numbers were measured on: CPU model, cores, memory and the cards ( `nvidia-smi` ), for the results file; with
+    the clocks sampled since `start_clock`"""
     import subprocess
     cpu = platform.processor() or platform.machine()
     try:
@@ -105,8 +226,13 @@ def hardware():
         level = "compiled for this machine" if os.environ.get( "LOOM_KERNELS" ) == "compile" else dev.current_catalogue_tag()
     except Exception:
         level = ""
-    return dict( hw_host = socket.gethostname(), hw_cpu = cpu, hw_cores = allowed_cpus(), hw_physical_cores = physical_cores(),
-                 hw_ram_gb = round( ram, 1 ), hw_gpus = gpus, hw_kernels = level )
+    res = dict( hw_host = socket.gethostname(), hw_cpu = cpu, hw_cores = allowed_cpus(), hw_physical_cores = physical_cores(),
+                hw_ram_gb = round( ram, 1 ), hw_gpus = gpus, hw_kernels = level )
+    if _clock is not None:
+        res.update( _clock.read() )
+        if "sm_clock_ghz" in res and ( sms := card_sms() ):
+            res[ "hw_sms" ] = sms
+    return res
 
 
 def set_openmp( omp_threads ):

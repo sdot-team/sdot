@@ -66,6 +66,7 @@ import { withBase } from 'vitepress'
 
 ## What's Next
 
+- [Performance →](./performance) what it costs, CPU and GPU
 - [Background →](./background) the mathematics
 - [Examples gallery →](/examples/) some use cases
 - [Plans and settings →](./ot-plan) barycenters, moments, ...

@@ -47,11 +47,21 @@ def diagram_class_for( positions, weights, accelerator ):
     kernel traced. Whoever wants the tree under a trace builds it outside and passes it ( `accelerator = tree` )."""
     from .PowerDiagram_Bsp import PowerDiagram_Bsp
     from .PowerDiagram_Plain import PowerDiagram_Plain
-    if accelerator == "plain":
+    from .distributions.SumOfDiracsOnAGrid import Grid
+    if isinstance( accelerator, Grid ):                 # the seeds of a grid: no positions, an implicit tree
+        from .PowerDiagram_Grid import PowerDiagram_Grid
+        return PowerDiagram_Grid
+    if isinstance( accelerator, str ) and accelerator == "plain":
         return PowerDiagram_Plain
     if accelerator is None and any( loom.is_traced( getattr( x, "raw", x ) ) for x in ( positions, weights ) if x is not None ):
         return PowerDiagram_Plain
     return PowerDiagram_Bsp
+
+
+def _grid_of( accelerator ):
+    """the grid of the seeds when `accelerator` is one ( `SumOfDiracsOnAGrid.Grid` ), else `None`"""
+    from .distributions.SumOfDiracsOnAGrid import Grid
+    return accelerator if isinstance( accelerator, Grid ) else None
 
 
 def _engine_unit( dim, seeds ):
@@ -233,7 +243,8 @@ class PowerDiagram( Aggregate, Displayable ):
         if distribution is not None:
             # NORMALIZED here once and for all, with the dimension of the diagram: a distribution that does not carry one
             # ( `Box()` ) makes up its parameters from it
-            pshape = positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
+            pshape = _grid_of( accelerator ).shape_nd if _grid_of( accelerator ) is not None else \
+                     positions.shape if hasattr( positions, "shape" ) else np.asarray( positions ).shape
             if len( pshape ) == 2:
                 distribution = distribution.normalized_version( nb_dims = int( pshape[ 1 ] ) )
             # ( with a periodicity: the fundamental domain it repeats, `Distribution.periodic_support` )
@@ -250,6 +261,8 @@ class PowerDiagram( Aggregate, Displayable ):
         # cells, and the images ( `periodicity.py` )
         self._periodic = None
         if periodicity is not None and periodicity is not False:
+            if _grid_of( accelerator ) is not None:
+                raise NotImplementedError( "the seeds of a grid: no periodicity yet ( pass the positions )" )
             positions, boundaries = self._periodic_setup( positions, boundaries, periodicity )
         # ... and the density with its images, for one that copies them itself ( `Distribution.periodized` ): the kernels then
         # integrate it as it is, not moved by the images of the diagram
@@ -296,16 +309,23 @@ class PowerDiagram( Aggregate, Displayable ):
             if len( boundaries[ 1 ] ):
                 kwargs[ "bnd_directions" ], kwargs[ "bnd_offsets" ] = boundaries
 
-        pos = positions if hasattr( positions, "shape" ) else np.asarray( positions, dtype = float )
-        if len( pos.shape ) != 2:
-            raise ValueError( f"`positions` has to be [ n, d ] ( got { tuple( pos.shape ) } )" )
-        n, d = int( pos.shape[ 0 ] ), int( pos.shape[ 1 ] )
-
-        # float32 seeds go to float64, as the tree's ( `AaBsp`: the C++ reads it in the float of the positions, and the card's
-        # solver works on float64 positions ) -- what was done before float32 tensors kept their float from one aggregate to
-        # the next ( `loom.Tensor.set` )
         from .AaBsp import as_float64
-        pos = as_float64( pos )
+        grid = _grid_of( accelerator )
+        if grid is not None:                             # the seeds of a grid ( `PowerDiagram_Grid` ): no positions
+            if self._periodic is not None or groups is not None:
+                raise NotImplementedError( "the seeds of a grid: no periodicity nor groups yet ( pass the positions )" )
+            pos = None
+            n, d = int( np.prod( grid.shape ) ), len( grid.shape )
+        else:
+            pos = positions if hasattr( positions, "shape" ) else np.asarray( positions, dtype = float )
+            if len( pos.shape ) != 2:
+                raise ValueError( f"`positions` has to be [ n, d ] ( got { tuple( pos.shape ) } )" )
+            n, d = int( pos.shape[ 0 ] ), int( pos.shape[ 1 ] )
+
+            # float32 seeds go to float64, as the tree's ( `AaBsp`: the C++ reads it in the float of the positions, and the card's
+            # solver works on float64 positions ) -- what was done before float32 tensors kept their float from one aggregate to
+            # the next ( `loom.Tensor.set` )
+            pos = as_float64( pos )
         weights = None if weights is None else as_float64( weights )
 
         # GROUPS: the outer weights take the place of the weights for everything that does not look inside a group

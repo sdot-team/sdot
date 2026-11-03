@@ -157,13 +157,15 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
                 fit[ i ] = s / A[ i ][ i ];
             }
 
-            TF rmin = 0, rmax = 0;
+            TF rmin = 0, rmax = 0, ramax = 0;
             for ( SI k = b; k < e; ++k ) {
-                TF r = TF( w( k ) );
+                TF ay = 0;
                 for ( int d = 0; d < ct_dim; ++d )
-                    r -= fit[ d ] * TF( pos( k, d ) );
+                    ay += fit[ d ] * TF( pos( k, d ) );
+                const TF r = TF( w( k ) ) - ay;
                 if ( k == b ) { rmin = r; rmax = r; }
                 else { rmin = r < rmin ? r : rmin; rmax = r > rmax ? r : rmax; }
+                ramax = sdot::fabs( ay ) > ramax ? sdot::fabs( ay ) : ramax;
             }
 
             // the tightening that CHANCE already gives to `d + 1` parameters on `m` points: without
@@ -176,12 +178,14 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
             // fit: it would make a `b` at 1e9 that no longer majorizes anything useful. See
             // `AaBsp.py::_weight_majorant`.
             bool well_behaved = true;
-            for ( int d = 0; d < ct_dim; ++d ) {
-                const TF reach = sdot::fabs( plo[ d ] ) > sdot::fabs( phi[ d ] ) ? sdot::fabs( plo[ d ] ) : sdot::fabs( phi[ d ] );
-                if ( sdot::fabs( fit[ d ] ) * ( phi[ d ] - plo[ d ] ) > 8 * spread || sdot::fabs( fit[ d ] ) * reach > TF( 100 ) * spread )
-                    well_behaved = false;                        // the margin on `b`, relative to `|a . y|`, must stay negligible
-            }
-            if ( well_behaved && rmax - rmin < TF( 0.85 ) * by_chance * spread )
+            for ( int d = 0; d < ct_dim; ++d )
+                if ( sdot::fabs( fit[ d ] ) * ( phi[ d ] - plo[ d ] ) > 8 * spread )
+                    well_behaved = false;
+            // the SLACK of each candidate, the rounding margin included: the margin grows with `|a . y|`, i.e. with the
+            // distance of the node to the origin, and the slope is worth it only while it stays below the constant's
+            const TF slack_affine   = rmax - rmin + TF( 1e-6 ) * ( sdot::fabs( rmax ) + spread + ramax );
+            const TF slack_constant = spread + TF( 1e-6 ) * ( sdot::fabs( wmax ) + spread );
+            if ( well_behaved && rmax - rmin < TF( 0.85 ) * by_chance * spread && slack_affine < slack_constant )
                 a = fit;
         }
     }

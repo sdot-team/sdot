@@ -1129,6 +1129,10 @@ struct CardLinear {
 
     LinOptions         o;
     LinStats           st;
+    /// an ABSOLUTE residual under which a solve stops, whatever its right-hand side ( 0: none ), and the residual the last
+    /// solve reached: the sweeps of the groups ( `Newton2D.cuh`, as `sdotplan/Linear.h::LinearSolver` ) correct a solve to
+    /// the accuracy it had, not to the tolerance relatively to their own tiny right-hand side
+    double             floor = 0, last_residual = 0;
     SI                 n = 0, nnz_cap = 0;
     double            *r = nullptr, *z = nullptr, *p = nullptr, *q = nullptr;
     CgScalars         *sc = nullptr;
@@ -1479,8 +1483,9 @@ struct CardLinear {
         CgScalars h;
         read_back( queue, &h, sc, 1 );
         const double bb = h.rr;
-        if ( ! ( bb > 0 ) ) { st.t_res += wall_now() - t0; return true; }
-        const double target = o.tol * o.tol * bb;
+        last_residual = std::sqrt( std::max( bb, 0.0 ) );
+        if ( ! ( bb > floor * floor ) ) { st.t_res += wall_now() - t0; return true; }   // ( `x` is zero: `CgInit` )
+        const double target = std::max( o.tol * o.tol * bb, floor * floor );
         int it = 0;
         while ( it < o.maxit ) {
             reduce_fin( queue, n, SpmvDot<TC>{ A, p, q }, w1, FinAlpha{ sc } );
@@ -1496,31 +1501,36 @@ struct CardLinear {
         read_back( queue, &h, sc, 1 );
         center( queue, x );
         const double err = std::sqrt( std::max( h.rr, 0.0 ) / bb );
+        last_residual = std::sqrt( std::max( h.rr, 0.0 ) );
         st.nb_iter += it;
         st.worst = std::max( st.worst, err );
         st.t_res += wall_now() - t0;
         if ( o.trace ) std::printf( "      lin cg: %d it, rel. residual %.2e\n", it, err );
-        return err < 1;
+        return err < 1 || h.rr <= target;
     }
 
     bool solve_mg( const CudaQueue &queue, auto &allocator, const CsrView<TC> &A, const double *b, double *x ) {
         double t0 = wall_now();
-        if constexpr ( SAME )
-            lev[ 0 ].A = A;
-        else {                                           // the fine level in `TV`: a copy of the values, at each solve
-            launch_kernel( queue, &convert_csr_values<double,TV>, blocks_for( nnz_cap ), BLOCK, 0, nnz_cap, ( const SI * ) A.row, n, A.val, val0 );
-            launch_kernel( queue, &convert_values<double,TV>, blocks_for( n ), BLOCK, 0, n, A.dia, dia0 );
-            lev[ 0 ].A = CsrView<TC,TV>{ n, A.row, A.col, val0, dia0 };
+        // a correction ( under a `floor` ) solves again the matrix of the solve it corrects: the hierarchy stays as it is
+        const bool same = floor > 0 && built;
+        if ( ! same ) {
+            if constexpr ( SAME )
+                lev[ 0 ].A = A;
+            else {                                       // the fine level in `TV`: a copy of the values, at each solve
+                launch_kernel( queue, &convert_csr_values<double,TV>, blocks_for( nnz_cap ), BLOCK, 0, nnz_cap, ( const SI * ) A.row, n, A.val, val0 );
+                launch_kernel( queue, &convert_values<double,TV>, blocks_for( n ), BLOCK, 0, n, A.dia, dia0 );
+                lev[ 0 ].A = CsrView<TC,TV>{ n, A.row, A.col, val0, dia0 };
+            }
+            if ( ! built || since >= std::max( o.rebuild, 1 ) || lev.size() == 1 ) {   // ( one level: the bottom IS the matrix )
+                if ( ! build( queue, allocator ) )
+                    return false;
+                built = true;
+                since = 0;
+                ++st.nb_hierarchies;
+            } else
+                relax( queue, lev[ 0 ] );                // the fine level only: repointed, its coefficients redone
+            ++since;
         }
-        if ( ! built || since >= std::max( o.rebuild, 1 ) || lev.size() == 1 ) {   // ( one level: the bottom IS the matrix )
-            if ( ! build( queue, allocator ) )
-                return false;
-            built = true;
-            since = 0;
-            ++st.nb_hierarchies;
-        } else
-            relax( queue, lev[ 0 ] );                    // the fine level only: repointed, its coefficients redone
-        ++since;
         const double t1 = wall_now();
         st.t_hierarchy += t1 - t0;
 
@@ -1529,13 +1539,14 @@ struct CardLinear {
         Sum1 hb;
         read_back( queue, &hb, w1.out, 1 );
         const double bb = hb.s;
-        if ( ! ( bb > 0 ) ) {
+        last_residual = std::sqrt( std::max( bb, 0.0 ) );
+        if ( ! ( bb > floor * floor ) ) {
             launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, x, 0.0, n );
             st.t_res += wall_now() - t1;
             return true;
         }
         bool started = false;
-        if ( nb_u > 0 ) {
+        if ( nb_u > 0 && ! ( floor > 0 ) ) {
             const int k = nb_u;
             for ( int j = 0; j < k; ++j )
                 reduce_fin( queue, n, SpmvDot<TC>{ A, U + SI( j ) * n, AU + SI( j ) * n }, w1 );
@@ -1568,7 +1579,7 @@ struct CardLinear {
         // every scalar on the card, the whole iteration ONE graph ( `Graph` ), the host reads back `r.r` only. ( The loop as a
         // while node of a graph, `cudaGraphSetConditional` from the last finalizer, was measured SLOWER: 0.0767 s against
         // 0.0703 at 1e5. )
-        const double target = o.tol * o.tol * bb;
+        const double target = std::max( o.tol * o.tol * bb, floor * floor );
         launch_kernel( queue, &fcg_init, 1, 1, 0, sc, bb );
         launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, p, 0.0, n );
         launch_kernel( queue, &fill_value, blocks_for( n ), BLOCK, 0, q, 0.0, n );
@@ -1589,7 +1600,7 @@ struct CardLinear {
         }
         const int it = h.it;
         center( queue, x );
-        if ( o.recycle > 0 ) {                           // the solution joins the subspace ( a ring of `recycle` slots )
+        if ( o.recycle > 0 && ! ( floor > 0 ) ) {        // the solution joins the subspace ( a ring of `recycle` slots; not a correction )
             const int slot = nb_u < o.recycle ? nb_u : ( since_slot++ % o.recycle );
             launch_kernel( queue, &copy_values, blocks_for( n ), BLOCK, 0, U + SI( slot ) * n, ( const double * ) x, n );
             nb_u = std::min( nb_u + 1, o.recycle );
@@ -1598,8 +1609,9 @@ struct CardLinear {
         st.nb_iter += it;
         st.worst = std::max( st.worst, err );
         st.t_res += wall_now() - t1;
+        last_residual = std::sqrt( std::max( h.rr, 0.0 ) );
         if ( o.trace ) std::printf( "      lin mg: %d levels, %d it, rel. residual %.2e%s\n", int( lev.size() ), it, err, started ? " ( recycled start )" : "" );
-        return err < 1;
+        return err < 1 || h.rr <= target;
     }
 
     /// the small dense system `G y = f` ( Cholesky with a ridge, as `Multigrid.h::solve_dense` ); `false`: declined

@@ -90,6 +90,7 @@ if p := bench( "geogram",
     env = dict( os.environ, OMP_NUM_THREADS = str( threads ) )
     runs = []
     try:
+        benchlib.start_clock()
         for r in range( 1 if p.level != "newton" else p.reps ):     # the diagram repeats inside the driver
             res = subprocess.run( args, capture_output = True, text = True, env = env )
             if res.returncode != 0:

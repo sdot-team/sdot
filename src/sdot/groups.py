@@ -443,7 +443,7 @@ def _separated_nodes( U, kappa ):
     if k < 3:
         return [], [], None
     K = min( k - 1, 2 * d + 1 )                  # ( the minimum spanning tree is in the near neighbours, Delaunay's degree ~ 2 d )
-    tree = cKDTree( U )
+    tree = cKDTree( U, balanced_tree = False, compact_nodes = False )   # ( twice as fast to build, the queries as fast )
     dist, idx = tree.query( U, k = K + 1, workers = -1 )
     a = np.repeat( np.arange( k, dtype = np.int64 ), K )
     b = idx[ :, 1: ].reshape( -1 ).astype( np.int64 )
@@ -503,7 +503,7 @@ def _separated_nodes( U, kappa ):
         size[ new ] = sz
     # the components left, joined by the long edges: each one's join is its shortest edge out
     la, lb = label[ every[ 0 ] ], label[ every[ 1 ] ]
-    cross = la != lb
+    cross = ( la != lb ) & ( ( size[ la ] > 1 ) | ( size[ lb ] > 1 ) )   # ( a lone position is no aggregate: its join is not needed )
     jn = np.full( k, np.inf )
     np.minimum.at( jn, la[ cross ], every[ 2 ][ cross ] )
     np.minimum.at( jn, lb[ cross ], every[ 2 ][ cross ] )
@@ -520,16 +520,15 @@ def _separated_nodes( U, kappa ):
 
 def _connect( U, tree, a, b, l, K ):
     """the near-neighbour edges, plus what joins their components when they are several ( a cluster of more than `K` close points
-    away from the rest ): for each component but the largest, its shortest edge out found among more neighbours ( Boruvka )"""
+    away from the rest ): for each component but the largest, its shortest edge out found among more neighbours ( Boruvka ). The
+    components are found once on the whole graph; each round's new edges only merge them ( a graph on the components )."""
     from scipy.sparse import coo_matrix, csr_matrix
     from scipy.sparse.csgraph import connected_components
     k = U.shape[ 0 ]
-    for rnd in range( 64 ):
-        if rnd == 0:                                 # ( the near neighbours, `K` per row in order: a CSR as it is, no sort )
-            g = csr_matrix( ( np.ones( len( a ), dtype = np.int8 ), b, np.arange( 0, len( a ) + 1, K ) ), shape = ( k, k ) )
-        else:
-            g = coo_matrix( ( np.ones( len( a ), dtype = np.int8 ), ( a, b ) ), shape = ( k, k ) )
-        nc, comp = connected_components( g, directed = True, connection = "weak" )
+    # ( the near neighbours, `K` per row in order: a CSR as it is, no sort )
+    g = csr_matrix( ( np.ones( len( a ), dtype = np.int8 ), b, np.arange( 0, len( a ) + 1, K ) ), shape = ( k, k ) )
+    nc, comp = connected_components( g, directed = True, connection = "weak" )
+    for _ in range( 64 ):
         if nc <= 1:
             break
         big = np.bincount( comp ).argmax()
@@ -554,9 +553,13 @@ def _connect( U, tree, a, b, l, K ):
         if not best:
             break
         e = np.asarray( list( best.values() ) )
-        a = np.r_[ a, e[ :, 0 ].astype( np.int64 ) ]
-        b = np.r_[ b, e[ :, 1 ].astype( np.int64 ) ]
+        ea, eb = e[ :, 0 ].astype( np.int64 ), e[ :, 1 ].astype( np.int64 )
+        a = np.r_[ a, ea ]
+        b = np.r_[ b, eb ]
         l = np.r_[ l, e[ :, 2 ] ]
+        h = coo_matrix( ( np.ones( len( ea ), dtype = np.int8 ), ( comp[ ea ], comp[ eb ] ) ), shape = ( nc, nc ) )
+        nc, merged = connected_components( h, directed = False )
+        comp = merged[ comp ]
     return a, b, l
 
 

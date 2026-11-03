@@ -372,6 +372,16 @@ struct Sweep {
                 for ( SI k = b; k < e; ++k )
                     pd.weights( k ) = TF( W[ k ] );
             } );
+            if constexpr ( requires { pd.node_majorant( SI( 0 ), pd.node_wa( SI( 0 ) ), pd.node_wb( SI( 0 ) ) ); } ) {
+                // ( a grid, `PowerDiagram_Grid.h`: the majorants of its implicit tree )
+                const SI nb_nodes = pd.nb_nodes();
+                queue.run_threads( nt, [&]( int t ) {
+                    SI b, e;
+                    thread_range( nb_nodes, t, nt, b, e );
+                    for ( SI m = b; m < e; ++m )
+                        pd.node_majorant( m, pd.node_wa( m ), pd.node_wb( m ) );
+                } );
+            }
         }
         t_majorant += now() - t0;
     }

@@ -9,7 +9,7 @@
     python sdot-ffi/bench/page.py --collect lmo-numpy lmo-jax             # rewrite the results file only
 
     # a cluster ( Jean Zay ): page.py itself in one watched job, whose errand calls run in it directly
-    errand run --env jz-h100-img --time 10:00:00 --pull runs/sdot-page --pull sdot-ffi/docs/guide/bench \
+    errand run --env jz-h100-img --time 10:00:00 --pull runs/sdot-page --pull sdot-ffi/docs/guide/bench/jz-h100.json \
         python sdot-ffi/bench/page.py jz-h100-img --name jz-h100 --threads=1,8,-1 --no-queue
 
 The CPU kernels are compiled for the machine ( `--kernels=compile` ), not served from the catalogue. An environment can
@@ -68,6 +68,9 @@ DENSITIES = [
     "--case=gauss4 --sigma=0.02 --reps=1",
 ]
 
+# the sizes of the scaling with the number of diracs
+NS = "1000,10000,100000,1000000,10000000"
+
 # job -> ( kind, bench, [ runs ], level ). level: `default` or `full`. `{T}`: the thread counts of `--threads` ( default 1 and
 # the physical cores, -1 ); the others run on all the cores.
 JOBS = {
@@ -87,6 +90,13 @@ JOBS = {
     "newton":     ( "cpu", "newton",   [ "--case=uniform --dim=2,3 --threads={T} --step=auto",       # ( every count: the comparison with geogram )
                                          "--case=lines_voronoi,planes_voronoi --threads={T} --step=auto",
                                          *[ d + " --threads=-1 --step=auto" for d in DENSITIES ] ], "default" ),
+    # the number of diracs, on all the cores: every library, a diagram and a solve
+    "n_diagram":  ( "cpu", "diagram",  [ f"--case=uniform --dim=2,3 --n={ NS } --threads=-1" ], "default" ),
+    "n_cgal":     ( "cpu", "cgal",     [ f"--case=uniform --dim=2,3 --n={ NS } --output=measures --threads=32" ], "default" ),   # ( its best: TBB slows down across sockets )
+    "n_geogram":  ( "cpu", "geogram",  [ f"--case=uniform --dim=2,3 --n={ NS } --threads=-1" ], "default" ),
+    "n_newton":   ( "cpu", "newton",   [ f"--case=uniform --dim=2,3 --n={ NS } --threads=-1 --reps=1 --step=auto" ], "default" ),
+    "n_geogram_newton": ( "cpu", "geogram", [ f"--case=uniform --dim=2,3 --n=1000,10000,100000,1000000 --level=newton --threads=-1 --reps=1" ], "default" ),
+    "n_geogram_newton_1e7": ( "cpu", "geogram", [ "--case=uniform --dim=2,3 --n=10000000 --level=newton --threads=-1 --reps=1" ], "full" ),
     "dims":       ( "cpu", "newton",   [ "--case=uniform --dim=2,3,4,5 --n=10000 --threads=-1 --reps=1" ], "default" ),
     "dims6":      ( "cpu", "newton",   [ "--case=uniform --dim=6 --n=10000 --threads=-1 --reps=1" ], "full" ),
     # ---------------------------------------------------------------------------------------------------- the card
@@ -96,7 +106,8 @@ JOBS = {
     "gpu_dual":    ( "gpu", "diagram", [ "--case=uniform --dim=2 --wscale=0,0.3 --kernel=double --output=dual",
                                          "--case=uniform --dim=3 --kernel=double --output=dual",
                                          "--case=lines_voronoi,lines_equal,planes_voronoi,planes_equal --kernel=double --output=dual" ], "default" ),
-    "gpu_newton":  ( "gpu", "newton",  [ "--case=uniform --dim=2,3 --n=100000,1000000 --kernel=mixed --jit=yes --step=auto",
+    "gpu_n_diagram": ( "gpu", "diagram", [ f"--case=uniform --dim=2,3 --n={ NS } --kernel=float" ], "default" ),
+    "gpu_newton":  ( "gpu", "newton",  [ "--case=uniform --dim=2,3 --n=1000,10000,100000,1000000 --kernel=mixed --jit=yes --step=auto",
                                          "--case=lines_voronoi,planes_voronoi --kernel=mixed --jit=yes --step=auto",
                                          *[ d + " --kernel=mixed --jit=yes --step=auto" for d in DENSITIES ] ], "default" ),
     "gpu_n1e7":    ( "gpu", "newton",  [ "--case=uniform --dim=2,3 --n=10000000 --kernel=mixed --jit=no --reps=1 --step=auto" ], "full" ),
@@ -117,7 +128,8 @@ KEEP = { "n", "dim", "threads", "kernel", "output", "status", "converged", "iter
          "t_tree", "t_prepare", "t_first", "t_next", "ns_per_seed_next", "ns_per_seed_mean", "sequence", "acc_median",
          "acc_max", "nb_continuation_steps", "residual_rel", "step", "linear_solver", "program", "cgal_commit", "t_bsp_build",
          "geogram", "t_triangulation", "t_rvd", "t_linear", "max_diff_sdot", "residual_sdot", "grid", "residual", "level", "triangulations",
-         "mean_neighbours", "simplices" }
+         "mean_neighbours", "simplices", "clock_ghz", "sm_clock_ghz", "t_ctor", "ns_per_seed_scratch", "t_scratch", "ns_per_seed_scratch_kernel",
+         "t_total_cpp", "t_jit_kernels", "t_eager_kernels" }
 
 
 def errand_root():

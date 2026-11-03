@@ -2080,6 +2080,13 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                 return lin_kind == LIN_HOST ? host.solve( queue, L, r, x )
                      : lin_float ? linf.solve( queue, allocator, L, r, x ) : lin.solve( queue, allocator, L, r, x );
             };
+            // the floor of the corrections ( `sdotplan/Linear.h::LinearSolver::floor` ): the sweeps of the groups below
+            auto set_floor = [&]( double f ) { lin.floor = f; linf.floor = f; if ( host.lin ) host.lin->floor = f; };
+            auto last_residual = [&]() -> double {
+                if ( sink || lin_kind == LIN_HOST ) return host.lin ? host.lin->last_residual : 0.0;
+                return lin_float ? linf.last_residual : lin.last_residual;
+            };
+            set_floor( 0 );
             bool solved = lin_solve( b, d );
             if ( ! solved && lin_kind != LIN_HOST ) {
                 // THE FALLBACK: the card's solver has limits that a pathological laplacian can pass ( a row of thousands of
@@ -2119,6 +2126,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                 sp::GroupStructure::FacetIndex fx;
                 gs.index_facets( fa_mem, fx );
                 const int max_sweeps = gs.coupled ? gs.sweeps : 1;
+                set_floor( last_residual() );            // ( each sweep corrects the solve above to ITS accuracy, not further )
                 for ( int sweep = 0; sweep < max_sweeps && solved; ++sweep ) {
                     double change = 0, size = 0;
                     if ( sweep > 0 ) {
@@ -2134,6 +2142,7 @@ void solve( const CudaQueue &queue, const auto &pd, const auto &nu_in, const aut
                     change = std::max( change, gs.blocks( fa_mem, fx, b_tree, dh ) );
                     if ( sweep > 0 && ! ( change > gs.sweep_rtol * size ) ) break;
                 }
+                set_floor( 0 );
                 const double g = dh[ r0 ];
                 for ( SI i = 0; i < n; ++i ) if ( gs.root_slot[ i ] ) dh[ i ] -= g;
                 CardTree<TR,DIM>::up( queue, d, dh );

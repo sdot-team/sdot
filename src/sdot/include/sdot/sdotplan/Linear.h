@@ -51,6 +51,11 @@ struct LinearSolver {
     /// space ). Only the multigrid uses it ( aggregation by rank ); called once, before the first solve.
     virtual void order( const std::vector<SI> &rank_of ) { (void) rank_of; }
     LinearStats st;
+    /// an ABSOLUTE residual under which an iterative solve stops, whatever its right-hand side ( 0: none ). The sweeps of
+    /// `Groups.h` set it to what their first solve reached: a correction needs no more accuracy than the solve it corrects
+    double floor = 0;
+    /// the absolute residual the last solve reached ( 0: not reported, a direct solver )
+    double last_residual = 0;
 };
 
 /// the settings of the solvers that have some ( `0` / `-1`: the default of the solver )

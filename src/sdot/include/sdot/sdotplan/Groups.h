@@ -332,6 +332,12 @@ struct GroupStructure {
         std::vector<double> bR( n ), dX;
         d.assign( n, 0.0 );
         const int max_sweeps = coupled ? sweeps : 1;
+        // THE FLOOR OF THE CORRECTIONS: the root solve of a later sweep stops at the residual the first one reached, not at
+        // the solver's tolerance relatively to its own ( tiny ) right-hand side -- which redid the whole solve each sweep, to six
+        // more digits than the direction has elsewhere ( uniform 2D, one pair merged in 1e5 seeds: 524 iterations of CG against
+        // 161; 1e7 seeds: 1134 )
+        struct Floor { LinearSolver &lin; ~Floor() { lin.floor = 0; } } floor_reset{ lin };
+        lin.floor = 0;
         for ( int sweep = 0; sweep < max_sweeps; ++sweep ) {
             double change = 0, size = 0;                 // ( the corrections and the direction, in outer weights: the stopping test )
             // ---- the root level: a correction of the roots' outer weights
@@ -344,6 +350,7 @@ struct GroupStructure {
             t0 = clock();
             if ( ! lin.solves( L, bR, dX ) ) return false;
             t_lin += clock() - t0;
+            if ( sweep == 0 ) lin.floor = lin.last_residual;
             for ( SI i = 0; i < n; ++i ) if ( root_slot[ i ] ) {
                 d[ i ] += dX[ i ];
                 change = std::max( change, std::fabs( dX[ i ] ) );

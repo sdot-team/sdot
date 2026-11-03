@@ -12,7 +12,7 @@ A baseline is UP TO DATE when the first directory its bench looks in that holds 
 driver rebuilds it. Otherwise it is built into `~/.cache/sdot/<x>-bench` by its `build.sh`, the sources cloned next to it
 ( CGAL's main, geogram's and exploragram's default branches ).
 
-The libraries ( gmp, mpfr, boost's headers, TBB ) come from a micromamba environment of their own, `~/.cache/sdot/baselines-env`,
+The libraries ( gmp, mpfr, boost's headers, TBB, zlib ) come from a micromamba environment of their own, `~/.cache/sdot/baselines-env`,
 created at the first build ( conda-forge ), with cmake / make / git / a compiler when the machine has none.
 
 Without internet ( the image `containers/jax-cuda.def` ): `SDOT_BASELINES_LIBS` is a prefix that already holds the libraries,
@@ -62,12 +62,14 @@ def libraries_env():
     if given := os.environ.get( "SDOT_BASELINES_LIBS" ):
         return Path( given )
     prefix = CACHE / "baselines-env"
-    if ( prefix / "include" / "gmp.h" ).exists():
-        return prefix
     mamba = os.environ.get( "MAMBA_EXE" ) or shutil.which( "micromamba" )
+    if ( prefix / "include" / "gmp.h" ).exists():
+        if not ( prefix / "include" / "zlib.h" ).exists() and mamba:   # ( the environments made before zlib was in the list )
+            subprocess.run( [ mamba, "install", "-y", "-q", "-p", str( prefix ), "-c", "conda-forge", "zlib" ], check = True )
+        return prefix
     if not mamba:
         sys.exit( "build_baselines: no micromamba ( MAMBA_EXE or on PATH ) to install gmp / mpfr / boost / TBB" )
-    pkgs = [ "gmp", "mpfr", "libboost-headers", "tbb-devel" ]
+    pkgs = [ "gmp", "mpfr", "libboost-headers", "tbb-devel", "zlib" ]      # ( zlib: geogram's headers, where the machine has none )
     pkgs += [ t for t in ( "cmake", "make", "git" ) if not shutil.which( t ) ]
     if not shutil.which( "g++" ):
         pkgs += [ "gxx", "gcc" ]

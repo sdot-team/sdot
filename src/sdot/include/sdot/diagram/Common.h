@@ -13,12 +13,17 @@
 #include "../Queue.h"
 
 #define SDOT_DIAGRAM_COMMON( POSITIONS, WEIGHTS ) \
+    using TF = DECAYED_TYPE_OF( POSITIONS )::TF; \
+    HD SI   nb_seeds() const { return SI( POSITIONS.shape( 0 ) ); } \
+    HD auto stored_point( SI j, int d ) const { return TF( POSITIONS( j, d ) ); } \
+    SDOT_DIAGRAM_COMMON_BODY( POSITIONS, WEIGHTS )
+
+/* the same, for a storage that has no positions array ( `PowerDiagram_Grid.h` ): it defines `TF`, `nb_seeds()` and
+   `stored_point( j, d )` itself, and names a member for `POSITIONS` that has no derivative ( `measures_computed_grads` ) */
+#define SDOT_DIAGRAM_COMMON_BODY( POSITIONS, WEIGHTS ) \
     static constexpr int  ct_dim = DECAYED_TYPE_OF( nb_dims )::value; \
     static constexpr bool on_cpu = std::is_same_v<Queue,CpuQueue>; \
-    using TF = DECAYED_TYPE_OF( POSITIONS )::TF; \
     static constexpr bool has_weights = DECAYED_TYPE_OF( WEIGHTS )::is_valid; \
-    \
-    HD SI   nb_seeds() const { return SI( POSITIONS.shape( 0 ) ); } \
     \
     /* PERIODICITY ( `PowerDiagram( periodicity = ... )` ): the IMAGE `t` of seed `j` is the seed `j + n t`, at `positions( j ) +
        periodic_shifts( t )` with the weight of `j` -- an identifier like any other, so the bisectors, the facets and the
@@ -37,13 +42,13 @@
                 const SI t = k / n, j = k - t * n; \
                 return Vector<TF,ct_dim>::with_func( [&]( PI d ) { \
                     TF r = TF( periodic_shifts( t, d ) ); \
-                    if constexpr ( periodic_linear_part ) { for ( int c = 0; c < ct_dim; ++c ) r += TF( periodic_linear( t, d, c ) ) * TF( POSITIONS( j, c ) ); } \
-                    else r += TF( POSITIONS( j, d ) ); \
+                    if constexpr ( periodic_linear_part ) { for ( int c = 0; c < ct_dim; ++c ) r += TF( periodic_linear( t, d, c ) ) * TF( stored_point( j, c ) ); } \
+                    else r += TF( stored_point( j, d ) ); \
                     return r; \
                 } ); \
             } \
         } \
-        return Vector<TF,ct_dim>::with_func( [&]( PI d ) { return TF( POSITIONS( k, d ) ); } ); \
+        return Vector<TF,ct_dim>::with_func( [&]( PI d ) { return TF( stored_point( k, d ) ); } ); \
     } \
     HD TF   weight( SI k ) const { if constexpr ( has_weights ) return TF( WEIGHTS( seed_of( k ) ) ); else return TF( 0 ); } \
     \

@@ -55,9 +55,16 @@ export default defineConfig({
     sidebar: {
       '/guide/': [
         {
-          text: 'Guide',
+          text: 'Introduction',
           items: [
             { text: 'Getting Started',          link: '/guide/getting-started' },
+            { text: 'Performance',              link: '/guide/performance' },
+            { text: 'Background',               link: '/guide/background' },
+          ]
+        },
+        {
+          text: 'Using sdot',
+          items: [
             { text: 'Plans and Settings',       link: '/guide/ot-plan' },
             { text: 'Distributions',            link: '/guide/distributions/', collapsed: false, items: [
               { text: 'Convex Polytopes',       link: '/guide/distributions/polytope' },
@@ -71,13 +78,16 @@ export default defineConfig({
               { text: 'Periodicity',            link: '/guide/ground-metrics/periodicity' },
               { text: 'Partial Transport',      link: '/guide/ground-metrics/partial' },
             ] },
-            { text: 'Duplicates and Close Seeds', link: '/guide/duplicates' },
             { text: 'The Cell Complex',         link: '/guide/cell-complex' },
             { text: 'Frameworks and Devices',   link: '/guide/backends' },
-            { text: 'Performance',              link: '/guide/performance' },
-            { text: 'Background',               link: '/guide/background' },
-            { text: 'Roadmap',                  link: '/guide/roadmap' },
             { text: 'The Visualizer',           link: '/guide/visualizer' },
+          ]
+        },
+        {
+          text: 'Going Further',
+          items: [
+            { text: 'Duplicates and Close Seeds', link: '/guide/duplicates' },
+            { text: 'Roadmap',                  link: '/guide/roadmap' },
           ]
         }
       ],

@@ -20,21 +20,36 @@ hero:
       link: https://github.com/sdot-team/sdot
 
 features:
-  - icon: 📦
-    title: Many target distributions
-    details: Images, meshes, gaussian mixtures, polytopes... with smoothing (continuation) for a robust convergence.
+  - icon: ⚡
+    title: Fast
+    details: O(n log n), not O(n²) — a Newton method on power diagrams. SIMD on the CPU, CUDA on the GPU.
+    link: /guide/performance
+    linkText: Benchmarks
   - icon: 🔗
     title: Differentiable end-to-end
     details: Use sdot as a differentiable layer inside JAX jit / grad or a PyTorch autograd graph.
+    link: /examples/gaussian-mixture-fit
+    linkText: Fit by gradient descent
   - icon: 📐
     title: Any number of dimensions
     details: 2D, 6D... — the same API and the same convergence behavior.
-  - icon: 🚀
-    title: Highly optimized
-    details: SIMD on the CPU, CUDA on the GPU, batched plans for data-parallel workloads.
-  - icon: ⚡
-    title: O(n log n) — not O(n²)
-    details: A damped Newton method on power diagrams. Memory efficient.
+    link: /guide/performance#scaling-with-the-dimension
+    linkText: Scaling with the dimension
+  - icon: 📦
+    title: Many target distributions
+    details: Images, meshes, gaussian mixtures, polytopes... with smoothing (continuation) for a robust convergence.
+    link: /guide/distributions/
+    linkText: Distributions
+  - icon: 🌐
+    title: Ground metrics
+    details: Periodic spaces ( torus, Klein bottle, crystals... ) and partial transport, composed freely.
+    link: /guide/ground-metrics/
+    linkText: Ground metrics
+  - icon: 🧩
+    title: Framework independent
+    details: NumPy, JAX, PyTorch or CuPy arrays, on the CPU or the GPU. Nothing to configure, the inputs decide.
+    link: /guide/backends
+    linkText: Frameworks and devices
 ---
 
 ## Hello, World
@@ -76,6 +91,7 @@ For the ground metric, SDOT focuses essentially for now on variants of the eucli
 ## What's next
 
 - [Getting started →](/guide/getting-started) installation, ...
+- [Performance →](/guide/performance) benchmarks against CGAL and geogram, CPU and GPU
 - [Examples gallery →](/examples/)
 - [Background →](/guide/background) the mathematics
 - [Plans and settings →](/guide/ot-plan) barycenters, moments, ...

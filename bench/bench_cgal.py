@@ -64,6 +64,7 @@ if p := bench( "cgal",
             args += [ "--threads", str( threads ) ]
         if d == 3 and p.output == "measures":
             args.append( "--cells" )
+        benchlib.start_clock()
         out = subprocess.run( args, capture_output = True, text = True, check = True ).stdout
     finally:
         os.unlink( cloud )

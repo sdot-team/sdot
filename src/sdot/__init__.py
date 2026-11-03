@@ -55,6 +55,7 @@ from .Voronoi import Voronoi as Voronoi
 
 from .distributions.SumOfDiracs1d import SumOfDiracs1d as SumOfDiracs1d
 from .distributions.SumOfDiracs import SumOfDiracs as SumOfDiracs
+from .distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid as SumOfDiracsOnAGrid
 from .distributions.ProjectedSumOfDiracs import ProjectedSumOfDiracs as ProjectedSumOfDiracs
 from .distributions.ProjectedSumOfTents import ProjectedSumOfTents as ProjectedSumOfTents
 from .distributions.ProjectedSumOfAnisotropicTents import ProjectedSumOfAnisotropicTents as ProjectedSumOfAnisotropicTents

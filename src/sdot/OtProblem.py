@@ -101,7 +101,12 @@ class Tuning:
                   # the machine : the spatial accelerator, the neighbour memory ( § 11 ), the scratch ( § 18.2 )
                   accelerator = None, memory = None, scratch_capacity = None,
                   # keep the given starting weights even if they empty a cell ( the stages of a continuation run by the caller )
-                  keep_start = False ):
+                  keep_start = False,
+                  # THE DIRACS OF A GRID ( `SumOfDiracsOnAGrid` ): "auto" the dedicated solver when it applies ( `grid/GridNewton2D.h`:
+                  # 2D, N x N, N a power of two, square cells, the target on the box of the grid ), "dedicated" the same or an error,
+                  # "cells" the generic solver on the grid's diagram ( `PowerDiagram_Grid` ). The dedicated solver's coarsest level,
+                  # the tolerance of its coarse levels, the relative tolerance of its conjugate gradient
+                  grid_solver = "auto", grid_n0 = 64, grid_ctol = 1e-2, grid_cg_rtol = 1e-2 ):
         self.step              = step
         self.linear_solver     = linear_solver
         self.amg_variant       = amg_variant
@@ -132,6 +137,10 @@ class Tuning:
         self.accelerator       = accelerator
         self.memory            = memory
         self.scratch_capacity  = scratch_capacity
+        self.grid_solver       = grid_solver
+        self.grid_n0           = int( grid_n0 )
+        self.grid_ctol         = float( grid_ctol )
+        self.grid_cg_rtol      = float( grid_cg_rtol )
 
 
 class OtNotConverged( RuntimeError ):

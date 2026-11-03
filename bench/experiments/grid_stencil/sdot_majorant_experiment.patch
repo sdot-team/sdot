@@ -1,0 +1,250 @@
+diff --git a/src/sdot/include/sdot/bsp_build_level.h b/src/sdot/include/sdot/bsp_build_level.h
+index 5cb7814..a76ced3 100644
+--- a/src/sdot/include/sdot/bsp_build_level.h
++++ b/src/sdot/include/sdot/bsp_build_level.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include <loom/support/math.h>
++#include <cstdlib>
+ #include <loom/support/common_macros.h>
+ #include <loom/support/containers/Vector.h>
+ 
+@@ -85,12 +86,19 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+     using TF = typename DECAYED_TYPE_OF( pos )::TF;
+ 
+     const SI m = e - b;
+-
+-    TF wmin = TF( w( b ) ), wmax = wmin, wsum = 0;
++    // ( EXPERIMENT, 2026-11-02: env `SDOT_MAJORANT_CURVATURE` = c, the majorant of `w - c / 2 |q|^2`, see `Box::c` )
++    TF hc = 0;
++#if ! defined( __CUDACC__ )
++    static const double env_c = [] { const char *s = std::getenv( "SDOT_MAJORANT_CURVATURE" ); return s ? std::atof( s ) : 0.0; }();
++    hc = TF( env_c / 2 );
++#endif
++    auto wq = [&]( SI k ) { TF r = TF( w( k ) ); for ( int d = 0; d < ct_dim; ++d ) r -= hc * TF( pos( k, d ) ) * TF( pos( k, d ) ); return r; };
++
++    TF wmin = wq( b ), wmax = wmin, wsum = 0;
+     auto psum = Vector<TF,ct_dim>::zeros();
+     auto plo = Vector<TF,ct_dim>::with_func( [&]( PI d ) { return TF( pos( b, d ) ); } ), phi = plo;
+     for ( SI k = b; k < e; ++k ) {
+-        const TF v = TF( w( k ) );
++        const TF v = wq( k );
+         wmin = v < wmin ? v : wmin;
+         wmax = v > wmax ? v : wmax;
+         wsum += v;
+@@ -118,7 +126,7 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+             for ( int j = 0; j <= ct_dim; ++j )
+                 A[ i ][ j ] = 0;
+         for ( SI k = b; k < e; ++k ) {
+-            const TF dw = TF( w( k ) ) - wm;
++            const TF dw = wq( k ) - wm;
+             for ( int i = 0; i < ct_dim; ++i ) {
+                 const TF qi = TF( pos( k, i ) ) - pm[ i ];
+                 for ( int j = 0; j < ct_dim; ++j )
+@@ -159,7 +167,7 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+ 
+             TF rmin = 0, rmax = 0;
+             for ( SI k = b; k < e; ++k ) {
+-                TF r = TF( w( k ) );
++                TF r = wq( k );
+                 for ( int d = 0; d < ct_dim; ++d )
+                     r -= fit[ d ] * TF( pos( k, d ) );
+                 if ( k == b ) { rmin = r; rmax = r; }
+@@ -175,10 +183,16 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+             // is an artifact of conditioning ( seeds aligned to within 1e-8 ), not a
+             // fit: it would make a `b` at 1e9 that no longer majorizes anything useful. See
+             // `AaBsp.py::_weight_majorant`.
++            // ( EXPERIMENT, 2026-11-02: env `SDOT_MAJORANT_REACH` overrides the 100 below on the CPU )
++            double reach_factor = 100;
++#if ! defined( __CUDACC__ )
++            static const double env_reach = [] { const char *s = std::getenv( "SDOT_MAJORANT_REACH" ); return s ? std::atof( s ) : 100.0; }();
++            reach_factor = env_reach;
++#endif
+             bool well_behaved = true;
+             for ( int d = 0; d < ct_dim; ++d ) {
+                 const TF reach = sdot::fabs( plo[ d ] ) > sdot::fabs( phi[ d ] ) ? sdot::fabs( plo[ d ] ) : sdot::fabs( phi[ d ] );
+-                if ( sdot::fabs( fit[ d ] ) * ( phi[ d ] - plo[ d ] ) > 8 * spread || sdot::fabs( fit[ d ] ) * reach > TF( 100 ) * spread )
++                if ( sdot::fabs( fit[ d ] ) * ( phi[ d ] - plo[ d ] ) > 8 * spread || sdot::fabs( fit[ d ] ) * reach > TF( reach_factor ) * spread )
+                     well_behaved = false;                        // the margin on `b`, relative to `|a . y|`, must stay negligible
+             }
+             if ( well_behaved && rmax - rmin < TF( 0.85 ) * by_chance * spread )
+@@ -191,7 +205,7 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+         TF ay = 0;
+         for ( int d = 0; d < ct_dim; ++d )
+             ay += a[ d ] * TF( pos( k, d ) );
+-        const TF v = TF( w( k ) ) - ay;
++        const TF v = wq( k ) - ay;
+         if ( k == b ) bb = v; else bb = v > bb ? v : bb;
+         amax = sdot::fabs( ay ) > amax ? sdot::fabs( ay ) : amax;
+     }
+@@ -202,7 +216,13 @@ HD void bsp_weight_majorant( const auto &pos, const auto &w, SI b, SI e, auto &&
+     // a rounding MARGIN on the constant, and on it alone -- see `_weight_majorant`: `b` is
+     // the only term that the host and the kernel would compute differently, and a `b` rounded
+     // down would cease to majorize.
+-    wb_out = bb + TF( 1e-6 ) * ( sdot::fabs( bb ) + spread + amax );
++    // ( EXPERIMENT, 2026-11-02: env `SDOT_MAJORANT_MARGIN` overrides the 1e-6 on the CPU, to measure what it costs the pruning )
++    TF margin = TF( 1e-6 );
++#if ! defined( __CUDACC__ )
++    static const double env_margin = [] { const char *s = std::getenv( "SDOT_MAJORANT_MARGIN" ); return s ? std::atof( s ) : 1e-6; }();
++    margin = TF( env_margin );
++#endif
++    wb_out = bb + margin * ( sdot::fabs( bb ) + spread + amax );
+ }
+ 
+ /// the majorant of ONE node, redone on fresh weights ( `AaBsp.refresh_weight_majorants` ): the
+diff --git a/src/sdot/include/sdot/cell/Providers.h b/src/sdot/include/sdot/cell/Providers.h
+index 226d3a7..7d8cbb0 100644
+--- a/src/sdot/include/sdot/cell/Providers.h
++++ b/src/sdot/include/sdot/cell/Providers.h
+@@ -23,6 +23,8 @@
+ // =====================================================================================
+ 
+ #include <loom/support/common_types.h>
++#include <cstdio>
++#include <cstdlib>
+ #include "Pruning.h"
+ #include "Plane.h"
+ #include "State.h"
+@@ -133,6 +135,22 @@ struct ProviderAll {
+ ///
+ /// `SLACK`: the boxes widened by `slack` ( the canonical cell: a plane through a vertex is never pruned ). A compile-time
+ /// choice: a margin read at run time, even zero, kept the compiler from folding the pruning test -- 5 % of a 2D diagram.
++// ( EXPERIMENT, 2026-11-02: counters of the BSP walk, printed at exit when env `SDOT_WALK_STATS` is set -- to revert )
++#if ! defined( __CUDACC__ )
++struct WalkStats {
++    long long cells = 0, pops = 0, pruned = 0, leaves = 0, proposed = 0;
++    ~WalkStats() {
++        if ( std::getenv( "SDOT_WALK_STATS" ) && cells )
++            std::fprintf( stderr, "WALK cells %lld | per cell: nodes popped %.1f, pruned %.1f, leaves opened %.1f, seeds proposed %.1f\n", cells,
++                          double( pops ) / cells, double( pruned ) / cells, double( leaves ) / cells, double( proposed ) / cells );
++    }
++};
++inline WalkStats walk_stats;
++#define SDOT_WALK( x ) ( ++walk_stats.x )
++#else
++#define SDOT_WALK( x ) ( (void)0 )
++#endif
++
+ template<class PD,class TK,int D,bool WEIGHTED,bool MEMO = false,bool SLACK = false>
+ struct ProviderBsp {
+     using TF = typename PD::TF;
+@@ -176,6 +194,7 @@ struct ProviderBsp {
+ 
+         if constexpr ( MEMO )
+             npre = int( pd.memo_counts( k0 ) );
++        SDOT_WALK( cells );
+     }
+ 
+     /// MEMO: the `q`-th memory of `k0`, a rank
+@@ -263,6 +282,9 @@ struct ProviderBsp {
+                 b -= ar * shift( t, r );
+             }
+             B.b = TK( b );
++#if ! defined( __CUDACC__ )
++            B.c = TK( experimental_majorant_curvature() );
++#endif
+         }
+         return B;
+     }
+@@ -324,6 +346,7 @@ struct ProviderBsp {
+                     if ( l.iskip < npre && remembered( l.iskip ) == k ) { ++l.iskip; continue; }
+                 }
+                 plane_of_rank( k, p );
++                SDOT_WALK( proposed );
+                 return true;
+             }
+ 
+@@ -350,10 +373,14 @@ struct ProviderBsp {
+ 
+             // the whole point of the tree: a subtree that can no longer reach the cell is
+             // not descended. Tested at POP time, hence against the cell as it is now.
+-            if ( ! can_cut<WEIGHTED,TK,D>( e, q0, v0, box( n, l.img ) ) )
++            SDOT_WALK( pops );
++            if ( ! can_cut<WEIGHTED,TK,D>( e, q0, v0, box( n, l.img ) ) ) {
++                SDOT_WALK( pruned );
+                 continue;
++            }
+ 
+-            if ( h <= 1 ) {                              // a leaf: its ranks, as identifiers of the current image
++            if ( h <= 1 ) {
++                SDOT_WALK( leaves );                              // a leaf: its ranks, as identifiers of the current image
+                 l.k = beg + this->n * l.img;
+                 l.stop = end + this->n * l.img;
+                 if constexpr ( MEMO ) {                  // the skip cursor: the first memory >= the first identifier
+diff --git a/src/sdot/include/sdot/cell/Pruning.h b/src/sdot/include/sdot/cell/Pruning.h
+index 13c411b..4a0a4b8 100644
+--- a/src/sdot/include/sdot/cell/Pruning.h
++++ b/src/sdot/include/sdot/cell/Pruning.h
+@@ -28,6 +28,7 @@
+ // =====================================================================================
+ 
+ #include <asimd/asimd.h>
++#include <cstdlib>
+ #include "State.h"
+ 
+ namespace sdot {
+@@ -37,8 +38,17 @@ template<class TK,int D>
+ struct Box {
+     TK lo[ D ], hi[ D ];
+     TK a[ D ], b;                                        ///< `w( q ) <= a . q + b`
++    TK c = 0;                                            ///< ( EXPERIMENT, 2026-11-02 ) `w( q ) <= a . q + b + c / 2 |q|^2`, `c < 2`
+ };
+ 
++// ( EXPERIMENT, 2026-11-02: a global curvature in the weight majorants, env `SDOT_MAJORANT_CURVATURE`, CPU only -- to revert )
++#if ! defined( __CUDACC__ )
++inline double experimental_majorant_curvature() {
++    static const double c = [] { const char *s = std::getenv( "SDOT_MAJORANT_CURVATURE" ); return s ? std::atof( s ) : 0.0; }();
++    return c;
++}
++#endif
++
+ /// the test, for a state in MEMORY ( `nb` vertices, `D` arrays ): eight vertices per step, in
+ /// registers, and out as soon as ONE block holds a vertex that can be cut. The tail is loaded
+ /// PARTIALLY and its dead lanes are masked ( a stale `s` would otherwise give up a legitimate pruning ).
+@@ -73,18 +83,19 @@ HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, con
+         }
+     }
+     const V cb( WEIGHTED ? w0 - B.b : TK( 0 ) ), zero( TK( 0 ) );
++    const V hc( WEIGHTED ? B.c / 2 : TK( 0 ) ), ik( WEIGHTED ? TK( 1 ) / ( TK( 1 ) - B.c / 2 ) : TK( 1 ) );
+ 
+-    // `s = min_q ( |x - q|^2 - a . q ) - |x - p0|^2 + w0 - b`, for eight vertices
++    // `s = min_q ( |x - q|^2 - a . q - c / 2 |q|^2 ) - |x - p0|^2 + w0 - b`, for eight vertices
+     auto balance = [&]( auto load ) {
+         V s = cb;
+         for ( int d = 0; d < D; ++d ) {
+             const V x = load( d );
+             V y = x;
+-            if constexpr ( WEIGHTED ) y = y + half[ d ];
++            if constexpr ( WEIGHTED ) y = ( y + half[ d ] ) * ik;
+             y = asimd::min( asimd::max( y, lo[ d ] ), hi[ d ] );
+             const V u = y - x, f = x - c[ d ];
+             s = asimd::fma( u, u, s ) - f * f;
+-            if constexpr ( WEIGHTED ) s = s - a[ d ] * y;
++            if constexpr ( WEIGHTED ) s = s - a[ d ] * y - hc * y * y;
+         }
+         return s;
+     };
+@@ -108,9 +119,10 @@ inline bool can_cut_box_reg( const State &e, const TK *p0, TK w0, const Box<TK,2
+     using V = asimd::SimdVec<TK,8>;
+     // the point of the box closest to the vertex, SHIFTED by half a slope
+     V y0 = e.vx, y1 = e.vy;
+-    if constexpr ( WEIGHTED ) {
+-        y0 = y0 + V( B.a[ 0 ] / 2 );
+-        y1 = y1 + V( B.a[ 1 ] / 2 );
++    if constexpr ( WEIGHTED ) {                          // ( the curvature: the free minimum moves to `( x + a / 2 ) / ( 1 - c / 2 )` )
++        const V ik( TK( 1 ) / ( TK( 1 ) - B.c / 2 ) );
++        y0 = ( y0 + V( B.a[ 0 ] / 2 ) ) * ik;
++        y1 = ( y1 + V( B.a[ 1 ] / 2 ) ) * ik;
+     }
+     y0 = asimd::min( asimd::max( y0, V( B.lo[ 0 ] ) ), V( B.hi[ 0 ] ) );
+     y1 = asimd::min( asimd::max( y1, V( B.lo[ 1 ] ) ), V( B.hi[ 1 ] ) );
+@@ -119,7 +131,7 @@ inline bool can_cut_box_reg( const State &e, const TK *p0, TK w0, const Box<TK,2
+     const V g1 = y1 - e.vy, f1 = e.vy - V( p0[ 1 ] );
+     V s = asimd::fma( g0, g0, g1 * g1 ) - asimd::fma( f0, f0, f1 * f1 );
+     if constexpr ( WEIGHTED )
+-        s = s + V( w0 - B.b ) - asimd::fma( V( B.a[ 0 ] ), y0, V( B.a[ 1 ] ) * y1 );
++        s = s + V( w0 - B.b ) - asimd::fma( V( B.a[ 0 ] ), y0, V( B.a[ 1 ] ) * y1 ) - V( B.c / 2 ) * asimd::fma( y0, y0, y1 * y1 );
+     const unsigned m = unsigned( asimd::to_bits( asimd::ge( V( TK( 0 ) ), s ) ) );
+     return ( m & ( ( 1u << State::nb ) - 1 ) ) != 0;
+ }

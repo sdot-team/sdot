@@ -71,6 +71,7 @@ if p := bench( "sequence",
         return t1 - t0, t2 - t1, ( t3 - t2 ) / ( len( seq ) - 1 ), m
 
     run( pos[ :1000 ], [ x[ :1000 ] for x in seq[ :2 ] ] )      # compiles
+    benchlib.start_clock()                                      # ( the clocks of the timed calls: `hardware` reads them )
     best = None
     for _ in range( p.reps ):
         r = run( pos, seq )

@@ -82,6 +82,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 
 namespace sdot {
 namespace sdotplan {
@@ -90,13 +91,18 @@ namespace sdotplan {
 /// -- one per worker, so that a thread stays in its region of the tree order. No OpenMP: the wheel needs no runtime for it.
 static int mg_nb_threads() { return cpu_thread_pool().nb_workers(); }
 
-/// under this size a loop stays sequential: the wake-up of the workers costs more than the work
-static constexpr SI MG_PAR_THRESHOLD = 2048;
+/// the rows a worker gets at least: under it, waking one more worker costs more than its share of the work. A loop of `n`
+/// rows runs on `n / MG_GRAIN` workers at most ( sequential under `2 MG_GRAIN` ): on a node of 128 cores, a multigrid of 1e4
+/// unknowns on every worker took 7 ms per CG iteration, 0.45 ms on 8.
+static constexpr SI MG_GRAIN = 1024;
+
+/// the workers of a loop of `n` rows
+static int mg_threads( SI n ) { return int( std::max<SI>( 1, std::min<SI>( mg_nb_threads(), n / MG_GRAIN ) ) ); }
 
 /// `body( i, t )` for `i` in `[ 0, n )`, `t` being the worker ( `< mg_nb_threads()` ) that runs it
 template<class F> static void mg_for( SI n, F &&body ) {
-    const int T = mg_nb_threads();
-    if ( T <= 1 || n < MG_PAR_THRESHOLD ) {
+    const int T = mg_threads( n );
+    if ( T <= 1 ) {
         for ( SI i = 0; i < n; ++i )
             body( i, 0 );
         return;
@@ -110,7 +116,7 @@ template<class F> static void mg_for( SI n, F &&body ) {
 
 /// the sum / the maximum of `term( i )`, the partial results being combined in the order of the workers ( deterministic for a given count )
 template<class F> static double mg_reduce( SI n, double init, F &&term, bool maximum ) {
-    const int T = n < MG_PAR_THRESHOLD ? 1 : std::max( mg_nb_threads(), 1 );
+    const int T = mg_threads( n );
     std::vector<double> part( T, init );
     auto slice = [&]( int t ) {
         const SI end = n * ( t + 1 ) / T;
@@ -133,6 +139,19 @@ static double mg_now() {
     return duration<double>( steady_clock::now().time_since_epoch() ).count();
 }
 
+/// THE COMPACT COPY of a matrix, for the loops of the cycle: 32-bit indices and float values, 8 bytes per entry against 16.
+/// At 1e6 unknowns the smoother is bound by the memory bandwidth ( measured: 8 -> 16 threads gain 1.7x, 16 -> 36 1.25x ),
+/// and the matrices are most of what it reads. A preconditioner does not need the last digits; the outer CG keeps the
+/// double matrix. `dia` is DOUBLE and corrected so that every row keeps its sum ( `dia - sum val` as in the double
+/// matrix ): the constants stay in the kernel, which the gauge of the solve relies on. Empty ( `on` false ) when the
+/// indices do not fit in 32 bits: the loops then read the double matrix.
+struct MgCompact {
+    bool                       on = false;
+    std::vector<std::uint32_t> row, col;
+    std::vector<float>         val;
+    std::vector<double>        dia;
+};
+
 /// one level. Level 0 POINTS at the caller's laplacian, the others own their matrix.
 /// Convention everywhere: `y_i = dia_i x_i - sum_e val_e x_( col_e )`.
 struct MgLevel {
@@ -141,6 +160,7 @@ struct MgLevel {
     const double     *val = nullptr, *dia = nullptr;
     std::vector<SI>     orow, ocol;                  ///< ownership, for the coarse levels
     std::vector<double> oval, odia;
+    MgCompact           cm;                          ///< what the cycle reads
     std::vector<double> rlx;                         ///< the spai0 coefficient, ONE PER ROW
     double              lmax = 2;                    ///< Gershgorin bound on `M^-1 A`
     std::vector<double> x, b, r, y, z;               ///< the cycle ( `y`, `z`: the two buffers )
@@ -150,9 +170,25 @@ struct MgLevel {
 struct MgCsr {
     std::vector<SI>     row, col;
     std::vector<double> val;
+    MgCompact           cm;                          ///< what the cycle reads ( `dia` unused )
 };
 
+/// `f( row, col, val )`: the compact copy of the matrix when there is one, the double one otherwise
+template<class F> static void mg_with( const MgCompact &cm, const SI *row, const SI *col, const double *val, F &&f ) {
+    if ( cm.on ) f( cm.row.data(), cm.col.data(), cm.val.data() );
+    else         f( row, col, val );
+}
+
+/// `( A x )_i`, `y = dia x - sum val x`
+template<class R, class C, class V>
+static double mg_row_product( const R *row, const C *col, const V *val, const double *dia, const std::vector<double> &x, SI i ) {
+    double s = dia[ i ] * x[ i ];
+    for ( SI e = SI( row[ i ] ); e < SI( row[ i + 1 ] ); ++e ) s -= double( val[ e ] ) * x[ SI( col[ e ] ) ];
+    return s;
+}
+
 struct Mg : LinearSolver {
+    bool   compact   = true;    ///< the cycle reads 32-bit / float copies of the matrices ( `MgCompact` )
     // ---- the settings; the values are those measured in the old campaign ( README § 17 )
     int    pack      = 8;       ///< seeds per packet -- A POWER OF TWO
     int    nu        = 3;       ///< smoothing steps before and after, per level ( `linear_solver()` sets 1 in 3D )
@@ -181,10 +217,12 @@ struct Mg : LinearSolver {
     bool solves( const Laplacian &L, const std::vector<double> &b, std::vector<double> &d ) override {
         const double t0 = mg_now();
         if ( ! lev.empty() && lev[ 0 ].n != L.n ) { Uv.clear(); AUv.clear(); }
-        const bool fresh = lev.empty() || lev[ 0 ].n != L.n || lev.size() == 1 || since >= std::max( rebuild, 1 );
+        // a correction ( under a `floor` ) solves again the matrix of the solve it corrects: the hierarchy stays as it is
+        const bool same = floor > 0 && ! lev.empty() && lev[ 0 ].n == L.n && lev[ 0 ].val == L.c.data();
+        const bool fresh = ! same && ( lev.empty() || lev[ 0 ].n != L.n || lev.size() == 1 || since >= std::max( rebuild, 1 ) );
         if ( fresh ) { build( L ); since = 0; ++st.nb_hierarchies; }
-        else           repoint( L );
-        ++since;
+        else if ( ! same ) repoint( L );
+        since += ! same;
         const double t1 = mg_now();
         st.t_hierarchy += t1 - t0;
         const bool ok = cg( b, d );
@@ -250,11 +288,37 @@ private:
         } );
     }
 
+    /// the compact copy of a CSR of `nr` rows and `nc` columns ( `dia`: the diagonal of a square one, corrected to keep the
+    /// sums of the rows; null for `P` ). One parallel pass.
+    void compact_copy( MgCompact &cm, SI nr, SI nc, const SI *row, const SI *col, const double *val, const double *dia ) const {
+        const SI nnz = row[ nr ];
+        cm.on = compact && nnz < SI( 0xffffffff ) && nr < SI( 0xffffffff ) && nc < SI( 0xffffffff );
+        if ( ! cm.on ) { cm.row.clear(); cm.col.clear(); cm.val.clear(); cm.dia.clear(); return; }
+        cm.row.resize( nr + 1 ); cm.col.resize( nnz ); cm.val.resize( nnz );
+        if ( dia ) cm.dia.resize( nr );
+        cm.row[ nr ] = std::uint32_t( nnz );
+        mg_for( nr, [&]( SI i, int ) {
+            cm.row[ i ] = std::uint32_t( row[ i ] );
+            double lost = 0;                         // what the rounding takes from the row's off-diagonals
+            for ( SI e = row[ i ]; e < row[ i + 1 ]; ++e ) {
+                const float f = float( val[ e ] );
+                cm.col[ e ] = std::uint32_t( col[ e ] );
+                cm.val[ e ] = f;
+                lost += val[ e ] - double( f );
+            }
+            if ( dia ) cm.dia[ i ] = dia[ i ] - lost;
+        } );
+    }
+    void compact_level( MgLevel &v ) const { compact_copy( v.cm, v.n, v.n, v.row, v.col, v.val, v.dia ); }
+    /// the diagonal the cycle uses with the matrix it reads
+    static const double *cycle_dia( const MgLevel &v ) { return v.cm.on ? v.cm.dia.data() : v.dia; }
+
     // ---------------------------------------------------------------- the hierarchy
     void repoint( const Laplacian &L ) {
         lev[ 0 ].row = L.row.data(); lev[ 0 ].col = L.col.data();
         lev[ 0 ].val = L.c.data();   lev[ 0 ].dia = L.dia.data();
         lev[ 0 ].nnz = SI( L.col.size() );
+        compact_level( lev[ 0 ] );
         relax_coefficients( lev[ 0 ] );              // the values changed, so did the coefficients
     }
 
@@ -262,62 +326,74 @@ private:
     /// of `M^-1 A` ( exact, one pass on the edges )
     void relax_coefficients( MgLevel &v ) const {
         const SI n = v.n;
+        const double *dia = cycle_dia( v );
         v.rlx.resize( n );
         double mx = 0;
-        mg_for( n, [&]( SI i, int t ) {
-            const double d = v.dia[ i ];
-            double q = d * d;
-            for ( SI e = v.row[ i ]; e < v.row[ i + 1 ]; ++e ) q += v.val[ e ] * v.val[ e ];
-            v.rlx[ i ] = q > 0 ? d / q : 0.0;
-        } );
-mx = mg_max( n, [&]( SI i ) {
-            double s = v.dia[ i ];
-            for ( SI e = v.row[ i ]; e < v.row[ i + 1 ]; ++e ) s += std::fabs( v.val[ e ] );
-            return v.rlx[ i ] * s;
+        mg_with( v.cm, v.row, v.col, v.val, [&]( const auto *row, const auto *, const auto *val ) {
+            mx = mg_max( n, [&]( SI i ) {               // ( one pass: the coefficient, then its Gershgorin row )
+                const double d = dia[ i ];
+                double q = d * d, a = d;
+                for ( SI e = SI( row[ i ] ); e < SI( row[ i + 1 ] ); ++e ) { const double c = val[ e ]; q += c * c; a += std::fabs( c ); }
+                v.rlx[ i ] = q > 0 ? d / q : 0.0;
+                return v.rlx[ i ] * a;
+            } );
         } );
         v.lmax = mx > 0 ? mx : 2.0;
     }
 
-    /// `r = b - A x`
-    static void residual( MgLevel &v ) {
-        const SI n = v.n;
-        mg_for( n, [&]( SI i, int t ) {
-            double s = v.dia[ i ] * v.x[ i ];
-            for ( SI e = v.row[ i ]; e < v.row[ i + 1 ]; ++e ) s -= v.val[ e ] * v.x[ v.col[ e ] ];
-            v.r[ i ] = v.b[ i ] - s;
+    /// THE CHEBYSHEV SMOOTHER, the three-term recurrence. `deg` matrix-vector products, exactly like `deg` sweeps of
+    /// Jacobi -- but a polynomial chosen to crush the high part of the spectrum. `fresh`: start from `x = 0`. `want_r`: leave
+    /// the residual of the result in `r` ( for the restriction ), at no extra pass.
+    ///
+    /// FUSED PASSES: each loop of the multigrid is a launch of the pool, and on a few 1e5 unknowns the launches cost as
+    /// much as the work ( measured: no gain from 8 to 16 threads ). One pass starts ( the residual, or `r = b` from `x = 0`,
+    /// and the first direction ); then each pass `k` adds `y` to `x` and, while a product is needed, takes `A y` out of `r`
+    /// and writes the next direction -- `deg + 1` passes where the plain recurrence makes `2 deg + 2`.
+    void chebyshev( MgLevel &v, int deg, bool fresh, bool want_r ) const {
+        mg_with( v.cm, v.row, v.col, v.val, [&]( const auto *row, const auto *col, const auto *val ) {
+            chebyshev( v, deg, fresh, want_r, row, col, val, cycle_dia( v ) );
         } );
     }
-
-    /// THE CHEBYSHEV SMOOTHER, the three-term recurrence. `deg` matrix-vector products, exactly like `deg` sweeps of
-    /// Jacobi -- but a polynomial chosen to crush the high part of the spectrum. `fresh`: start from `x = 0`.
-    void chebyshev( MgLevel &v, int deg, bool fresh ) const {
+    template<class R, class C, class V>
+    void chebyshev( MgLevel &v, int deg, bool fresh, bool want_r, const R *row, const C *col, const V *val, const double *dia ) const {
         const SI n = v.n;
-        if ( deg <= 0 ) { if ( fresh ) std::fill( v.x.begin(), v.x.end(), 0.0 ); return; }
+        auto product = [&]( const std::vector<double> &x, SI i ) { return mg_row_product( row, col, val, dia, x, i ); };
+        if ( deg <= 0 ) {
+            mg_for( n, [&]( SI i, int ) {
+                if ( fresh ) v.x[ i ] = 0;
+                if ( want_r ) v.r[ i ] = v.b[ i ] - ( fresh ? 0.0 : product( v.x, i ) );
+            } );
+            return;
+        }
         const double hi = v.lmax, lo = hi / std::max( cheb, 1.01 );
         const double th = ( hi + lo ) / 2, de = ( hi - lo ) / 2;
         const double si = th / de;
         double rh = 1 / si;
-        if ( fresh ) {
-            std::fill( v.x.begin(), v.x.end(), 0.0 );
-            v.r = v.b;
-        } else {
-            residual( v );
-        }
-        mg_for( n, [&]( SI i, int ) { v.y[ i ] = v.rlx[ i ] * v.r[ i ] / th; } );     // `y` carries the direction
+        mg_for( n, [&]( SI i, int ) {                // `r` and the first direction `y`
+            double ri = v.b[ i ];
+            if ( fresh ) v.x[ i ] = 0;
+            else         ri -= product( v.x, i );
+            v.r[ i ] = ri;
+            v.y[ i ] = v.rlx[ i ] * ri / th;
+        } );
         for ( int k = 0; k < deg; ++k ) {
-            mg_for( n, [&]( SI i, int ) { v.x[ i ] += v.y[ i ]; } );
-            if ( k + 1 == deg ) break;
-            // ONE PASS, with a double buffer: the product `A y` of row `i` reads `y` at the neighbours, so the
-            // next direction cannot be written into `y`; but it needs no further pass -- we read `y`, update
-            // `r` in place ( each its own index ) and write the next direction into `z`, then swap
+            const bool next = k + 1 < deg;          // a next direction to write
+            if ( ! next && ! want_r ) {
+                mg_for( n, [&]( SI i, int ) { v.x[ i ] += v.y[ i ]; } );
+                break;
+            }
+            // ONE PASS, with a double buffer: the product `A y` of row `i` reads `y` at the neighbours, so the next direction
+            // cannot be written into `y`; we read `y`, update `x` and `r` in place ( each its own index ) and write the next
+            // direction into `z`, then swap
             const double r2 = 1 / ( 2 * si - rh ), c1 = r2 * rh, c2 = 2 * r2 / de;
-            mg_for( n, [&]( SI i, int t ) {
-                double s = v.dia[ i ] * v.y[ i ];
-                for ( SI e = v.row[ i ]; e < v.row[ i + 1 ]; ++e ) s -= v.val[ e ] * v.y[ v.col[ e ] ];
-                const double ri = v.r[ i ] - s;
+            mg_for( n, [&]( SI i, int ) {
+                const double yi = v.y[ i ];
+                const double ri = v.r[ i ] - product( v.y, i );
+                v.x[ i ] += yi;
                 v.r[ i ] = ri;
-                v.z[ i ] = c1 * v.y[ i ] + c2 * v.rlx[ i ] * ri;
+                if ( next ) v.z[ i ] = c1 * yi + c2 * v.rlx[ i ] * ri;
             } );
+            if ( ! next ) break;
             v.y.swap( v.z );
             rh = r2;
         }
@@ -337,7 +413,12 @@ mx = mg_max( n, [&]( SI i ) {
         for ( MgLevel &v : lev ) {
             v.x.assign( v.n, 0.0 ); v.b.assign( v.n, 0.0 );
             v.r.assign( v.n, 0.0 ); v.y.assign( v.n, 0.0 ); v.z.assign( v.n, 0.0 );
+            compact_level( v );
             relax_coefficients( v );
+        }
+        for ( size_t l = 0; l < prol.size(); ++l ) {
+            compact_copy( prol [ l ].cm, lev[ l ].n, lev[ l + 1 ].n, prol [ l ].row.data(), prol [ l ].col.data(), prol [ l ].val.data(), nullptr );
+            compact_copy( prolt[ l ].cm, lev[ l + 1 ].n, lev[ l ].n, prolt[ l ].row.data(), prolt[ l ].col.data(), prolt[ l ].val.data(), nullptr );
         }
         factorize_bottom();
     }
@@ -570,29 +651,32 @@ mx = mg_max( n, [&]( SI i ) {
                 return;
             }
 #endif
-            chebyshev( g, bottom_sweeps, true );
+            chebyshev( g, bottom_sweeps, true, false );
             return;
         }
         MgLevel &c = lev[ l + 1 ];
         const SI nf = g.n, ncc = c.n;
 
-        chebyshev( g, nu, true );
-        residual( g );
+        chebyshev( g, nu, true, true );              // the residual comes with it
         // THE RESTRICTION IS A GATHER, never a scatter: no atomic. `P^t` is a CSR product.
         const MgCsr &Pt = prolt[ l ];
-        mg_for( ncc, [&]( SI a, int t ) {
-            double s = 0;
-            for ( SI k = Pt.row[ a ]; k < Pt.row[ a + 1 ]; ++k ) s += Pt.val[ k ] * g.r[ Pt.col[ k ] ];
-            c.b[ a ] = s;
+        mg_with( Pt.cm, Pt.row.data(), Pt.col.data(), Pt.val.data(), [&]( const auto *row, const auto *col, const auto *val ) {
+            mg_for( ncc, [&]( SI a, int ) {
+                double s = 0;
+                for ( SI k = SI( row[ a ] ); k < SI( row[ a + 1 ] ); ++k ) s += double( val[ k ] ) * g.r[ SI( col[ k ] ) ];
+                c.b[ a ] = s;
+            } );
         } );
         cycle( l + 1 );
         const MgCsr &P = prol[ l ];
-        mg_for( nf, [&]( SI i, int t ) {
-            double s = 0;
-            for ( SI e = P.row[ i ]; e < P.row[ i + 1 ]; ++e ) s += P.val[ e ] * c.x[ P.col[ e ] ];
-            g.x[ i ] += s;
+        mg_with( P.cm, P.row.data(), P.col.data(), P.val.data(), [&]( const auto *row, const auto *col, const auto *val ) {
+            mg_for( nf, [&]( SI i, int ) {
+                double s = 0;
+                for ( SI e = SI( row[ i ] ); e < SI( row[ i + 1 ] ); ++e ) s += double( val[ e ] ) * c.x[ SI( col[ e ] ) ];
+                g.x[ i ] += s;
+            } );
         } );
-        chebyshev( g, nu, false );
+        chebyshev( g, nu, false, false );
     }
 
     /// the small dense system `G y = f`, `G` symmetric positive definite, `k <= 32`. Hand-written Cholesky with a
@@ -650,11 +734,15 @@ mx = mg_max( n, [&]( SI i ) {
         center( cr );
         cz.assign( n, 0.0 ); cp.assign( n, 0.0 ); cq.assign( n, 0.0 );
 
-        auto precond = [&]( const std::vector<double> &rr, std::vector<double> &zz ) {
-            lev[ 0 ].b = rr;
+        // the cycle reads its right-hand side in `lev[ 0 ].b`: lent by a swap, not copied ( a copy is a sequential pass ). The
+        // output is centered on the way out, in one parallel pass.
+        auto precond = [&]( std::vector<double> &rr, std::vector<double> &zz ) {
+            lev[ 0 ].b.swap( rr );
             cycle( 0 );                                  // with a single level, the direct solve of the bottom
-            zz = lev[ 0 ].x;
-            center( zz );
+            lev[ 0 ].b.swap( rr );
+            const std::vector<double> &x = lev[ 0 ].x;
+            const double mu = mg_sum( n, [&]( SI i ) { return x[ i ]; } ) / double( n );
+            mg_for( n, [&]( SI i, int ) { zz[ i ] = x[ i ] - mu; } );
         };
 
         const double bb = dot( cr, cr );
@@ -691,11 +779,15 @@ mx = mg_max( n, [&]( SI i ) {
             }
         }
 
-        precond( cr, cz );
-        cp = cz;
-        double rz = dot( cr, cz );
-        const double target = tol * tol * bb;
+        // ( `floor`: a correction stops where the solve it corrects stopped; already there, it costs no cycle )
+        const double target = std::max( tol * tol * bb, floor * floor );
         double rr = dot( cr, cr );
+        double rz = 0;
+        if ( rr > target ) {
+            precond( cr, cz );
+            cp = cz;
+            rz = dot( cr, cz );
+        }
         int it = 0;
         for ( ; it < maxit && rr > target; ++it ) {
             matvec( lev[ 0 ], cp, cq );
@@ -715,8 +807,10 @@ mx = mg_max( n, [&]( SI i ) {
             mg_for( n, [&]( SI i, int ) { cp[ i ] = cz[ i ] + be * cp[ i ]; } );
         }
         st.nb_iter += it;
-        // THE SOLUTION JOINS THE SUBSPACE, in the zero-mean gauge: the one it is solved in, so the one `U` lives in
-        if ( recycle > 0 ) {
+        last_residual = std::sqrt( rr );
+        // THE SOLUTION JOINS THE SUBSPACE, in the zero-mean gauge: the one it is solved in, so the one `U` lives in ( not a
+        // correction, under a `floor`: it would push a Newton direction out )
+        if ( recycle > 0 && ! ( floor > 0 ) ) {
             if ( int( Uv.size() ) >= recycle ) Uv.erase( Uv.begin() );
             Uv.push_back( d );
         }
@@ -725,7 +819,7 @@ mx = mg_max( n, [&]( SI i ) {
         mg_for( n, [&]( SI i, int ) { d[ i ] -= d0; } );
         const double err = std::sqrt( rr / bb );
         st.worst = std::max( st.worst, err );
-        return err < 1;
+        return err < 1 || rr <= target;
     }
 };
 

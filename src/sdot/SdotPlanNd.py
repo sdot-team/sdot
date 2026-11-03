@@ -193,6 +193,99 @@ def _sink_of( problem ):
     return 0.0
 
 
+def _grid_source( dist ):
+    """the source when it is the diracs of a grid ( `SumOfDiracsOnAGrid` ), else `None`"""
+    from .distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    return dist if isinstance( dist, SumOfDiracsOnAGrid ) else None
+
+
+def _grid_path( problem ):
+    """the grid's diagram ( `PowerDiagram_Grid` ) takes this problem: the CPU, 2D or 3D, no periodicity, sink nor radial integrand,
+    masses that do not trace ( a derivative is solved on positions )"""
+    src = problem.source
+    if not loom.resolved_device().is_cpu or int( src.nb_dims.value ) not in ( 2, 3 ):
+        return False
+    if _periodicity_of( problem ) is not None or getattr( problem, "radial_func", None ) is not None:
+        return False
+    if _sink_of( problem ) is not None:
+        return False
+    return not any( loom.is_traced( getattr( x, "raw", x ) ) for x in ( src.weights, src.origin, src.frame ) if getattr( x, "is_defined", True ) )
+
+
+def _dedicated_grid( src, dst, tun ):
+    """`{ N, h, origin, kind, prm }` when the dedicated solver of a grid applies ( `grid/GridNewton2D.h` ): 2D, N x N with N a
+    power of two from 32, square cells along the axes, the target's support the box of the grid; `None` otherwise
+    ( `Tuning( grid_solver = "dedicated" )`: an error saying why ). `kind` says who integrates ( `grid/GridDensities.h` ):
+    "unit" ( a uniform density ), "image" ( constant pixels along the axes: `prm` = nx, ny, their physical edges, their
+    values ), "gauss" ( at most 8 isotropic gaussians: `prm` = k, then cx, cy, sigma, mass for each ), or "cells" ( sdot's
+    cells, any density )"""
+    def no( why ):
+        if tun.grid_solver == "dedicated":
+            raise ValueError( f"Tuning( grid_solver = 'dedicated' ): { why }" )
+        return None
+    if tun.grid_solver == "cells":
+        return None
+    g = src.grid
+    if len( g.shape ) != 2:
+        return no( "2D only" )
+    N = int( g.shape[ 0 ] )
+    if g.shape[ 1 ] != N or N < 32 or N & ( N - 1 ):
+        return no( f"an N x N grid, N a power of two from 32 ( got { g.shape } )" )
+    h = float( g.cell_frame[ 0, 0 ] )
+    if not ( h > 0 and np.allclose( g.cell_frame, h * np.eye( 2 ), rtol = 0, atol = 1e-14 * h ) ):
+        return no( "square cells along the axes" )
+    from .PowerDiagram import axis_aligned_box
+    support = dst.bounding_half_spaces()
+    box = None if support is None else axis_aligned_box( *support )
+    lo, hi = g.origin, g.origin + N * h
+    if box is None or box[ 2 ].any() or not ( np.allclose( box[ 0 ], lo, rtol = 0, atol = 1e-12 * N * h ) and np.allclose( box[ 1 ], hi, rtol = 0, atol = 1e-12 * N * h ) ):
+        return no( "the support of the target must be the box of the grid" )
+    kind, prm = _grid_density( dst )
+    return dict( N = N, h = h, origin = np.asarray( g.origin, dtype = float ), kind = kind, prm = prm )
+
+
+def _grid_density( dst ):
+    """`( kind, prm )` of `_dedicated_grid`: how the dedicated solver integrates `dst`"""
+    from loom.tensor.host import to_host
+    from .distributions.Image import Image
+    from .distributions.SumOfGaussians import SumOfGaussians
+    def host( t ):
+        return None if not t.is_defined or loom.is_traced( t.raw ) else np.asarray( to_host( t.raw ), dtype = float )
+    if isinstance( dst, Image ) and not dst.is_polynomial and dst.values.is_defined and not dst.batch_axes:
+        v = host( dst.values )
+        geo = dst._grid_geometry()
+        if v is None or v.ndim != 2 or geo is None:
+            return "cells", None
+        if v.size > 0 and bool( np.all( v == v.reshape( -1 )[ 0 ] ) ):
+            return "unit", None
+        d, frame, origin, lo, hi = geo
+        f = np.diag( frame )
+        if not ( np.all( frame == np.diag( f ) ) and np.all( f > 0 ) ):
+            return "cells", None
+        nx, ny = v.shape
+        kn = host( dst.knots ).reshape( 2, -1 ) if dst.knots.is_defined else None
+        kx = kn[ 0, : nx + 1 ] if kn is not None else np.arange( nx + 1, dtype = float )
+        ky = kn[ 1, : ny + 1 ] if kn is not None else np.arange( ny + 1, dtype = float )
+        return "image", np.concatenate( [ [ nx, ny ], origin[ 0 ] + f[ 0 ] * kx, origin[ 1 ] + f[ 1 ] * ky, v.reshape( -1 ) ] )
+    if isinstance( dst, SumOfGaussians ) and not dst.batch_axes:
+        c, s = host( dst.positions ), host( dst.sigmas )
+        if c is None or s is None or s.ndim != 1 or c.shape[ 0 ] > 8 or c.shape[ 0 ] == 0:
+            return "cells", None
+        k = c.shape[ 0 ]
+        w = host( dst.weights ) if dst.weights.is_defined else np.ones( k )
+        if w is None:
+            return "cells", None
+        return "gauss", np.concatenate( [ [ k ], np.stack( [ c[ :, 0 ], c[ :, 1 ], s, w ], axis = 1 ).reshape( -1 ) ] )
+    return "cells", None
+
+
+def _on_positions( problem ):
+    """the same problem, the diracs of its grid given by their positions ( `SumOfDiracs` )"""
+    res = copy.copy( problem )
+    res._source = problem.source.as_sum_of_diracs().normalized_version()
+    return res
+
+
 def exact_duplicates( positions ):
     """THE EXACT DUPLICATES of a cloud `[ n, d ]` ( a host array ): `( dup, rep )`, each duplicate and the smallest index of
     the seeds at the same position ( empty arrays when there is none ). A hash of the coordinates' bits, sorted: 2.8 ms for
@@ -455,10 +548,13 @@ class SdotPlanNd( Displayable ):
         from loom.calls import _scan
         from loom.drivers import framework_defaults
         from loom.drivers.promotion import promote
+        if _grid_source( problem.source ) is not None and not _grid_path( problem ):
+            problem = _on_positions( problem )           # ( a grid the grid's diagram cannot take: its positions, made here )
         default = framework_defaults.framework_name()
         tracing, plain = set(), set()
         _scan( problem.source, tracing, plain, set() )
-        if not tracing:                                  # ( nothing traces: the positions' -- the masses may be the default's, from numpy )
+        if not tracing and _grid_source( problem.source ) is None:
+            # ( nothing traces: the positions' -- the masses may be the default's, from numpy )
             plain = set()
             _scan( problem.source.positions, tracing, plain, set() )
         framework = promote( tracing, plain, default )
@@ -642,9 +738,12 @@ class SdotPlanNd( Displayable ):
         # Newton of the CPU and of the card ( `gpu/CardGroups.cuh` ) then runs on all the weights of that geometry; a periodicity keeps
         # the aggregation, then `_split_groups`
         self._solver_groups = None
-        pos_given = getattr( src_dist.positions, "raw", src_dist.positions )
+        # THE SEEDS OF A GRID ( `SumOfDiracsOnAGrid` ): no positions, `PowerDiagram_Grid` -- no groups ( a grid has neither
+        # duplicates nor separations of scales ), and the step by trials ( the limits' cells walk a tree, `sdotplan/Bounds.h` )
+        grid = _grid_source( src_dist )
+        pos_given = None if grid is not None else getattr( src_dist.positions, "raw", src_dist.positions )
         # ( the limits' cells, `sdotplan/Bounds.h`, do not know the groups: an explicit `step = "limits"` takes that path too )
-        if ( getattr( settings, "duplicates", "split" ) == "split" and settings.aggregate and periodicity is None
+        if ( grid is None and getattr( settings, "duplicates", "split" ) == "split" and settings.aggregate and periodicity is None
              and tun.step != "limits" and not loom.is_traced( pos_given ) ):
             self._solver_groups = self._groups_for( problem, settings, warm )
         if self._sink is not None and on_card:
@@ -656,7 +755,9 @@ class SdotPlanNd( Displayable ):
                 raise NotImplementedError( "radial_func with a periodicity: not written yet" )
             self._solver_groups = None                   # ( the tree of aggregates does not know the radial factor )
         step = { "auto": "limits" if d == 2 and periodicity is None and self._sink is None and self._radial is None and self._solver_groups is None
-                 else "trials" }.get( tun.step, tun.step )
+                 and grid is None else "trials" }.get( tun.step, tun.step )
+        if step == "limits" and grid is not None:
+            raise ValueError( "step = 'limits' is not available for the diracs of a grid: 'trials' or 'auto'" )
         if step == "limits" and periodicity is not None:
             raise ValueError( "step = 'limits' is not available with a periodicity: 'trials' or 'auto'" )
         if step == "limits" and self._sink is not None:
@@ -689,6 +790,12 @@ class SdotPlanNd( Displayable ):
         else:
             w0_given, self._warm_start = None, "none"
 
+        # THE DIRACS OF A GRID, the dedicated solver ( `grid/GridNewton2D.h` ) when it applies
+        if grid is not None:
+            dedicated = _dedicated_grid( src_dist, dst_dist, tun )
+            if dedicated is not None:
+                return self._build_grid( problem, settings, dedicated, w0_given )
+
         # THE diagram, built once on the positions ( see the module docstring ); the weights it
         # carries at a given moment are the last ones set
         # Under a trace ( `jax.jit` ) the weights may be tracers, and a diagram with traced weights falls back on the
@@ -702,8 +809,8 @@ class SdotPlanNd( Displayable ):
                           if getattr( x, "is_defined", True ) )
             self._card_mg_recycle = self._check_card_memory( int( src_dist.nb_diracs.value ), settings, jitted = traced, dim = d )
 
-        accelerator = tun.accelerator
-        pos_raw = getattr( src_dist.positions, "raw", src_dist.positions )
+        accelerator = src_dist.grid if grid is not None else tun.accelerator
+        pos_raw = None if grid is not None else getattr( src_dist.positions, "raw", src_dist.positions )
         import numpy as np
         w_start = np.zeros( int( src_dist.nb_diracs.value ) ) if w0_given is None else w0_given
         from .AaBsp import AaBsp, builds_on_card
@@ -711,7 +818,9 @@ class SdotPlanNd( Displayable ):
             # the tree is that of the FOLDED seeds ( the diagram folds them the same way: `periodicity.setup_for` )
             from .periodicity import setup_for
             pos_raw = setup_for( pos_raw, dst_dist.periodic_support(), periodicity )[ 1 ]
-        if accelerator is None and on_card and builds_on_card( pos_raw ) and self._solver_groups is not None:
+        if grid is not None:
+            pass
+        elif accelerator is None and on_card and builds_on_card( pos_raw ) and self._solver_groups is not None:
             # GROUPS: the positions are readable ( the tree of aggregates was read from them ) and the groups need the tree's
             # order on the host ( `PowerDiagram_Bsp._stored_group_members` ): the card's tree built as a CONSTANT of a trace
             with loom.concrete_eval():
@@ -735,7 +844,7 @@ class SdotPlanNd( Displayable ):
             accelerator = AaBsp( pos_raw )
         # ( and what is concrete is EVALUATED under the trace: the domain, the tree, the density's values stay readable )
         with loom.concrete_eval():
-            self._pd = PowerDiagram( src_dist.positions, w_start,
+            self._pd = PowerDiagram( None if grid is not None else src_dist.positions, w_start,
                                      accelerator = accelerator, kernel_dtype = settings.kernel_dtype,
                                      distribution = dst_dist, memory = tun.memory,
                                      scratch_capacity = tun.scratch_capacity, periodicity = periodicity, sink_weight = self._sink, radial_func = self._radial,
@@ -875,6 +984,97 @@ class SdotPlanNd( Displayable ):
         vals = np.zeros( 2 * d + 1 ) if box is None else np.concatenate( [ [ 1.0 ], np.asarray( box[ 0 ], dtype = float ), np.asarray( box[ 1 ], dtype = float ) ] )
         return RealTensor[ Axis( ShapeVar( 2 * d + 1 ), name = "num_start_box" ) ]( vals )
 
+    def _build_grid( self, problem, settings, g, w0_given ):
+        """THE DEDICATED SOLVER OF THE DIRACS OF A GRID ( `grid/GridNewton2D.h` ): N x N seeds, the target on the box of the grid.
+        The uniform density in SIMD, any other through sdot's cells. Coarse to fine unless `weights0` ( or a plan ) is given. One
+        call; the outputs are those of `sdotplan/Solve.h` ( no history: one row, the end )."""
+        src_dist, dst_dist = problem.source, problem.target
+        tun = settings.tuning
+        N, h, origin = g[ "N" ], g[ "h" ], g[ "origin" ]
+        def axis( m, name ):
+            return Axis( ShapeVar( int( m ) ), name = name )
+        # the diagram of the plan ( no positions ): what `power_diagram()`, the domain and the distribution's call read
+        with loom.concrete_eval():
+            self._pd = PowerDiagram( None, None, accelerator = src_dist.grid, kernel_dtype = settings.kernel_dtype, distribution = dst_dist )
+        pd = self._pd
+        self._masses = RealTensor[ pd.num_point ]( src_dist.weights.raw )
+        self._dup_note = "checked ( a grid: no duplicates )"
+        self._agg_dups, self._agg_margin, self._agg_gap, self._agg_nb_dups, self._exact_dups = None, 0.0, 0.0, 0, None
+
+        weights = RealTensor[ pd.num_point ]()
+        cell_masses = RealTensor[ pd.num_point ]()
+        barycenters = RealTensor[ pd.num_point, pd.dim ]()
+        cost = RealTensor()
+        stats = RealTensor[ axis( len( _STATS ), "num_stat" ) ]()
+        from loom.tensor.host import to_host
+        w0 = None if w0_given is None else RealTensor[ pd.num_point ]( np.asarray( to_host( getattr( w0_given, "raw", w0_given ) ), dtype = np.float64 ).reshape( -1 ) )
+        opts = [ N, origin[ 0 ], origin[ 1 ], h, float( settings.tol ), float( tun.mass_rtol ), tun.grid_ctol, tun.grid_n0, int( settings.max_iter ),
+                 tun.grid_cg_rtol, 0.0 if w0 is None else 1.0 ]
+        # ( `dp`: the parameters of the density, physical; `Sh2 = n^2 h_n^2`, the factor of the densities in index units )
+        kind, dist_kwargs, dom_kwargs = g[ "kind" ], {}, {}
+        prm = g[ "prm" ] if g[ "prm" ] is not None else np.zeros( 1 )
+        if kind == "unit":
+            integ = "[&]( int, double, double ) { return sdot::grid::UnitCells{}; }"
+        elif kind == "image":
+            integ = ( "[&]( int n, double hl, double ) { const int nx = int( dp[ 0 ] ), ny = int( dp[ 1 ] ); "
+                      "return sdot::grid::ImageCells( nx, ny, dp.data() + 2, dp.data() + 3 + nx, dp.data() + 4 + nx + ny, ox, oy, hl, double( n ) * n * hl * hl ); }" )
+        elif kind == "gauss":
+            integ = "[&]( int n, double hl, double blur ) { return sdot::grid::GaussCells( int( dp[ 0 ] ), dp.data() + 1, ox, oy, hl, double( n ) * n * hl * hl, blur ); }"
+        else:
+            dist_expr, _, dist_kwargs = pd._dist_for()
+            dom_kwargs = dict( dom_cell = pd._domain_cell() )
+            integ = ( "[&]( int n, double hl, double ) { return sdot::grid::DistCells<DECAYED_TYPE_OF( inputs.dom_cell ),DECAYED_TYPE_OF( "
+                      f"{ dist_expr } ),TK_grid>( inputs.dom_cell, { dist_expr }, n, ox, oy, hl ); }}" )
+        loom.ffi_call(
+            "sdot_grid_solve_2d",
+            FfiCode.inline( includes = [ "sdot/grid/GridNewton2D.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], code = "\n".join( [
+                "auto &inputs = args.inputs; auto &outputs = args.outputs;",
+                "using TK_grid = double;",
+                "auto op = [&]( int k ) { return double( inputs.options( k ) ); };",
+                "const int N = int( op( 0 ) ); const double ox = op( 1 ), oy = op( 2 ), h = op( 3 );",
+                "sdot::grid::Options o; o.tol_abs = op( 4 ); o.tol_rel = op( 5 ); o.ctol = op( 6 ); o.n0 = int( op( 7 ) ); o.max_iter = int( op( 8 ) ); o.cg_rtol = op( 9 );",
+                "const SI n = SI( N ) * N;",
+                "std::vector<double> dp( inputs.dens_prm.shape( 0 ) ); for ( size_t q = 0; q < dp.size(); ++q ) dp[ q ] = double( inputs.dens_prm( SI( q ) ) );",
+                "std::vector<double> nu( n ), w0v, w( n ), m( n ), b( 2 * n );",
+                "for ( SI i = 0; i < n; ++i ) nu[ i ] = double( inputs.nu( i ) );",
+                "double s = 0; for ( double v : nu ) s += v; for ( double &v : nu ) v /= s;",
+                "if ( op( 10 ) != 0 ) { w0v.resize( n ); for ( SI i = 0; i < n; ++i ) w0v[ i ] = double( inputs.w0( i ) ); }",
+                "double c = 0;",
+                f"auto st = sdot::grid::solve( queue, N, ox, oy, h, { integ }, nu.data(), w0v.empty() ? nullptr : w0v.data(), o, w.data(), m.data(), b.data(), c );",
+                "for ( SI i = 0; i < n; ++i ) { outputs.weights( i ) = w[ i ]; outputs.cell_masses( i ) = m[ i ]; "
+                "outputs.barycenters( i, 0 ) = b[ 2 * i ]; outputs.barycenters( i, 1 ) = b[ 2 * i + 1 ]; }",
+                "outputs.cost = c;",
+                "for ( SI k = 0; k < SI( outputs.stats.shape( 0 ) ); ++k ) outputs.stats( k ) = 0;",
+                "auto put = [&]( int k, double v ) { outputs.stats( k ) = v; };",
+                f"put( { _STATS.index( 'status' ) }, st.status ); put( { _STATS.index( 'residual' ) }, st.residual ); "
+                f"put( { _STATS.index( 'residual0' ) }, st.residual0 ); put( { _STATS.index( 'nb_iter' ) }, st.nb_iter ); "
+                f"put( { _STATS.index( 'nb_diag' ) }, st.nb_diag ); put( { _STATS.index( 'nb_backtracks' ) }, st.nb_backtracks ); "
+                f"put( { _STATS.index( 't_diag' ) }, st.t_diag ); put( { _STATS.index( 't_lin' ) }, st.t_lin ); "
+                f"put( { _STATS.index( 'domain_mass' ) }, st.domain_mass ); put( { _STATS.index( 'lin_nb_iter' ) }, st.lin_nb_iter ); "
+                f"put( { _STATS.index( 't_total' ) }, st.t_total ); put( { _STATS.index( 'nb_continuation_steps' ) }, st.nb_levels ); "
+                f"put( { _STATS.index( 'residual_full' ) }, st.residual );",
+            ] ) ),
+            nu = self._masses,
+            options = RealTensor[ axis( len( opts ), "num_grid_opt" ) ]( np.asarray( opts, dtype = np.float64 ) ),
+            dens_prm = RealTensor[ axis( len( prm ), "num_dens_prm" ) ]( np.asarray( prm, dtype = np.float64 ) ),
+            weights = loom.out( weights ), cell_masses = loom.out( cell_masses ), barycenters = loom.out( barycenters ),
+            cost = loom.out( cost ), stats = loom.out( stats ),
+            has_dynamic_capacity = False,
+            w0 = w0 if w0 is not None else RealTensor[ pd.num_point ]( np.zeros( N * N ) ), **dom_kwargs, **dist_kwargs,
+        )
+        # ( `pd` gets its weights in `power_diagram()`, when asked: setting them redoes the majorants of its tree )
+        self.weights = weights
+        self._weights_fit = weights
+        self.cell_masses = cell_masses
+        self.barycenters = barycenters
+        self.cost = cost
+        self._clusters = None
+        self._read_stats( stats, settings )
+        self.stats[ "grid_solver" ] = { "unit": "dedicated ( uniform density )", "image": "dedicated ( image )", "gauss": "dedicated ( gaussians )" }.get( kind, "dedicated ( sdot cells )" )
+        self.history = []
+        self._groups, self._group_pd = None, None
+        self._check_converged( settings )
+
     def _aggregation_inputs( self, pos_raw, settings, n ):
         """THE AGGREGATION'S INPUTS ( `sdotplan/Aggregation.h` ): `_agg_margin` ( 0: off ), and the EXACT DUPLICATES, which the
         diagram cannot see ( no plane between two equal points ): `_agg_dups` ( `2 k` values, the pairs `( dup, rep )`, one
@@ -895,7 +1095,9 @@ class SdotPlanNd( Displayable ):
         elif settings.aggregate:
             margin = getattr( settings.tuning, "aggregation_margin", None )
             self._agg_margin = float( _AGGREGATE_MARGIN if margin is None else margin )
-            if loom.is_traced( pos_raw ):
+            if pos_raw is None:
+                self._dup_note = "checked ( a grid: no duplicates )"
+            elif loom.is_traced( pos_raw ):
                 self._dup_note = "not checked ( traced positions )"
             else:
                 from loom.tensor.host import to_host     # any framework, any device ( a cupy array refuses `np.asarray` )
@@ -1675,9 +1877,23 @@ class SdotPlanNd( Displayable ):
         ts = grp.TreeSystem.from_rows( g, members, *gpd.hessian_rows( items = members, host = False ) )
         x0 = ts.slots_of( gpd.weights.raw.reshape( -1 ), g.seed_v, g.agg_v )
 
+        # A TREE for each diagram below, built on the host positions: under a trace ( `jax.jit` ), a diagram without one is the plain
+        # O( n^2 ) diagram ( `diagram_class_for` ) -- a minute per sweep at 1e5 seeds on a card. The groups were found on readable
+        # positions ( `_groups_for` ): the tree is EVALUATED on them ( `concrete_eval` ), its order readable as the groups need it
+        from .AaBsp import AaBsp
+        frozen_pos = self.problem.source.positions.raw
+        host_pos = None if loom.is_traced( frozen_pos ) else np.asarray( grp._host( frozen_pos ), dtype = np.float64 )
+
+        def tree( rows = None ):
+            if host_pos is None:
+                return None
+            with loom.concrete_eval():
+                return AaBsp( host_pos if rows is None else host_pos[ rows ] )
+
         def grouped( x, at_pos = live_pos ):
             gg = g.with_virtual_weights( *ts.virtual_weights( x ) )
-            return PowerDiagram( at_pos, ts.outer( x ), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, radial_func = rf, groups = gg )
+            return PowerDiagram( at_pos, ts.outer( x ), accelerator = tree(), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk,
+                                 radial_func = rf, groups = gg )
 
         # ONE FROZEN NEWTON STEP: the roots, then the aggregates
         x0f = loom.array( x0 ) if not isinstance( live_pos, np.ndarray ) else x0
@@ -1686,56 +1902,58 @@ class SdotPlanNd( Displayable ):
         D = gpd.laplacian_solve( b, linear_solver = settings.tuning.linear_solver ).raw * grp._arr( m0, ts.root_slot.astype( np.float64 ) )
         x1 = x0f + ts.step( b, D )
 
-        # THE OUTPUTS, on the grouped diagram at the live slots
-        at = grouped( x1 )
-        m = RealTensor[ ax ]( at.measures.raw )
-        d = int( at.dim_count )
-        first = [ RealTensor[ ax ]( at.moment( c ).raw ) for c in range( d ) ]
-        mass = RealTensor[ ax ]( at.moment( d + 1 ).raw )
-        pos = [ RealTensor[ ax ]( live_pos[ :, c ] ) for c in range( d ) ]
-
-        # THE COST, as the sites' dual functional at the mean `p_s` of their members' positions ( weighted by the masses: the
-        # value of their position ), plus what the members' own positions add, `eps_i = p_i - p_s` ( zero ):
-        # `int_{piece_i} |x - p_i|^2 = int_{piece_i} |x - p_s|^2 - 2 eps_i . ( first_i - m_i p_s ) + |eps_i|^2 m_i`. Its
-        # derivative is the envelope one member by member, `2 m_i ( p_i - b_i )` with the barycentre of the piece -- which the
-        # dual functional of the members alone would only give for a site moved as a whole ( its neighbours see a duplicate's
-        # facets through the mean of the one-sided derivatives )
-        keep, gs = g.sites()
-        dup = np.flatnonzero( g.site != np.arange( n ) )
-        keep_, inv, groups_of = _duplicate_layout( n, dup, g.site[ dup ] )
-        nu_s = _cluster_sum( nu, groups_of )
-        ops = loom.ops( live_pos )
-        nu_ext = ops.concatenate( [ nu, nu[ :1 ] * 0 ], axis = 0 )
-        p_ext = ops.concatenate( [ live_pos, live_pos[ :1 ] * 0 ], axis = 0 )
-        p_site = live_pos[ keep ]
-        for r in groups_of[ 1: ]:
-            p_site = p_site + ( nu_ext[ r ] / nu_s )[ :, None ] * ( p_ext[ r ] - live_pos[ keep ] )
-        axs = Axis( ShapeVar( len( keep ) ), name = "num_point" )
-        sv1, av1 = ts.virtual_weights( x1 )
-        W1 = ts.outer( x1 )
-        if gs is not None:
-            _, gs = g.with_virtual_weights( sv1, av1 ).sites()
-        sd = PowerDiagram( p_site, W1[ keep ], distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, radial_func = rf, groups = gs )
-        ms = RealTensor[ axs ]( sd.measures.raw )
-        fs = [ RealTensor[ axs ]( sd.moment( c ).raw ) for c in range( d ) ]
-        ss = RealTensor[ axs ]( sd.moment( d ).raw )
-        qs = RealTensor[ axs ]( sd.moment( d + 1 ).raw )
-        ps = [ RealTensor[ axs ]( p_site[ :, c ] ) for c in range( d ) ]
-        nus = RealTensor[ axs ]( nu_s )
-        nus_eff = nus if sk is not None or rf is not None else nus * ( ms.sum() / nus.sum() )
-        pp = sum( ( p * p for p in ps[ 1: ] ), ps[ 0 ] * ps[ 0 ] )
-        px = sum( ( p * f for p, f in zip( ps[ 1: ], fs[ 1: ] ) ), ps[ 0 ] * fs[ 0 ] )
-        dual = ( RealTensor[ ax ]( x1 ) * RealTensor[ ax ]( ts.slot_sum( ( nus_eff - ms ).raw, rows = keep ) ) ).sum()
-        cost = ( ss - 2 * px + pp * qs ).sum() + dual
-        at_site = [ RealTensor[ ax ]( p_site[ inv, c ] ) for c in range( d ) ]
-        for c in range( d ):
-            e = pos[ c ] - at_site[ c ]
-            cost = cost + ( -2 * e * ( first[ c ] - mass * at_site[ c ] ) + e * e * mass ).sum()
-        self.cost = cost
         self.weights = RealTensor[ ax ]( ts.weights( x1 ) )
-        self.cell_masses = m
-        ops = loom.ops()
-        self.barycenters = RealTensor[ ax, self._pd.dim ]( ops.stack( [ ops.where( mass.raw > 0, f.raw / ops.where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 ) )
+
+        def outputs():
+            """THE OUTPUTS, on the grouped diagram at the live slots ( `_defer`: computed when one of them is read )"""
+            at = grouped( x1 )
+            m = RealTensor[ ax ]( at.measures.raw )
+            d = int( at.dim_count )
+            first = [ RealTensor[ ax ]( at.moment( c ).raw ) for c in range( d ) ]
+            mass = RealTensor[ ax ]( at.moment( d + 1 ).raw )
+            pos = [ RealTensor[ ax ]( live_pos[ :, c ] ) for c in range( d ) ]
+
+            # THE COST, as the sites' dual functional at the mean `p_s` of their members' positions ( weighted by the masses: the
+            # value of their position ), plus what the members' own positions add, `eps_i = p_i - p_s` ( zero ):
+            # `int_{piece_i} |x - p_i|^2 = int_{piece_i} |x - p_s|^2 - 2 eps_i . ( first_i - m_i p_s ) + |eps_i|^2 m_i`. Its
+            # derivative is the envelope one member by member, `2 m_i ( p_i - b_i )` with the barycentre of the piece -- which the
+            # dual functional of the members alone would only give for a site moved as a whole ( its neighbours see a duplicate's
+            # facets through the mean of the one-sided derivatives )
+            keep, gs = g.sites()
+            dup = np.flatnonzero( g.site != np.arange( n ) )
+            keep_, inv, groups_of = _duplicate_layout( n, dup, g.site[ dup ] )
+            nu_s = _cluster_sum( nu, groups_of )
+            ops = loom.ops( live_pos )
+            nu_ext = ops.concatenate( [ nu, nu[ :1 ] * 0 ], axis = 0 )
+            p_ext = ops.concatenate( [ live_pos, live_pos[ :1 ] * 0 ], axis = 0 )
+            p_site = live_pos[ keep ]
+            for r in groups_of[ 1: ]:
+                p_site = p_site + ( nu_ext[ r ] / nu_s )[ :, None ] * ( p_ext[ r ] - live_pos[ keep ] )
+            axs = Axis( ShapeVar( len( keep ) ), name = "num_point" )
+            sv1, av1 = ts.virtual_weights( x1 )
+            W1 = ts.outer( x1 )
+            if gs is not None:
+                _, gs = g.with_virtual_weights( sv1, av1 ).sites()
+            sd = PowerDiagram( p_site, W1[ keep ], accelerator = tree( keep ), distribution = dst, kernel_dtype = kd, memory = 0, sink_weight = sk, radial_func = rf, groups = gs )
+            ms = RealTensor[ axs ]( sd.measures.raw )
+            fs = [ RealTensor[ axs ]( sd.moment( c ).raw ) for c in range( d ) ]
+            ss = RealTensor[ axs ]( sd.moment( d ).raw )
+            qs = RealTensor[ axs ]( sd.moment( d + 1 ).raw )
+            ps = [ RealTensor[ axs ]( p_site[ :, c ] ) for c in range( d ) ]
+            nus = RealTensor[ axs ]( nu_s )
+            nus_eff = nus if sk is not None or rf is not None else nus * ( ms.sum() / nus.sum() )
+            pp = sum( ( p * p for p in ps[ 1: ] ), ps[ 0 ] * ps[ 0 ] )
+            px = sum( ( p * f for p, f in zip( ps[ 1: ], fs[ 1: ] ) ), ps[ 0 ] * fs[ 0 ] )
+            dual = ( RealTensor[ ax ]( x1 ) * RealTensor[ ax ]( ts.slot_sum( ( nus_eff - ms ).raw, rows = keep ) ) ).sum()
+            cost = ( ss - 2 * px + pp * qs ).sum() + dual
+            at_site = [ RealTensor[ ax ]( p_site[ inv, c ] ) for c in range( d ) ]
+            for c in range( d ):
+                e = pos[ c ] - at_site[ c ]
+                cost = cost + ( -2 * e * ( first[ c ] - mass * at_site[ c ] ) + e * e * mass ).sum()
+            ops = loom.ops()
+            barycenters = RealTensor[ ax, self._pd.dim ]( ops.stack( [ ops.where( mass.raw > 0, f.raw / ops.where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 ) )
+            return dict( cost = cost, cell_masses = m, barycenters = barycenters )
+        self._defer( outputs, ( "cost", "cell_masses", "barycenters" ) )
 
     @property
     def sphere_areas( self ):

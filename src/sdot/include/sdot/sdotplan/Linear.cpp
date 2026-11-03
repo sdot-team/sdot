@@ -60,7 +60,9 @@ struct Cg : LinearSolver {
         for ( SI i = 1; i < n; ++i ) { r[ i ] = b[ i ]; nb += b[ i ] * b[ i ]; }
         r[ 0 ] = 0;
         nb = std::sqrt( nb );
-        if ( ! ( nb > 0 ) ) { st.t_res += now() - t0; return true; }
+        last_residual = nb;
+        if ( ! ( nb > 0 ) || nb <= floor ) { st.t_res += now() - t0; return true; }   // ( `floor`: see `LinearSolver` )
+        const double rtol = std::max( tol, floor / nb );
         double rz = 0;
         for ( SI i = 1; i < n; ++i ) { z[ i ] = r[ i ] / L.dia[ i ]; p[ i ] = z[ i ]; rz += r[ i ] * z[ i ]; }
         double err = 1;
@@ -74,7 +76,8 @@ struct Cg : LinearSolver {
             double nr = 0;
             for ( SI i = 1; i < n; ++i ) { d[ i ] += alpha * p[ i ]; r[ i ] -= alpha * q[ i ]; nr += r[ i ] * r[ i ]; }
             err = std::sqrt( nr ) / nb;
-            if ( err <= tol ) break;
+            last_residual = std::sqrt( nr );
+            if ( err <= rtol ) break;
             double rz2 = 0;
             for ( SI i = 1; i < n; ++i ) { z[ i ] = r[ i ] / L.dia[ i ]; rz2 += r[ i ] * z[ i ]; }
             const double beta = rz2 / rz;
@@ -205,7 +208,8 @@ std::unique_ptr<LinearSolver> linear_solver( Lin method, SI n, int dim, const Li
     // otherwise. The Cholesky is sequential, the multigrid is not ( node20, Xeon Gold 5220, whole Newton solves, linear part,
     // Cholesky / multigrid ): uniform 1e5 1.81 / 2.35 s on 1 thread, 1.81 / 0.83 on 4, 1.81 / 0.65 on 8; uniform 3e5 9.4 / 14.0 on 1,
     // 9.6 / 2.6 on 8; lines 1e5 2.4 / 9.5 on 1, 2.5 / 2.3 on 8; uniform 1e6 74 / 69 on 1, 76 / 7.9 on 16. Its factor weighs
-    // ~35 bytes x n log2 n ( 0.7 GB over the multigrid at 1e6 ).
+    // ~35 bytes x n log2 n ( 0.7 GB over the multigrid at 1e6 ). Since the fused passes, the spinning pool and the compact matrices
+    // ( `Multigrid.h` ), the multigrid's linear part, uniform 1e5: 0.53 / 0.43 / 0.39 s on 8 / 16 / 36 threads; 1e6: 9.5 / 5.6 / 4.5.
     constexpr SI CHOLESKY_MAX_AUTO_2D = 600000;
     if ( method == Lin::AUTO )
         method = dim >= 3 || n > CHOLESKY_MAX_AUTO_2D || cpu_thread_pool().nb_workers() > 1 ? Lin::MG : Lin::CHOLESKY;

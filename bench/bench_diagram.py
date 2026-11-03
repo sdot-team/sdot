@@ -101,8 +101,12 @@ if p := bench( "diagram",
     w_arg = None if unweighted else w
     print( f"  weights: { 'none ( Euclidean kernel, like the old POIDS = false )' if unweighted else 'given ( weighted kernel )' }" )
 
-    # the tree is built once, and warmed up on a small prefix so that `t_build` does not measure a compilation
-    AaBsp( pos[ :1000 ], None if unweighted else w[ :1000 ], max_seeds_per_leaf = p.leaf_size )
+    # the tree is built once, and warmed up on a small prefix so that `t_build` does not measure a compilation ( nor the first
+    # diagram: a whole diagram on the prefix compiles its kernels )
+    small = AaBsp( pos[ :1000 ], None if unweighted else w[ :1000 ], max_seeds_per_leaf = p.leaf_size )
+    if p.output == "measures":
+        PowerDiagram( pos[ :1000 ], weights = None if unweighted else w[ :1000 ], boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ),
+                      accelerator = small, kernel_dtype = kernel, memory = memory ).measures
     t = time.perf_counter()
     bsp = AaBsp( pos, w_arg, max_seeds_per_leaf = p.leaf_size )
     t_build = time.perf_counter() - t
@@ -163,8 +167,9 @@ if p := bench( "diagram",
         t3 = time.perf_counter()
         return ( t1 - t0, t2 - t1, t3 - t2 ), m, k
 
-    once()                                            # warm-up: this one compiles
+    t_first = sum( once()[ 0 ][ :2 ] )                # warm-up: the first diagram, cold ( compiled on the prefix for `measures` )
     once()                                            # and this one fills the memory
+    benchlib.start_clock()                            # ( the clocks of the timed calls: `hardware` reads them )
     nb_warm, t_warm = 0, time.perf_counter()
     if on_gpu:                                        # and the card goes back to its clock
         while nb_warm < 2 or time.perf_counter() - t_warm < p.warmup:
@@ -181,6 +186,26 @@ if p := bench( "diagram",
         t_weights, best, t_convert = min( t_weights, ts[ 0 ] ), min( best, ts[ 1 ] ), min( t_convert, ts[ 2 ] )
         if k and k[ "ms" ] * 1e-3 < best_kernel:
             best_kernel, kernels = k[ "ms" ] * 1e-3, k
+
+    # -- FROM SCRATCH, the whole chain again: the tree, the diagram and its first measures. Its first run at this size is a
+    # warm-up ( on a card: what compiles at a new size ), then the minimum of `reps`, wall and, on a card, kernels
+    t_scratch = k_scratch = None
+    if p.output == "measures":
+        for rep in range( reps + 1 ):
+            if timing:
+                timing.reset()
+            t = time.perf_counter()
+            pd_s = PowerDiagram( pos, weights = w_arg, boundaries = box_half_spaces( [ 0 ] * d, [ 1 ] * d ),
+                                 accelerator = AaBsp( pos, w_arg, max_seeds_per_leaf = p.leaf_size ), kernel_dtype = kernel, memory = memory )
+            benchlib.block_until_ready( pd_s.measures )
+            ts_ = time.perf_counter() - t
+            ks = timing.read() if timing else None
+            del pd_s
+            if rep == 0:
+                continue
+            t_scratch = ts_ if t_scratch is None else min( t_scratch, ts_ )
+            if ks:
+                k_scratch = ks[ "ms" ] * 1e-3 if k_scratch is None else min( k_scratch, ks[ "ms" ] * 1e-3 )
 
     # -- the accuracy, against a double kernel on the same tree
     acc = None
@@ -212,6 +237,12 @@ if p := bench( "diagram",
     p.results[ "ns_per_seed" ] = ns
     p.results[ "t_bsp_build" ] = t_build
     p.results[ "t_ctor" ] = t_ctor
+    if p.output == "measures":                        # FROM SCRATCH: the tree, the diagram and its first measures ( above )
+        p.results[ "t_first" ] = t_first
+        p.results[ "t_scratch" ] = t_scratch
+        p.results[ "ns_per_seed_scratch" ] = t_scratch / n * 1e9
+        if k_scratch is not None:
+            p.results[ "ns_per_seed_scratch_kernel" ] = k_scratch / n * 1e9
     p.results[ "sum_of_measures" ] = float( m.sum() )
     p.results[ "reps" ] = reps
     p.results[ "output" ] = p.output
@@ -240,6 +271,7 @@ if p := bench( "diagram",
         print( benchlib.table( header, [ row ] ) )
         print( f"  min of { reps }; apart from the cells: weights set { t_weights * 1e3 :.1f} ms ( { t_weights / n * 1e9 :.0f} ns/seed ), "
                f"copy to numpy { t_convert * 1e3 :.1f} ms; tree built in { t_build * 1e3 :.0f} ms, diagram built in { t_ctor * 1e3 :.0f} ms, "
+               + ( f"from scratch ( min of { reps } ) { t_scratch * 1e3 :.0f} ms, " if t_scratch is not None else "" )
                + ( f"sum of the measures { m.sum() :.6f}" if p.output == "measures" else
                    f"neighbours per cell { m.mean() :.2f}" if p.output == "adjacency" else
                    f"{ len( m ) // ( d + 1 ) } simplices ( { len( m ) / ( d + 1 ) / n :.2f} per seed )" if p.output == "dual" else f"faces per dimension { m.astype( int ).tolist() }" )

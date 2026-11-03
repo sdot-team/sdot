@@ -220,11 +220,23 @@ class AaBsp( SpatialAccelerator ):
         self.__base_init__( nb_dims = int( pos.shape[ 1 ] ), nb_lohi = 2, **kwargs )
 
         self._majorant_weights = weights
+        # the positions it was built on, in its order ( once: see `take_sorted_positions` )
+        self._sorted_for = ( pos, tree[ "sorted_positions" ] ) if tree[ "sorted_positions" ] is not None else None
         if traced_w:
             order = tree[ "seed_indices" ]
             self.refresh_weight_majorants( getattr( pos, "raw", pos )[ order ], w[ order ] )
             self._majorant_weights = weights
 
+
+    def take_sorted_positions( self, positions ):
+        """`positions` in the tree's order, as its construction wrote them -- if they are the very array the tree was built on
+        ( the same object: concrete, so nothing to differentiate through ), else `None`. Given ONCE, then dropped: it is a copy
+        of the cloud, which a tree kept for later diagrams would otherwise hold"""
+        kept = getattr( self, "_sorted_for", None )
+        if kept is None or getattr( positions, "raw", positions ) is not getattr( kept[ 0 ], "raw", kept[ 0 ] ):
+            return None
+        self._sorted_for = None
+        return kept[ 1 ]
 
     def _init_on_card( self, pos, weights, max_seeds_per_leaf ):
         """THE CARD'S BUILD ( `gpu/Bsp2D.cuh::build_tree` ): the same tree as `_build_in_kernel` ( slices, boxes, median
@@ -426,9 +438,13 @@ def _weight_majorant( pos, w ):
     1e13 and `b` is computed at 1e9 by a cancellation that eats everything. Once raised, the majorant stays
     true, but it no longer majorizes ANYTHING useful. A slope is therefore only admitted if, over the extent
     of the node, it remains of the order of the spread of the weights: beyond that it explains nothing, it
-    amplifies rounding. And since the rounding margin of `b` is relative to `|a . y|` (the kernel
-    computes in `float`), `|a . y|` must not exceed a hundred times the spread, otherwise this
-    margin ceases to be negligible compared to what is being majorized.
+    amplifies rounding.
+
+    And the rounding margin of `b` is relative to `|a . y|` (the kernel computes in `float`): it grows with the
+    distance of the node to the ORIGIN, not with its size. The slope is kept only if its slack, margin included,
+    stays below the constant's. ( A fixed bound, `|a . y| <= 100 spread`, dropped the slope on every node smaller
+    than a hundredth of its distance to the origin: on a grid of 2048^2 seeds in the unit square with the
+    weights of an OT solve, 347 candidates per cell instead of 36. )
     """
     d = pos.shape[ 1 ]
     if w is None:
@@ -442,12 +458,15 @@ def _weight_majorant( pos, w ):
         # is far from the origin. The constant does not change the spread, it is taken up by `b`.
         q = pos - pos.mean( axis = 0 )
         fit = np.linalg.lstsq( q, w - w.mean(), rcond = None )[ 0 ]
-        r = w - pos @ fit
+        ay = pos @ fit
+        r = w - ay
         by_chance = np.sqrt( max( 1.0 - d / ( m - 1 ), 0.0 ) )
         extent = pos.max( axis = 0 ) - pos.min( axis = 0 )
-        reach = np.abs( pos ).max( axis = 0 )
-        well_behaved = bool( ( np.abs( fit ) * extent <= 8 * spread ).all() and ( np.abs( fit ) * reach <= 100 * spread ).all() )
-        if well_behaved and float( r.max() - r.min() ) < 0.85 * by_chance * spread:
+        well_behaved = bool( ( np.abs( fit ) * extent <= 8 * spread ).all() )
+        # the slack of each candidate, the margin below included
+        slack_affine = float( r.max() - r.min() ) + 1e-6 * ( abs( float( r.max() ) ) + spread + float( np.abs( ay ).max() ) )
+        slack_constant = spread + 1e-6 * ( abs( float( w.max() ) ) + spread )
+        if well_behaved and float( r.max() - r.min() ) < 0.85 * by_chance * spread and slack_affine < slack_constant:
             a = fit
 
     b = float( ( w - pos @ a ).max() )
@@ -525,6 +544,30 @@ class _BspLevel( Aggregate ):
     nb_dims  : CtShapeVar
 
 
+class _BspHeap( Aggregate ):
+    """What the ONE-CALL construction writes ( `bsp_build_tree.h` ): the nodes of all the levels, in PREORDER, with their
+    children and the count of the leaves that hold seeds"""
+
+    begin : IntTensor[ "num_node" ]
+    end   : IntTensor[ "num_node" ]
+    left  : IntTensor[ "num_node" ]
+    right : IntTensor[ "num_node" ]
+    nb_leaves : IntTensor[ "num_count" ]
+
+    box   : RealTensor[ "num_node", "num_lohi", "dim" ]
+    wa    : RealTensor[ "num_node", "dim" ]
+    wb    : RealTensor[ "num_node" ]
+
+    num_node : Axis[ "nb_nodes" ]
+    num_lohi : Axis[ "nb_lohi" ]
+    dim      : Axis[ "nb_dims" ]
+    num_count : Axis[ "nb_count" ]
+    nb_nodes : ShapeVar
+    nb_lohi  : CtShapeVar
+    nb_dims  : CtShapeVar
+    nb_count : ShapeVar
+
+
 def _preorder_of_heap( depth ):
     """`p[ i ]` = where the node of heap rank `i` lands in PREORDER (DFS).
 
@@ -559,6 +602,9 @@ def _preorder_of_heap( depth ):
     return pre
 
 
+_ONE_CALL = True     # ( False: the per-level calls on the CPU too -- what the tests compare the one call with )
+
+
 def _build_in_kernel( pos, w, leaf_size ):
     """The same tree as `_build`, built by `bsp_build_level.h` instead of numpy.
 
@@ -570,6 +616,9 @@ def _build_in_kernel( pos, w, leaf_size ):
     `max_depth_for( n, leaf_size )`, a function of `n` ALONE (median cut), so the number
     of calls is known in advance and depends on no data -- about fifteen at 1e6 seeds, against
     the ~130 000 Python loop iterations that the host version does per node.
+
+    ON THE CPU, the levels are chained IN ONE CALL instead ( `bsp_build_tree.h` ): the same body per node, the thread pool's
+    return as the barrier -- the cost of a call through the driver, paid `depth` times, was more than the work itself.
 
     = What stays on the host side, and what it costs
 
@@ -648,6 +697,48 @@ def _build_in_kernel( pos, w, leaf_size ):
             ne_[ 0::2 ], ne_[ 1::2 ] = mid, end
             beg, end = nb_, ne_
         src = _BspCloud( nb_dims = d, positions = P, order = order, **( {} if W is None else { "weights": W } ) )
+
+    # ON THE CPU, ALL THE LEVELS IN ONE CALL ( `bsp_build_tree.h` ): the same tree, the barrier between two levels being the
+    # thread pool's instead of the end of a launch -- one call through the driver instead of `depth`, which writes the nodes
+    # in preorder too: what it returns is taken as it is
+    one_call = _ONE_CALL and host_levels == 0 and getattr( loom.resolved_device(), "is_cpu", False )
+    if one_call:
+        c0 = _BspCloud( nb_dims = d, num_point = src.num_point )
+        c1 = _BspCloud( nb_dims = d, num_point = src.num_point )
+        heap = _BspHeap( nb_dims = d, nb_lohi = 2, nb_nodes = 2 ** depth - 1, nb_count = 1 )
+        prm = IntTensor[ Axis( ShapeVar( 3 ), name = "num_bsp_tree_param" ) ]()
+        prm.set( np.array( [ n, depth, leaf_size ], dtype = np.int64 ) )
+        written_c = [ "positions", "order" ] + ( [ "weights" ] if w is not None else [] )
+        loom.ffi_call(
+            "bsp_build_tree",
+            FfiCode.inline( includes = [ "sdot/bsp_build_tree.h" ],
+                code = "sdot::bsp_build_tree( queue, args.inputs.src, args.outputs.c0, args.outputs.c1, args.outputs.heap, "
+                       "SI( args.inputs.prm( 0 ) ), SI( args.inputs.prm( 1 ) ), SI( args.inputs.prm( 2 ) ) );" ),
+            src = src,
+            c0 = loom.out( c0, writes = written_c ),
+            c1 = loom.out( c1, writes = written_c ),
+            heap = loom.out( heap, writes = [ "begin", "end", "left", "right", "nb_leaves", "box" ] + ( [ "wa", "wb" ] if w is not None else [] ) ),
+            prm = prm,
+            has_dynamic_capacity = False,
+        )
+        # ( everything in its final form, preorder included: the arrays are taken as they are, no copy, no arrangement )
+        last = ( c0, c1 )[ ( depth - 1 ) % 2 ]
+        nb_nodes = 2 ** depth - 1
+        return dict(
+            # the positions IN THE TREE'S ORDER, which the construction has just written: the diagram built on these
+            # positions takes them instead of gathering them again ( `PowerDiagram_Bsp._init_seeds` )
+            sorted_positions = np.asarray( last.positions ).reshape( n, d ),
+            seed_indices = np.asarray( last.order ).reshape( -1 ),
+            node_left    = np.asarray( heap.left ).reshape( -1 ),
+            node_right   = np.asarray( heap.right ).reshape( -1 ),
+            node_begin   = np.asarray( heap.begin ).reshape( -1 ),
+            node_end     = np.asarray( heap.end ).reshape( -1 ),
+            node_box     = np.asarray( heap.box ).reshape( -1, 2, d ),
+            node_wa      = np.asarray( heap.wa ).reshape( -1, d ) if w is not None else np.zeros( ( nb_nodes, d ) ),
+            node_wb      = np.asarray( heap.wb ).reshape( -1 ) if w is not None else np.zeros( nb_nodes ),
+            max_depth    = depth,
+            nb_leaves    = int( np.asarray( heap.nb_leaves ).reshape( -1 )[ 0 ] ),
+        )
 
     for level in range( host_levels, depth ):
         # the output cloud SHARES the points axis (hence its count) with the input: it is the
@@ -740,6 +831,7 @@ def _build_in_kernel( pos, w, leaf_size ):
     node_begin_pre = in_preorder( node_begin )
 
     return dict(
+        sorted_positions = None,
         seed_indices = order,
         node_left    = in_preorder( node_left ),
         node_right   = in_preorder( node_right ),

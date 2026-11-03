@@ -97,6 +97,7 @@ if p := bench( "newton",
                linear_host   = Param( "no", choices = [ "no", "yes" ], help = "ON THE CARD: the linear solver on the host ( the CPU's, through a copy )" ),
                mg_precision  = Param( "auto", choices = [ "auto", "float", "double" ], help = "ON THE CARD: the precision of the multigrid's levels" ),
                mg_kcycle     = Param( -1, help = "ON THE CARD: levels accelerated by the K-cycle ( -1: the default, 2 )" ),
+               plant         = Param( 0.0, help = "move seed 1 this far from seed 0, a pair the aggregation merges ( 0: leave the cloud alone )" ),
                mg_smoothed   = Param( -1, help = "ON THE CARD: levels passed on by the smoothed aggregation ( -1: the default, 1; 0: plain aggregation )" ),
                trace         = Param( "no", choices = [ "no", "yes" ], help = "print the solver's trace ( per iteration, per linear solve )" ),
                card_graphs   = Param( "yes", choices = [ "yes", "no" ], help = "ON THE CARD: the linear solver's iterations replayed from CUDA graphs ( no: plain launches, every kernel timed )" ),
@@ -135,6 +136,9 @@ if p := bench( "newton",
         n_want = p.n or ( 100_000 if p.case == "uniform" else None )
         pos, w_file, d = cases.case( name, n = n_want, seed = p.seed )
     n = len( pos )
+    if p.plant > 0:                                   # ( seed 1 brought `plant` away from seed 0 )
+        pos = numpy.array( pos, dtype = float )
+        pos[ 1 ] = pos[ 0 ] + p.plant / numpy.sqrt( pos.shape[ 1 ] )
     print( "  " + benchlib.env_report() + "; " + benchlib.driver_line() )
     continuation = p.continuation if p.continuation != "default" else ( "always" if density else "never" )
 
@@ -173,6 +177,7 @@ if p := bench( "newton",
     # THE TREE alone ( on the card: one call, `gpu/Bsp2D.cuh`; waited for, min of `reps` ), kernel-only next to the wall
     from sdot import AaBsp
     t_tree = t_tree_kern = None
+    benchlib.start_clock()                            # ( the clocks of the timed calls: `hardware` reads them )
     for _ in range( max( p.reps, 1 ) ):
         if kt: kt.reset()
         t = time.perf_counter()
