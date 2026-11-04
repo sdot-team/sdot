@@ -52,6 +52,29 @@
 // widths otherwise, a width where Newton fails being abandoned for a wider one. `ALWAYS` runs the fixed
 // ladder of widths, from half the diameter of the domain.
 //
+// = The surprise continuation ( `surprise` ): the JUMPS of the density
+//
+// A density positive everywhere can still be hard: an image with coarse pixels against many cells, whose jumps break the
+// linear model as soon as the cells move ( `Newton.h`, the surprise ). `AUTO` watches the first step of the plain Newton; when
+// it is surprised, the start's direction says how far the cells have to go -- `D`, the root mean square of the displacement of
+// the facets for the full step -- and stages run on a regularized density, solved loosely ( `surprise_rtol` ), each one starting
+// the next. For an image ( constant per pixel, `p` its pixel ), the path is `R_eps B_s`: `B_s` the blur of the values on the
+// grid, `R_eps` the RAMPS ( `Image.h`, `ramp` ): each jump a linear ramp of half-width `eps` across the pixel edge, cut on the
+// fly into sub-boxes of degree 1 ( `Image.cxx` ), `R_{ p / 2 }` the P1 interpolation of the pixel centres. A blur alone keeps the
+// jumps -- they are what hurts. So:
+//
+//   * `( s, eps ) = ( D / 4, p / 2 )` if the way is longer than a pixel ( `D / 4 >= p` ), `( 0, min( p / 2, D / 4 ) )` otherwise;
+//   * then the image itself, the surprise still watched: the way left is short. Surprised again, `D` is measured again and a
+//     narrower ramp `min( eps / 2, D / 4 )` is inserted ( 6 rounds at most; a ramp under a quarter of the width of the thinnest
+//     cells is not seen: the plain Newton then ).
+//
+// The width of the thinnest cells is measured a posteriori, on the diagram at hand ( `thin_width`: `2 D a_i / sum_j m_ij`, the
+// side of a cube for any density, its 1 % quantile ), not taken from the mean spacing: the cells that cross the jumps may end
+// much thinner than the average. Another distribution follows its blur `at( s )`
+// alone ( kept above its own scale ). Measured on 24^2 pixels, rtol 1e-6: 9 iterations from 128^2 to 1024^2 diracs, on the grid or
+// jittered, instead of 8 / 14 / 26 / 49 ( 1024^2: 5.7 s instead of 29 s ); 48^2 pixels at 1024^2 ( the blurred stage ): 9 instead
+// of 32. Smooth targets are never surprised ( the cases of `bench/bench_newton.py`: the same iterations ).
+//
 // = The target mass
 //
 // The cells PARTITION the domain: their masses sum to the mass of the density in the
@@ -85,6 +108,9 @@ struct SolverOptions {
     double agg_gap = 0;              ///< ... `w_dup = w_rep - gap` for the exact duplicates
     SI     agg_nb_dups = 0;          ///< ... how many rows of `dups_in` are exact duplicates
     bool   keep_start = false;       ///< the given weights are kept even if they empty a cell ( a stage of a continuation run by the caller )
+    double surprise = 0.5;           ///< AUTO: the surprise that sends the plain Newton to a smoothed stage ( `Newton.h`, 0: never )
+    double surprise_width = 0.25;     ///< ... the width of that stage ( blur or ramp ), in displacements of the full step
+    double surprise_rtol = 1e-3;     ///< ... the relative tolerance of the smoothed stages
 };
 
 /// the weights of the Voronoi of a SIMILITUDE of the cloud that fits it in the box `[ lo, hi ]`: the box
@@ -310,8 +336,9 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     auto min_mass = [&]( const std::vector<double> &m ) { return newton.agg.floor_min( m ); };
     bool groups_on = false;
     if constexpr ( decltype( bal )::groups ) groups_on = bal.grp.active;
-    if ( ! sink && given && ! o.keep_start && ! groups_on && min_mass( a ) < 1e-3 * nu_min ) {   // a warm start that empties a cell: its repair ( `WarmRepair.h` )
-        double vol = 1;                                  // ( the squared spacing of the seeds, `( |box| / n )^( 2 / D )` )
+    // the squared spacing of the seeds, `( |box| / n )^( 2 / D )` ( the box of the domain, or of the cloud )
+    auto spacing2 = [&]() {
+        double vol = 1;
         if constexpr ( DECAYED_TYPE_OF( pd.box_min )::is_valid ) {
             for ( int d = 0; d < D; ++d ) vol *= std::max( double( pd.box_max( d ) ) - double( pd.box_min( d ) ), 1e-300 );
         } else {
@@ -323,7 +350,10 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
             }
             for ( int d = 0; d < D; ++d ) vol *= std::max( hi[ d ] - lo[ d ], 1e-300 );
         }
-        const double l2 = std::pow( vol / double( std::max<SI>( n, 1 ) ), 2.0 / D );
+        return std::pow( vol / double( std::max<SI>( n, 1 ) ), 2.0 / D );
+    };
+    if ( ! sink && given && ! o.keep_start && ! groups_on && min_mass( a ) < 1e-3 * nu_min ) {   // a warm start that empties a cell: its repair ( `WarmRepair.h` )
+        const double l2 = spacing2();
         std::vector<double> w1( w ), a1( a ), lo( nn ), hi( nn ), step( nn ), touched( nn );
         std::vector<Facet> fa1;
         for ( SI i = 0; i < nn; ++i )
@@ -422,6 +452,7 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     double domain_mass = 0;
     // one stage: Newton at `s_current`, from `w`, whose measures at `s_current` are `a`, `fa`; what it leaves is in `newton`
     PI nb_stages = 0;
+    double last_surprise = -1, last_t_surprise = 0;     // ( the surprise of the last stage's first step, `Newton.h` )
     auto run_stage = [&]( int nb_planned ) {
         // the target mass, at the scale of what the domain contains of THIS density
         std::vector<double> nu_s = nu;
@@ -469,10 +500,123 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
         total.residual = newton.st.residual;
         ++nb_stages;
         const bool ok = newton.st.status == NewtonStats::CONVERGED || newton.st.status == NewtonStats::STAGNATION;
+        last_surprise = newton.st.surprise;
+        last_t_surprise = newton.st.t_surprise;
         newton.st = NewtonStats{};
         return ok;
     };
     auto accept = [&]() { w = newton.w; a = newton.a; fa = newton.fa; };
+
+    // ---- THE SURPRISE ( `Newton.h`, `surprise` ): the first step of the plain Newton missed the linear model and stayed short --
+    // the kinks of the density ( the pixel edges of an image ) that the cells cross on their way. A stage on the density
+    // SMOOTHED at the scale of that way, then the density again, the surprise watched at each return ( see the head of the file )
+    const bool can_surprise = can_continue && o.surprise > 0 && ! groups_on && n > 1;
+    // the width of the THINNEST cells of the current diagram ( `newton.a`, `newton.fa` ), a posteriori: `2 D a_i / sum_j m_ij`,
+    // `m_ij = 2 c_ij | p_i - p_j |` the masses of its facets ( the side of a cube, whatever the density ), its 1 % quantile
+    // ( a single crushed cell does not decide ). The faces on the border of the domain are not facets: these cells come out
+    // wider, which a low quantile does not see
+    auto thin_width = [&]() {
+        std::vector<double> pos( PI( nn * D ), 0.0 ), per( nn, 0.0 );
+        for ( SI k = 0; k < n; ++k ) {
+            const auto p = pd.point( k );
+            for ( int d = 0; d < D; ++d ) pos[ PI( ( off + pd.user_id( k ) ) * D + d ) ] = double( p[ d ] );
+        }
+        for ( const Facet &f : newton.fa ) {
+            if ( f.i < off || f.j < off ) continue;
+            double l2 = 0;
+            for ( int d = 0; d < D; ++d ) { const double e = pos[ PI( f.i * D + d ) ] - pos[ PI( f.j * D + d ) ]; l2 += e * e; }
+            per[ f.i ] += 2 * f.c * std::sqrt( l2 );          // ( each cell lists its own facets: `( i, j )` and `( j, i )` )
+        }
+        std::vector<double> wid;
+        for ( SI i = off; i < nn; ++i )
+            if ( newton.a[ i ] > 0 && per[ i ] > 0 && ! newton.agg.is_dup( i ) )
+                wid.push_back( 2 * D * newton.a[ i ] / per[ i ] );
+        if ( wid.empty() ) return std::sqrt( spacing2() );
+        const auto q = wid.begin() + std::ptrdiff_t( 0.01 * double( wid.size() - 1 ) );
+        std::nth_element( wid.begin(), q, wid.end() );
+        return *q;
+    };
+    // the typical way of the cells over the full step `d`: the displacement of each facet `| d_i - d_j | / ( 2 | p_i - p_j | )`,
+    // their root mean square weighted by the mass of the facet ( `c_ij | p_i - p_j |` )
+    auto displacement = [&]() {
+        std::vector<double> pos( PI( nn * D ), 0.0 );
+        for ( SI k = 0; k < n; ++k ) {
+            const auto p = pd.point( k );
+            for ( int d = 0; d < D; ++d ) pos[ PI( ( off + pd.user_id( k ) ) * D + d ) ] = double( p[ d ] );
+        }
+        double num = 0, den = 0;
+        for ( const Facet &f : newton.fa ) {
+            if ( f.i < off || f.j < off ) continue;
+            double l2 = 0;
+            for ( int d = 0; d < D; ++d ) { const double e = pos[ PI( f.i * D + d ) ] - pos[ PI( f.j * D + d ) ]; l2 += e * e; }
+            const double l = std::sqrt( l2 );
+            if ( ! ( l > 0 ) ) continue;
+            const double dis = std::fabs( newton.d[ f.i ] - newton.d[ f.j ] ) / ( 2 * l );
+            num += f.c * l * dis * dis;
+            den += f.c * l;
+        }
+        return den > 0 ? std::sqrt( num / den ) : 0.0;
+    };
+    // the stages: an image ( `at( s, eps )` ) follows `R_eps B_s`: blurred and P1 ( `eps = p / 2` ) if the way is longer than a
+    // pixel, then the ramps tightening towards the jumps; another distribution its blur `s` alone, kept above its own scale
+    // ( under it, `at` smooths nothing )
+    constexpr bool ramps = requires { conv.at( 0.0, 0.0 ); };
+    auto run_surprised = [&]() {
+        const NewtonOptions plain = newton.o;
+        double s_prev = 1e300, e_prev = 1e300;
+        for ( int round = 0; round < 6; ++round ) {
+            const double dis = displacement();
+            const double h = thin_width();
+            double s = 0, e = 0;
+            if constexpr ( ramps ) {
+                const double p = conv.pixel();
+                if ( round == 0 && o.surprise_width * dis >= p ) { s = o.surprise_width * dis; e = p / 2; }
+                else e = std::min( { p / 2, o.surprise_width * dis, e_prev / 2 } );
+                if ( s == 0 && e < h / 4 ) break;               // ( under the width of the thinnest cells, a ramp is not seen )
+            } else {
+                s = std::max( std::min( o.surprise_width * dis, s_prev / 2 ), o.conv_ratio * s_min );
+                if ( ! ( s < s_prev ) || ! ( s > 0 ) ) break;
+            }
+            if ( o.newton.trace )
+                std::printf( "  surprise %.3e at step %.3e: smoothed stage, displacement %.3e, thinnest cells %.3e, s = %.4e, ramp %.4e\n",
+                             last_surprise, last_t_surprise, dis, h, s, e );
+            // the smoothed stage, solved loosely: the next one restarts from it
+            s_current = s;
+            const double t_smooth = now();
+            if constexpr ( ramps ) bal.dist = &conv.at( s, e );
+            else                   bal.dist = &conv.at( s );
+            const double t_meas = now();
+            newton.measures_and_facets( w, a, fa );
+            if ( o.newton.trace )
+                std::printf( "  ( smoothed density built in %.3f s, measured in %.3f s )\n", t_meas - t_smooth, now() - t_meas );
+            newton.o = plain;
+            newton.o.surprise = 0;
+            newton.o.tol_abs = 0;
+            newton.o.tol_rel = std::max( plain.tol_rel, o.surprise_rtol );
+            const bool ok = run_stage( 0 );
+            newton.o = plain;
+            if ( ! ok ) break;
+            accept();
+            // the density itself, the surprise watched
+            s_current = 0;
+            bal.dist = &conv.at( 0 );
+            newton.measures_and_facets( w, a, fa );
+            newton.o.surprise = o.surprise;
+            const bool done = run_stage( 0 );
+            newton.o = plain;
+            if ( total.status != NewtonStats::SURPRISED ) { accept(); return done; }
+            s_prev = s > 0 ? s : s_prev;
+            e_prev = e;
+        }
+        // ( no smoothing helps: the plain Newton, from where we are )
+        newton.o = plain;
+        s_current = 0;
+        bal.dist = &conv.at( 0 );
+        newton.measures_and_facets( w, a, fa );
+        const bool done = run_stage( 0 );
+        accept();
+        return done;
+    };
 
     auto run_adaptive = [&]() {
         if ( run_stage( 0 ) ) {
@@ -542,8 +686,12 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
                 bal.dist = &conv.at( s_current );
                 newton.measures_and_facets( w, a, fa );
             }
+            if ( can_surprise ) newton.o.surprise = o.surprise;
             ok = run_stage( int( scales.size() ) );
+            newton.o.surprise = 0;
             accept();
+            if ( total.status == NewtonStats::SURPRISED )
+                ok = run_surprised();
             if ( total.status == NewtonStats::LINEAR_FAILURE )
                 break;
         }

@@ -66,3 +66,45 @@ if test( "duplicates_diagram" ):
 
 if test( "duplicates_plan" ):
     _run( "duplicates_plan.py" )
+
+
+def _run_launched( name, launcher, module = None ):
+    """runs the snippet the way its page says: under `torchrun` or `mpiexec`, 4 processes"""
+    import importlib.util
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+    if module is not None and importlib.util.find_spec( module ) is None:
+        skip( f"{ module } is not installed" )
+    path = Path( __file__ ).resolve().parents[ 1 ] / "docs" / "snippets" / name
+    if launcher == "torchrun":
+        cmd = [ sys.executable, "-m", "torch.distributed.run", "--nproc-per-node", "4", str( path ) ]
+    else:
+        mpiexec = shutil.which( "mpiexec", path = os.path.dirname( sys.executable ) ) or shutil.which( "mpiexec" )
+        cmd = [ mpiexec, "-n", "4", sys.executable, str( path ) ]
+    with tempfile.TemporaryDirectory() as tmp:
+        res = subprocess.run( cmd, cwd = tmp, capture_output = True, text = True, timeout = 900 )
+    assert res.returncode == 0, f"{ name } failed:\n{ res.stdout[ -2000: ] }{ res.stderr[ -4000: ] }"
+
+
+if test( "parallel_boxes" ):
+    _run( "parallel_boxes.py" )
+
+if test( "parallel_jax" ):
+    _run( "parallel_jax.py" )
+
+if test( "parallel_program" ):
+    # ( JAX ranks: `_run` only skips on the name )
+    import importlib.util
+    if importlib.util.find_spec( "jax" ) is None:
+        skip( "jax is not installed" )
+    _run( "parallel_program.py" )
+
+if test( "parallel_torch" ):
+    _run_launched( "parallel_torch.py", "torchrun", "torch" )
+
+if test( "parallel_mpi" ):
+    _run_launched( "parallel_mpi.py", "mpiexec", "mpi4py" )

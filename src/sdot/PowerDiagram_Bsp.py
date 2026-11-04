@@ -237,6 +237,9 @@ class PowerDiagram_Bsp( PowerDiagram ):
           * `kind = "image"`: an `Image` with a DIAGONAL frame and UNIFORM knots ( a regular grid ), the domain inside it:
             `values` flattened `j * nx + i` ( `i` along x ), `geom = ( x0, y0, hx, hy, nx, ny )`, `min_scale`
             ( `Convolved< Image >::min_scale` );
+          * `kind = "image1"`: an `Image( degree = 1 )` with a DIAGONAL frame, any knots, the domain inside it ( `Density2D.cuh::DensImage1` ):
+            `knots` from its corner ( `nx + 1` then `ny + 1` ), `coeffs` its Bernstein coefficients `[ nx, ny, 4 ]` flattened,
+            `geom = ( x0, y0, 0, 0, nx, ny )` -- read on the host, no continuation;
           * `kind = "gauss"`: isotropic `SumOfGaussians`, 2D or 3D: `pos`, `sigma`, `mass` ( the backend's arrays, traced or not ).
 
         The geometry of an image is read on the host ( it is a constant of the problem ); its values are not."""
@@ -270,6 +273,20 @@ class PowerDiagram_Bsp( PowerDiagram ):
             if int( dist.nb_dims.value ) != self.dim_count or self.dim_count not in ( 2, 3 ) or len( dist.sigmas.shape ) != 1 or dist.batch_axes:
                 return None
             return dict( kind = "gauss", pos = dist.positions.raw, sigma = dist.sigmas.raw, mass = dist.weights.raw )
+        if isinstance( dist, Image ) and dist.is_polynomial and self.dim_count == 2:
+            from .SdotPlanNd import _image_of_degree_1
+            q1 = _image_of_degree_1( dist )
+            if q1 is None:
+                return None
+            nx, ny, prm = q1
+            kx, ky = prm[ : nx + 1 ], prm[ nx + 1 : nx + ny + 2 ]
+            mi = np.asarray( self.box_min, dtype = float ).reshape( -1 )
+            ma = np.asarray( self.box_max, dtype = float ).reshape( -1 )
+            tol = 1e-12 * max( float( np.abs( np.concatenate( [ kx, ky ] ) ).max() ), 1.0 )
+            if mi[ 0 ] < kx[ 0 ] - tol or mi[ 1 ] < ky[ 0 ] - tol or ma[ 0 ] > kx[ -1 ] + tol or ma[ 1 ] > ky[ -1 ] + tol:
+                return None                                  # ( the Green tables of a row assume the cells inside the image )
+            return dict( kind = "image1", conv_possible = False, min_scale = 0.0, knots = np.concatenate( [ kx - kx[ 0 ], ky - ky[ 0 ] ] ),
+                         coeffs = prm[ nx + ny + 2 : ], geom = [ kx[ 0 ], ky[ 0 ], 0.0, 0.0, nx, ny ] )
         if isinstance( dist, Image ):
             try:
                 geo = dist._grid_geometry()

@@ -11,9 +11,11 @@
 #include "cell/Ids.h"
 #include "ConstantDensity.h"
 #include "CstUdPiece.h"
+#include "LinUdPiece.h"
 #include "Image.h"
 #include "PolynomialPixel.h"
 #include <cmath>
+#include <cassert>
 
 #define UTP SDOT_TEMPLATE_DECL_FOR_Image
 #define DTP Image<SDOT_TEMPLATE_ARGS_FOR_Image>
@@ -32,12 +34,14 @@ UTP HD auto DTP::with_defaults( auto &&cont ) const {
     // frame, knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs. `::sdot::Image` (qualified) names the
     // TEMPLATE so CTAD re-deduces; bare `Image` would mean the current instantiation and defeat the
     // substitution.
+    // ( `ramp`, a C++ member out of the positional list, is copied by hand: see `Image.h` )
+    auto again = [&]( auto &&img ) { img.ramp = ramp; return img.with_defaults( FORWARD( cont ) ); };
     if constexpr ( ! DECAYED_TYPE_OF( origin )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, Vector<TF,ct_dim>::zeros(), frame, knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
+        return again( ::sdot::Image{ target_mass, nb_dims, shape, values, Vector<TF,ct_dim>::zeros(), frame, knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs } );
     else if constexpr ( ! DECAYED_TYPE_OF( frame )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, Matrix<TF,ct_dim>::identity(), knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
+        return again( ::sdot::Image{ target_mass, nb_dims, shape, values, origin, Matrix<TF,ct_dim>::identity(), knots, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs } );
     else if constexpr ( ! DECAYED_TYPE_OF( knots )::is_valid )
-        return ::sdot::Image{ target_mass, nb_dims, shape, values, origin, frame, IotaTensor<TF>{}, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs }.with_defaults( FORWARD( cont ) );
+        return again( ::sdot::Image{ target_mass, nb_dims, shape, values, origin, frame, IotaTensor<TF>{}, current_mass, nb_cells_cum, cell_cum_mass, nb_coeffs, coeffs } );
     else
         return cont( *this );
 }
@@ -58,7 +62,7 @@ UTP HD typename DTP::TF DTP::measure() const {
             constexpr PI nc = DECAYED_TYPE_OF( img.nb_coeffs )::value;
             auto shape = img.coeffs.shape();
             CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
-            TF sum = 0;
+            double sum = 0;                   // ( in double: in float, the sum of many pixels drifts )
             for ( PI flat = 0; flat < cells.size(); ++flat )
                 sum += cells[ flat ].values.apply_values( [&]( auto ...i ) {
                     PI axis = 0;
@@ -66,7 +70,7 @@ UTP HD typename DTP::TF DTP::measure() const {
                     ( ( axis < PI( d ) ? ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), 0 ) : 0, ++axis ), ... );
                     return TF( img.coeffs( i... ) ) * spacing;
                 } );
-            return sum * fdet / TF( nc );
+            return TF( sum * double( fdet ) / double( nc ) );
         } else {
             // sum over the cells (extent per axis = number of cells along it = `values.shape()`).
             // Each cell contributes value * |det(frame)| * Prod_axis ( knots(axis, i+1) - knots(axis, i) ).
@@ -74,7 +78,7 @@ UTP HD typename DTP::TF DTP::measure() const {
             // dimensions), so it and `knots` are both indexed positionally.
             auto shape = img.values.shape();
             CartesianIndices<DECAYED_TYPE_OF( shape )> cells{ shape };
-            TF sum = 0;
+            double sum = 0;                   // ( in double: in float, the sum of many pixels drifts )
             for ( PI flat = 0; flat < cells.size(); ++flat ) {
                 // `cells[ flat ]` now returns a `Coords` ( a NAMED multi-index ) and no longer the
                 // bare tuple: unpacking is requested from its `values`.
@@ -85,14 +89,22 @@ UTP HD typename DTP::TF DTP::measure() const {
                     ( ( spacing *= TF( img.knots( axis, i + 1 ) ) - TF( img.knots( axis, i ) ), ++axis ), ... );
                     return TF( img.values( i... ) ) * spacing;
                 } );
-                sum += cell * fdet;
+                sum += double( cell * fdet );
             }
-            return sum;
+            return TF( sum );
         }
     } );
 }
 
 namespace detail {
+    /// a sub-box of a pixel under the RAMP ( `Image.h`, `ramp` ): degree 1 along each axis. A stage of the solver only: no
+    /// derivative goes through it ( the adjoints read the image at `ramp = 0` )
+    template<class TF,int D,class Idx>
+    struct RampPixel : PolynomialPixel<TF,D,1,Idx> {
+        HD void add_value_grad_at( auto &&, const auto &, TF ) const { assert( false && "no derivative through the ramp of an image" ); }
+        HD void integrate_over_simplex_bwd( auto &&... ) const { assert( false && "no derivative through the ramp of an image" ); }
+    };
+
     /// A RUNTIME multi-index (`Vector<SI,d>`) turned into a `Tuple`, which `TensorView::offset` unpacks
     /// by itself -- enough to write `values( k )` with a `k` whose components are computed.
     /// Same `Ct` recursion as `unravel_index` (see `CartesianIndices.h`).
@@ -214,6 +226,138 @@ UTP HD void DTP::_for_each_piece( const auto &cell, auto &&ws, auto &&func, cons
 
     using TK = std::decay_t<decltype( cell.coord( 0, 0 ) )>;
     const TF tol = TF( 64 ) * TF( std::numeric_limits<TK>::epsilon() );
+
+    // ---- THE RAMP ( `Image.h` ): the tile `k` cut into sub-boxes, `[ lo, lo + e ]`, the centre, `[ hi - e, hi ]` along each axis
+    // where the density varies there, each one a piece of its own ( at most 2d cuts, as a tile: `extra_cuts_per_piece` holds ).
+    // `e` is the ramp in grid units at that knot, clipped at half of each pixel it touches -- the same on both sides
+    if constexpr ( ! is_polynomial ) {
+        if ( ramp > 0 ) {
+            TF unit[ d ];                                     // the length of a grid unit along each axis ( a row of `F` )
+            for ( PI a = 0; a < d; ++a ) {
+                TF l2 = 0;
+                for ( PI c = 0; c < d; ++c ) l2 += F( a, c ) * F( a, c );
+                unit[ a ] = std::sqrt( l2 );
+            }
+            auto value_at = [&]( const Vector<SI,d> &q ) { return TF( values( detail::image_index_tuple( q, tuple(), Ct<int,0>() ) ) ); };
+            auto differ = [&]( TF u, TF v ) { const TF m = ( u < 0 ? -u : u ) > ( v < 0 ? -v : v ) ? ( u < 0 ? -u : u ) : ( v < 0 ? -v : v ); return ( u > v ? u - v : v - u ) > TF( 1e-12 ) * m; };
+            // the density varies across side `sg` of axis `a` of tile `k`: some pair across that face, the other axes within one pixel
+            auto varies = [&]( const Vector<SI,d> &kk, PI a, int sg ) {
+                Vector<SI,d> o;
+                for ( PI b = 0; b < d; ++b ) o[ b ] = b == a ? 0 : -1;
+                while ( true ) {
+                    Vector<SI,d> p = kk, q;
+                    bool in = true;
+                    for ( PI b = 0; b < d; ++b ) { p[ b ] += o[ b ]; in &= p[ b ] >= 0 && p[ b ] < nb_pixels( int( b ) ); }
+                    if ( in ) {
+                        q = p;
+                        q[ a ] += sg;
+                        if ( differ( value_at( p ), value_at( q ) ) ) return true;
+                    }
+                    PI b = 0;
+                    while ( b < d && ( b == a || ++o[ b ] > 1 ) ) { if ( b != a ) o[ b ] = -1; ++b; }
+                    if ( b == d ) return false;
+                }
+            };
+            // the half-width of the ramp at knot `j` of axis `a` ( between pixels `j - 1` and `j` ), in grid units
+            auto half = [&]( PI a, SI j ) {
+                TF e = ramp / unit[ a ];
+                const TF wl = TF( knots( a, j ) ) - TF( knots( a, j - 1 ) ), wr = TF( knots( a, j + 1 ) ) - TF( knots( a, j ) );
+                e = e < wl / 2 ? e : wl / 2;
+                return e < wr / 2 ? e : wr / 2;
+            };
+            // along each axis, up to 3 intervals; at each end, the pixels ( offsets -1, 0, 1 ) that mix and their weights
+            struct Iv { TF lo, hi; int nb[ 2 ]; SI off[ 2 ][ 2 ]; TF w[ 2 ][ 2 ]; };
+            while ( true ) {
+                Iv iv[ d ][ 3 ];
+                int ni[ d ];
+                for ( PI a = 0; a < d; ++a ) {
+                    const SI nb = nb_pixels( int( a ) );
+                    const TF lo = TF( knots( a, k[ a ] ) ), hi = TF( knots( a, k[ a ] + 1 ) );
+                    const TF el = k[ a ] > 0 && varies( k, a, -1 ) ? half( a, k[ a ] ) : TF( 0 );
+                    const TF er = k[ a ] + 1 < nb && varies( k, a, +1 ) ? half( a, k[ a ] + 1 ) : TF( 0 );
+                    int n = 0;
+                    if ( el > 0 ) iv[ a ][ n++ ] = Iv{ lo, lo + el, { 2, 1 }, { { -1, 0 }, { 0, 0 } }, { { TF( 0.5 ), TF( 0.5 ) }, { TF( 1 ), TF( 0 ) } } };
+                    if ( hi - er > lo + el ) iv[ a ][ n++ ] = Iv{ lo + el, hi - er, { 1, 1 }, { { 0, 0 }, { 0, 0 } }, { { TF( 1 ), TF( 0 ) }, { TF( 1 ), TF( 0 ) } } };
+                    if ( er > 0 ) iv[ a ][ n++ ] = Iv{ hi - er, hi, { 1, 2 }, { { 0, 0 }, { 0, 1 } }, { { TF( 1 ), TF( 0 ) }, { TF( 0.5 ), TF( 0.5 ) } } };
+                    ni[ a ] = n;
+                }
+                Vector<SI,d> m;
+                for ( PI a = 0; a < d; ++a ) m[ a ] = 0;
+                while ( true ) {
+                    // the sub-box `m`: cut out of the cell as a tile is
+                    bool alive = true, fitted = true, started = false;
+                    for ( PI a = 0; a < d && alive; ++a ) {
+                        const Iv &I = iv[ a ][ m[ a ] ];
+                        const TF tol_hi = tol * ( 1 + ( I.hi < 0 ? -I.hi : I.hi ) ), tol_lo = tol * ( 1 + ( I.lo < 0 ? -I.lo : I.lo ) );
+                        if ( t_hi[ a ] > I.hi + tol_hi ) {
+                            fitted = started ? ws.cut( nrm[ a ], I.hi + shift[ a ] ) : ws.start( cell, nrm[ a ], I.hi + shift[ a ] );
+                            started = true;
+                            if ( ! fitted ) break;
+                            if ( ws.nb_vertices() == 0 ) { alive = false; break; }
+                        }
+                        if ( t_lo[ a ] < I.lo - tol_lo ) {
+                            fitted = started ? ws.cut( - nrm[ a ], - I.lo - shift[ a ] ) : ws.start( cell, - nrm[ a ], - I.lo - shift[ a ] );
+                            started = true;
+                            if ( ! fitted ) break;
+                            if ( ws.nb_vertices() == 0 ) { alive = false; break; }
+                        }
+                    }
+                    if ( ! fitted )
+                        return;
+                    if ( alive ) {
+                        // its Bernstein coefficients ( degree 1 along each axis ): at each corner `al`, the product of the weights
+                        const auto idx = detail::image_index_tuple( k, tuple(), Ct<int,0>() );
+                        detail::RampPixel<TF,d,DECAYED_TYPE_OF( idx )> density{ PolynomialPixel<TF,d,1,DECAYED_TYPE_OF( idx )>{ .idx = idx } };
+                        density.for_each_alpha( [&]( int flat, const int *al ) {
+                            TF sum = 0;
+                            int ch[ d ];
+                            for ( PI a = 0; a < d; ++a ) ch[ a ] = 0;
+                            while ( true ) {
+                                Vector<SI,d> q = k;
+                                TF w = 1;
+                                for ( PI a = 0; a < d; ++a ) {
+                                    const Iv &I = iv[ a ][ m[ a ] ];
+                                    q[ a ] += I.off[ al[ a ] ][ ch[ a ] ];
+                                    w *= I.w[ al[ a ] ][ ch[ a ] ];
+                                }
+                                sum += w * value_at( q );
+                                PI a = 0;
+                                while ( a < d && ++ch[ a ] >= iv[ a ][ m[ a ] ].nb[ al[ a ] ] ) { ch[ a ] = 0; ++a; }
+                                if ( a == PI( d ) ) break;
+                            }
+                            density.c[ flat ] = sum;
+                        } );
+                        bool flat_density = true;
+                        for ( int j = 1; j < density.nb_coeffs; ++j ) flat_density &= ! differ( density.c[ j ], density.c[ 0 ] );
+                        if ( flat_density ) {                   // ( the centre, and every sub-box without a jump: the fast path )
+                            auto cst = ConstantDensity{ density.c[ 0 ], [&]( auto &&, TF ) {
+                                assert( false && "no derivative through the ramp of an image" );
+                            } };
+                            if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, cst ); } );
+                            else           func( cell, cst );
+                        } else {
+                            for ( PI a = 0; a < d; ++a ) {
+                                const Iv &I = iv[ a ][ m[ a ] ];
+                                density.nrm[ a ] = nrm[ a ];
+                                density.off[ a ] = I.lo + shift[ a ];
+                                density.inv_h[ a ] = TF( 1 ) / ( I.hi - I.lo );
+                            }
+                            if ( started ) ws.with_current( [&]( const auto &piece ) { func( piece, density ); } );
+                            else           func( cell, density );
+                        }
+                    }
+                    PI a = 0;
+                    while ( a < d && ++m[ a ] >= ni[ a ] ) { m[ a ] = 0; ++a; }
+                    if ( a == PI( d ) ) break;
+                }
+                PI a = 0;
+                while ( a < d && ++k[ a ] >= k1[ a ] ) { k[ a ] = k0[ a ]; ++a; }
+                if ( a == PI( d ) )
+                    return;
+            }
+        }
+    }
+
     while ( true ) {
         // A plane that every vertex already satisfies cuts nothing: it is not made. In the common case
         // of a cell that lies inside its tile ( one tile for the whole domain, and the interior cells ) NO plane is
@@ -376,21 +520,63 @@ UTP HD void DTP::measure_coeffs_bwd( auto &&grad_coeffs, auto &&grad_mass ) cons
 // `frame(0,0) * ( knots(i+1) - knots(i) ) * value` -- integral of the density over the physical
 // width -- while `y` stays the DENSITY (so `mass / y` is a physical length). The default
 // origin=0 / frame=identity collapses `x(i)` back to `knots(i)`, reproducing the plain-knot walk.
-// Callers reach these through `with_defaults`, so `origin`/`frame`/`knots` are always populated.
+// Callers reach these through `with_defaults`, so `origin`/`frame`/`knots` are always populated. The knots are read
+// as `knots( 0, i )`, the axis first: those of a polynomial image are given per axis.
 // Assumes `frame(0,0) > 0` (an increasing detector axis), like the sorted-by-position diracs.
+UTP HD typename DTP::TF DTP::udp_left( SI c ) const {
+    if constexpr ( is_polynomial ) return TF( coeffs( c, 0 ) );
+    else                           return TF( values[ c ] );
+}
+
+UTP HD typename DTP::TF DTP::udp_slope( SI c ) const {
+    if constexpr ( is_polynomial ) return ( TF( coeffs( c, 1 ) ) - TF( coeffs( c, 0 ) ) ) / ( frame( 0, 0 ) * ( knots( 0, c + 1 ) - knots( 0, c ) ) );
+    else                           return TF( 0 );
+}
+
+// ( in double: in float, the mass of a pixel of a tail, h times a density of 1e-38, is a denormal with few digits left )
+UTP HD double DTP::udp_cell_mass( SI c ) const {
+    const double h = double( frame( 0, 0 ) ) * ( double( knots( 0, c + 1 ) ) - double( knots( 0, c ) ) );
+    if constexpr ( is_polynomial ) return h * ( double( coeffs( c, 0 ) ) + double( coeffs( c, 1 ) ) ) / 2;
+    else                           return h * double( values[ c ] );
+}
+
+UTP HD SI DTP::udp_nb_cells() const {
+    if constexpr ( is_polynomial ) return SI( coeffs.shape( 0 ) );
+    else                           return SI( values.size() );
+}
+
+// the length from a point of density `y` ( slope `s` in its pixel ) that holds the mass `m`: `m / y` on a constant
+// pixel, the root of `y u + s u^2 / 2 = m` on an affine one, `2 m / ( y + sqrt( y^2 + 2 s m ) )` ( no cancellation )
+// ( in double, for the same reason: a small mass over a small density )
+UTP HD typename DTP::TF DTP::udp_length( TF y, TF s, double m ) const {
+    if constexpr ( is_polynomial ) {
+        const double d = double( y ) * double( y ) + 2 * double( s ) * m;
+        using std::sqrt;
+        const double den = double( y ) + ( d > 0 ? sqrt( d ) : 0.0 );
+        return den > 0 ? TF( 2 * m / den ) : TF( 0 );
+    } else
+        return TF( m / double( y ) );
+}
+
+UTP HD auto DTP::udp_piece( TF x0, TF x1, const auto &udp ) const {
+    if constexpr ( is_polynomial ) return LinUdPiece<TF>{ .x0 = x0, .x1 = x1, .y0 = udp.y, .s = udp.s };
+    else                           return CstUdPiece<TF>{ .x0 = x0, .x1 = x1, .y = udp.y };
+}
+
 UTP HD auto DTP::udp_start() const {
     const TF sc = frame( 0, 0 );
     const TF of = origin( 0 );
     return Udp{
         .index = 0,
-        .pos = of + sc * knots( 0 ),
-        .mass = sc * ( knots( 1 ) - knots( 0 ) ) * values[ 0 ],
-        .y = values[ 0 ]
+        .pos = of + sc * knots( 0, 0 ),
+        .mass = udp_cell_mass( 0 ),
+        .y = udp_left( 0 ),
+        .s = udp_slope( 0 )
     };
 }
 
 UTP HD auto DTP::udp_cont( auto &&udp, auto mass_to_take, auto &&cb_parts ) const {
-    const SI nb_cells = values.size();
+    const SI nb_cells = udp_nb_cells();
     const TF sc = frame( 0, 0 );
     const TF of = origin( 0 );
 
@@ -402,36 +588,45 @@ UTP HD auto DTP::udp_cont( auto &&udp, auto mass_to_take, auto &&cb_parts ) cons
         mass_to_take -= udp.mass;
 
         const SI new_index = udp.index + 1;
-        const TF x1 = of + sc * knots( new_index );
+        const TF x1 = of + sc * knots( 0, new_index );
         // Emit even when y == 0: it contributes nothing to the cost / barycenter (`w2_dist` and
         // `first_moment` carry the y factor) but its `second_moment_about` feeds the direct term of
         // d cost / d y_c, which is non-zero on a zero-density cell.
-        cb_parts( CstUdPiece{ .x0 = udp.pos, .x1 = x1, .y = udp.y } );
+        cb_parts( udp_piece( udp.pos, x1, udp ) );
 
         udp.index = new_index;
         udp.pos = x1;
-        udp.y = values[ new_index ];
+        udp.y = udp_left( new_index );
+        udp.s = udp_slope( new_index );
 
-        udp.mass = sc * ( knots( new_index + 1 ) - knots( new_index ) ) * udp.y;
+        udp.mass = udp_cell_mass( new_index );
     }
 
     // Partial take inside the current cell. Interior zero-density cells are already SKIPPED by the
     // loop above (their mass is 0, so `mass_to_take >= udp.mass` always advances past them); the only
-    // way `udp.y` can be 0 here is a TRAILING run of empty cells at the target's right end. There is
-    // no mass to place there -- the residual `mass_to_take` is the floating-point remainder of an
-    // exhausted target -- so we skip the take rather than divide by zero. The dirac's cost and
-    // barycenter come entirely from the (nonzero) pieces already emitted, as a zero-`y` piece
-    // contributes nothing to either (`w2_dist` / `first_moment` carry the `y` factor).
-    if ( udp.y != 0 ) {
-        const TF x1 = udp.pos + mass_to_take / udp.y;
-        cb_parts( CstUdPiece{ .x0 = udp.pos, .x1 = x1, .y = udp.y } );
+    // way the density can be 0 here ( and not rise in the cell ) is a TRAILING run of empty cells at the
+    // target's right end. There is no mass to place there -- the residual `mass_to_take` is the
+    // floating-point remainder of an exhausted target -- so we skip the take rather than divide by zero.
+    if ( udp.y > 0 || udp.s > 0 ) {
+        // The new position is computed FROM THE START OF THE PIXEL, from the mass taken in it so far -- not by adding the
+        // length of this take to `udp.pos`: in single precision, at coordinates of the order of 1, a sum of lengths drifts
+        // by a fraction of a pixel and the position no longer matches the mass. Bounded by the end of the pixel ( a rounding
+        // remainder taken from a nearly empty pixel, a density of 1e-70 in the tail of a gaussian, would otherwise give a
+        // length far outside it ).
+        const SI c = udp.index;
+        const TF x_cell = of + sc * knots( 0, c ), h = sc * ( knots( 0, c + 1 ) - knots( 0, c ) );
+        const double rem = udp.mass - double( mass_to_take );
+        const TF L0 = udp_length( udp_left( c ), udp.s, udp_cell_mass( c ) - rem ), L = L0 < h ? L0 : h;
+        const TF x1 = x_cell + L > udp.pos ? x_cell + L : udp.pos;
+        cb_parts( udp_piece( udp.pos, x1, udp ) );
         udp.pos = x1;
-        udp.mass -= mass_to_take; // remaining mass of the current cell, for the next dirac
+        udp.y = udp_left( c ) + udp.s * L;
+        udp.mass = rem; // remaining mass of the current cell, for the next dirac
     }
 }
 
 UTP HD auto DTP::udp_at( auto &&cell_cum_mass, auto target_mass ) const {
-    const SI nb_cells = values.size();
+    const SI nb_cells = udp_nb_cells();
     const TF sc = frame( 0, 0 );
     const TF of = origin( 0 );
 
@@ -444,30 +639,35 @@ UTP HD auto DTP::udp_at( auto &&cell_cum_mass, auto target_mass ) const {
     // cell edge resolves to the LAST cell whose mass ended there (`udp.y` possibly nonzero, `udp.mass`
     // exactly 0), matching `udp_cont`'s own state right after a partial-take finishes exactly on an
     // edge -- the following zero-mass run is only entered by the NEXT `udp_cont` call, exactly like the
-    // sequential algorithm's own next call would. For any `c > 0` chosen by this rule, `y(c)` is
-    // PROVABLY nonzero (`cell_cum_mass(c) < target_mass` forces `cell_cum_mass(c) < cell_cum_mass(c+1)`,
-    // i.e. cell `c` itself carries mass) -- only `c == 0` can have `y(c) == 0`, and only when
-    // `target_mass == 0` exactly, guarded below like `udp_cont`'s own partial-take guard.
+    // sequential algorithm's own next call would. For any `c > 0` chosen by this rule, cell `c` PROVABLY
+    // carries mass (`cell_cum_mass(c) < target_mass` forces `cell_cum_mass(c) < cell_cum_mass(c+1)`) --
+    // only `c == 0` can be empty, and only when `target_mass == 0` exactly, guarded below like
+    // `udp_cont`'s own partial-take guard.
     SI lo = 0, hi = nb_cells - 1; // invariant: answer in [lo,hi]
     while ( lo < hi ) {
         const SI mid = lo + ( hi - lo ) / 2;
-        if ( TF( cell_cum_mass( mid + 1 ) ) >= TF( target_mass ) ) hi = mid;
+        if ( double( cell_cum_mass( mid + 1 ) ) >= double( target_mass ) ) hi = mid;
         else                                                       lo = mid + 1;
     }
     const SI c = lo; // a float overshoot past the array's own total (independent chunked-summation
                       // rounding between `cell_cum_mass` and the caller's own target mass) cannot walk
                       // past the end -- same bound-safety reasoning as `udp_cont`'s `index+1 < nb_cells`.
 
-    const TF base = TF( cell_cum_mass( c ) );
-    const TF y    = values[ c ];
-    const TF x0   = of + sc * knots( c );
+    const double base = double( cell_cum_mass( c ) );
+    const TF y    = udp_left( c );
+    const TF s    = udp_slope( c );
+    const TF x0   = of + sc * knots( 0, c );
+    const TF L0   = ( y > 0 || s > 0 ) ? udp_length( y, s, double( target_mass ) - base ) : TF( 0 );
+    const TF h    = sc * ( knots( 0, c + 1 ) - knots( 0, c ) );
+    const TF L    = L0 < h ? L0 : h;                                 // ( bounded by the pixel, as in `udp_cont` )
     return Udp{
         .index = c,
-        .pos   = ( y != 0 ) ? x0 + ( TF( target_mass ) - base ) / y : x0,
-        .mass  = TF( cell_cum_mass( c + 1 ) ) - TF( target_mass ), // array-consistent (not recomputed
+        .pos   = x0 + L,
+        .mass  = double( cell_cum_mass( c + 1 ) ) - double( target_mass ), // array-consistent (not recomputed
                                                                     // from knots*y), stays coherent with
                                                                     // whatever rounding built the array
-        .y     = y
+        .y     = y + s * L,
+        .s     = s
     };
 }
 
@@ -477,11 +677,10 @@ UTP HD auto DTP::udp_at( auto &&cell_cum_mass, auto target_mass ) const {
 // thread does a whole angle -- `nb_cells` is small enough that no cooperative scan is worth it.
 UTP HD void DTP::fill_cell_cum_mass( auto &&cell_cum_mass ) const {
     with_defaults( [&]( auto &&img ) {
-        const SI nb_cells = img.values.size();
-        const TF sc = img.frame( 0, 0 );
-        auto cell_mass = [&]( SI c ) { return sc * ( TF( img.knots( c + 1 ) ) - TF( img.knots( c ) ) ) * TF( img.values[ c ] ); };
+        const SI nb_cells = img.udp_nb_cells();
+        auto cell_mass = [&]( SI c ) { return img.udp_cell_mass( c ); };   // ( in double )
 
-        TF running = 0;
+        double running = 0;                  // ( in double, and stored as such: in float, the sum of many pixels drifts )
         for ( SI c = 0; c < nb_cells; ++c ) {
             cell_cum_mass( c ) = running;
             running += cell_mass( c );

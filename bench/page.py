@@ -55,7 +55,8 @@ HERE = Path( __file__ ).resolve().parent
 DOCS = HERE.parent / "docs" / "guide" / "bench"
 
 BASELINES = { "cgal", "geogram" }      # the benches whose programs `build_baselines.py` builds on the machine
-FILES = { "diagram": "bench_diagram.py", "newton": "bench_newton.py", "sequence": "bench_sequence.py", "cgal": "bench_cgal.py", "geogram": "bench_geogram.py" }
+FILES = { "diagram": "bench_diagram.py", "newton": "bench_newton.py", "sequence": "bench_sequence.py", "cgal": "bench_cgal.py", "geogram": "bench_geogram.py",
+          "one_d": "bench_1d.py", "grid": "bench_grid.py" }
 
 # the clouds of `bench_diagram` / `bench_cgal` / `bench_geogram` ( a list of runs: one errand call each, a comma is a matrix )
 CLOUDS = [
@@ -70,6 +71,8 @@ DENSITIES = [
 
 # the sizes of the scaling with the number of diracs
 NS = "1000,10000,100000,1000000,10000000"
+N1D  = "1000,10000,100000,1000000"           # 1D: the diracs ( or the pixels ) of each of the 256 problems
+MPOT = "1000,3000,10000,30000,100000,300000,1000000,3000000"   # 1D: POT's diracs per image
 
 # job -> ( kind, bench, [ runs ], level ). level: `default` or `full`. `{T}`: the thread counts of `--threads` ( default 1 and
 # the physical cores, -1 ); the others run on all the cores.
@@ -111,6 +114,24 @@ JOBS = {
                                          "--case=lines_voronoi,planes_voronoi --kernel=mixed --jit=yes --step=auto",
                                          *[ d + " --kernel=mixed --jit=yes --step=auto" for d in DENSITIES ] ], "default" ),
     "gpu_n1e7":    ( "gpu", "newton",  [ "--case=uniform --dim=2,3 --n=10000000 --kernel=mixed --jit=no --reps=1 --step=auto" ], "full" ),
+
+    # the 1D page ( `bench_1d.py` ): batches of 256 problems in double, all the cores ( and over the threads at n = 1e5 ).
+    # sdot in a numpy environment ( POT in numpy there, in torch in a torch one; on a card, in the environment's framework )
+    "one_d":       ( "cpu", "one_d", [ f"--problem=diracs,images --n={ N1D } --threads=-1 --reps=2",
+                                       "--problem=diracs,images --n=100000 --threads=1,2,4,8,16,32,64 --reps=1" ], "default" ),
+    # POT on 256 pairs of images of 1e4 pixels discretized alike ( m diracs each ): POT on numpy against sdot on one thread,
+    # POT on torch against sdot on all the cores
+    "one_d_pot":   ( "cpu", "one_d", [ "--problem=images --n=10000 --threads=1,-1 --reps=2",
+                                       f"--problem=images --method=pot --n=10000 --m={ MPOT } --threads=1 --reps=1" ], "default" ),
+    "one_d_pot_torch": ( "cpu", "one_d", [ f"--problem=images --method=pot --backend=torch --n=10000 --m={ MPOT } --threads=-1 --reps=1" ], "default" ),
+    "gpu_one_d":   ( "gpu", "one_d", [ f"--problem=diracs --n={ N1D } --device=default --reps=2",
+                                       f"--problem=images --n={ N1D } --device=default --reps=2",
+                                       f"--problem=images --method=pot --backend=auto --n=10000 --m={ MPOT } --device=default --reps=2" ], "default" ),
+
+    # the grid page ( `bench_grid.py` ): N x N diracs against an image of 512 x 512 affine pixels, the dedicated solver and the
+    # same diracs as a cloud, over N, all the cores
+    "grid":        ( "cpu", "grid", [ "--side=64,128,256,512,1024,2048,4096 --solver=dedicated,generic --threads=-1" ], "default" ),
+    "gpu_grid":    ( "gpu", "grid", [ "--side=64,128,256,512,1024,2048 --solver=dedicated,generic --device=default" ], "default" ),
 }
 
 # `--quick`: the flags each bench gets instead of its own
@@ -120,6 +141,8 @@ QUICK = {
     "geogram":  "--n=20000 --reps=1",
     "sequence": "--n=20000 --reps=1",
     "newton":   "--n=3000 --reps=1 --image-size=64",
+    "one_d":    "--reps=1",
+    "grid":     "--side=64,128 --reps=1",
 }
 
 # result keys worth keeping ( the others are diagnostics of the benches )
@@ -129,7 +152,8 @@ KEEP = { "n", "dim", "threads", "kernel", "output", "status", "converged", "iter
          "acc_max", "nb_continuation_steps", "residual_rel", "step", "linear_solver", "program", "cgal_commit", "t_bsp_build",
          "geogram", "t_triangulation", "t_rvd", "t_linear", "max_diff_sdot", "residual_sdot", "grid", "residual", "level", "triangulations",
          "mean_neighbours", "simplices", "clock_ghz", "sm_clock_ghz", "t_ctor", "ns_per_seed_scratch", "t_scratch", "ns_per_seed_scratch_kernel",
-         "t_total_cpp", "t_jit_kernels", "t_eager_kernels" }
+         "t_total_cpp", "t_jit_kernels", "t_eager_kernels", "batch", "pixels", "method", "backend", "problem", "m", "error", "t_kernels", "skipped",
+         "side", "solver", "precision", "ns_per_dirac", "grid_solver" }
 
 
 def errand_root():

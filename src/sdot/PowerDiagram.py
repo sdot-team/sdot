@@ -40,11 +40,16 @@ from .StartCell import start_cell
 from .viz.Displayable import Displayable
 
 
-def diagram_class_for( positions, weights, accelerator ):
+def diagram_class_for( positions, weights, accelerator, nb_boxes = None ):
     """The specialization that lays out these seeds: the BSP tree unless it is not wanted
     ( `accelerator = "plain"` ) or one cannot be built here -- TRACED seeds, positions
     or weights: the tree is built host-side, and under a `jit` even a constant comes out of a
-    kernel traced. Whoever wants the tree under a trace builds it outside and passes it ( `accelerator = tree` )."""
+    kernel traced. Whoever wants the tree under a trace builds it outside and passes it ( `accelerator = tree` ).
+    DISTRIBUTED ( `distributed.py` ): positions spread over several devices ( a Jax array with a `NamedSharding` ), or
+    `nb_boxes` given."""
+    from .distributed import PowerDiagram_Distributed, is_spread
+    if nb_boxes is not None or is_spread( positions ):
+        return PowerDiagram_Distributed
     from .PowerDiagram_Bsp import PowerDiagram_Bsp
     from .PowerDiagram_Plain import PowerDiagram_Plain
     from .distributions.SumOfDiracsOnAGrid import Grid
@@ -167,9 +172,9 @@ class PowerDiagram( Aggregate, Displayable ):
     num_agg            : Axis[ "nb_aggs" ]
     nb_aggs            : ShapeVar
 
-    def __new__( cls, positions = None, weights = None, *args, accelerator = None, **kwargs ):
+    def __new__( cls, positions = None, weights = None, *args, accelerator = None, nb_boxes = None, **kwargs ):
         if cls is PowerDiagram:
-            cls = diagram_class_for( positions, weights, accelerator )
+            cls = diagram_class_for( positions, weights, accelerator, nb_boxes )
         return super().__new__( cls )
 
     def __init__( self, positions, weights = None, boundaries = None, accelerator = None,
@@ -236,6 +241,11 @@ class PowerDiagram( Aggregate, Displayable ):
         seeds ). `"canonical"`: from the generators of the vertex alone ( its seeds and walls, `cell/Canonical.h` ), in doubles, a tie
         broken by a symbolic perturbation of the weights -- every cell takes the same decision about the same vertex, at a cost ( about
         four times the cells' ). What `cell_complex()` always uses. Dimension 2 and above.
+
+        DISTRIBUTED ( `distributed.py` ): `positions` spread over several devices ( a Jax array with a `NamedSharding` along the seeds )
+        give one box of seeds per device, the cells that a box cannot finish travelling to the boxes that can still cut them; `measures`
+        then comes back spread the same way. `nb_boxes = K`: the same sweep, the `K` boxes in turn on one device. 2D, a domain, and
+        `measures` only for now.
         """
         # the SUPPORT of the distribution bounds the domain, for free and without changing the
         # result: what lies beyond brings no mass. The caller's domain is INTERSECTED
@@ -932,19 +942,22 @@ class PowerDiagram( Aggregate, Displayable ):
     def potential_integrals( self ):
         """per value of the distribution ( an `Image`'s pixels ), the integral over it of the Kantorovich potential
         `|x - p_i|^2 - w_i` on the cell of `i`: the derivative of a transport cost with respect to the image's values, at
-        these weights, by the envelope theorem. One sweep, piece by piece ( cell x pixel ), on a piecewise-constant
-        distribution only. Not differentiable."""
+        these weights, by the envelope theorem. One sweep, piece by piece ( cell x pixel ). A polynomial image
+        ( `Image( degree = P )` ): the integral against each Bernstein basis function of each pixel, shaped like its `coeffs`.
+        Not differentiable."""
         if self.distribution is None or not hasattr( self.distribution, "values" ):
-            raise ValueError( "potential_integrals: an image ( a piecewise-constant distribution with `values` )" )
+            raise ValueError( "potential_integrals: an image ( a distribution with `values` or `coeffs` )" )
+        poly = bool( getattr( self.distribution, "is_polynomial", False ) )
         dom = self._domain_cell()
         nb_words = self._scratch_words( self._scratch_capacity, self._nb_work_cells(), False )
         kp = loom.kernel_parameters_for( "power_diagram_potential_integrals" )
         nt = kp.nb_threads( nb_local_bytes_per_thread = 4 * nb_words, batch_axes = [ self.num_point ] )
         num_thread = new_batch_axis( nt, prefix = "thread" )
-        res = RealTensor.like( self.distribution.values )
+        res = RealTensor.like( self.distribution.coeffs if poly else self.distribution.values )
         dist_expr, _, dist_kwargs = self._dist_for()
+        sink = "CoeffsSink" if poly else "ValuesSink"
         kp.ffi_call(
-            FfiCode.per_item( code = "inputs.power_diagram.potential_into_pixels( sdot::diagram::ValuesSink{ outputs.res }, "
+            FfiCode.per_item( code = f"inputs.power_diagram.potential_into_pixels( sdot::diagram::{ sink }{{ outputs.res }}, "
                            f"inputs.dom_cell, scratch.pool( batch_index ), { dist_expr }, thread_index, nb_threads );" ),
             power_diagram = self,
             dom_cell = dom,

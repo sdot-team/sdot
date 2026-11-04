@@ -104,10 +104,6 @@ class SumOfDiracsOnAGrid( Distribution ):
         return SumOfDiracsOnAGrid( self.shape, weights = weights, cell_frame = self.frame.value, origin = self.origin.value,
                                    target_mass = self.target_mass, current_mass = self.target_mass, batch_axes = self.batch_axes )
 
-    def raw_1d_diracs( self ):
-        # ( see `SumOfDiracs.raw_1d_diracs`: the 1D plan sorts its diracs, it reads their positions )
-        return self.as_sum_of_diracs().raw_1d_diracs()
-
     def add_to_viz( self, viz, color = "#d62728", **kwargs ):
         """The diracs, as points."""
         viz.add_points( np.asarray( to_host( self.positions.raw ) ), color = color )

@@ -1,4 +1,3 @@
-import jax.numpy as jnp
 
 from loom.tensor import CtShapeVar
 from loom.tensor import ShapeVar
@@ -8,6 +7,7 @@ from loom.tensor import Axis
 from loom.util import ComputedAttribute
 
 from .Distribution import Distribution
+from .Distribution import batch_item
 
 
 class ProjectedSumOfTents( Distribution ):
@@ -62,7 +62,7 @@ class ProjectedSumOfTents( Distribution ):
                 half_widths = self.half_widths,
                 normal = self.normal,
                 weights = weights,
-                current_mass = RealTensor[ bits ]( jnp.asarray( self.target_mass.value, dt ) ),
+                current_mass = RealTensor[ bits ].full( self.target_mass.value ),
                 batch_axes = self.batch_axes,
             )
         return self
@@ -80,6 +80,6 @@ class ProjectedSumOfTents( Distribution ):
         return ProjectedSumOfTents(
             points = self.points,
             half_widths = self.half_widths,
-            normal = Tensor.wrap( self.normal.value[ index ], [ self.proj_dim.name ] ),
+            normal = Tensor.wrap( batch_item( self.normal.value, index ), [ self.proj_dim.name ] ),
             weights = self.weights if self.weights.is_defined else None,
         )

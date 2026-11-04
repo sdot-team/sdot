@@ -58,7 +58,12 @@ export default defineConfig({
           text: 'Introduction',
           items: [
             { text: 'Getting Started',          link: '/guide/getting-started' },
-            { text: 'Performance',              link: '/guide/performance' },
+            { text: 'Performance',              link: '/guide/performance', collapsed: true, items: [
+              { text: 'Semi-discrete OT',       link: '/guide/performance-ot' },
+              { text: 'Diracs on a Grid',       link: '/guide/performance-grid' },
+              { text: 'Power Diagrams',         link: '/guide/performance-diagram' },
+              { text: '1D Transport',           link: '/guide/performance-1d' },
+            ] },
             { text: 'Background',               link: '/guide/background' },
           ]
         },
@@ -73,13 +78,16 @@ export default defineConfig({
               { text: 'Meshes',                 link: '/guide/distributions/mesh' },
               { text: 'Lines and Surfaces',     link: '/guide/distributions/codim-mesh' },
               { text: 'Projected Sources',      link: '/guide/distributions/projected' },
+              { text: 'Diracs on a Grid',       link: '/guide/distributions/grid' },
             ] },
             { text: 'Ground Metrics',           link: '/guide/ground-metrics/', collapsed: false, items: [
               { text: 'Periodicity',            link: '/guide/ground-metrics/periodicity' },
               { text: 'Partial Transport',      link: '/guide/ground-metrics/partial' },
             ] },
+            { text: '1D Transport',             link: '/guide/one-d' },
             { text: 'The Cell Complex',         link: '/guide/cell-complex' },
             { text: 'Frameworks and Devices',   link: '/guide/backends' },
+            { text: 'Running in Parallel',      link: '/guide/parallel' },
             { text: 'The Visualizer',           link: '/guide/visualizer' },
           ]
         },

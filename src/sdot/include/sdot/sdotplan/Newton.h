@@ -58,6 +58,17 @@
 // again in LIN: a cell under 1e-8 of its target, whose request the linear solver loses ). The default is the old one: LOG, then LIN.
 // `residual = LIN` is the previous behaviour.
 //
+// = The surprise ( `surprise`, read by `Solve.h` )
+//
+// The masses of the first accepted step against the linear model: `| a( w + t d ) - a - t b |_2 / | t b |_2` ( `L d = b` ). On a
+// smooth density it is of order `t` -- the curvature of the masses -- and the step that the damping keeps is that of the
+// curvature. On a density with KINKS ( a piecewise constant image, many cells per pixel ) it stays near 1 at any `t`: a cell
+// that straddles a pixel edge gains mass at the rate of the jump as it slides, the linear model takes that rate for a
+// sensitivity and asks for a squeeze to compensate, and once the cell has crossed, the squeeze crushes it. The step is then
+// limited by those cells to about a spacing over the way of the cells -- measured: 0.05 at 512^2 diracs on a 24^2 image, and
+// iterations growing as the side of the cloud. With `surprise > 0`, such a first step ( surprise above the threshold, step
+// under `surprise_step` ) is not taken: Newton stops at the start ( SURPRISED ) and the caller smooths the density.
+//
 // = What an iteration costs
 //
 // ONE diagram per trial step, and nothing more: the accepted step delivers both the measures ( the
@@ -96,13 +107,16 @@ struct NewtonOptions {
     int    residual   = LOG;     ///< the residual `g` of the direction and of the merit ( see the head of the file )
     double power      = 0.5;     ///< POWER: the exponent `p` of `g_p` ( LOG is `p = 0`, LIN `p = 1` )
     double switch_residual = 2;  ///< back to LIN once `max |a - nu| / nu <= switch_residual` ( 0: never )
+    double surprise   = 0;       ///< > 0: the first iteration stops ( SURPRISED ) if the masses of its step miss the linear model
+                                 ///< by more than this ( relative, `| a( w + t d ) - a - t b |_2 / | t b |_2` ) ...
+    double surprise_step = 0.5;  ///< ... and that step is under this ( see the head of the file )
     /// called after each ACCEPTED step ( and at the start, `it = 0` ): `w` and `a` are those of the step
     std::function<void( int it, double t, int nb_evals )> after_step;
 };
 
 struct NewtonStats {
     int    status = 0;              ///< why the loop stopped ( `Status` )
-    enum Status : int { RUNNING = 0, CONVERGED = 1, MAX_ITERATIONS = 2, STAGNATION = 3, LINEAR_FAILURE = 4 };
+    enum Status : int { RUNNING = 0, CONVERGED = 1, MAX_ITERATIONS = 2, STAGNATION = 3, LINEAR_FAILURE = 4, SURPRISED = 8 };   // ( 8: never a `SolveStatus`, it does not leave `Solve.h` )
     double residual  = 0;           ///< the `max_i |a_i - nu_i|` reached
     double residual0 = 0;           ///< the same AT THE START
     double eps    = 0;           ///< the mass floor of the damping
@@ -111,6 +125,8 @@ struct NewtonStats {
     SI     nb_cell_lim = 0;      ///< cells computed by the limits passes, in all
     int    nb_limit_rounds = 0;   ///< LIMITS: trials corrected by local limits
     double t_asm = 0, t_lin = 0, t_lim = 0;
+    double surprise = -1;        ///< the surprise of the first accepted step ( -1: not measured ), and that step
+    double t_surprise = 0;
     int    nb_polish = 0;        ///< diagrams of the re-splitting of the clusters ( `Aggregation.h` )
     static const char *text( int status ) {
         switch ( status ) {
@@ -118,6 +134,7 @@ struct NewtonStats {
             case MAX_ITERATIONS: return "MAX ITERATIONS";
             case STAGNATION:     return "STAGNATION";
             case LINEAR_FAILURE: return "LINEAR SOLVER FAILURE";
+            case SURPRISED:      return "SURPRISED";
             default:             return "?";
         }
     }
@@ -429,6 +446,20 @@ struct Newton {
                 bal.set_weights( w );                    // the diagram takes the accepted weights back
                 st.status = NewtonStats::STAGNATION;        // the numerical floor, not a failure
                 return false;
+            }
+            // THE SURPRISE of the first step: how far its masses are from the linear model `a + t b` ( `L d = b` )
+            if ( it == 0 && st.surprise < 0 ) {
+                double se = 0, sp = 0;
+                for ( SI i = 0; i < n; ++i ) { const double p = t * b[ i ], e = a2[ i ] - a[ i ] - p; se += e * e; sp += p * p; }
+                st.surprise = sp > 0 ? std::sqrt( se / sp ) : 0;
+                st.t_surprise = t;
+                if ( o.trace )
+                    std::printf( "      surprise of the first step: %.3e at t %.3e\n", st.surprise, t );
+                if ( o.surprise > 0 && st.surprise > o.surprise && t < o.surprise_step ) {
+                    bal.set_weights( w );                // the diagram takes the start back; `d` and `fa` are those of the start
+                    st.status = NewtonStats::SURPRISED;
+                    return false;
+                }
             }
             t_last = t;
             nb_evals_last = nb_evals;

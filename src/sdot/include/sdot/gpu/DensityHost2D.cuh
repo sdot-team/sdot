@@ -16,6 +16,7 @@
 //     standard deviations and renormalized at the edge ( axis 0 then axis 1, each output pixel the same sum, in the same
 //     order, as `Convolved< Image >::at` ), then the prefix sums of the rows ( `DensImage` );
 //   * gaussians: their widths `sqrt( sigma^2 + s^2 )`, nothing else;
+//   * an image of degree 1, a mesh: no stages ( the CPU does not convolve them );
 //   * a constant: nothing ( the stages, if any, solve the same problem: an `Image` of equal values on the CPU convolves to
 //     itself ).
 // =====================================================================================
@@ -36,6 +37,13 @@ template<class Vals>
 struct ImageIn { const Vals &values; };
 template<class Vals>
 ImageIn<Vals> image_in( const Vals &values ) { return { values }; }
+
+/// an image of degree 1: its knots `[ nx + 1 + ny + 1 ]` ( from its corner: `kx[ 0 ] = ky[ 0 ] = 0` ), its Bernstein coefficients
+/// `[ nx * ny * 4 ]` ( `( i * ny + j ) * 4 + a * 2 + b` ), its corner and its size in the solver's options ( `img_x0`, `img_y0`, `img_nx`, `img_ny` )
+template<class K,class C>
+struct Image1In { const K &knots; const C &coeffs; };
+template<class K,class C>
+Image1In<K,C> image1_in( const K &knots, const C &coeffs ) { return { knots, coeffs }; }
 
 /// gaussians: centres `[ nb, 2 ]`, widths `[ nb ]`, masses `[ nb ]`
 template<class P,class S,class M>
@@ -168,7 +176,14 @@ __global__ void __launch_bounds__( BLOCK ) image_prefix( SI nx, SI ny, double hx
     if ( s1 ) { s1[ j * ( nx + 1 ) + nx ] = a1; s2[ j * ( nx + 1 ) + nx ] = a2; }
 }
 
-// ---- the three kinds ----------------------------------------------------------------------------------------------------
+/// the prefixes of the rows of an image of degree 1 ( one thread per row, `Density2D.cuh::image1_prefix_row` )
+__global__ void __launch_bounds__( BLOCK ) image1_prefix( SI nx, SI ny, const double *kx, const double *c, double *p ) {
+    const SI j = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( j < ny )
+        image1_prefix_row( nx, ny, j, kx, c, p );
+}
+
+// ---- the kinds ----------------------------------------------------------------------------------------------------
 
 /// a constant: nothing changes with `s`. `possible` and `min_scale` are the CPU's for the distribution it came from ( an
 /// `Image` of equal values convolves, no distribution does not: the solver's options say which )
@@ -251,6 +266,33 @@ struct ImageDensityHost {
         }
         dev = DensImage{ x0, y0, hx, hy, nx, ny, v, s0, moments ? s1 : nullptr, moments ? s2 : nullptr };
     }
+};
+
+/// an image of degree 1: its knots and coefficients gathered as doubles, the prefixes of its rows, once. No continuation ( `possible`
+/// is false, as for a mesh: the CPU does not convolve a polynomial image either )
+struct Image1DensityHost {
+    using Dev = DensImage1;
+    Dev     dev{};
+    static constexpr bool possible = false;
+
+    template<class In>
+    bool prepare( const CudaQueue &queue, auto &allocator, const In &in, const double *geom ) {
+        const SI nx = SI( geom[ 4 ] ), ny = SI( geom[ 5 ] ), nk = nx + ny + 2, nc = 4 * nx * ny;
+        auto vec = [&]( SI m ) { return static_cast<double *>( take( allocator, SI( sizeof( double ) ) * std::max<SI>( m, 1 ) ) ); };
+        double *k = vec( nk ), *c = vec( nc ), *p = vec( 6 * ( nx + 1 ) * ny );
+        if ( ! k || ! c || ! p )
+            return false;
+        using TK = std::remove_const_t<typename std::decay_t<decltype( in.knots )>::TF>;
+        using TC = std::remove_const_t<typename std::decay_t<decltype( in.coeffs )>::TF>;
+        launch_kernel( queue, &gather_doubles<TK>, blocks_for( nk ), BLOCK, 0, nk, strided( in.knots ), k );
+        launch_kernel( queue, &gather_doubles<TC>, blocks_for( nc ), BLOCK, 0, nc, strided( in.coeffs ), c );
+        launch_kernel( queue, &image1_prefix, blocks_for( ny ), BLOCK, 0, nx, ny, ( const double * ) k, ( const double * ) c, p );
+        dev = DensImage1{ nx, ny, geom[ 0 ], geom[ 1 ], k, k + nx + 1, c, p };
+        return true;
+    }
+
+    double min_scale( const CudaQueue & ) const { return 0; }
+    void   at( const CudaQueue &, double, bool ) {}
 };
 
 /// gaussians ( see the header )
@@ -489,6 +531,7 @@ struct Gauss3DensityHost {
 /// the host class of what the call hands over: a 0-d tensor ( or a number ) is a constant
 template<class In> struct DensityHostOf { using type = ConstDensityHost; };
 template<class V> struct DensityHostOf<ImageIn<V>> { using type = ImageDensityHost<std::remove_const_t<typename V::TF>>; };
+template<class K,class C> struct DensityHostOf<Image1In<K,C>> { using type = Image1DensityHost; };
 template<class P,class S,class M> struct DensityHostOf<GaussIn<P,S,M>> { using type = GaussDensityHost; };
 template<class P,class S,class M> struct DensityHostOf<Gauss3In<P,S,M>> { using type = Gauss3DensityHost; };
 template<class N,class V,class T,class G,class L,class H,class K> struct DensityHostOf<MeshIn<N,V,T,G,L,H,K>> { using type = MeshDensityHost; };

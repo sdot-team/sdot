@@ -318,3 +318,41 @@ if test( "the_barycenters_derive" ):
     for output in ( "cost", "barycenters" ):
         check_grad( lambda p, q, v: getattr( OtProblem( SumOfDiracs( p, weights = q ), Image( v, frame = [ 1.0 ] ) ).solve( settings ), output ),
                     pos, nu, values, seed = 3, eps = 1e-6, rtol = 1e-6, atol = 1e-9 )
+
+if test( "affine_pixels_are_the_limit_of_constant_ones" ):
+    # An image of degree 1 ( affine pixels ) against the same density cut into R constant pixels per pixel: the costs
+    # agree to O( 1 / R^2 ), and the uniform case is exact ( 1 / 12 for one dirac against a uniform density on [ 0, 1 ] ).
+    import numpy
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
+    flat = SdotPlan1d( SumOfDiracs1d( positions = [ 0.5 ] ), Image( values = [ [ 1.0, 1.0 ] ], degree = 1 ) )
+    assert abs( float( numpy.asarray( flat.cost ) ) - 1 / 12 ) < 1e-12
+    nodes = 1 + 0.8 * numpy.sin( 3 * numpy.linspace( -1, 1, 17 ) )
+    coeffs = numpy.stack( [ nodes[ :-1 ], nodes[ 1: ] ], axis = 1 )
+    x = numpy.random.default_rng( 0 ).uniform( -0.9, 0.9, 500 )
+    p1 = float( numpy.asarray( SdotPlan1d( SumOfDiracs1d( positions = x ), Image( values = coeffs, degree = 1, origin = [ -1.0 ], pixel_frame = [ [ 0.125 ] ] ) ).cost ) )
+    errs = [ ]
+    for R in ( 16, 64, 256 ):
+        t = ( numpy.arange( R ) + 0.5 ) / R
+        vals = ( coeffs[ :, :1 ] * ( 1 - t ) + coeffs[ :, 1: ] * t ).ravel()
+        p0 = float( numpy.asarray( SdotPlan1d( SumOfDiracs1d( positions = x ), Image( values = vals, origin = [ -1.0 ], pixel_frame = [ [ 0.125 / R ] ] ) ).cost ) )
+        errs.append( abs( p0 - p1 ) / p1 )
+    print( "  relative differences at R = 16, 64, 256:", errs )
+    assert errs[ -1 ] < 1e-6 and errs[ 1 ] < errs[ 0 ] / 10 and errs[ 2 ] < errs[ 1 ] / 10, errs
+
+if test( "affine_pixels_derive" ):
+    # the derivatives through an image of degree 1: the positions, the weights and the two coefficients of each pixel
+    import loom
+    from sdot.distributions.Image import Image
+    from sdot.SdotPlan1d import SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
+    from loom.testing import need, check_grad
+    need( "grad" )
+    coeffs = loom.array( [ [ 1.0, 2.0 ], [ 2.0, 0.5 ], [ 0.5, 1.5 ] ] )
+    positions = loom.array( [ 0.2, 0.5, 0.9, 1.7, 2.6 ] )
+    weights = loom.array( [ 1.0, 0.7, 1.3, 0.9, 1.1 ] )
+    img = lambda c: Image( values = c, degree = 1 )
+    check_grad( lambda p: SdotPlan1d( SumOfDiracs1d( positions = p, weights = weights ), img( coeffs ) ).cost, positions )
+    check_grad( lambda w: SdotPlan1d( SumOfDiracs1d( positions = positions, weights = w ), img( coeffs ) ).cost, weights )
+    check_grad( lambda c: SdotPlan1d( SumOfDiracs1d( positions = positions, weights = weights ), img( c ) ).cost, coeffs )

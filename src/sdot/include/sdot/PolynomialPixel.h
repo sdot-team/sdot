@@ -224,8 +224,8 @@ struct PolynomialPixel {
         integrate_moment_over_simplex_bwd<D + 1>( Q, g, grad_pts, grad_dist );
     }
 
-    /// `int rho`, `int x rho`, `int |x|^2 rho` over the simplex, ACCUMULATED
-    HD void integrate_moments_over_simplex( const auto &Q, TF &m, auto &mx, TF &m2 ) const {
+    /// `int rho`, `int x rho`, `int |x|^2 rho` over the simplex, ACCUMULATED ( in the caller's type: `float` pixels, `double` solver )
+    HD void integrate_moments_over_simplex( const auto &Q, auto &m, auto &mx, auto &m2 ) const {
         for_each_node( Q, degree + 2, [&]( const auto &x, const TF *, TF w ) {
             const TF r = w * value_at( x );
             m += r;

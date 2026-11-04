@@ -12,6 +12,32 @@
 
 namespace sdot {
 
+// the bit operations of `sort_diracs`, by the CUDA intrinsics on the card ( the `std::` ones are host constexpr
+// functions there, relaxed into device code )
+HD_INLINE uint32_t bits_of( float f ) {
+#ifdef __CUDA_ARCH__
+    return __float_as_uint( f );
+#else
+    return std::bit_cast<uint32_t>( f );
+#endif
+}
+
+HD_INLINE int popcount_32( uint32_t m ) {
+#ifdef __CUDA_ARCH__
+    return __popc( m );
+#else
+    return std::popcount( m );
+#endif
+}
+
+HD_INLINE int countl_zero_32( uint32_t m ) {
+#ifdef __CUDA_ARCH__
+    return __clz( int( m ) );
+#else
+    return std::countl_zero( m );
+#endif
+}
+
 UTP HD void DTP::sort_diracs( auto &&sorted_indices, auto &&radix_tmp, auto &&sorted_pos,
                             int local_index, int local_size, auto &&group, auto &&local_scratch, auto &&sub_group ) const {
     // Sort the diracs by position INTO `sorted_indices` (a per-GROUP scratch row, shared by every
@@ -37,7 +63,7 @@ UTP HD void DTP::sort_diracs( auto &&sorted_indices, auto &&radix_tmp, auto &&so
     // packing: each dirac's key depends only on its own position -> no cooperation needed here.
     for ( SI i = lo; i < hi; ++i ) {
         const float f = float( src_dist.position( i ) );
-        uint32_t u = std::bit_cast<uint32_t>( f );
+        uint32_t u = bits_of( f );
         u ^= ( u & 0x80000000u ) ? 0xFFFFFFFFu : 0x80000000u;       // IEEE float -> order-preserving uint32
         sorted_indices( i ) = ( SI( u >> 1 ) << 32 ) | SI( i );     // key (31 bits) high, index (32 bits) low; stays positive
     }
@@ -191,8 +217,8 @@ UTP HD void DTP::sort_diracs( auto &&sorted_indices, auto &&radix_tmp, auto &&so
                 const std::uint32_t bin_mask = std::uint32_t( local_scratch[ match_row + b ] );
                 const std::uint32_t lanemask_le =
                     ( sg_lid == 31 ) ? 0xFFFFFFFFu : ( ( std::uint32_t( 1 ) << ( sg_lid + 1 ) ) - 1u );
-                popc = std::popcount( bin_mask & lanemask_le );
-                is_leader = ( sg_lid == 31 - std::countl_zero( bin_mask ) );
+                popc = popcount_32( bin_mask & lanemask_le );
+                is_leader = ( sg_lid == 31 - countl_zero_32( bin_mask ) );
                 base = local_scratch[ hist_row + b ]; // reservation base -- READ before anyone bumps it
             }
             // every active lane's READ of `base` above must complete before the leader's WRITE below --
@@ -259,6 +285,36 @@ UTP HD typename DTP::TF DTP::chunked_weight_prefix( auto &&sorted_indices, auto 
     return group_scan( local_index ); // W_lo_t
 }
 
+// The forward on the sorted diracs `[ lo, hi )`, from `w_lo`, the source mass before `lo`: the walk jumps straight
+// to its starting `Udp` state ( `Image::udp_at`, no need to walk there step by step ), writes the barycenters
+// ( disjoint per dirac ) and returns the cost of these diracs. The chunk of a work-item of a group on the host,
+// of a thread on the card ( `SdotPlan1dCard.h` ).
+UTP HD typename DTP::TF DTP::sweep_chunk( auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi, double w_lo ) {
+    double local_cost = 0;          // ( in double: a sum of n terms, single precision would lose digits )
+    dst_dist.with_defaults( [&]( auto &&dst_dist ) {
+        auto udp = dst_dist.udp_at( dst_dist.cell_cum_mass, w_lo );
+        for( SI k = lo; k < hi; ++k ) {
+            const SI num_dirac = sorted_indices( k );
+            const TF dirac_pos = sorted_pos( k );          // streamed (contiguous), not re-projected
+            const TF mass = src_dist.weights( ::num_dirac = num_dirac );
+            [[maybe_unused]] TF moment = 0;
+            dst_dist.udp_cont( udp, mass, [&]( auto &&item ) {
+                local_cost += item.w2_dist( dirac_pos );
+                if constexpr ( DECAYED_TYPE_OF( barycenters )::is_valid )
+                    moment += item.first_moment();
+            } );
+            if constexpr ( DECAYED_TYPE_OF( barycenters )::is_valid )
+                barycenters( ::num_dirac = num_dirac, dim = 0 ) = moment / mass;   // center of mass of the slice
+        }
+    } );
+    return TF( local_cost );
+}
+
+UTP HD void DTP::set_cost( TF total ) {
+    nb_diracs.set( src_dist.nb_diracs );
+    cost = total;
+}
+
 // Sort-INDEPENDENT half of the forward: everything that only needs a (however obtained) sorted
 // order, shared by `update_outputs` (sorts internally, via `sort_diracs`) and
 // `update_outputs_presorted` (order already provided -- e.g. computed by `jnp.argsort` upstream of
@@ -277,39 +333,19 @@ UTP HD void DTP::sweep_outputs( auto &&sorted_indices, auto &&sorted_pos, auto &
     const SI hi = ( nb * SI( local_index + 1 ) ) / local_size;
     const TF w_lo = chunked_weight_prefix( sorted_indices, group_scan, lo, hi, local_index, local_size, group );
 
-    // PARALLEL sweep: each work-item JUMPS straight to its own chunk's starting `Udp` state (via
-    // `Image::udp_at`, no need to walk there step by step) and walks ONLY `[lo,hi)` -- no leader, no
-    // idle work-items (contrast the old leader-only, `local_index==0`-guarded, full-`[0,nb)` walk this
-    // replaces). `barycenters` writes stay race-free exactly as before (disjoint per-dirac indices);
-    // `cost` is now a per-work-item PARTIAL sum, combined below.
-    TF local_cost = 0;
-    dst_dist.with_defaults( [&]( auto &&dst_dist ) {
-        auto udp = dst_dist.udp_at( dst_dist.cell_cum_mass, w_lo );
-        for( SI k = lo; k < hi; ++k ) {
-            const SI num_dirac = sorted_indices( k );
-            const TF dirac_pos = sorted_pos( k );          // streamed (contiguous), not re-projected
-            const TF mass = src_dist.weights( ::num_dirac = num_dirac );
-            TF moment = 0;
-            dst_dist.udp_cont( udp, mass, [&]( auto &&item ) {
-                local_cost += item.w2_dist( dirac_pos );
-                if constexpr ( DECAYED_TYPE_OF( barycenters )::is_valid )
-                    moment += item.first_moment();
-            } );
-            if constexpr ( DECAYED_TYPE_OF( barycenters )::is_valid )
-                barycenters( ::num_dirac = num_dirac, dim = 0 ) = moment / mass;   // center of mass of the slice
-        }
-    } );
+    // PARALLEL sweep: each work-item JUMPS straight to its own chunk's starting `Udp` state and walks
+    // ONLY `[lo,hi)` ( `sweep_chunk` ); `cost` is a per-work-item PARTIAL sum, combined below.
+    const TF local_cost = sweep_chunk( sorted_indices, sorted_pos, lo, hi, w_lo );
 
     // combine the `local_size` partial costs into the group's `cost` -- same barrier+group_scan
     // reduction idiom as the cooperative scans above.
     group_scan( local_index ) = local_cost;
     group_barrier( group );
     if ( local_index == 0 ) {
-        nb_diracs.set( src_dist.nb_diracs );
         TF total = 0;
         for ( int t = 0; t < local_size; ++t )
             total += TF( group_scan( t ) );
-        cost = total;
+        set_cost( total );
     }
     // the group's scratch rows are REUSED for the next angle this group strides onto (see
     // FfiCodeParallel's `group_index` docstring): every work-item must wait for the leader to finish
@@ -346,38 +382,66 @@ UTP HD void DTP::update_outputs_presorted( auto &&sorted_indices, auto &&sorted_
 // suffix sum is carried by two scalars instead of an array.
 UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, auto &&group_scan,
                                   int local_index, int local_size, auto &&group ) const {
-    const TF g = grad_plan.cost; // scalar cotangent seeding `cost`
-    // the cotangent of the BARYCENTERS ( stored by the forward, `with_barycenters` ): `b_k = Integral_{t_k}^{t_{k+1}} x y dx / w_k` moves with
-    // its two boundaries, and in the same way as the cost: `d b_k = ( t_{k+1} dW_{k+1} - t_k dW_k ) / w_k - b_k dw_k / w_k`, the
-    // `y( t_m )` cancelling as above -- so its share joins the jump `phi_m` of the potential:
-    //   chi_m = gamma_{s(m-1)} t_m / w_{s(m-1)} - gamma_{s(m)} t_m / w_{s(m)},
-    // plus what `b_k` reads directly: `- gamma_k b_k / w_k` for its mass, `gamma_k Integral_piece x dx / w_k` for a value. Not the
-    // positions: a barycenter does not depend on them ( only the ORDER does ).
-    constexpr bool with_bary = DECAYED_TYPE_OF( barycenters )::is_valid && requires { grad_plan.barycenters; }
-                            && [] { if constexpr ( requires { DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid; } ) return bool( DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid ); else return false; }();
-    auto gamma_of = [&]( SI di ) -> TF {
-        if constexpr ( with_bary ) return TF( grad_plan.barycenters( ::num_dirac = di, dim = 0 ) );
-        else return TF( 0 );
-    };
-    auto bary_of = [&]( SI di ) -> TF {
-        if constexpr ( with_bary ) return TF( barycenters( ::num_dirac = di, dim = 0 ) );
-        else return TF( 0 );
-    };
     const SI nb = src_dist.weights.size();
     const SI lo = ( nb * SI( local_index ) ) / local_size;
     const SI hi = ( nb * SI( local_index + 1 ) ) / local_size;
+    constexpr bool need_position_walk = CT_VALUE( src_dist.position_grad_wanted( grad_plan.src_dist ) )
+                                      && ! DECAYED_TYPE_OF( barycenters )::is_valid;
     constexpr bool need_weight_value_grad = DECAYED_TYPE_OF( grad_plan.src_dist.weights )::is_valid
-                                          || DECAYED_TYPE_OF( grad_plan.dst_dist.values )::is_valid;
+                                          || target_grad_wanted<DECAYED_TYPE_OF( grad_plan )>;
 
-    // --- d cost / d positions -------------------------------------------------------------------
-    //   d cost / d p_i = Integral_{S_i} 2 (p_i - x) y dx = 2 w_i ( p_i - b_i ),  b_i the barycenter of
-    // the target slice assigned to dirac i. Guarded at compile time on the source so the whole block
-    // is skipped when the position gradient is not wanted; `add_position_grad` then scatters (per-angle
-    // write for SumOfDiracs, atomic to the shared 2D points for a projected source).
+    // this work-item's start in the walk ( sorted above, hoisted, shared by both blocks )
+    TF w_lo = 0;
+    if constexpr ( need_position_walk || need_weight_value_grad )
+        w_lo = chunked_weight_prefix( sorted_indices, group_scan, lo, hi, local_index, local_size, group );
+
+    position_grad_chunk( grad_plan, sorted_indices, sorted_pos, lo, hi, w_lo );
+
+    // d cost / d weights and d cost / d values: two passes over the walk, each CHUNK-LOCAL and on every work-item in
+    // parallel ( see `weight_value_grad_chunk` ): phase 1 gets each work-item's chunk phi SUBTOTAL, the scan of the
+    // `local_size` subtotals gives both `phi_total` ( broadcast ) and each work-item's exclusive prefix `pref_lo`, then
+    // phase 2 re-walks its own chunk, writing `grad_w` / `grad_y`.
+    if constexpr ( need_weight_value_grad ) {
+        if constexpr ( target_grad_wanted<DECAYED_TYPE_OF( grad_plan )> ) {
+            // cooperative zeroing, chunked over CELLS -- accumulated below via atomic `+=`, one per piece.
+            const SI nb_cells = dst_dist.udp_nb_cells();
+            const SI lo_c = ( nb_cells * SI( local_index ) ) / local_size;
+            const SI hi_c = ( nb_cells * SI( local_index + 1 ) ) / local_size;
+            for ( SI c = lo_c; c < hi_c; ++c )
+                zero_target_grad( grad_plan, c );
+            group_barrier( group ); // every zero-write visible before any += below
+        }
+
+        group_scan( local_index ) = weight_value_grad_chunk<false>( grad_plan, sorted_indices, sorted_pos, lo, hi, w_lo, TF( 0 ), TF( 0 ) );
+        group_barrier( group );
+        if ( local_index == 0 ) {
+            TF run = 0;
+            for ( int t = 0; t < local_size; ++t ) {
+                const TF v = group_scan( t );
+                group_scan( t ) = run; // exclusive prefix, in place
+                run += v;
+            }
+            group_scan( local_size ) = run; // broadcast slot: phi_total
+        }
+        group_barrier( group );
+        weight_value_grad_chunk<true>( grad_plan, sorted_indices, sorted_pos, lo, hi, w_lo, TF( group_scan( local_index ) ), TF( group_scan( local_size ) ) );
+    }
+    // scratch rows reused by the next angle this group strides onto -- every work-item must wait for
+    // every other to finish reading them before any of them starts overwriting it.
+    group_barrier( group );
+}
+
+// d cost / d positions, for the diracs `[ lo, hi )`:
+//   d cost / d p_i = Integral_{S_i} 2 (p_i - x) y dx = 2 w_i ( p_i - b_i ),  b_i the barycenter of
+// the target slice assigned to dirac i. Guarded at compile time on the source so the whole block
+// is skipped when the position gradient is not wanted; `add_position_grad` then scatters (per-angle
+// write for SumOfDiracs, atomic to the shared 2D points for a projected source).
+UTP HD void DTP::position_grad_chunk( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi, double w_lo ) const {
+    const TF g = grad_plan.cost; // scalar cotangent seeding `cost`
     if constexpr ( CT_VALUE( src_dist.position_grad_wanted( grad_plan.src_dist ) ) ) {
         if constexpr ( DECAYED_TYPE_OF( barycenters )::is_valid ) {
             // b_i was stored by the forward (`with_barycenters`): read it, no walk, order-independent --
-            // EMBARRASSINGLY parallel over i, every work-item does its own chunk, no scratch touched.
+            // `[ lo, hi )` are then dirac indices, not sorted ranks.
             for( SI i = lo; i < hi; ++i ) {
                 const TF p = src_dist.position( i );
                 const TF b = barycenters( ::num_dirac = i, dim = 0 );
@@ -385,11 +449,8 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
                 src_dist.add_position_grad( grad_plan.src_dist, i, g * 2 * w * ( p - b ) );
             }
         } else {
-            // b_i NOT stored: RECOMPUTE it from the sort hoisted above (trades the [nb_angles, n]
-            // residual for compute). PARALLEL sweep: each work-item jumps straight to its own chunk's
-            // start (`udp_at`, no leader) and walks only `[lo,hi)` -- per-dirac scatter, disjoint
-            // indices, no reduction needed.
-            const TF w_lo = chunked_weight_prefix( sorted_indices, group_scan, lo, hi, local_index, local_size, group );
+            // b_i NOT stored: RECOMPUTE it from the sort (trades the [nb_angles, n] residual for compute),
+            // jump-started at `w_lo` -- per-dirac scatter, disjoint indices, no reduction needed.
             dst_dist.with_defaults( [&]( auto &&img ) {
                 auto udp = img.udp_at( img.cell_cum_mass, w_lo );
                 for( SI k = lo; k < hi; ++k ) {
@@ -404,132 +465,91 @@ UTP HD void DTP::sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, aut
             } );
         }
     }
+}
 
-    // --- d cost / d weights and d cost / d values ----------------------------------------------
-    // Both flow through the moving boundaries t_m. The potential jump at t_m is (the y(t_m) factor
-    // cancels against dt_m/dW_m = 1/y(t_m)):
-    //   phi_m = (t_m - p_{s(m-1)})^2 - (t_m - p_{s(m)})^2   for 1 <= m <= n-1  (interior bounds),
-    //   phi_n = (t_n - p_{s(n-1)})^2                        for the last endpoint t_n = M^{-1}(Sum w),
-    // which moves too since w (and y) are free at the kernel level -- normalization lives upstream.
-    // With Phi_k = Sum_{m=k+1}^{n} phi_m = phi_total - Sum_{m<=k} phi_m:
-    //   d cost / d w_{s(k)} = Phi_k,   and, per emitted piece (one cell c, sorted dirac k),
-    //   d cost / d y_c     += second_moment_about(p_{s(k)}) - Phi_k * (x1 - x0).
-    //
-    // Phi_k needs the GRAND TOTAL phi_total, itself a sum over every dirac -- a genuine global
-    // dependency, not a sequential-implementation artifact, so this still needs two passes over the
-    // walk. But each pass is now CHUNK-LOCAL and runs on every work-item in parallel: phase 1 gets each
-    // work-item's own chunk phi SUBTOTAL (one local walk, jump-started via `udp_at`) and combines the
-    // `local_size` subtotals into both `phi_total` (broadcast) and each work-item's exclusive prefix
-    // `pref_lo` (its phase-2 starting offset) from the SAME scan -- same idiom as `sort_diracs`'s bucket
-    // scan producing both `bucket_start` and per-row chunk-local offsets together. Phase 2 re-derives
-    // its own start state (cheap, O(log nb_cells) -- simpler than threading `Udp` state across the
-    // barrier) and re-walks its own chunk once more, this time actually writing `grad_w`/`grad_y`.
-    if constexpr ( need_weight_value_grad ) {
-        // sorted above (hoisted, shared with the position-grad block when both run).
-        const TF w_lo = chunked_weight_prefix( sorted_indices, group_scan, lo, hi, local_index, local_size, group );
-
-        dst_dist.with_defaults( [&]( auto &&img ) {
-            // NB: read each weight into a scalar `TF w` before passing it to `udp_cont`. That method
-            // MUTATES its `mass_to_take` argument (`mass_to_take -= udp.mass`); handing it the tensor
-            // view `src_dist.weights( ... )` directly would decrement the shared weights buffer and
-            // corrupt every later read (the forward avoids this via its own `const TF mass`).
-
-            if constexpr ( DECAYED_TYPE_OF( grad_plan.dst_dist.values )::is_valid ) {
-                // cooperative zeroing, chunked over CELLS -- accumulated below via atomic `+=`,
-                // one per piece.
-                const SI nb_cells = img.values.size();
-                const SI lo_c = ( nb_cells * SI( local_index ) ) / local_size;
-                const SI hi_c = ( nb_cells * SI( local_index + 1 ) ) / local_size;
-                for ( SI c = lo_c; c < hi_c; ++c )
-                    grad_plan.dst_dist.values( c ) = 0;
-                group_barrier( group ); // every zero-write visible before any += below
+// d cost / d weights and d cost / d values, for the sorted diracs `[ lo, hi )` from `w_lo`. Both flow through the
+// moving boundaries t_m. The potential jump at t_m is (the y(t_m) factor cancels against dt_m/dW_m = 1/y(t_m)):
+//   phi_m = (t_m - p_{s(m-1)})^2 - (t_m - p_{s(m)})^2   for 1 <= m <= n-1  (interior bounds),
+//   phi_n = (t_n - p_{s(n-1)})^2                        for the last endpoint t_n = M^{-1}(Sum w),
+// which moves too since w (and y) are free at the kernel level -- normalization lives upstream.
+// With Phi_k = Sum_{m=k+1}^{n} phi_m = phi_total - Sum_{m<=k} phi_m:
+//   d cost / d w_{s(k)} = Phi_k,   and, per emitted piece (one cell c, sorted dirac k),
+//   d cost / d y_c     += second_moment_about(p_{s(k)}) - Phi_k * (x1 - x0).
+// Phi_k needs the GRAND TOTAL phi_total, itself a sum over every dirac: two passes. `WRITE = false` ( phase 1 ):
+// returns the chunk's phi SUBTOTAL; `WRITE = true` ( phase 2 ): `pref_lo` is the phi of the diracs before `lo`,
+// and the gradients are written ( `grad_y` by atomics: a cell straddling two chunks gets a write from each ).
+// ( `phi` carries the cotangents: `g` for the cost, `chi` for the barycenters )
+UTP template<bool WRITE> HD typename DTP::TF DTP::weight_value_grad_chunk( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi,
+                                                                       double w_lo, TF pref_lo, TF phi_total ) const {
+    const TF g = grad_plan.cost;
+    constexpr bool with_bary = DECAYED_TYPE_OF( barycenters )::is_valid && requires { grad_plan.barycenters; }
+                            && [] { if constexpr ( requires { DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid; } ) return bool( DECAYED_TYPE_OF( grad_plan.barycenters )::is_valid ); else return false; }();
+    auto gamma_of = [&]( SI di ) -> TF {
+        if constexpr ( with_bary ) return TF( grad_plan.barycenters( ::num_dirac = di, dim = 0 ) );
+        else return TF( 0 );
+    };
+    auto bary_of = [&]( SI di ) -> TF {
+        if constexpr ( with_bary ) return TF( barycenters( ::num_dirac = di, dim = 0 ) );
+        else return TF( 0 );
+    };
+    auto chi_prev_of = [&]( SI di, TF t ) -> TF {          // the share of the barycenter of `di` at its bound `t`
+        if constexpr ( with_bary ) return gamma_of( di ) * t / TF( src_dist.weights( ::num_dirac = di ) );
+        else return TF( 0 );
+    };
+    const SI nb = src_dist.weights.size();
+    TF pref = pref_lo;
+    dst_dist.with_defaults( [&]( auto &&img ) {
+        // NB: read each weight into a scalar `TF w` before passing it to `udp_cont`. That method
+        // MUTATES its `mass_to_take` argument (`mass_to_take -= udp.mass`); handing it the tensor
+        // view `src_dist.weights( ... )` directly would decrement the shared weights buffer and
+        // corrupt every later read (the forward avoids this via its own `const TF mass`).
+        auto udp = img.udp_at( img.cell_cum_mass, w_lo );
+        TF p_prev = ( lo > 0 ) ? TF( sorted_pos( lo - 1 ) ) : TF( 0 );
+        SI di_prev = lo > 0 ? SI( sorted_indices( lo - 1 ) ) : SI( 0 );
+        for( SI k = lo; k < hi; ++k ) {
+            const SI di = sorted_indices( k );
+            const TF pk = sorted_pos( k );          // streamed (contiguous), not re-projected
+            const TF w = src_dist.weights( ::num_dirac = di );
+            if ( k >= 1 ) { // GLOBAL index check: every dirac except the very first has a boundary
+                const TF t = udp.pos;
+                pref += g * ( ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk ) ) + chi_prev_of( di_prev, t ) - chi_prev_of( di, t );
             }
-
-            // phase 1: this work-item's chunk phi SUBTOTAL.
-            // ( `phi` carries the cotangents: `g` for the cost, `chi` for the barycenters )
-            const SI di_prev0 = lo > 0 ? SI( sorted_indices( lo - 1 ) ) : SI( 0 );
-            auto chi_prev_of = [&]( SI di, TF t ) -> TF {          // the share of the barycenter of `di` at its bound `t`
-                if constexpr ( with_bary ) return gamma_of( di ) * t / TF( src_dist.weights( ::num_dirac = di ) );
-                else return TF( 0 );
-            };
-            TF phi_sub = 0;
-            {
-                auto udp = img.udp_at( img.cell_cum_mass, w_lo );
-                TF p_prev = ( lo > 0 ) ? TF( sorted_pos( lo - 1 ) ) : TF( 0 );
-                SI di_prev = di_prev0;
-                for( SI k = lo; k < hi; ++k ) {
-                    const SI di = sorted_indices( k );
-                    const TF pk = sorted_pos( k );          // streamed (contiguous), not re-projected
-                    const TF w = src_dist.weights( ::num_dirac = di );
-                    if ( k >= 1 ) { // GLOBAL index check: every dirac except the very first has a boundary
-                        const TF t = udp.pos;
-                        phi_sub += g * ( ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk ) ) + chi_prev_of( di_prev, t ) - chi_prev_of( di, t );
-                    }
-                    img.udp_cont( udp, w, []( auto && ) {} );
-                    p_prev = pk;
-                    di_prev = di;
-                }
-                if ( hi == nb ) // this work-item owns the last dirac -> also owns phi_n
-                    phi_sub += g * ( udp.pos - p_prev ) * ( udp.pos - p_prev ) + chi_prev_of( di_prev, udp.pos );
-            }
-
-            group_scan( local_index ) = phi_sub;
-            group_barrier( group );
-            if ( local_index == 0 ) {
-                TF run = 0;
-                for ( int t = 0; t < local_size; ++t ) {
-                    const TF v = group_scan( t );
-                    group_scan( t ) = run; // exclusive prefix, in place
-                    run += v;
-                }
-                group_scan( local_size ) = run; // broadcast slot: phi_total
-            }
-            group_barrier( group );
-            const TF pref_lo = group_scan( local_index );
-            const TF phi_total = group_scan( local_size );
-
-            // phase 2: re-derive this work-item's own start state and re-walk its chunk, this time
-            // actually writing grad_w (disjoint per dirac, safe) / grad_y (see the atomic note below).
-            auto udp = img.udp_at( img.cell_cum_mass, w_lo );
-            TF p_prev = ( lo > 0 ) ? TF( sorted_pos( lo - 1 ) ) : TF( 0 );
-            SI di_prev = di_prev0;
-            TF pref = pref_lo;
-            for( SI k = lo; k < hi; ++k ) {
-                const SI di = sorted_indices( k );
-                const TF pk = sorted_pos( k );
-                const TF w = src_dist.weights( ::num_dirac = di );
-                if ( k >= 1 ) {
-                    const TF t = udp.pos;
-                    pref += g * ( ( t - p_prev ) * ( t - p_prev ) - ( t - pk ) * ( t - pk ) ) + chi_prev_of( di_prev, t ) - chi_prev_of( di, t );
-                }
+            if constexpr ( WRITE ) {
                 const TF Phi_k = phi_total - pref;
                 const TF gw = gamma_of( di ) / w;            // ( the barycenter's direct share: `b_k` divides by `w_k` )
 
                 if constexpr ( DECAYED_TYPE_OF( grad_plan.src_dist.weights )::is_valid )
                     grad_plan.src_dist.weights( ::num_dirac = di ) = Phi_k - gw * bary_of( di );
 
-                if constexpr ( DECAYED_TYPE_OF( grad_plan.dst_dist.values )::is_valid )
+                if constexpr ( target_grad_wanted<DECAYED_TYPE_OF( grad_plan )> )
                     // `udp.index` is the cell of the piece being emitted (read before the walker
-                    // advances); every piece lives in a single cell. ATOMIC: unlike the sequential
-                    // original, a cell straddling a CHUNK BOUNDARY now gets one write from the end of
-                    // chunk t-1 and one from the start of chunk t, on two concurrent work-items --
-                    // everywhere else (grad_w, barycenters, add_position_grad) stays disjoint per dirac.
+                    // advances); every piece lives in a single cell. On it, d cost / d y = Integral f with
+                    // f( x ) = g ( x - p )^2 - Phi_k + gw x, against the basis of the pixel when it is affine.
                     img.udp_cont( udp, w, [&]( auto &&item ) {
-                        atomic_add( grad_plan.dst_dist.values( udp.index ).ref(),
-                                    TF( g * item.second_moment_about( pk ) - Phi_k * ( item.x1 - item.x0 )
-                                        + gw * ( item.x1 * item.x1 - item.x0 * item.x0 ) / 2 ) );
+                        if constexpr ( target_affine ) {
+                            const SI c = udp.index;
+                            const TF xl = TF( img.origin( 0 ) ) + TF( img.frame( 0, 0 ) ) * TF( img.knots( 0, c ) );
+                            const TF h = TF( img.frame( 0, 0 ) ) * ( TF( img.knots( 0, c + 1 ) ) - TF( img.knots( 0, c ) ) );
+                            auto f = [&]( TF x ) { return g * ( x - pk ) * ( x - pk ) - Phi_k + gw * x; };
+                            atomic_add( grad_plan.dst_dist.coeffs( c, 0 ).ref(), TF( item.basis_integral( 0, f, xl, h ) ) );
+                            atomic_add( grad_plan.dst_dist.coeffs( c, 1 ).ref(), TF( item.basis_integral( 1, f, xl, h ) ) );
+                        } else
+                            atomic_add( grad_plan.dst_dist.values( udp.index ).ref(),
+                                        TF( g * item.second_moment_about( pk ) - Phi_k * ( item.x1 - item.x0 )
+                                            + gw * ( item.x1 * item.x1 - item.x0 * item.x0 ) / 2 ) );
                     } );
                 else
                     img.udp_cont( udp, w, []( auto && ) {} );
-
-                p_prev = pk;
-                di_prev = di;
-            }
-        } );
-    }
-    // scratch rows reused by the next angle this group strides onto -- every work-item must wait for
-    // every other to finish reading them before any of them starts overwriting it.
-    group_barrier( group );
+            } else
+                img.udp_cont( udp, w, []( auto && ) {} );
+            p_prev = pk;
+            di_prev = di;
+        }
+        if constexpr ( ! WRITE )
+            if ( hi == nb ) // this chunk owns the last dirac -> also owns phi_n
+                pref += g * ( udp.pos - p_prev ) * ( udp.pos - p_prev ) + chi_prev_of( di_prev, udp.pos );
+    } );
+    return pref - pref_lo;
 }
 
 UTP HD void DTP::update_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&radix_tmp, auto &&sorted_pos,
@@ -544,7 +564,7 @@ UTP HD void DTP::update_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, au
     constexpr bool need_position_resort  = CT_VALUE( src_dist.position_grad_wanted( grad_plan.src_dist ) )
                                          && ! DECAYED_TYPE_OF( barycenters )::is_valid;
     constexpr bool need_weight_value_grad = DECAYED_TYPE_OF( grad_plan.src_dist.weights )::is_valid
-                                          || DECAYED_TYPE_OF( grad_plan.dst_dist.values )::is_valid;
+                                          || target_grad_wanted<DECAYED_TYPE_OF( grad_plan )>;
     if constexpr ( need_position_resort || need_weight_value_grad )
         sort_diracs( sorted_indices, radix_tmp, sorted_pos, local_index, local_size, group, local_scratch, sub_group );
     sweep_outputs_bwd( grad_plan, sorted_indices, sorted_pos, group_scan, local_index, local_size, group );

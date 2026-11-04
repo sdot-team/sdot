@@ -11,9 +11,10 @@ from loom.util import Aggregate
 
 
 class ContinuousOtPlan1d( Aggregate ):
-    """THE TRANSPORT between two CONTINUOUS distributions on a line: today a `ProjectedSumOfTents` ( the source ) against
-    an `Image` ( the target ), batched over the items of both ( e.g. the angles of a sinogram ), differentiable with
-    respect to the tents' points and half-widths.
+    """THE TRANSPORT between two CONTINUOUS distributions on a line: a `ProjectedSumOfTents` ( the source ) against an
+    `Image` ( the target ), batched over the items of both ( e.g. the angles of a sinogram ), differentiable with respect
+    to the tents' points and half-widths; or an `Image` against an `Image`, pixels of degree 0 or 1, the cost only
+    ( `sdot::image_ot_1d`, `ImageOt1d.h`: no sort, the merge of the two images' pixels ).
 
     `cost` is W2^2 ( both sides normalized to mass 1 ); `barycenters` ( b_i = int T t_i, `[ n ]` ) and `potentials` ( the
     derivative with respect to the mass of each tent, centered ) are stored only when asked for.
@@ -64,10 +65,13 @@ class ContinuousOtPlan1d( Aggregate ):
         self._with_gradient = bool( with_gradient )
         if with_gradient and not hasattr( src_dist, "half_widths" ):
             raise NotImplementedError( "`with_gradient` is for tents with a half-width each ( `ProjectedSumOfTents` ): differentiate the cost with jax" )
+        self._image_source = hasattr( src_dist, "cell_cum_mass" )     # an `Image` ( or its public view )
+        if self._image_source and ( with_barycenters or with_potentials or with_gradient or method != "exact" ):
+            raise NotImplementedError( "ContinuousOtPlan1d between two images: the cost only ( `sdot::image_ot_1d` )" )
         src_dist = src_dist.normalized_version( nb_dims = 1 )
         dst_dist = dst_dist.normalized_version( nb_dims = 1 )
         self.__base_init__(
-            nb_diracs = src_dist.nb_diracs.value,
+            nb_diracs = src_dist.nb_pieces if self._image_source else src_dist.nb_diracs.value,
             nb_dims = 1,
             src_dist = src_dist,
             dst_dist = dst_dist,
@@ -82,6 +86,16 @@ class ContinuousOtPlan1d( Aggregate ):
         written = [ "cost", "nb_diracs" ] + ( [ "barycenters" ] if self._with_barycenters else [] ) \
                                           + ( [ "potentials" ] if self._with_potentials else [] )
         kp = loom.kernel_parameters_for( "update_outputs_ContinuousOtPlan1d" )
+        if self._image_source:
+            # two images: the merge of their pixels ( `ImageOt1d.h` ), the forward only
+            self.src_dist._only_constant_in_1d()
+            self.dst_dist._only_constant_in_1d()
+            kp.ffi_call(
+                FfiCode.inline( "sdot::image_ot_1d( queue, batch_axes, args.outputs.plan, nullptr, args.allocator );", allocator = True ),
+                plan = loom.out( self, writes = written ),
+                has_dynamic_capacity = False,
+            )
+            return
         # the exact transport, or the grid method ( `ContinuousOtPlan1dGrid.h` ) and its cells per bin
         fn, extra = ( "continuous_ot_1d", "" ) if self._method == "exact" else ( "continuous_ot_1d_grid", f", { self._scale }" )
         if self._with_gradient:

@@ -13,10 +13,10 @@ From: quay.io/pypa/manylinux_2_28_x86_64
     dnf -y install clang llvm-toolset libomp-devel libstdc++-static gcc-toolset-14-gcc-c++
     dnf clean all
     /opt/python/cp313-cp313/bin/python -m venv /opt/venv
-    # loom's pinned nvcc ( `loom[cuda]`: the 13.4 frontend collapses on the kernels ), then the frameworks, then what builds and checks a wheel.
+    # loom's pinned nvcc and CCCL ( `loom[cuda]`: the 13.4 frontend collapses on the kernels, CUB is for the 1D ones ), then the frameworks, then what builds and checks a wheel.
     # jax: old enough for about everyone's jaxlib to take its kernels ( XLA FFI API 0.3, see JAX in errand-envs.py )
     /opt/venv/bin/pip install --no-cache-dir "pip>=26.2.1" numpy scipy pyyaml devtools typing_extensions ninja pytest \
-        wheel twine auditwheel "nvidia-cuda-nvcc>=13.3,<13.4" "nvidia-cuda-crt<13.4" "nvidia-nvvm<13.4" \
+        wheel twine auditwheel "nvidia-cuda-nvcc>=13.3,<13.4" "nvidia-cuda-crt<13.4" "nvidia-nvvm<13.4" "nvidia-cuda-cccl<13.4" \
         "jax[cuda13]==0.10.2" torch cupy-cuda13x
 
 %environment

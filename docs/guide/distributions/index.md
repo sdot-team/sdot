@@ -10,6 +10,7 @@ total mass of 1: only the ratios between masses ( or between pixel values ) coun
 | Class | |
 |---|---|
 | `SumOfDiracs( positions, weights = None )` | diracs at `positions` ( `[ n, d ]` ), of masses `weights` ( `[ n ]`, all equal by default ) |
+| `SumOfDiracsOnAGrid( shape, weights = None )` | diracs at the centres of the cells of a regular grid, solved by a dedicated path in 2D: see [Diracs on a Grid](./grid) |
 | `ProjectedSumOfDiracs( points, normal, weights = None )` | 1D diracs, the projections of shared points on a normal per item ( e.g. one per angle of a tomography ), never materialized |
 | `ProjectedSumOfTents( points, half_widths, normal, weights = None )` | the same with a tent of half-width `half_widths` instead of a dirac: a continuous source, see [Projected Sources](./projected) |
 | `ProjectedSumOfAnisotropicTents( points, matrices, normal, weights = None )` | tents whose half-width depends on the direction ( a matrix per tent ): see [Projected Sources](./projected#anisotropic-tents) |

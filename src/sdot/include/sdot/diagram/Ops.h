@@ -399,8 +399,15 @@ struct ValuesSink {
     V values;
 };
 
-/// per PIECE of a piecewise-constant density ( Laguerre cell k x pixel of an image ), the integral over it of the
-/// Kantorovich potential |x - p_k|^2 - w_k, added to the piece's pixel through the density's gradient sink ( `sink.values` ):
+/// the same for a POLYNOMIAL image ( `Image( degree = P )` ): the Bernstein coefficients of each pixel, `[ pixels..., ( P + 1 )^d ]`
+template<class V>
+struct CoeffsSink {
+    V coeffs;
+};
+
+/// per PIECE of an image ( Laguerre cell k x pixel ), the integral over it of the
+/// Kantorovich potential |x - p_k|^2 - w_k, added to the piece's pixel through the density's gradient sink ( `sink.values`;
+/// for a polynomial pixel, its integral against each basis function, into `sink.coeffs` ):
 /// what the derivative of a transport cost with respect to the density's values is made of, by the envelope theorem
 /// ( `PowerDiagram.potential_integrals` ) -- in one sweep, where the four moments' adjoints take four
 template<class PD>
@@ -464,6 +471,21 @@ HD void potential_into_pixels( const PD &pd, auto &&sink, const auto &dom, auto 
                     vol_tot += vol;
                 } );
                 dens.add_value_grad( sink, acc - w * vol_tot );
+            } else if constexpr ( requires { DECAYED_TYPE_OF( dens )::nb_coeffs; } ) {
+                // a polynomial pixel ( `PolynomialPixel.h` ): the potential, of degree 2, against each of its basis functions, by
+                // the exact rule, into `sink.coeffs`
+                if ( ! pc.bounded() )
+                    return;
+                using Dens = DECAYED_TYPE_OF( dens );
+                pc.for_each_simplex( [&]( const auto &chain ) {
+                    const auto pts = simplex_points<TF,D>( pc, chain );
+                    Dens::for_each_node( pts, Dens::degree + 2, [&]( const auto &x, const auto *, TF wq ) {
+                        TF sq = 0;
+                        for ( int d = 0; d < D; ++d )
+                            sq += ( TF( x[ d ] ) - TF( p[ d ] ) ) * ( TF( x[ d ] ) - TF( p[ d ] ) );
+                        dens.add_value_grad_at( sink, x, wq * ( sq - w ) );
+                    } );
+                } );
             }
         } );
         if ( ws.overflow ) {

@@ -151,18 +151,12 @@ class SdotPlan1d( Aggregate ):
         }
 
     def update_outputs( self ):
-        # give the target distribution first refusal: e.g. `Image.try_update_sdotplan1d` solves
-        # the whole thing in closed-form pure JAX (no loom.ffi_call/C++ kernel at all) when the
-        # combination qualifies (JAX backend, 1D, <=1 batch axis, no barycenters, a dirac
-        # source that can supply plain positions/weights) -- see [[pure-jax-otplan1d]]. `False`
-        # means "unsupported combination", not "error" -- fall through to the general path.
-        if self.dst_dist.try_update_sdotplan1d( self ):
-            return
-
-        # second refusal, this time from the BATCH shape itself: when there is one, loop over
-        # it with `jax.lax.map` (one `loom.ffi_call` per angle) instead of one call handling every
-        # angle's memory at once -- see `_update_outputs_via_angle_loop`'s docstring for why.
-        if self.batch_axes and self._update_outputs_via_angle_loop():
+        # with the barycenters ( a `[ angles, n ]` output ), a batch is looped over with `jax.lax.map`
+        # (one `loom.ffi_call` per angle) instead of one call handling every angle's memory at once --
+        # see `_update_outputs_via_angle_loop`'s docstring for why. Not for the cost alone: one call
+        # for the whole batch runs the angles side by side, 12x-20x faster on a card ( 2080 Ti, 1e5
+        # diracs x 600 angles: 0.22 s against 2.6 s ), and its scratch is already bounded by `_scratch`.
+        if self.batch_axes and self._with_barycenters and self._update_outputs_via_angle_loop():
             return
 
         # `dst_dist.cell_cum_mass` is read (not built) by the C++ below -- make sure it is materialized
@@ -176,6 +170,25 @@ class SdotPlan1d( Aggregate ):
         # if asked for: not naming it leaves it a `NoneTensor` ( the forward guards it with
         # `is_valid` C++-side ) and the adjoint recomputes b_i. This is what the flag decides.
         written = [ "cost", "nb_diracs" ] + ( [ "barycenters" ] if self._with_barycenters else [] )
+
+        # ON A CARD: device-wide launches ( `SdotPlan1dCard.h`: one radix sort of every dirac of a chunk of items, scans,
+        # one thread per chunk of sorted diracs ) instead of one block per item, which leaves the card idle on a single
+        # transport ( 1e8 diracs: 4.7 s of kernels in one block )
+        if getattr( loom.resolved_device(), "is_cuda_gpu", False ):
+            kp = loom.kernel_parameters_for( "update_outputs_SdotPlan1d_card" )
+            kp.ffi_call(
+                FfiCode.inline( "sdot::sdot_plan_1d_card( queue, batch_axes, args.outputs.plan, nullptr, args.allocator );", allocator = True ),
+                FfiCode.inline( "args.outputs.plan.src_dist.zero_position_grad( queue, args.grad_of_outputs.plan.src_dist );\n"
+                                "    DECAYED_TYPE_OF( args.outputs.plan )::update_outputs_computed_grads( args.computed_grads.from_plan_cost.plan );\n"
+                                "    [&]( auto &cg ) { if constexpr ( requires { cg.from_plan_barycenters; } ) "
+                                "DECAYED_TYPE_OF( args.outputs.plan )::update_outputs_computed_grads( cg.from_plan_barycenters.plan ); }( args.computed_grads );\n"
+                                "    sdot::sdot_plan_1d_card( queue, batch_axes, args.outputs.plan, args.grad_of_outputs.plan, args.allocator );",
+                                allocator = True ),
+                plan = loom.out( self, writes = written ),
+                has_dynamic_capacity = False,
+            )
+            return
+
         group_size_expr = "scratch.num_local_marker.shape( 0 )"   # a C++ expression, read off an argument
 
         # THE LAUNCH GEOMETRY, written once and given to BOTH directions. Here they share it,
@@ -233,11 +246,10 @@ class SdotPlan1d( Aggregate ):
         FRESH, unbatched `SdotPlan1d` (one `loom.ffi_call` -- sort AND sweep, unaffected by this)
         per angle, instead of one call whose internal scratch/output memory scales with how many
         CONCURRENT angles it processes at once (`_scratch`'s `nt`, or an `[ nb_angles, n, dim ]`
-        `barycenters` output). Mirrors `Image.try_update_sdotplan1d`'s own `lax.map`, extended to
-        the loom.ffi_call/C++ path: 'we will always have a large n', so bounding peak memory to
+        `barycenters` output). 'We will always have a large n', so bounding peak memory to
         ONE angle -- regardless of the total angle count -- matters more than batching several
         angles' GPU work concurrently (confirmed: `with_barycenters=True` OOMs today's single
-        batched call at n=1e8 x 20 angles; looping fixes it, see [[pure-jax-otplan1d]]). Declines
+        batched call at n=1e8 x 20 angles; looping fixes it). Declines
         (returns False, caller keeps the single batched call) when: not JAX, more than one batch
         axis, or either distribution cannot slice itself (`batch_slice`).
         """

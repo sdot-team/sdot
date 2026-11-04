@@ -12,6 +12,21 @@ struct SdotPlan1d {
     SCInt ct_dim        = DECAYED_TYPE_OF( nb_dims )::value;
     using TF            = DECAYED_TYPE_OF( cost )::TF;
 
+    /// the target's pixels are affine ( `Image( degree = 1 )` ): its adjoint writes the two coefficients of each pixel,
+    /// `coeffs`, instead of `values`
+    static constexpr bool target_affine = [] {
+        if constexpr ( requires { DECAYED_TYPE_OF( dst_dist )::is_polynomial; } ) return bool( DECAYED_TYPE_OF( dst_dist )::is_polynomial );
+        else return false;
+    }();
+    /// whether the cotangent `G` of the plan asks for the target's gradient
+    template<class G> static constexpr bool target_grad_wanted = target_affine ? bool( DECAYED_TYPE_OF( std::declval<G>().dst_dist.coeffs )::is_valid )
+                                                                                 : bool( DECAYED_TYPE_OF( std::declval<G>().dst_dist.values )::is_valid );
+    /// the gradient of pixel `c` of the target, zeroed before the adjoint accumulates into it
+    HD static void zero_target_grad( auto &&grad_plan, SI c ) {
+        if constexpr ( target_affine ) { grad_plan.dst_dist.coeffs( c, 0 ) = 0; grad_plan.dst_dist.coeffs( c, 1 ) = 0; }
+        else grad_plan.dst_dist.values( c ) = 0;
+    }
+
     // `local_index`/`local_size`/`group`/`local_scratch`: the work-group cooperating on ONE angle
     // (see run_parallel.h/FfiCodeParallel's `group_size` docstring) -- `group_size == 1` degenerates
     // exactly to the single-work-item algorithm these generalize. `sub_group`: the warp cooperating
@@ -40,6 +55,16 @@ struct SdotPlan1d {
     // `SdotPlan1d.py::update_outputs_presorted`; [[jax-sort-lax-scan]]).
     HD void  sweep_outputs( auto &&sorted_indices, auto &&sorted_pos, auto &&group_scan,
                           int local_index, int local_size, auto &&group );
+
+    // The walks of a CHUNK `[ lo, hi )` of the sorted diracs, from `w_lo` ( the source mass before `lo` ): what a
+    // work-item of a group runs on the host, and a thread on the card ( `SdotPlan1dCard.h` ). `sorted_indices( k )`
+    // and `sorted_pos( k )` are read only, for any k of the item.
+    HD TF    sweep_chunk( auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi, double w_lo );
+    HD void  set_cost( TF total );
+    HD void  position_grad_chunk( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi, double w_lo ) const;
+    template<bool WRITE>
+    HD TF    weight_value_grad_chunk( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, SI lo, SI hi,
+                                      double w_lo, TF pref_lo, TF phi_total ) const;
     HD void  sweep_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&sorted_pos, auto &&group_scan,
                               int local_index, int local_size, auto &&group ) const;
 
@@ -52,7 +77,8 @@ struct SdotPlan1d {
     static void update_outputs_computed_grads( auto &&flags ) {
         DECAYED_TYPE_OF( src_dist )::position_computed_grads( flags.src_dist );
         flags.src_dist.weights = true;
-        flags.dst_dist.values  = true;
+        if constexpr ( target_affine ) flags.dst_dist.coeffs = true;
+        else                           flags.dst_dist.values = true;
     }
     HD void  update_outputs_bwd( auto &&grad_plan, auto &&sorted_indices, auto &&radix_tmp, auto &&sorted_pos,
                                auto &&group_scan,
@@ -67,3 +93,4 @@ struct SdotPlan1d {
 }
 
 #include "SdotPlan1d.cxx"
+#include "SdotPlan1dCard.h"

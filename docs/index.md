@@ -33,7 +33,7 @@ features:
   - icon: 📐
     title: Any number of dimensions
     details: 2D, 6D... — the same API and the same convergence behavior.
-    link: /guide/performance#scaling-with-the-dimension
+    link: /guide/performance-ot#scaling-with-the-dimension
     linkText: Scaling with the dimension
   - icon: 📦
     title: Many target distributions

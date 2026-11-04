@@ -39,7 +39,7 @@ struct SumOfDiracs {
     /// No-op: `add_position_grad` here is a plain per-angle `=` (no cross-angle accumulation), so
     /// there is nothing to clear first (mirrors `ProjectedSumOfDiracs::zero_position_grad`, called
     /// unconditionally by `SdotPlan1d.py`'s `bwd_setup_code` regardless of which source is used).
-    HD void zero_position_grad( auto &&, auto && ) const {}
+    void zero_position_grad( auto &&, auto && ) const {}
 };
 
 }

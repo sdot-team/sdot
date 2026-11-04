@@ -123,13 +123,14 @@ if test( "grid loss converges to the exact one as the grid refines" ):
 
 
 if test( "tents approach the semi-discrete transport of diracs" ):
-    import jax.numpy as jnp
     import numpy as np
     from sdot.projected1d import ProjectedLoss1d
-    from sdot.distributions._pure_jax_cost1d import cost_1d_ot
+    from sdot import Image, SdotPlan1d
+    from sdot.distributions.SumOfDiracs1d import SumOfDiracs1d
     angles, values, s_min, dw, pts = _setup( n = 200, A = 4, B = 64 )
-    sd = sum( float( cost_1d_ot( jnp.asarray( pts @ np.array( [ np.cos( a ), np.sin( a ) ] ) ), jnp.ones( len( pts ) ),
-                                 jnp.asarray( values[ q ] ), s_min, dw ) ) for q, a in enumerate( angles ) )
+    sd = sum( float( np.asarray( SdotPlan1d( SumOfDiracs1d( positions = pts @ np.array( [ np.cos( a ), np.sin( a ) ] ) ),
+                                             Image( values = values[ q ], origin = [ s_min ], pixel_frame = [ [ dw ] ] ) ).cost ) )
+              for q, a in enumerate( angles ) )
     prev = None
     for scale in [ 4, 16, 64 ]:
         g = float( ProjectedLoss1d( angles, values, s_min, dw, scale = scale, shape = "tent", dtype = np.float64 )( pts ) )

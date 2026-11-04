@@ -877,3 +877,4 @@ void continuous_ot_1d( const Queue &queue, const auto &batch, auto &&plan, Grad 
 }
 
 #include "ContinuousOtPlan1dGrid.h"
+#include "ImageOt1d.h"

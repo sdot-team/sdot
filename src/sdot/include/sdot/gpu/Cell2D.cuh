@@ -1302,6 +1302,9 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
             if constexpr ( std::is_same_v<D,DensImage> ) {
                 const double Ox = o.x - pb.dens.x0, Oy = o.y - pb.dens.y0;
                 line = image_edge<MOM>( pb.dens, st.ref, Ox + ax, Oy + ay, Ox + bx, Oy + by, acc );
+            } else if constexpr ( std::is_same_v<D,DensImage1> ) {
+                const double Ox = o.x - pb.dens.x0, Oy = o.y - pb.dens.y0;
+                line = image1_edge<MOM>( pb.dens, st.ref, Ox + ax, Oy + ay, Ox + bx, Oy + by, acc );
             } else if constexpr ( std::is_same_v<D,DensMesh> ) {
                 // the cell as a fan of triangles from its first vertex, each against the mesh; the edge against it for the facets
                 if ( ! st.set ) { st.x0 = ax; st.y0 = ay; st.set = true; }
@@ -1324,7 +1327,7 @@ __device__ __forceinline__ void finish_cell( const Pb &pb, typename Pb::TR k, co
         } );
         const double sg = a2 < 0 ? -1.0 : 1.0;
         DensSums r;
-        if constexpr ( std::is_same_v<D,DensImage> )
+        if constexpr ( std::is_same_v<D,DensImage> || std::is_same_v<D,DensImage1> )
             r = image_finish( pb.dens, acc, sg, o.x, o.y );
         else if constexpr ( std::is_same_v<D,DensMesh> ) {
             r.m = sg * acc.m; r.mx = sg * acc.mx; r.my = sg * acc.my; r.m2 = sg * acc.m2;

@@ -7,7 +7,8 @@
 //   * `DensConst`  a constant ( `Problem::rho` ): the cells' own closed forms, the code of before -- nothing here;
 //   * `DensImage`  a piecewise-constant image on a regular grid ( `Image` with a diagonal frame and uniform knots );
 //   * `DensGauss`  a sum of isotropic gaussians ( `SumOfGaussians`, 2D ), possibly convolved ( the width continuation );
-//   * `DensMesh`   a continuous piecewise linear density on a triangle mesh ( `Mesh`, 2D ).
+//   * `DensMesh`   a continuous piecewise linear density on a triangle mesh ( `Mesh`, 2D );
+//   * `DensImage1` an image of degree 1, bilinear on each pixel ( `Image( degree = 1 )`, `SplineGrid( degree = 1 )` ).
 //
 // Everything is a CIRCULATION on the boundary of the cell, so a cell is never cut ( the old campaigns: `gpu_des_familles`
 // doc/08, `solvers_des_familles` § 9 and § 12 ). The sums are accumulated as if the polygon were counterclockwise; the
@@ -155,6 +156,117 @@ __device__ __forceinline__ double image_edge( const DensImage &im, ImageRefs &re
         Xp = Xc;
     }
     return line;
+}
+
+// ---- the image of degree 1 ------------------------------------------------------------------------------------------
+
+/// AN IMAGE OF DEGREE 1 ( `Image( degree = 1 )`, what `SplineGrid( degree = 1 )` makes: the bilinear interpolation of pixel values ):
+/// on pixel ( i, j ), `rho = sum_ab c_ab B_a( u ) B_b( v )`, `B_0( t ) = 1 - t`, `B_1( t ) = t`, `( u, v )` the place in the pixel. Any
+/// knots, relative to the image's corner `( x0, y0 )` ( `kx[ 0 ] = ky[ 0 ] = 0` ): physical units in the generic solve, index units of
+/// the level in the grid's ( `GridNewton2D.cuh`, the coefficients scaled to the level ).
+///
+/// Green on the rows, as the constant image: `F0( x, y ) = int_0^x rho( t, y ) dt` is `P0_i( v ) + hx_i G0( u, v )` in pixel i, with
+/// `P0_i` the prefix of the whole pixels to its left -- affine in `v` on the row: its values at `v = 0` and `v = 1` are tabulated
+/// ( `p` ), with those of `F1 = int t rho dt` and `F2 = int t^2 rho dt` for the moments. On a piece of an edge in one pixel, everything
+/// is a polynomial of degree <= 5 in the parameter: 3 Gauss points are exact.
+struct DensImage1 {
+    SI            nx, ny;
+    double        x0, y0;
+    const double *kx, *ky;                               ///< `nx + 1`, `ny + 1` knots
+    const double *c;                                     ///< `c[ ( i * ny + j ) * 4 + a * 2 + b ]`, scaled to the level
+    const double *p;                                     ///< `p[ ( j * ( nx + 1 ) + i ) * 6 + 2 m + e ]`: the prefix of `F_m` at `v = e`
+};
+
+/// the pixel of `X` along knots `k` ( n pixels ), clamped
+__device__ __forceinline__ SI knot_cell( const double *k, SI n, double X ) {
+    SI lo = 0, hi = n;                                   // ( the last knot <= X )
+    while ( hi - lo > 1 ) { const SI m = ( lo + hi ) / 2; if ( k[ m ] <= X ) lo = m; else hi = m; }
+    return lo;
+}
+
+/// `G0, G1, G2` of a pixel: `int_0^u s^m rho( s, v ) ds`, `rho = al ( 1 - s ) + be s`
+__device__ __forceinline__ void q1_partials( double al, double be, double u, double &g0, double &g1, double &g2 ) {
+    const double u2 = u * u, u3 = u2 * u, u4 = u3 * u;
+    g0 = al * ( u - u2 / 2 ) + be * u2 / 2;
+    g1 = al * ( u2 / 2 - u3 / 3 ) + be * u3 / 3;
+    g2 = al * ( u3 / 3 - u4 / 4 ) + be * u4 / 4;
+}
+
+/// ONE EDGE of the degree-1 image ( image frame ): its share of the circulations into `acc` ( mass, and the moments about the image's
+/// corner for `MOM` ), `int rho ds` returned. An edge along a line of the pixels takes the pixels on the side of its cell ( `GridNewton2D.cuh::grid_image_edge` ).
+template<bool MOM>
+__device__ __forceinline__ double image1_edge( const DensImage1 &im, ImageRefs &ref, double X0, double Y0, double X1, double Y1, DensSums &acc ) {
+    const double dX = X1 - X0, dY = Y1 - Y0;
+    SI i = knot_cell( im.kx, im.nx, X0 ), j = knot_cell( im.ky, im.ny, Y0 );
+    if ( ! ref.set ) {
+        ref.r0 = im.p[ ( j * ( im.nx + 1 ) + i ) * 6 ];
+        if constexpr ( MOM ) { ref.r1 = im.p[ ( j * ( im.nx + 1 ) + i ) * 6 + 2 ]; ref.r2 = im.p[ ( j * ( im.nx + 1 ) + i ) * 6 + 4 ]; }
+        ref.set = true;
+    }
+    const double L = sqrt( dX * dX + dY * dY );
+    if ( ! ( L > 0 ) )
+        return 0;
+    if ( dX == 0 && dY > 0 && i > 0 && X0 == im.kx[ i ] ) --i;
+    if ( dY == 0 && dX < 0 && j > 0 && Y0 == im.ky[ j ] ) --j;
+    const double INF = 1e300;
+    auto next_x = [&]() { return dX > 0 ? ( i + 1 < im.nx ? ( im.kx[ i + 1 ] - X0 ) / dX : INF ) : dX < 0 ? ( i > 0 ? ( im.kx[ i ] - X0 ) / dX : INF ) : INF; };
+    auto next_y = [&]() { return dY > 0 ? ( j + 1 < im.ny ? ( im.ky[ j + 1 ] - Y0 ) / dY : INF ) : dY < 0 ? ( j > 0 ? ( im.ky[ j ] - Y0 ) / dY : INF ) : INF; };
+    double tx = fmax( next_x(), 0.0 ), ty = fmax( next_y(), 0.0 ), tp = 0, line = 0;
+    const double gt[ 3 ] = { 0.11270166537925831148, 0.5, 0.88729833462074168852 }, gw[ 3 ] = { 5.0 / 18, 8.0 / 18, 5.0 / 18 };
+    const SI guard = 2 * ( im.nx + im.ny ) + 4;
+    for ( SI g = 0; g < guard; ++g ) {
+        const bool by_x = tx < ty;
+        double tn = by_x ? tx : ty;
+        const bool last = ! ( tn < 1 );
+        if ( last ) tn = 1;
+        const double dt = tn - tp;
+        if ( dt > 0 ) {
+            const double kx = im.kx[ i ], hx = im.kx[ i + 1 ] - kx, ky = im.ky[ j ], hy = im.ky[ j + 1 ] - ky;
+            const double *c = im.c + ( i * im.ny + j ) * 4, *pp = im.p + ( j * ( im.nx + 1 ) + i ) * 6;
+            for ( int q = 0; q < 3; ++q ) {
+                const double tau = tp + dt * gt[ q ], X = X0 + dX * tau, Y = Y0 + dY * tau;
+                const double u = ( X - kx ) / hx, v = ( Y - ky ) / hy;
+                const double al = c[ 0 ] * ( 1 - v ) + c[ 1 ] * v, be = c[ 2 ] * ( 1 - v ) + c[ 3 ] * v;
+                double g0, g1, g2;
+                q1_partials( al, be, u, g0, g1, g2 );
+                const double F0 = pp[ 0 ] * ( 1 - v ) + pp[ 1 ] * v - ref.r0 + hx * g0, w = gw[ q ] * dt;
+                acc.m += w * dY * F0;
+                line += w * L * ( al * ( 1 - u ) + be * u );
+                if constexpr ( MOM ) {
+                    const double F1 = pp[ 2 ] * ( 1 - v ) + pp[ 3 ] * v - ref.r1 + hx * ( kx * g0 + hx * g1 );
+                    const double F2 = pp[ 4 ] * ( 1 - v ) + pp[ 5 ] * v - ref.r2 + hx * ( kx * kx * g0 + 2 * kx * hx * g1 + hx * hx * g2 );
+                    acc.mx += w * dY * F1;
+                    acc.my += w * dY * Y * F0;
+                    acc.m2 += w * dY * ( F2 + Y * Y * F0 );
+                }
+            }
+        }
+        if ( last )
+            break;
+        if ( by_x ) { i += dX > 0 ? 1 : -1; tx = next_x(); }
+        else        { j += dY > 0 ? 1 : -1; ty = next_y(); }
+        tp = tn;
+    }
+    return line;
+}
+
+/// the prefixes of row `j` ( `DensImage1::p` ): `F_m` of the whole pixels left of i, at `v = 0` and `v = 1` ( one thread per row )
+__device__ __forceinline__ void image1_prefix_row( SI nx, SI ny, SI j, const double *kx, const double *c, double *p ) {
+    double a[ 6 ] = { 0, 0, 0, 0, 0, 0 };
+    for ( SI i = 0; i <= nx; ++i ) {
+        for ( int q = 0; q < 6; ++q ) p[ ( j * ( nx + 1 ) + i ) * 6 + q ] = a[ q ];
+        if ( i == nx )
+            break;
+        const double k = kx[ i ], h = kx[ i + 1 ] - k, *cc = c + ( i * ny + j ) * 4;
+        for ( int e = 0; e < 2; ++e ) {
+            const double al = cc[ e ], be = cc[ 2 + e ];           // ( v = e )
+            double g0, g1, g2;
+            q1_partials( al, be, 1.0, g0, g1, g2 );
+            a[ e ] += h * g0;
+            a[ 2 + e ] += h * ( k * g0 + h * g1 );
+            a[ 4 + e ] += h * ( k * k * g0 + 2 * k * h * g1 + h * h * g2 );
+        }
+    }
 }
 
 // ---- the gaussians ( `SumOfGaussians.cxx`, the same formulas ) ------------------------------------------------------------
@@ -559,6 +671,7 @@ __device__ __forceinline__ void mesh_triangle_in_ball( const DensMesh &m, double
 /// what a cell keeps from one edge to the next ( the image's references )
 template<class D> struct DensState {};
 template<> struct DensState<DensImage> { ImageRefs ref; };
+template<> struct DensState<DensImage1> { ImageRefs ref; };
 /// the mesh: the first vertex of the cell, the apex of the fan of triangles that its mass is made of
 template<> struct DensState<DensMesh> { double x0 = 0, y0 = 0; bool set = false; };
 
@@ -570,6 +683,9 @@ __device__ __forceinline__ void density_edge_mass( const D &dens, DensState<D> &
     if constexpr ( std::is_same_v<D,DensImage> ) {
         const double Ox = ox - dens.x0, Oy = oy - dens.y0;
         image_edge<false>( dens, st.ref, Ox + ax, Oy + ay, Ox + bx, Oy + by, acc );
+    } else if constexpr ( std::is_same_v<D,DensImage1> ) {
+        const double Ox = ox - dens.x0, Oy = oy - dens.y0;
+        image1_edge<false>( dens, st.ref, Ox + ax, Oy + ay, Ox + bx, Oy + by, acc );
     } else if constexpr ( std::is_same_v<D,DensMesh> ) {
         if ( ! st.set ) { st.x0 = ax; st.y0 = ay; st.set = true; }
         mesh_triangle<false>( dens, ox, oy, st.x0, st.y0, ax, ay, bx, by, acc );
@@ -578,8 +694,9 @@ __device__ __forceinline__ void density_edge_mass( const D &dens, DensState<D> &
 }
 
 /// THE IMAGE'S sums of a counterclockwise walk turned into the cell's: `sg` the sign of its area; the moments about the seed
-/// ( `mx`, `my`, `m2` = the cost of the cell )
-__device__ __forceinline__ DensSums image_finish( const DensImage &dens, DensSums acc, double sg, double ox, double oy ) {
+/// ( `mx`, `my`, `m2` = the cost of the cell ). Either image ( `DensImage`, `DensImage1` ).
+template<class Im>
+__device__ __forceinline__ DensSums image_finish( const Im &dens, DensSums acc, double sg, double ox, double oy ) {
     DensSums r;
     r.m = sg * acc.m;
     // about the image's corner -> about the seed `P`

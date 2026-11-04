@@ -34,6 +34,13 @@ struct Image {
     }();
     static_assert( degree >= 0, "Image: `nb_coeffs` is not a `( P + 1 )^d`" );
 
+    /// THE RAMP of the jump continuation ( `sdotplan/Solve.h`, the surprise ): a C++ member only, never set from Python. `ramp > 0`
+    /// ( a length ) turns each jump of a constant image into a linear ramp over `[ -ramp, ramp ]` across the pixel edge, axis by axis
+    /// ( a tensor product: bilinear in the corners ), clipped at half a pixel -- at `ramp >= p / 2` it is the P1 interpolation of the
+    /// pixel centres. A stage of the solver only: the derivatives do not see it ( `RampPixel`, `Image.cxx` ). The places that rebuild
+    /// the image field by field ( `with_defaults`, `Convolved` ) copy it.
+    TF ramp = 0;
+
     /// the number of pixels along axis `a`
     HD SI nb_pixels( int a ) const {
         if constexpr ( is_polynomial ) return SI( coeffs.shape( a ) );
@@ -116,8 +123,15 @@ struct Image {
     HD void   measure_frame_bwd( auto &&grad_frame, auto &&grad_mass ) const;
 
     // unidimension piece
-    struct Udp          { SI index; TF pos; TF mass; TF y; };
+    // `s`: the slope of the density in the current pixel ( 0 on a constant one ); the walk takes `degree <= 1`
+    struct Udp          { SI index; TF pos; double mass; TF y; TF s; };   // ( `mass`: the remaining mass of the pixel, in double: many takes are subtracted from it )
     HD auto   udp_start () const;
+    HD TF     udp_left     ( SI c ) const;                  // the density at the left edge of pixel `c`
+    HD TF     udp_slope    ( SI c ) const;                  // its slope ( 0 on a constant pixel )
+    HD double udp_cell_mass( SI c ) const;
+    HD SI     udp_nb_cells () const;
+    HD TF     udp_length   ( TF y, TF s, double m ) const;  // the length from density y, slope s, that holds the mass m
+    HD auto   udp_piece    ( TF x0, TF x1, const auto &udp ) const;  // a `CstUdPiece`, or a `LinUdPiece` ( degree 1 )
     HD auto   udp_cont  ( auto &&udp, auto mass_to_take, auto &&cb_parts ) const;
 
     // jump directly to the `Udp` state a sequential walk would be in after having consumed exactly

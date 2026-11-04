@@ -102,6 +102,10 @@ class Tuning:
                   accelerator = None, memory = None, scratch_capacity = None,
                   # keep the given starting weights even if they empty a cell ( the stages of a continuation run by the caller )
                   keep_start = False,
+                  # the SURPRISE ( `sdotplan/Newton.h`, `sdotplan/Solve.h` ): with `continuation = "auto"`, a first Newton step whose
+                  # masses miss the linear model by more than this ( relative ) and stays short sends the solve to the jump
+                  # continuation ( the ramps of an image with coarse pixels ); 0: never
+                  surprise = 0.5,
                   # THE DIRACS OF A GRID ( `SumOfDiracsOnAGrid` ): "auto" the dedicated solver when it applies ( `grid/GridNewton2D.h`:
                   # 2D, N x N, N a power of two, square cells, the target on the box of the grid ), "dedicated" the same or an error,
                   # "cells" the generic solver on the grid's diagram ( `PowerDiagram_Grid` ). The dedicated solver's coarsest level,
@@ -134,6 +138,7 @@ class Tuning:
         self.aggregation_margin = aggregation_margin
         self.aggregation_kappa = float( aggregation_kappa )
         self.keep_start        = bool( keep_start )
+        self.surprise          = float( surprise )
         self.accelerator       = accelerator
         self.memory            = memory
         self.scratch_capacity  = scratch_capacity

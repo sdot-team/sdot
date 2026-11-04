@@ -6,6 +6,7 @@ from loom.tensor import Axis
 from loom.util import ComputedAttribute
 
 from .Distribution import Distribution
+from .Distribution import batch_item
 
 
 class ProjectedSumOfDiracs( Distribution ):
@@ -80,26 +81,6 @@ class ProjectedSumOfDiracs( Distribution ):
         else:
             self.current_mass = self.nb_diracs.value
 
-    def raw_1d_diracs( self ):
-        # see `Distribution.raw_1d_diracs`. `points` [n,proj_dim] is shared; `normal` is
-        # `[proj_dim]` (unbatched) or `[*batch,proj_dim]` (one per angle) -- when batched, the
-        # projection (`points·normal`) is DEFERRED (`project_fn`, `normal` routed through
-        # `batched_extra`) so the caller computes it ONE ANGLE AT A TIME: materializing the
-        # full `[*batch,n]` projection upfront (a plain eager `einsum` over every angle at
-        # once) is exactly the memory blow-up `Image.try_update_sdotplan1d`'s `lax.map` exists to
-        # avoid -- confirmed as the actual cause of an OOM at n=1e8 x 5 angles that an EARLIER,
-        # eager version of this method hit (the lazy `lax.map` alone did not save it, because
-        # the projection was already materialized in full before `lax.map` ever ran).
-        if not self.weights.is_defined:
-            return None
-        import jax.numpy as jnp
-        points = self.points.value
-        normal = self.normal.value
-        weights = self.weights.value
-        if normal.ndim > 1:
-            return weights, { "normal": normal }, lambda extra: jnp.einsum( "n p, p -> n", points, extra[ "normal" ] )
-        return weights, {}, lambda extra: jnp.einsum( "n p, p -> n", points, normal )
-
     def batch_slice( self, index ):
         # see `Distribution.batch_slice`. `points`/`weights` are shared (unaffected by which
         # angle); only `normal` varies, so only it is actually indexed.
@@ -107,6 +88,6 @@ class ProjectedSumOfDiracs( Distribution ):
             return None
         return ProjectedSumOfDiracs(
             points = self.points,
-            normal = Tensor.wrap( self.normal.value[ index ], [ self.proj_dim.name ] ),
+            normal = Tensor.wrap( batch_item( self.normal.value, index ), [ self.proj_dim.name ] ),
             weights = self.weights if self.weights.is_defined else None,
         )

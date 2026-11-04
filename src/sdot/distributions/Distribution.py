@@ -2,6 +2,16 @@ from loom.util import Aggregate
 from loom.tensor import RealTensor
 
 
+def batch_item( value, index ):
+    """`value[ index ]` for `batch_slice`, also when `value` is a host array and `index` is traced ( the `jax.lax.map`
+    of `SdotPlan1d._update_outputs_via_angle_loop` ): the host array is then put in the framework first"""
+    import numpy
+    if isinstance( value, numpy.ndarray ) and not isinstance( index, ( int, numpy.integer ) ):
+        import jax.numpy as jnp
+        value = jnp.asarray( value )
+    return value[ index ]
+
+
 class Distribution( Aggregate ):
     """Base class for probability distributions.
 
@@ -221,42 +231,6 @@ class Distribution( Aggregate ):
         """  """
         raise NotImplementedError
 
-    def raw_1d_diracs( self ):
-        """= Internals
-
-        For a 1D dirac-source distribution (`_is_dirac_source`): `( weights, batched_extra,
-        project_fn )`, letting a target distribution's `try_update_sdotplan1d` read plain,
-        differentiable backend arrays and bypass `loom.ffi_call` entirely (ordinary autodiff
-        differentiates straight through). `None` when this distribution cannot supply this
-        cheaply (default: unsupported) -- the caller then falls back to the general
-        loom.ffi_call/C++ path.
-
-        - `weights`: `[ nb_diracs ]` (shared across the batch) or `[ *batch, nb_diracs ]`.
-        - `batched_extra`: a dict of this distribution's OWN per-batch-element leaves needed to
-          compute positions (e.g. a per-angle projection normal) -- EMPTY if positions do not
-          depend on the batch. The caller merges these into whatever it maps/vmaps over, so
-          they are sliced one batch element at a time, not materialized in full.
-        - `project_fn( extra )`: given one slice of `batched_extra` (same keys, each now
-          unbatched -- `{}` if `batched_extra` is empty), returns this distribution's `[ n ]`
-          1D positions for that one batch element. Deferred like this (a function, not a
-          materialized array) so a projection that DOES depend on the batch (e.g.
-          `ProjectedSumOfDiracs`'s `points·normal`) is computed LAZILY, one angle at a time,
-          inside the caller's `lax.map` -- eagerly materializing it for every batch element
-          upfront would defeat the whole point of mapping instead of vmapping (see
-          `Image.try_update_sdotplan1d`)."""
-        return None
-
-    def try_update_sdotplan1d( self, plan ):
-        """= Internals
-
-        Attempt to solve `plan` (an `SdotPlan1d` with `self` as one of its two
-        distributions) without going through `loom.ffi_call` -- e.g. a closed-form, pure-JAX
-        computation. On success: update `plan`'s output fields (at least `plan.cost`) and
-        return True. On failure (unsupported combination): change nothing and return False,
-        so the caller uses the general loom.ffi_call/C++ path instead. Default: always decline
-        (default: unsupported)."""
-        return False
-
     def batch_slice( self, index ):
         """= Internals
 
@@ -264,8 +238,7 @@ class Distribution( Aggregate ):
         (single) batch axis -- lets `SdotPlan1d` loop over the batch with `jax.lax.map` (one
         instance, and so one `loom.ffi_call`, per iteration) instead of a single call handling
         every batch element's memory at once. This is what lets the loom.ffi_call/C++ path scale
-        to a large batch count the same way `Image.try_update_sdotplan1d`'s own `lax.map` already
-        does for the pure-JAX path: peak memory bounded by ONE batch element, not the total
+        to a large batch count: peak memory bounded by ONE batch element, not the total
         count (see `SdotPlan1d._update_outputs_via_angle_loop`). `None` when unsupported (no
         batch axis, or this distribution type does not know how to slice itself) -- the caller
         then falls back to its previous, single-call batched behavior."""

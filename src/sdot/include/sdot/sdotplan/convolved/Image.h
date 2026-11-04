@@ -51,6 +51,23 @@ struct Convolved<Image<T...>> {
         return r / 4;
     }
 
+    /// the smallest pixel
+    double pixel() const { return 4 * min_scale( 0 ); }
+
+    /// the image blurred at `s` ( `B_s` ), its jumps turned into ramps of half-width `eps` ( `R_eps`, `Image.h`: `ramp` ) -- the
+    /// two parameters of the jump continuation ( `Solve.h`, the surprise )
+    const Dist &at( double s, double eps ) {
+        if ( s > 0 ) {
+            at( s );
+            current->ramp = TF( eps );
+            return *current;
+        }
+        if ( ! ( eps > 0 ) ) return dist;
+        current.emplace( dist );
+        current->ramp = TF( eps );
+        return *current;
+    }
+
     const Dist &at( double s ) {
         if ( s <= 0 ) return dist;
         // the separable filter: along each axis, a Gaussian of standard deviation `s / step` in pixels,

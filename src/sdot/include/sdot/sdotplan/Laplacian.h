@@ -89,6 +89,7 @@ struct Laplacian {
                     c[ p ] = fa[ k ].c;
                 }
         } );
+        symmetrize( T );
         // a cell without a neighbor cannot happen as long as none is empty, but a zero row
         // would make the system singular WITHOUT SAYING SO: we neutralize it.
         run( [&]( int t ) {
@@ -100,6 +101,34 @@ struct Laplacian {
                 dia[ i ] = s > 0 ? s : 1;
             }
         } );
+    }
+
+    /// THE TWO MEASURES OF A FACET, made one: `c_ij = c_ji = ( c_ij + c_ji ) / 2`, and a facet that only one of its cells saw is
+    /// dropped. They differ by more than rounding where the facet is degenerate: a facet of zero length that one cell keeps and
+    /// the other does not ( four seeds on a circle, every vertex of a grid ), or a facet lying ON a discontinuity of the density,
+    /// which each cell integrates with the density of its own side ( a grid of seeds on an image: 5 % apart ). The solvers
+    /// ( CG, the multigrid ) need a symmetric matrix: on a grid against an image, the multigrid stalled at 0.2 after 2500
+    /// iterations. A lookup in the other row, a few entries long: no sort. Several entries of one row may share a column ( the
+    /// facets of a group sent onto one row ): the SUMS `S_ij` and `S_ji` are made equal, each entry scaled by the same factor.
+    std::vector<double> cs;
+    void symmetrize( int T ) {
+        cs.resize( c.size() );
+        auto run = [&]( auto &&slice ) { if ( T == 1 ) slice( 0 ); else cpu_thread_pool().run_threads( T, slice ); };
+        run( [&]( int t ) {
+            const SI e = n * ( t + 1 ) / T;
+            for ( SI i = n * t / T; i < e; ++i )
+                for ( SI k = row[ i ]; k < row[ i + 1 ]; ++k ) {
+                    const SI j = col[ k ];
+                    if ( j < 0 || j >= n ) { cs[ k ] = c[ k ]; continue; }
+                    double sij = 0, sji = 0;
+                    for ( SI l = row[ i ]; l < row[ i + 1 ]; ++l )
+                        if ( col[ l ] == j ) sij += c[ l ];
+                    for ( SI l = row[ j ]; l < row[ j + 1 ]; ++l )
+                        if ( col[ l ] == i ) sji += c[ l ];
+                    cs[ k ] = sji > 0 && sij > 0 ? c[ k ] * ( 0.5 * ( sij + sji ) / sij ) : 0.0;
+                }
+        } );
+        c.swap( cs );
     }
 
     /// `y = L x` ( the full system, gauge included )

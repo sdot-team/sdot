@@ -30,10 +30,12 @@
 namespace sdot {
 namespace ot1d {
 
-/// the running sums of `transport_1d` ( see the header )
-struct Sums1d {
-    double cost = 0, P0 = 0, P1 = 0, P2 = 0, phi = 0;
+/// the running sums of `transport_1d` ( see the header ), in double
+template<class T>
+struct Sums1dT {
+    T cost = 0, P0 = 0, P1 = 0, P2 = 0, phi = 0;
 };
+using Sums1d = Sums1dT<double>;
 
 template<int Q>
 struct GaussLegendre1d;
@@ -53,6 +55,18 @@ struct GaussLegendre1d<5> {
     SDOT_OT1D_HD static double w( int q ) {
         constexpr double a = 0.2369268850561891, b = 0.4786286704993665, c = 0.5688888888888889;
         return q == 0 || q == 4 ? a : q == 1 || q == 3 ? b : c;
+    }
+};
+
+template<>
+struct GaussLegendre1d<7> {
+    SDOT_OT1D_HD static double x( int q ) {
+        constexpr double a = 0.9491079123427585, b = 0.7415311855993945, c = 0.4058451513773972;
+        return q == 0 ? -a : q == 1 ? -b : q == 2 ? -c : q == 3 ? 0.0 : q == 4 ? c : q == 5 ? b : a;
+    }
+    SDOT_OT1D_HD static double w( int q ) {
+        constexpr double a = 0.1294849661688697, b = 0.2797053914892766, c = 0.3818300505051189, d = 0.4179591836734694;
+        return q == 0 || q == 6 ? a : q == 1 || q == 5 ? b : q == 2 || q == 4 ? c : d;
     }
 };
 
@@ -159,25 +173,27 @@ SDOT_OT1D_HD Sums1d transport_1d_lin_const( SrcStream &&src, DstStream &&dst, On
 /// see the header. `Q`: the points of the Gauss-Legendre rule on each merged sub-piece. `dd0`: the mass already taken in
 /// the target's first piece -- a chunk of a parallel sweep starts the target mid-way ( its sums are then local ).
 template<int Q = 3, class SrcStream, class DstStream, class OnEvent>
-SDOT_OT1D_HD Sums1d transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on_event, double dd0 = 0 ) {
+SDOT_OT1D_HD auto transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on_event, double dd0 = 0 ) {
     using SP = typename std::decay_t<SrcStream>::Piece;
     using DP = typename std::decay_t<DstStream>::Piece;
     using GL = GaussLegendre1d<Q>;
-    if constexpr ( requires { SP::degree; DP::degree; } )
+    // the computations in the float of the pieces ( float pieces: single precision, the card's fast path )
+    using T = std::decay_t<decltype( SP{}.x0 + DP{}.x0 )>;
+    if constexpr ( requires { SP::degree; DP::degree; } && std::is_same_v<T, double> )
         if constexpr ( SP::degree <= 1 && DP::degree == 0 )
             return transport_1d_lin_const<Q>( src, dst, on_event, dd0 );
 
-    Sums1d S;
+    Sums1d S;           // ( the sums in double, each merged piece's quadrature in T: in float, a sum of many pieces drifts )
     SP ps;
     DP pd;
     bool has_src = src.next( ps ), has_dst = dst.next( pd );
-    double sd = 0;                      // mass already taken in the current source piece
-    double dd = dd0;                    // mass already taken in the current target piece
+    T sd = 0;                      // mass already taken in the current source piece
+    T dd = dd0;                    // mass already taken in the current target piece
     bool fired = false;                 // the current source piece's event already reported
 
-    auto target_at = [&]( double level ) -> double {   // T at the current target piece, `level` the mass taken in it
-        const double m = double( pd.mass() );
-        return double( pd.x0 ) + double( pd.inv_cdf( level < 0 ? 0 : ( level > m ? m : level ) ) );
+    auto target_at = [&]( T level ) -> T {   // T at the current target piece, `level` the mass taken in it
+        const T m = T( pd.mass() );
+        return T( pd.x0 ) + T( pd.inv_cdf( level < 0 ? 0 : ( level > m ? m : level ) ) );
     };
 
     while ( has_src ) {
@@ -185,13 +201,13 @@ SDOT_OT1D_HD Sums1d transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on
             on_event( ps.event, S );
         fired = true;
 
-        const double ms = double( ps.mass() );
+        const T ms = T( ps.mass() );
         if ( !( ms > 0 ) ) {
             // a gap of the source ( or an event marker ): T is constant there, the potential still moves
             if ( has_dst && ps.length() > 0 ) {
-                const double T = target_at( dd );
-                const double a = double( ps.x0 ) - T, b = double( ps.x1 ) - T;
-                S.phi += b * b - a * a;
+                const T Tx = target_at( dd );
+                const T a = T( ps.x0 ) - Tx, b = T( ps.x1 ) - Tx;
+                S.phi += double( b * b - a * a );
             }
             has_src = src.next( ps ); sd = 0; fired = false;
             continue;
@@ -200,34 +216,36 @@ SDOT_OT1D_HD Sums1d transport_1d( SrcStream &&src, DstStream &&dst, OnEvent &&on
             has_src = src.next( ps ); sd = 0; fired = false;
             continue;
         }
-        const double md = double( pd.mass() );
+        const T md = T( pd.mass() );
         if ( !( md - dd > 0 ) ) {        // a target piece used up ( or empty ): the next one
             has_dst = dst.next( pd ); dd = 0;
             continue;
         }
 
-        const double take = ms - sd < md - dd ? ms - sd : md - dd;
+        const T take = ms - sd < md - dd ? ms - sd : md - dd;
         const bool src_done = take >= ms - sd;
-        const double u0 = double( ps.inv_cdf( sd ) );
-        const double u1 = src_done ? double( ps.length() ) : double( ps.inv_cdf( sd + take ) );
+        const T u0 = T( ps.inv_cdf( sd ) );
+        const T u1 = src_done ? T( ps.length() ) : T( ps.inv_cdf( sd + take ) );
 
         // the merged sub-piece [ x0 + u0, x0 + u1 ] of the source onto the target piece, from `dd`
-        const double h = 0.5 * ( u1 - u0 );
+        const T h = 0.5 * ( u1 - u0 );
         if ( h > 0 ) {
-            const double F0 = double( ps.cdf( u0 ) );
+            const T F0 = T( ps.cdf( u0 ) );
+            T c_ = 0, p0_ = 0, p1_ = 0, p2_ = 0, f_ = 0;
             for ( int q = 0; q < Q; ++q ) {
-                const double u = 0.5 * ( u0 + u1 ) + h * GL::x( q );
-                const double y = double( ps.x0 ) + u;
-                const double f = double( ps.density( u ) );
-                const double T = target_at( dd + double( ps.cdf( u ) ) - F0 );
-                const double wq = h * GL::w( q );
-                const double e = y - T;
-                S.cost += wq * e * e * f;
-                S.P0 += wq * T;
-                S.P1 += wq * y * T;
-                S.P2 += wq * y * y * T;
-                S.phi += wq * 2 * e;
+                const T u = 0.5 * ( u0 + u1 ) + h * T( GL::x( q ) );
+                const T y = T( ps.x0 ) + u;
+                const T f = T( ps.density( u ) );
+                const T Tx = target_at( dd + T( ps.cdf( u ) ) - F0 );
+                const T wq = h * T( GL::w( q ) );
+                const T e = y - Tx;
+                c_ += wq * e * e * f;
+                p0_ += wq * Tx;
+                p1_ += wq * y * Tx;
+                p2_ += wq * y * y * Tx;
+                f_ += wq * 2 * e;
             }
+            S.cost += double( c_ ); S.P0 += double( p0_ ); S.P1 += double( p1_ ); S.P2 += double( p2_ ); S.phi += double( f_ );
         }
 
         sd += take; dd += take;

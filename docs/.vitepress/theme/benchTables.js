@@ -41,10 +41,27 @@ const threadCols = ( group, m, v, f, best = true ) => [
 const t1 = r => r.results.t_total_wall
 const tGpu = r => r.results.t_jit_wall ?? r.results.t_total_wall
 const nsSeed = r => r.results.ns_per_seed
+const gridSolve = r => r?.status === 'PASS' ? r.results : null
+const gridCell = x => x && ( x.converged ? `${ sec( x.t_total_wall ) } ( ${ x.iterations } )` : `no conv. ( ${ sec( x.t_total_wall ) } )` )
+const gridBest = x => x?.converged ? x.t_total_wall : null
 const nsKernel = r => r.results.ns_per_seed_kernel
 const triSeed = r => r.results.t_triangulation / r.results.n * 1e9
 const solve = x => x && ( x.converged ? sec( x.t_total_wall ) : `no conv. ( ${ sec( x.t_total_wall ) } )` )
 const its = x => x && `${ x.iterations } / ${ x.diagrams }`
+
+
+// THE 1D PAGE ( `bench_1d.py`, jobs `one_d*` of `page.py` ): batches of 256 problems
+const wall = r => r?.results?.t_total_wall
+const wall9 = r => r?.results && r.results.t_total_wall * 1e9                  // ( the charts take nanoseconds )
+const exp0 = x => x?.toExponential( 0 ).replace( 'e+', 'e' )
+const nRows = ns => ns.map( n => ( { label: exp0( n ), m: { n } } ) )
+const DIRACS = { problem: 'diracs' }, IMAGES = { problem: 'images' }
+// POT's time, down to an error of 1e-12: below, the rounding of both costs in double
+const potTime = r => r?.results?.error >= 1e-12 ? wall9( r ) : null
+const sdotCols = ( m, gm ) => [
+  { group: 'sdot', label: 'all the cores', kind: 'cpu', m: { job: 'one_d', ...m, threads: 'cores' }, v: wall, f: sec },
+  { group: 'sdot', kind: 'gpu', m: { job: 'gpu_one_d', ...( gm ?? m ) }, v: wall, f: sec },
+]
 
 export const TABLES = {
   diagram: {
@@ -141,6 +158,50 @@ export const TABLES = {
       { label: 'one diagram, per dirac', kind: 'cpu', m: { job: [ 'dims', 'dims6' ] }, v: r => r.results.t_diag / r.results.diagrams / r.results.n * 1e6, f: mus },
     ],
   },
+  one_d: {
+    note: 'Seconds, 256 semi-discrete transports: n diracs each against an image of 1e4 affine pixels, the inputs already where the computation runs, until the costs are on the host.',
+    rows: nRows( [ 1e3, 1e4, 1e5, 1e6 ] ),
+    cols: sdotCols( DIRACS ),
+  },
+  one_d_images: {
+    note: 'Seconds, 256 transports between two images of n affine pixels each.',
+    rows: nRows( [ 1e3, 1e4, 1e5, 1e6 ] ),
+    cols: sdotCols( IMAGES ),
+  },
+  one_d_threads: {
+    note: 'Seconds, over the threads: 256 transports of 1e5 diracs against 1e4 pixels, of two images of 1e5 pixels.',
+    rows: [ { label: 'diracs', m: { ...DIRACS, n: 1e5 } }, { label: 'images', m: { ...IMAGES, n: 1e5 } } ],
+    cols: [ 1, 8, 32 ].map( t => ( { group: 'threads', label: `${ t }`, merge: 'threads', kind: 'cpu', m: { job: 'one_d', threads: t }, v: wall, f: sec } ) )
+      .concat( [ { group: 'threads', label: r => `${ thr( r ) ?? 'all' }`, merge: 'threads', kind: 'cpu', m: { job: 'one_d', threads: 'cores' }, v: wall, f: sec } ] ),
+  },
+  one_d_pot: {
+    note: 'Seconds and median relative error on W2 ( against sdot ), 256 pairs of images of 1e4 affine pixels, in double. POT: each image replaced by m diracs ( the same number on both sides, made beforehand ), one column per pair; on a card, with its jax backend.',
+    rows: [ 1e3, 1e4, 1e5, 1e6, 3e6 ].map( m => ( { label: `m = ${ exp0( m ) }`, m: { m } } ) ),
+    cols: [
+      { group: 'POT, numpy, one thread', label: 'time', kind: 'cpu', m: { job: 'one_d_pot', method: 'pot' }, v: wall, f: sec },
+      { group: 'POT, numpy, one thread', label: 'error', kind: 'cpu', m: { job: 'one_d_pot', method: 'pot' }, v: r => r?.results?.error, f: x => x?.toExponential( 1 ) },
+      { group: 'POT, torch, all the cores', label: 'time', kind: 'cpu', m: { job: 'one_d_pot_torch', method: 'pot' }, v: wall, f: sec },
+      { group: 'POT, jax', kind: 'gpu', m: { job: 'gpu_one_d', method: 'pot' }, v: wall, f: sec },
+    ],
+  },
+  one_d_pot_sdot: {
+    note: 'sdot on the same 256 pairs, exact: seconds.',
+    rows: [ { label: 'sdot', m: { method: 'sdot', n: 1e4 } } ],
+    cols: [
+      { group: 'one thread', label: 'time', kind: 'cpu', m: { job: 'one_d_pot', threads: 1 }, v: wall, f: sec },
+      { group: 'all the cores', label: 'time', kind: 'cpu', m: { job: 'one_d_pot', threads: 'cores' }, v: wall, f: sec },
+      { group: 'sdot', kind: 'gpu', m: { job: 'gpu_one_d', ...IMAGES }, v: wall, f: sec },
+    ],
+  },
+  // the grid page ( `bench_grid.py`, jobs `grid`, `gpu_grid` ): N x N diracs against an image of 512 x 512 affine pixels
+  grid: {
+    note: 'Seconds, a whole solve from a cold start to `max |mass - target| / target <= 1e-6`: N x N diracs of equal masses against an image of 512 x 512 affine pixels. dedicated: the grid\'s own Newton; generic: the same diracs as a cloud. In brackets: Newton iterations.',
+    rows: [ 64, 128, 256, 512, 1024, 2048, 4096 ].map( N => ( { label: `${ N } x ${ N }`, m: { side: N } } ) ),
+    cols: [ 'dedicated', 'generic' ].flatMap( solver => [
+      { group: solver, label: 'all the cores', kind: 'cpu', m: { job: 'grid', solver, threads: 'cores' }, v: gridSolve, f: gridCell, best: gridBest },
+      { group: solver, kind: 'gpu', m: { job: 'gpu_grid', solver }, v: gridSolve, f: gridCell, best: gridBest },
+    ] ),
+  },
 }
 
 // THE CHARTS: how each program scales, one panel per row ( the clouds of the tables ), log-log. A series is a program:
@@ -151,6 +212,7 @@ export const TABLES = {
 // take for a loss of scaling. Without a clock for every point, a chart falls back to the times.
 const nsSolve = r => r.results.t_total_wall * 1e9
 const nsSolveGpu = r => tGpu( r ) * 1e9
+const gridNs = r => r.status === 'PASS' && r.results.converged ? r.results.t_total_wall * 1e9 : null
 export const CHARTS = {
   diagram: {
     unit: 'per dirac',
@@ -216,5 +278,44 @@ export const CHARTS = {
     rows: [ { label: 'A whole solve', v: r => r.results.t_total_wall * 1e9 },
             { label: 'One diagram, per dirac', v: r => r.results.t_diag / r.results.diagrams / r.results.n * 1e9 } ],
     series: [ { label: 'sdot', m: { job: [ 'dims', 'dims6' ] }, v: null } ],
+  },
+  // the 1D page: the total time of a batch of 256 problems, over their size; the host on all its cores, each card a curve
+  one_d: {
+    x: 'n', xLabel: 'diracs per problem', total: true, unit: 'for 256 transports against images of 1e4 pixels',
+    rows: [ { label: '256 semi-discrete transports', m: DIRACS } ],
+    series: [ { label: 'sdot', m: { job: 'one_d', threads: 'cores' }, v: wall9, gpu: { m: { job: 'gpu_one_d' }, v: wall9 } } ],
+  },
+  one_d_images: {
+    x: 'n', xLabel: 'pixels per image', total: true, unit: 'for 256 pairs of images',
+    rows: [ { label: '256 transports between two images', m: IMAGES } ],
+    series: [ { label: 'sdot', m: { job: 'one_d', threads: 'cores' }, v: wall9, gpu: { m: { job: 'gpu_one_d', method: 'sdot' }, v: wall9 } } ],
+  },
+  one_d_threads: {
+    unit: 'for 256 problems of 1e5 diracs ( or pixels )',
+    rows: [ { label: 'Diracs against an image', m: { job: 'one_d', ...DIRACS, n: 1e5 } }, { label: 'Two images', m: { job: 'one_d', ...IMAGES, n: 1e5 } } ],
+    series: [ { label: 'sdot', m: {}, v: wall9, gpu: { m: { job: 'gpu_one_d' }, v: wall9 } } ],
+  },
+  // the grid page: one curve per path over the number of diracs, the host on all its cores, each card a curve
+  grid: {
+    x: 'n', xLabel: 'diracs ( N x N )', total: true, unit: 'for a solve against an image of 512 x 512 affine pixels',
+    rows: [ { label: 'Diracs on a grid', m: {} } ],
+    series: [
+      { label: 'dedicated', m: { job: 'grid', solver: 'dedicated', threads: 'cores' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'dedicated' }, v: gridNs } },
+      { label: 'generic', color: 1, m: { job: 'grid', solver: 'generic', threads: 'cores' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'generic' }, v: gridNs } },
+    ],
+  },
+  // POT against sdot: the time over the relative error on W2 ( `x: 'error'` ), in double; sdot, exact, is a level ( `exact` ),
+  // one per thread count and one on the card
+  one_d_pot: {
+    x: 'error', xLabel: 'relative error on W2', cores: false, unit: '256 pairs of images of 1e4 pixels, in double',
+    rows: [ { label: '{cpu}', m: IMAGES }, { label: '{card}', m: IMAGES, on: 'gpu' } ],
+    series: [
+      { label: 'sdot, one thread', exact: true, m: { job: 'one_d_pot', method: 'sdot', threads: 1 }, v: wall9 },
+      { label: 'sdot, all the cores ( the card )', exact: true, color: 2, m: { job: 'one_d_pot', method: 'sdot', threads: 'cores' }, v: wall9,
+        card: { m: { job: 'gpu_one_d', n: 1e4, method: 'sdot', m: undefined } } },
+      { label: 'POT, numpy ( one thread )', color: 1, m: { job: 'one_d_pot', method: 'pot' }, v: potTime },
+      { label: 'POT, torch on all the cores ( jax on the card )', color: 1, dash: true, m: { job: 'one_d_pot_torch', method: 'pot' }, v: potTime,
+        card: { m: { job: 'gpu_one_d', method: 'pot' }, v: potTime } },
+    ],
   },
 }

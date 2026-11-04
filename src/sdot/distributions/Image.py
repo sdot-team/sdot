@@ -7,6 +7,7 @@ from loom.tensor import Axis, AxisList, CtShapeVar, RealTensor, ShapeVar
 from loom.util import ComputedAttribute
 
 from .Distribution import Distribution
+from .Distribution import batch_item
 
 
 class Image( Distribution ):
@@ -62,7 +63,7 @@ class Image( Distribution ):
     # there step by step. Depends only on `values`/`frame`/`knots`, so it is CACHED like `current_mass`
     # (`ensure_cell_cum_mass` below) instead of being rebuilt on every `SdotPlan1d` forward/backward
     # call -- previously it was, twice per call, see [[otplan1d-kernel-profile]].
-    cell_cum_mass    : ComputedAttribute[ RealTensor[ "num_cell_cum" ], ( "values", "frame", "knots" ) ]
+    cell_cum_mass    : ComputedAttribute[ RealTensor[ "num_cell_cum" ], ( "values", "coeffs", "frame", "knots" ) ]
 
     # a POLYNOMIAL image ( `degree > 0` ): the Bernstein coefficients of each pixel, `( degree + 1 )^d` of them
     # ( `PolynomialPixel.h` ). Declared LAST: the C++ side rebuilds the aggregate positionally ( `Image::with_defaults` )
@@ -304,8 +305,12 @@ class Image( Distribution ):
 
         # normalize
         if self.target_mass.is_defined:
-            data = dict( coeffs = self.target_mass / mass * self.coeffs, nb_coeffs = self.nb_coeffs.value ) if self.is_polynomial else \
-                   dict( values = self.target_mass / mass * self.values )
+            # back in the float of the values: the float64 factor would promote float32 values ( and their kernels ) to float64
+            from loom.tensor.Dtype import Dtype
+            vals = self.coeffs if self.is_polynomial else self.values
+            scaled = ( self.target_mass / mass * vals ).value
+            scaled = loom.ops().astype( scaled, Dtype.of( vals.value ) )
+            data = dict( coeffs = scaled, nb_coeffs = self.nb_coeffs.value ) if self.is_polynomial else dict( values = scaled )
             return Image(
                 nb_dims = self.nb_dims.value,
                 shape = self.shape.value,
@@ -359,13 +364,13 @@ class Image( Distribution ):
             if attr.is_defined:
                 kwargs[ "pixel_frame" if name == "frame" else name ] = attr.value
         if self.is_polynomial:
-            return Image( values = self.coeffs.value[ index ], degree = self.degree, **kwargs )
-        return Image( values = self.values.value[ index ], **kwargs )
+            return Image( values = batch_item( self.coeffs.value, index ), degree = self.degree, **kwargs )
+        return Image( values = batch_item( self.values.value, index ), **kwargs )
 
     def _only_constant_in_1d( self ):
-        if self.is_polynomial:
-            raise NotImplementedError( "Image: the 1D transport ( `SdotPlan1d`, a sort ) takes a constant per pixel only ( `degree = 0` ) "
-                                       "-- a polynomial image goes through a power diagram in 2D or 3D" )
+        if self.is_polynomial and self.degree > 1:
+            raise NotImplementedError( "Image: the 1D transport ( `SdotPlan1d`, a sort ) takes pixels of degree 0 or 1 "
+                                       "-- a higher degree goes through a power diagram in 2D or 3D" )
 
     def ensure_cell_cum_mass( self ):
         """= Internals
@@ -393,10 +398,13 @@ class Image( Distribution ):
             attr = getattr( self, name )
             if attr.is_defined:
                 detached_kwargs[ "pixel_frame" if name == "frame" else name ] = loom.ops().stop_gradient( attr.value )
+        if self.is_polynomial:
+            detached_kwargs.update( values = loom.ops().stop_gradient( self.coeffs.value ), degree = self.degree )   # ( `values` holds the coefficients )
+        else:
+            detached_kwargs.update( values = loom.ops().stop_gradient( self.values.value ) )
         detached = Image(
             nb_dims = self.nb_dims.value,
             shape = self.shape.value,
-            values = loom.ops().stop_gradient( self.values.value ),
             batch_axes = self.batch_axes,
             **detached_kwargs,
         )
@@ -422,79 +430,6 @@ class Image( Distribution ):
             has_dynamic_capacity = False,
         )
         self.cell_cum_mass.set_raw( cell_cum_mass.raw )
-
-    def try_update_sdotplan1d( self, plan ):
-        """= Internals
-
-        Closed-form, pure-JAX fast path for `SdotPlan1d.update_outputs` when `self` is its
-        1D piecewise-constant target: bypasses `loom.ffi_call`/the C++ kernel entirely (ordinary
-        JAX autodiff differentiates straight through `_pure_jax_cost1d.cost_1d_ot`), evaluated
-        ~1.2x-6x faster than the C++ kernel from n=1e6 through 1e8 diracs (see
-        [[pure-jax-otplan1d]]). Declines (returns False, caller falls back to loom.ffi_call)
-        when: the backend is not JAX (this path uses `jax.lax.map`/`jnp.argsort` directly, not
-        the backend-agnostic `Tensor` algebra), `self` is not 1D, more than one batch axis is
-        in play (matches today's ONE `num_angle` axis in production; untested beyond that),
-        `plan` wants `barycenters` (not implemented here), or `plan.src_dist` cannot supply
-        plain positions/weights (`raw_1d_diracs`, e.g. an unsupported dirac-source type).
-
-        Batched over angles with `jax.lax.map` (sequential), NOT `jax.vmap`: `vmap` batches
-        `jnp.argsort`/the fancy-index gathers by materializing a `[ nb_angles * n, ... ]`
-        transpose/fusion -- fine at moderate scale, but a genuine OOM at n=1e8 x 5 angles
-        (needing >13GiB). `lax.map` processes one angle at a time (no such batched-sort
-        buffer) and, measured, is never slower -- often faster -- than `vmap` at every scale
-        tried (1e6-1e8), so there is no size threshold to pick between them.
-        """
-        if plan._with_barycenters or self.is_polynomial:
-            return False
-        if int( self.nb_dims.value ) != 1:
-            return False
-        if len( self.batch_axes ) > 1:
-            return False
-        if loom.resolved_framework().module_name != "jax":
-            return False
-
-        diracs = plan.src_dist.raw_1d_diracs()
-        if diracs is None:
-            return False
-        weights, batched_extra, project_fn = diracs
-
-        import jax
-        from ._pure_jax_cost1d import cost_1d_ot
-
-        values = self.values.value
-        s_min = self.origin.value[ 0 ] if self.origin.is_defined else 0.0
-        dw = self.frame.value[ 0, 0 ] if self.frame.is_defined else 1.0
-
-        if self.batch_axes:
-            # only the genuinely PER-ANGLE leaves are mapped (`lax.map` requires every leaf of
-            # its pytree argument to share the same leading/mapped axis) -- shared (unbatched)
-            # `weights`, and `batched_extra`'s own projection inputs, are closed over instead
-            # where they are not batched, so nothing is ever materialized for more than one
-            # angle at a time (see `raw_1d_diracs`'s docstring on why this matters).
-            mapped = { "values": values, **batched_extra }
-            if weights.ndim > 1:
-                mapped[ "weights" ] = weights
-
-            # `jax.checkpoint`: without it, the backward through `lax.map` still retains every
-            # angle's forward residuals at once (confirmed: OOMs at n=1e8 x 5 angles needing
-            # >13GiB even though the forward itself, thanks to the lazy `project_fn` above,
-            # never materializes more than one angle's data) -- recomputing the forward per
-            # angle during the backward instead is what actually bounds peak memory to ONE
-            # angle's worth, letting this scale to n=1e8 (measured ~920ms/angle, matched
-            # against a single-angle-isolated baseline -- i.e. no residual per-angle overhead).
-            @jax.checkpoint
-            def body( leaves ):
-                w = leaves[ "weights" ] if "weights" in leaves else weights
-                extra = { k: leaves[ k ] for k in batched_extra }
-                p = project_fn( extra )
-                return cost_1d_ot( p, w, leaves[ "values" ], s_min, dw )
-
-            cost = jax.lax.map( body, mapped )
-        else:
-            cost = cost_1d_ot( project_fn( {} ), weights, values, s_min, dw )
-
-        plan.cost = cost
-        return True
 
 
 def _box_count( sat, lo, hi ):

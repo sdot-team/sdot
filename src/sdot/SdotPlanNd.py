@@ -244,6 +244,74 @@ def _dedicated_grid( src, dst, tun ):
     return dict( N = N, h = h, origin = np.asarray( g.origin, dtype = float ), kind = kind, prm = prm )
 
 
+def _card_grid( problem, settings ):
+    """`_dedicated_grid`'s dict when the CARD's grid solver takes this problem ( `gpu/GridNewton2D.cuh` ): a CUDA device, the
+    dedicated solver's conditions, no periodicity, sink nor radial integrand, masses that do not trace, and a density the card
+    integrates by itself -- uniform, an `Image` on a regular grid ( uniform knots ), isotropic gaussians. For an image, `prm`
+    becomes `x0, y0, hx, hy, nx, ny` ( `geom` ) and the values ( C order ). `None` otherwise ( the card's generic Newton on the
+    positions )."""
+    if not getattr( loom.resolved_device(), "is_cuda_gpu", False ):
+        return None
+    src = problem.source
+    if _grid_source( src ) is None or int( src.nb_dims.value ) != 2:
+        return None
+    if _periodicity_of( problem ) is not None or getattr( problem, "radial_func", None ) is not None or _sink_of( problem ) is not None:
+        return None
+    if any( loom.is_traced( getattr( x, "raw", x ) ) for x in ( src.weights, src.origin, src.frame ) if getattr( x, "is_defined", True ) ):
+        return None
+    tun = settings.tuning
+    if tun.grid_solver == "cells":
+        return None
+    g = _dedicated_grid( src, problem.target, tun )
+    if g is not None and g[ "kind" ] == "cells":
+        q1 = _image_of_degree_1( problem.target )
+        if q1 is not None:
+            g = dict( g, kind = "image1", geom = [ 0.0, 0.0, 0.0, 0.0, q1[ 0 ], q1[ 1 ] ], prm = q1[ 2 ] )
+            return g
+    if g is None or g[ "kind" ] == "cells":
+        if g is not None and tun.grid_solver == "dedicated":
+            raise ValueError( "Tuning( grid_solver = 'dedicated' ) on the card: a uniform density, an `Image` on a regular grid or isotropic gaussians" )
+        return None
+    if g[ "kind" ] == "image":
+        prm = g[ "prm" ]
+        nx, ny = int( prm[ 0 ] ), int( prm[ 1 ] )
+        kx, ky = prm[ 2 : 3 + nx ], prm[ 3 + nx : 4 + nx + ny ]
+        hx, hy = ( kx[ -1 ] - kx[ 0 ] ) / nx, ( ky[ -1 ] - ky[ 0 ] ) / ny
+        if not ( np.allclose( np.diff( kx ), hx, rtol = 1e-12, atol = 0 ) and np.allclose( np.diff( ky ), hy, rtol = 1e-12, atol = 0 ) ):
+            if tun.grid_solver == "dedicated":
+                raise ValueError( "Tuning( grid_solver = 'dedicated' ) on the card: an `Image` with uniform knots" )
+            return None
+        g = dict( g, geom = [ kx[ 0 ], ky[ 0 ], hx, hy, nx, ny ], prm = np.asarray( prm[ 4 + nx + ny : ], dtype = float ) )
+    return g
+
+
+def _image_of_degree_1( dst ):
+    """`( nx, ny, prm )` of an `Image( degree = 1 )` along the axes ( `SplineGrid( degree = 1 )`: the bilinear interpolation of pixel
+    values ) readable on the host -- `prm` its physical knots ( `nx + 1`, `ny + 1` ) then its Bernstein coefficients `[ nx, ny, 4 ]`
+    ( `gpu/GridNewton2D.cuh::DensImage1` ) -- or `None`"""
+    from loom.tensor.host import to_host
+    from .distributions.Image import Image
+    if not isinstance( dst, Image ) or not dst.is_polynomial or dst.degree != 1 or dst.batch_axes or not dst.coeffs.is_defined:
+        return None
+    if loom.is_traced( dst.coeffs.raw ):
+        return None
+    geo = dst._grid_geometry()
+    if geo is None or geo[ 0 ] != 2:
+        return None
+    d, frame, origin, lo, hi = geo
+    f = np.diag( frame )
+    if not ( np.all( frame == np.diag( f ) ) and np.all( f > 0 ) ):
+        return None
+    c = np.asarray( to_host( dst.coeffs.raw ), dtype = float )
+    if c.ndim != 3 or c.shape[ 2 ] != 4:
+        return None
+    nx, ny = c.shape[ :2 ]
+    kn = np.asarray( to_host( dst.knots.raw ), dtype = float ).reshape( 2, -1 ) if dst.knots.is_defined else None
+    kx = kn[ 0, : nx + 1 ] if kn is not None else np.arange( nx + 1, dtype = float )
+    ky = kn[ 1, : ny + 1 ] if kn is not None else np.arange( ny + 1, dtype = float )
+    return nx, ny, np.concatenate( [ origin[ 0 ] + f[ 0 ] * kx, origin[ 1 ] + f[ 1 ] * ky, c.reshape( -1 ) ] )
+
+
 def _grid_density( dst ):
     """`( kind, prm )` of `_dedicated_grid`: how the dedicated solver integrates `dst`"""
     from loom.tensor.host import to_host
@@ -386,6 +454,7 @@ class _Options( Aggregate ):
     agg_gap        : RealTensor
     agg_nb_dups    : IntTensor
     keep_start     : IntTensor
+    surprise       : RealTensor
     kernel_fp_size : CtShapeVar
 
 
@@ -412,6 +481,11 @@ def card_density_call( dens, d ):
     if dens[ "kind" ] == "image":
         nx, ny = int( dens[ "geom" ][ 4 ] ), int( dens[ "geom" ][ 5 ] )
         return "sdot::gpu2d::image_in( args.inputs.img_values )", dict( img_values = RealTensor[ axis( nx * ny, "num_card_pixel" ) ]( dens[ "values" ] ) )
+    if dens[ "kind" ] == "image1":
+        nx, ny = int( dens[ "geom" ][ 4 ] ), int( dens[ "geom" ][ 5 ] )
+        return "sdot::gpu2d::image1_in( args.inputs.img1_knots, args.inputs.img1_coeffs )", dict(
+            img1_knots = RealTensor[ axis( nx + ny + 2, "num_card_knot" ) ]( dens[ "knots" ] ),
+            img1_coeffs = RealTensor[ axis( 4 * nx * ny, "num_card_coeff" ) ]( dens[ "coeffs" ] ) )
     if dens[ "kind" ] == "mesh":
         # ( 2D: triangles, `Density2D.cuh::DensMesh`; 3D: tetrahedra, `Density3D.cuh::DensMesh3` )
         ne, nn, nb = int( dens[ "tri" ].shape[ 0 ] ), int( dens[ "nodes" ].shape[ 0 ] ), int( dens[ "lo" ].shape[ 0 ] )
@@ -548,7 +622,7 @@ class SdotPlanNd( Displayable ):
         from loom.calls import _scan
         from loom.drivers import framework_defaults
         from loom.drivers.promotion import promote
-        if _grid_source( problem.source ) is not None and not _grid_path( problem ):
+        if _grid_source( problem.source ) is not None and not _grid_path( problem ) and _card_grid( problem, settings ) is None:
             problem = _on_positions( problem )           # ( a grid the grid's diagram cannot take: its positions, made here )
         default = framework_defaults.framework_name()
         tracing, plain = set(), set()
@@ -790,7 +864,12 @@ class SdotPlanNd( Displayable ):
         else:
             w0_given, self._warm_start = None, "none"
 
-        # THE DIRACS OF A GRID, the dedicated solver ( `grid/GridNewton2D.h` ) when it applies
+        # THE DIRACS OF A GRID, the dedicated solver ( `grid/GridNewton2D.h` ) when it applies -- on the card, its port
+        # ( `gpu/GridNewton2D.cuh` )
+        if grid is not None and on_card:
+            dedicated = _card_grid( problem, settings )
+            if dedicated is not None:
+                return self._build_grid_card( problem, settings, dedicated, w0_given, verbose )
         if grid is not None:
             dedicated = _dedicated_grid( src_dist, dst_dist, tun )
             if dedicated is not None:
@@ -871,6 +950,7 @@ class SdotPlanNd( Displayable ):
             step = _STEP[ step ], residual = _RESIDUAL[ tun.residual ], trace = int( bool( verbose ) ), continuation = _CONTINUATION[ settings.continuation ],
             cap0 = int( pd._scratch_capacity ),
             agg_margin = self._agg_margin, agg_gap = self._agg_gap, agg_nb_dups = self._agg_nb_dups, keep_start = int( bool( getattr( tun, "keep_start", False ) ) ),
+            surprise = float( getattr( tun, "surprise", 0.5 ) ),
             kernel_fp_size = fp_size( pd.kernel_dtype ),
         )
 
@@ -929,6 +1009,7 @@ class SdotPlanNd( Displayable ):
                     "os.continuation = int( SI( inputs.options.continuation ) ); os.continuation_threshold = double( inputs.options.conv_threshold );",
                     "os.conv_s0 = double( inputs.options.conv_s0 ); os.conv_ratio = double( inputs.options.conv_ratio ); os.conv_min = double( inputs.options.conv_min );",
                     "os.agg_margin = double( inputs.options.agg_margin ); os.agg_gap = double( inputs.options.agg_gap ); os.agg_nb_dups = SI( inputs.options.agg_nb_dups ); os.keep_start = SI( inputs.options.keep_start ) != 0;",
+                    "os.surprise = double( inputs.options.surprise );",
                     f"sdotplan::solve<TK_sdotplan>( queue, pd_sdotplan, inputs.power_diagram, inputs.dom_cell, { dist_expr }, inputs.nu, inputs.w0, inputs.dups, inputs.start_box, os, "
                     "outputs.weights, outputs.history, outputs.stats, outputs.cell_masses, outputs.barycenters, outputs.cost, outputs.clusters );",
                 ] ) ),
@@ -1075,6 +1156,59 @@ class SdotPlanNd( Displayable ):
         self._groups, self._group_pd = None, None
         self._check_converged( settings )
 
+    def _build_grid_card( self, problem, settings, g, w0_given, verbose = False ):
+        """THE CARD'S SOLVER OF THE DIRACS OF A GRID ( `gpu/GridNewton2D.cuh` ): `_build_grid` on a CUDA device, the same steps, options
+        and outputs, in one call. The density: uniform, an `Image` on a regular grid, isotropic gaussians ( `_card_grid` )."""
+        src_dist, dst_dist = problem.source, problem.target
+        tun = settings.tuning
+        N, h, origin = g[ "N" ], g[ "h" ], g[ "origin" ]
+        def axis( m, name ):
+            return Axis( ShapeVar( int( m ) ), name = name )
+        with loom.concrete_eval():
+            self._pd = PowerDiagram( None, None, accelerator = src_dist.grid, kernel_dtype = settings.kernel_dtype, distribution = dst_dist )
+        pd = self._pd
+        self._masses = RealTensor[ pd.num_point ]( src_dist.weights.raw )
+        self._dup_note = "checked ( a grid: no duplicates )"
+        self._agg_dups, self._agg_margin, self._agg_gap, self._agg_nb_dups, self._exact_dups = None, 0.0, 0.0, 0, None
+
+        weights = RealTensor[ pd.num_point ]()
+        cell_masses = RealTensor[ pd.num_point ]()
+        barycenters = RealTensor[ pd.num_point, pd.dim ]()
+        cost = RealTensor()
+        stats = RealTensor[ axis( len( _STATS ), "num_stat" ) ]()
+        w0 = None if w0_given is None else RealTensor[ pd.num_point ]( getattr( w0_given, "raw", w0_given ) )
+        kind = g[ "kind" ]
+        # ( the order of `gpu/GridNewton2D.cuh::solve_call` )
+        opts = [ N, origin[ 0 ], origin[ 1 ], h, float( settings.tol ), float( tun.mass_rtol ), tun.grid_ctol, tun.grid_n0, int( settings.max_iter ),
+                 tun.grid_cg_rtol, 0.0 if w0 is None else 1.0, { "unit": 0, "image": 1, "gauss": 2, "image1": 3 }[ kind ], *g.get( "geom", [ 0.0 ] * 6 ),
+                 float( bool( verbose ) ) ]
+        prm = g[ "prm" ] if g[ "prm" ] is not None else np.zeros( 1 )
+        loom.ffi_call(
+            "sdot_grid_solve_2d_card",
+            FfiCode.inline( "sdot::gpu2d::grid::solve_call( queue, args.allocator, args.inputs.nu, args.inputs.w0, args.inputs.options, args.inputs.dens_prm, "
+                            "args.outputs.weights, args.outputs.cell_masses, args.outputs.barycenters, args.outputs.cost, args.outputs.stats );",
+                            includes = [ "sdot/gpu/GridNewton2D.cuh" ], allocator = True ),
+            nu = self._masses,
+            options = RealTensor[ axis( len( opts ), "num_grid_opt" ) ]( np.asarray( opts, dtype = np.float64 ) ),
+            dens_prm = RealTensor[ axis( len( prm ), "num_dens_prm" ) ]( np.asarray( prm, dtype = np.float64 ) ),
+            w0 = w0 if w0 is not None else RealTensor[ pd.num_point ]( np.zeros( N * N ) ),
+            weights = loom.out( weights ), cell_masses = loom.out( cell_masses ), barycenters = loom.out( barycenters ),
+            cost = loom.out( cost ), stats = loom.out( stats ),
+            has_dynamic_capacity = False,
+        )
+        self.weights = weights
+        self._weights_fit = weights
+        self.cell_masses = cell_masses
+        self.barycenters = barycenters
+        self.cost = cost
+        self._clusters = None
+        self._read_stats( stats, settings )
+        self.stats[ "grid_solver" ] = { "unit": "dedicated card ( uniform density )", "image": "dedicated card ( image )", "gauss": "dedicated card ( gaussians )",
+                                        "image1": "dedicated card ( image of degree 1 )" }[ kind ]
+        self.history = []
+        self._groups, self._group_pd = None, None
+        self._check_converged( settings )
+
     def _aggregation_inputs( self, pos_raw, settings, n ):
         """THE AGGREGATION'S INPUTS ( `sdotplan/Aggregation.h` ): `_agg_margin` ( 0: off ), and the EXACT DUPLICATES, which the
         diagram cannot see ( no plane between two equal points ): `_agg_dups` ( `2 k` values, the pairs `( dup, rep )`, one
@@ -1210,7 +1344,7 @@ class SdotPlanNd( Displayable ):
                            "values ), gaussians or a mesh -- its images are not repeated by the group" )
             if dens is None and reason is None:
                 reason = ( "the card integrates a constant density, an `Image` on a regular grid ( a diagonal frame, uniform knots, "
-                           "covering the box ), isotropic gaussians or a triangle `Mesh` in 2D -- not this distribution" if d == 2 else
+                           "covering the box ), an `Image( degree = 1 )` covering the box, isotropic gaussians or a triangle `Mesh` in 2D -- not this distribution" if d == 2 else
                            "in 3D the card integrates a constant density ( Lebesgue on the box, or an `Image` of equal values "
                            "covering it ), isotropic gaussians or a tetrahedral `Mesh` -- not this distribution" )
         if reason is not None:
@@ -1291,7 +1425,8 @@ class SdotPlanNd( Displayable ):
 
         # the density: its tensors, and how the handler hands them over ( `DensityHost2D.cuh` )
         dens_expr, dens_args = card_density_call( dens, d )
-        name = { "const": "sdotplan_solve_card_2d", "image": "sdotplan_solve_card_2d_image", "mesh": f"sdotplan_solve_card_{ d }d_mesh",
+        name = { "const": "sdotplan_solve_card_2d", "image": "sdotplan_solve_card_2d_image",
+                 "image1": "sdotplan_solve_card_2d_image1", "mesh": f"sdotplan_solve_card_{ d }d_mesh",
                  "gauss": f"sdotplan_solve_card_{ d }d_gauss" }[ dens[ "kind" ] ]
 
         # GROUPS: the virtual weights of the tree come out too

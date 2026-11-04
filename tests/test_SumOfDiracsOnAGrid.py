@@ -220,3 +220,78 @@ if test( "what_the_dedicated_solver_does_not_take_goes_to_the_cells" ):
             assert False, "grid_solver = 'dedicated' where it does not apply"
         except ValueError:
             pass
+
+if test( "the_potential_integrals_of_a_p1_image_are_the_derivative_of_the_cost" ):
+    import numpy
+    from loom.testing import need
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.OtProblem import Iterative, OtProblem
+    from sdot.PowerDiagram import PowerDiagram
+    need( "cpu" )
+    # the diracs of a grid against a P1 image ( nodal values at the corners of its pixels ); the derivative of the cost with
+    # respect to the nodal values, by the envelope theorem: the potential against each basis function, through the
+    # normalization of the image
+    N = 32
+    x = numpy.arange( N + 1 ) / N
+    X, Y = numpy.meshgrid( x, x, indexing = "ij" )
+    nodes = 1 + 0.5 * numpy.cos( 5 * X + 2 * Y ) ** 2 + 0.3 * numpy.exp( -30 * ( ( X - 0.4 ) ** 2 + ( Y - 0.6 ) ** 2 ) )
+    c = ( numpy.arange( N ) + 0.5 ) / N
+    masses = 1 + 0.4 * numpy.sin( 3 * c[ :, None ] + 1 ) * numpy.cos( 4 * c[ None, : ] )
+    corners = ( numpy.s_[ :-1, :-1 ], numpy.s_[ :-1, 1: ], numpy.s_[ 1:, :-1 ], numpy.s_[ 1:, 1: ] )
+    coeffs = lambda v: numpy.stack( [ v[ s ] for s in corners ], -1 )
+
+    def solve( v ):
+        return OtProblem( SumOfDiracsOnAGrid( ( N, N ), weights = masses ), Image( values = coeffs( v ), degree = 1 ) ).solve( Iterative( tol = 1e-12, max_iter = 200 ) )
+
+    p = solve( nodes )
+    pd = PowerDiagram( _host( SumOfDiracsOnAGrid( ( N, N ) ).positions ), _host( p.weights ), distribution = Image( values = coeffs( nodes ), degree = 1 ),
+                       kernel_dtype = "FP64" )
+    I = _host( pd.potential_integrals() )
+    assert I.shape == ( N, N, 4 )
+    In, q = numpy.zeros( ( N + 1, N + 1 ) ), numpy.zeros( ( N + 1, N + 1 ) )
+    for k, s in enumerate( corners ):
+        In[ s ] += I[ ..., k ]
+        q[ s ] += 0.25 / N ** 2
+    S = float( ( nodes * q ).sum() )
+    g = In / S - q * float( ( nodes * In ).sum() ) / S ** 2
+    d, eps = numpy.random.default_rng( 0 ).normal( size = nodes.shape ), 1e-5
+    fd = ( float( _host( solve( nodes + eps * d ).cost ) ) - float( _host( solve( nodes - eps * d ).cost ) ) ) / ( 2 * eps )
+    an = float( ( g * d ).sum() )
+    assert abs( fd - an ) < 1e-6 * abs( an ), ( fd, an )
+
+if test( "the_grid_solver_takes_sharp_targets" ):
+    import numpy
+    from loom.testing import need
+    from sdot.OtProblem import OtProblem, Iterative, Tuning
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    need( "cpu" )
+    # thin rings on a dark background, the diracs and the image a fraction of a pixel apart ( a radiograph of hollow spheres and
+    # its model ): cells of a hundredth of a pixel beside cells of ten pixels, a Newton step of 100 at the rim of the rings
+    N = 128
+    h = 1 / N
+    def rings( x, y, shift ):
+        v = 0 * x
+        for cx, cy, r in ( ( 0.35, 0.4, 0.2 ), ( 0.7, 0.65, 0.15 ) ):
+            d = numpy.hypot( x - cx - shift, y - cy ) - r
+            v = v + numpy.maximum( 1 - ( d / ( 2.5 * h ) ) ** 2, 0 ) ** 2.5
+        return v + 3e-3 * v.mean()
+    p = ( numpy.arange( N ) + 0.5 ) * h
+    q = numpy.arange( N + 1 ) * h
+    def solve( shift, weights0 = None ):
+        v = rings( q[ :, None ], q[ None, : ], shift )
+        img = Image( values = numpy.stack( [ v[ :-1, :-1 ], v[ :-1, 1: ], v[ 1:, :-1 ], v[ 1:, 1: ] ], -1 ), degree = 1 )
+        src = SumOfDiracsOnAGrid( ( N, N ), weights = rings( p[ :, None ], p[ None, : ], 0.0 ).reshape( -1 ) )
+        return OtProblem( src, img ).solve( Iterative( tol = 1e-3 / N ** 2, max_iter = 100, weights0 = weights0, tuning = Tuning( grid_solver = "dedicated" ) ) )
+
+    cold = solve( 0.7 * h )
+    print( { k: cold.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
+    nu = rings( p[ :, None ], p[ None, : ], 0.0 ).reshape( -1 )
+    assert numpy.abs( _host( cold.cell_masses ) - nu / nu.sum() ).max() < 1e-3 / N ** 2
+    assert float( _host( cold.cost ) ) > 0
+
+    # the same target a quarter of a pixel further: a few steps from the weights of the first solve
+    warm = solve( 0.95 * h, cold.weights )
+    print( { k: warm.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
+    assert int( warm.stats[ "nb_iter" ] ) <= 25 and int( warm.stats[ "nb_backtracks" ] ) <= 40

@@ -43,6 +43,7 @@ struct ExactKernel {
         for( int e = 0; e < n; ++e ) R2 = std::max( R2, px[ e ] * px[ e ] + py[ e ] * py[ e ] );
         bool done = false;
         for( size_t o = 0; o < ox.size(); ++o ) {
+            if( n + 1 >= C ) return false;               // ( a cut adds one vertex at most )
             const T R = std::sqrt( R2 ), k = nk[ o ];
             if( k >= R && k * k - 2 * k * R + pi[ 0 ] - psi_max > 0 ) { done = true; break; }
             const int na = a + ox[ o ], nb = b + oy[ o ];

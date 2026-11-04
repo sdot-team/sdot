@@ -6334,6 +6334,431 @@
     "t_jit_wall": 0.9059886215254664,
     "t_jit_kernels": 0.8269871692024171
    }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 64,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 1.2,
+    "n": 4096,
+    "side": 64,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.03953821212053299,
+    "ns_per_dirac": 9652.8838184895,
+    "residual_rel": 1.419178858874659e-07,
+    "iterations": 4,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.0028800107538700104,
+    "t_lin": 0.0014298781752586365
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 512,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 3.067,
+    "sm_clock_ghz": 1.875,
+    "n": 262144,
+    "side": 512,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 0.32091134041547775,
+    "ns_per_dirac": 1224.1796127909765,
+    "residual_rel": 1.3541512355885743e-09,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.025516608238220214,
+    "t_lin": 0.04255950357764959
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 128,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 1.913,
+    "n": 16384,
+    "side": 128,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.041231779381632805,
+    "ns_per_dirac": 2516.5880970234866,
+    "residual_rel": 5.985045850032122e-07,
+    "iterations": 5,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 2,
+    "t_diag": 0.004841501824557781,
+    "t_lin": 0.0018561771139502525
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 2048,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 3.02,
+    "sm_clock_ghz": 1.86,
+    "n": 4194304,
+    "side": 2048,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.3478838065639138,
+    "ns_per_dirac": 82.94196285341116,
+    "residual_rel": 2.0447413873192488e-08,
+    "iterations": 8,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 6,
+    "t_diag": 0.16270454414188862,
+    "t_lin": 0.05192031338810921
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 256,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 1.64,
+    "n": 65536,
+    "side": 256,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 0.1468535102903843,
+    "ns_per_dirac": 2240.806736608647,
+    "residual_rel": 1.296784679638563e-09,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.00949126398563385,
+    "t_lin": 0.019276248291134834
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 1024,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 2.508,
+    "n": 1048576,
+    "side": 1024,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.11842708941549063,
+    "ns_per_dirac": 112.94087354229987,
+    "residual_rel": 3.299382965726849e-07,
+    "iterations": 7,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 5,
+    "t_diag": 0.04679613560438156,
+    "t_lin": 0.013198137283325195
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 1024,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 2.387,
+    "sm_clock_ghz": 1.86,
+    "n": 1048576,
+    "side": 1024,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 0.9892633557319641,
+    "ns_per_dirac": 943.4350545234338,
+    "residual_rel": 7.036392246639878e-09,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.09168912124633788,
+    "t_lin": 0.13695552572607994
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 64,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 1.9,
+    "n": 4096,
+    "side": 64,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 0.09087140578776598,
+    "ns_per_dirac": 22185.401803653804,
+    "residual_rel": 9.371596831897477e-10,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.003966976046562196,
+    "t_lin": 0.008358634077012539
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 128,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 1.743,
+    "sm_clock_ghz": 1.875,
+    "n": 16384,
+    "side": 128,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 0.11325087025761604,
+    "ns_per_dirac": 6912.284561622073,
+    "residual_rel": 1.2334535615110553e-09,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.004445855915546418,
+    "t_lin": 0.020301494747400284
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 512,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 3.222,
+    "n": 262144,
+    "side": 512,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.0639297254383564,
+    "ns_per_dirac": 243.87254882185516,
+    "residual_rel": 1.318957396634346e-07,
+    "iterations": 7,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 4,
+    "t_diag": 0.01844983547925949,
+    "t_lin": 0.0051340097561478615
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 256,
+    "solver": "dedicated",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 2.025,
+    "n": 65536,
+    "side": 256,
+    "threads": 8,
+    "solver": "dedicated",
+    "precision": "fp64",
+    "converged": 1,
+    "t_total_wall": 0.04937158431857824,
+    "ns_per_dirac": 753.3505907986182,
+    "residual_rel": 1.0632998925785841e-08,
+    "iterations": 7,
+    "grid_solver": "dedicated card ( image of degree 1 )",
+    "nb_continuation_steps": 3,
+    "t_diag": 0.010043630376458168,
+    "t_lin": 0.003299773670732975
+   }
+  },
+  {
+   "env": "lmo-jax",
+   "job": "gpu_grid",
+   "kind": "gpu",
+   "bench": "grid",
+   "status": "PASS",
+   "params": {
+    "side": 2048,
+    "solver": "generic",
+    "precision": "auto",
+    "rtol": 1e-06,
+    "threads": -1,
+    "pin": "yes",
+    "reps": 3,
+    "device": "default",
+    "kernels": "catalogue"
+   },
+   "results": {
+    "clock_ghz": 3.565,
+    "sm_clock_ghz": 1.827,
+    "n": 4194304,
+    "side": 2048,
+    "threads": 8,
+    "solver": "generic",
+    "precision": "mixed",
+    "converged": 1,
+    "t_total_wall": 4.036735906265676,
+    "ns_per_dirac": 962.4328389801207,
+    "residual_rel": 5.02098811416829e-08,
+    "iterations": 4,
+    "grid_solver": "",
+    "nb_continuation_steps": 1,
+    "t_diag": 0.38951609802246095,
+    "t_lin": 0.5778648471459746
+   }
   }
  ],
  "envs": {
@@ -6364,7 +6789,7 @@
     "cgal_dual": "2026-10-28_09h02m45"
    },
    "date": "2026-10-30",
-   "commit": "6ab425e-dirty"
+   "commit": "80c41f6-dirty"
   },
   "lmo-jax": {
    "kinds": {
@@ -6381,16 +6806,17 @@
      }
     }
    },
-   "stamp": "2026-11-02_22h45m12",
+   "stamp": "2026-11-03_16h56m04",
    "stamps": {
     "gpu_newton": "2026-11-02_22h45m12",
     "gpu_diagram": "2026-11-02_22h45m12",
     "gpu_dual": "2026-11-02_22h45m12",
     "gpu_n1e7": "2026-11-01_13h13m12",
-    "gpu_n_diagram": "2026-11-02_22h45m12"
+    "gpu_n_diagram": "2026-11-02_22h45m12",
+    "gpu_grid": "2026-11-03_16h56m04"
    },
-   "date": "2026-11-02",
-   "commit": "6ab425e-dirty"
+   "date": "2026-11-03",
+   "commit": "80c41f6-dirty"
   }
  },
  "updated": "2026-11-03"

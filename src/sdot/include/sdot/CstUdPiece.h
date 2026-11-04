@@ -19,13 +19,12 @@ struct CstUdPiece {
         return ( a * a * a - b * b * b ) / 3;
     }
 
-    // Integral_{x0}^{x1} (x - dirac_pos)^2 * y dx, expanded via a^3-b^3 = (a-b)(a^2+ab+b^2) with
-    // a = x1-dirac_pos, b = x0-dirac_pos and specialized for the piecewise-CONSTANT density this
-    // piece always carries (a single `y`, not the general piecewise-linear y0/y1 the earlier form
-    // priced for) -- about half the multiplies of the generic formula.
+    // Integral_{x0}^{x1} (x - dirac_pos)^2 * y dx = y ( b^3 - a^3 ) / 3 = y ( b - a ) ( a^2 + a b + b^2 ) / 3, with
+    // a = x0-dirac_pos, b = x1-dirac_pos: RELATIVE to the dirac -- expanded in x0, x1 and dirac_pos, terms of the order
+    // of x^2 cancel down to ( x - dirac_pos )^2, which single precision does not survive.
     HD auto w2_dist( auto &&dirac_pos ) const {
-        const TF dp = dirac_pos;
-        return ( x0 - x1 ) * y * ( 3 * dp * ( x0 + x1 ) - 3 * dp * dp - x0 * x0 - x1 * x1 - x0 * x1 ) / 3;
+        const TF a = x0 - TF( dirac_pos ), b = x1 - TF( dirac_pos );
+        return y * ( b - a ) * ( a * a + a * b + b * b ) / 3;
     }
 
     TF x0, x1;

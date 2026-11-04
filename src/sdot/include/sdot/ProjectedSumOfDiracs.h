@@ -51,7 +51,7 @@ struct ProjectedSumOfDiracs {
     /// ... )` (-> `run_parallel`) rather than a hand-rolled kernel submission, so it goes through the
     /// same, already-proven device-kernel launch path as every other kernel here. Compile-time
     /// no-op when the points gradient is not wanted.
-    HD void zero_position_grad( auto &&queue, auto &&grad_src ) const {
+    void zero_position_grad( auto &&queue, auto &&grad_src ) const {
         if constexpr ( DECAYED_TYPE_OF( grad_src.points )::is_valid )
             grad_src.points.fill_with( queue, TF( 0 ) );
     }
