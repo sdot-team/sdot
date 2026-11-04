@@ -990,6 +990,7 @@ struct BlurredNodes {
             for( int k = std::max( -r, -a ); k <= std::min( r, nv - 1 - a ); ++k ) { u += g[ k + r ] * t[ ( a + k ) * nv + b ]; w += g[ k + r ]; }
             o[ a * nv + b ] = u / w;
         }
+        if( getenv( "SDOT_HOP_RAISE" ) ) for( size_t q = 0; q < o.size(); ++q ) o[ q ] = std::max( o[ q ], v0[ q ] );
         return cache[ s ] = std::move( o );
     }
     T sample( const std::vector<T> &v, T x, T y ) const {
