@@ -19,6 +19,8 @@
 //              launch per level along the first axis and ONE launch for all the levels along the second ( a block per row )
 //   start      coarse to fine: the solve on n0, 2 n0, ..., N, each level from the cubic interpolation of the previous psi; the
 //              gaussians first on the coarsest level through their widening ( the CPU's width continuation )
+//   damping    sharp targets, as the CPU: the line search on the residual, `tau` brought under the limit of the cells that a trial
+//              left under the floor ( `tau_limit` ), the cells that remain empty repaired one by one ( `repair` )
 //
 // The host reads back SCALARS where it decides: the counts of the flagged cells ( one read when there is none ), the residual of
 // each diagram, the residual of each CG iteration. The reductions are those of `Reduce.cuh` ( a fixed tree: the same number at
@@ -29,6 +31,7 @@
 #include "Reduce.cuh"
 #include "../grid/StencilTables.h"
 #include "../sdotplan/Report.h"
+#include "../sdotplan/WarmRepair.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -44,7 +47,7 @@ namespace sdot::gpu2d::grid {
 namespace sp = sdot::sdotplan;
 
 constexpr int    C    = 128;                             ///< the vertices of a cell of the exact path ( `ExactKernel::C` )
-constexpr int    RB   = 24;                              ///< the rings of the exact path's offsets
+constexpr int    RB   = 24;                              ///< the rings of the exact path's offsets at the start ( they grow on demand, `Solver::grow_rings` )
 constexpr int    MAXL = 15;                              ///< the levels of the preconditioner's trees ( N up to 2^16 )
 constexpr double TOL  = 1e-9;                            ///< the certificates' tolerance ( index units, the CPU's )
 
@@ -226,8 +229,10 @@ struct Counts {
     unsigned nchk;                                       ///< the cells of their neighbourhoods ( `check` )
     unsigned nex;                                        ///< the cells of the exact path ( `exl` )
     unsigned nx;                                         ///< the faces out of ring 1 ( `extras` )
-    unsigned exhausted;                                  ///< a cell of the exact path wider than its rings
-    unsigned pad[ 3 ];
+    unsigned exhausted;                                  ///< a cell of the exact path wider than its rings, or with too many vertices
+    unsigned nbad;                                       ///< the cells under the floor ( `tau_limit` )
+    unsigned nfell;                                      ///< those that fall at the `tau` tried
+    unsigned pad[ 1 ];
 };
 
 /// THE RING-1 CERTIFICATE ( `StencilKernel::certify_row` ): every positive edge k of cell i ( owner j ) must be edge opp( k ) of
@@ -410,6 +415,7 @@ __global__ void __launch_bounds__( BLOCK ) exact_kernel( int N, const double *ps
     for ( int o = 0; o < eo.nb; ++o ) {
         const double R = sqrt( R2 ), k = eo.nk[ o ];
         if ( k >= R && k * k - 2 * k * R + pi - pmax > 0 ) { done = true; break; }
+        if ( n + 1 >= C ) break;                         // ( a cut adds one vertex at most )
         const int na = a + eo.ox[ o ], nb = b + eo.oy[ o ];
         if ( na < 0 || na >= N || nb < 0 || nb >= N )
             continue;
@@ -1106,6 +1112,107 @@ __global__ void __launch_bounds__( BLOCK ) sub_mean_kernel( SI n, double *b, con
     if ( i < n ) b[ i ] -= s->s / double( n );
 }
 
+/// the cells that a trial left under the floor, in any order ( nothing computed from them depends on it )
+__global__ void __launch_bounds__( BLOCK ) under_floor_kernel( SI n, const double *mass, double eps0, int *bad, Counts *cnt ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n && mass[ i ] <= eps0 )
+        bad[ atomicAdd( &cnt->nbad, 1u ) ] = int( i );
+}
+
+/// the neighbours of the cells `bad` in the diagram that is there ( `C` places each ); `active`: those with a polygon
+__global__ void __launch_bounds__( BLOCK ) frozen_faces_kernel( int N, const int *bad, SI nb, const unsigned char *flag1, const unsigned char *flag2, const signed char *ow1,
+                                                                const int *pos2, const int *expos, Planes2 p2, ExactPolys ep, int *faces, int *nfaces, unsigned char *active ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nb )
+        return;
+    const SI nn = SI( N ) * N;
+    const int i = bad[ q ];
+    int m = 0;
+    bool any = true;
+    if ( flag1[ i ] ) {
+        double px[ C ], py[ C ];
+        int nbr[ C ];
+        const int n = flagged_polygon( N, i, flag2, pos2, expos, p2, ep, px, py, nbr );
+        any = n > 0;
+        for ( int e = 0; e < n; ++e ) if ( nbr[ e ] >= 0 ) faces[ q * C + m++ ] = nbr[ e ];
+    } else
+        for ( int e = 0; e < 8; ++e ) {
+            const int o = ow1[ e * nn + i ];
+            if ( o >= 0 ) faces[ q * C + m++ ] = i + c_tab1.off_x[ o ] * N + c_tab1.off_y[ o ];
+        }
+    nfaces[ q ] = m;
+    active[ q ] = any;
+}
+
+/// THE MASSES OF THE CELLS `bad` AT `psi + s x`, THEIR EDGES FROZEN ( `Evaluator::frozen_mass` ): `below` those of `active` that fall under the floor
+template<class Dn>
+__global__ void __launch_bounds__( BLOCK ) frozen_mass_kernel( int N, Dn dens, const int *bad, SI nb, const int *faces, const int *nfaces, const double *psi, const double *x,
+                                                               double s, double eps0, const unsigned char *active, unsigned char *below, Counts *cnt ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nb )
+        return;
+    below[ q ] = 0;
+    if ( ! active[ q ] )
+        return;
+    const int i = bad[ q ], a = i / N, b = i % N;
+    double px[ C ], py[ C ], qx[ C ], qy[ C ];
+    px[ 0 ] = -a - 0.5;    py[ 0 ] = -b - 0.5;
+    px[ 1 ] = N - 0.5 - a; py[ 1 ] = -b - 0.5;
+    px[ 2 ] = N - 0.5 - a; py[ 2 ] = N - 0.5 - b;
+    px[ 3 ] = -a - 0.5;    py[ 3 ] = N - 0.5 - b;
+    int n = 4;
+    const double pi = psi[ i ] + s * x[ i ];
+    for ( int f = 0; f < nfaces[ q ] && n; ++f ) {
+        const int j = faces[ q * C + f ];
+        const double kx = j / N - a, ky = j % N - b, c = ( kx * kx + ky * ky + pi - psi[ j ] - s * x[ j ] ) / 2;
+        int m = 0;
+        for ( int v = 0; v < n && m + 2 < C; ++v ) {
+            const int w = v + 1 == n ? 0 : v + 1;
+            const double s0 = kx * px[ v ] + ky * py[ v ] - c, s1 = kx * px[ w ] + ky * py[ w ] - c;
+            if ( s0 <= 0 ) { qx[ m ] = px[ v ]; qy[ m ] = py[ v ]; ++m; }
+            if ( ( s0 < 0 && s1 > 0 ) || ( s0 > 0 && s1 < 0 ) ) {
+                const double u = s0 / ( s0 - s1 );
+                qx[ m ] = px[ v ] + u * ( px[ w ] - px[ v ] ); qy[ m ] = py[ v ] + u * ( py[ w ] - py[ v ] ); ++m;
+            }
+        }
+        for ( int v = 0; v < m; ++v ) { px[ v ] = qx[ v ]; py[ v ] = qy[ v ]; }
+        n = m;
+    }
+    const double mass = n >= 3 ? cell_sums<false>( dens, double( a ), double( b ), AnyPoly{ px, py, n }, [&]( int, double ) {} ).m : 0.0;
+    if ( mass <= eps0 ) {
+        below[ q ] = 1;
+        atomicAdd( &cnt->nfell, 1u );
+    }
+}
+
+/// the cells at or under the floor
+struct FloorCountFn {
+    const double *m;
+    double eps0;
+    __device__ void operator()( SI i, Sum1 &acc ) const { acc.s += m[ i ] <= eps0 ? 1.0 : 0.0; }
+};
+
+/// the state of the repair of each cell ( `sdotplan/WarmRepair.h`, in squared spacings: index units )
+struct RepairState { double *lo, *hi, *step, *touched; };
+
+__global__ void __launch_bounds__( BLOCK ) repair_init_kernel( SI n, RepairState rs ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n )
+        sp::warm_repair_init( rs.lo[ i ], rs.hi[ i ], rs.step[ i ], rs.touched[ i ], 1.0, false );
+}
+
+__global__ void __launch_bounds__( BLOCK ) repair_round_kernel( SI n, const double *mass, const double *target, double *ps, RepairState rs, double *moved ) {
+    const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( i < n )
+        moved[ i ] = sp::warm_repair_cell( mass[ i ], target[ i ], ps[ i ], rs.lo[ i ], rs.hi[ i ], rs.step[ i ], rs.touched[ i ], 1.0 ) ? 1.0 : 0.0;
+}
+
+/// the cells under `LO` of their target
+struct SmallFn {
+    const double *m, *t;
+    __device__ void operator()( SI i, Sum1 &acc ) const { acc.s += m[ i ] < sp::WarmRepair::LO * t[ i ] ? 1.0 : 0.0; }
+};
+
 __global__ void __launch_bounds__( BLOCK ) axpy_kernel( SI n, const double *x, double t, const double *d, double *y ) {
     const SI i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
     if ( i < n ) y[ i ] = x[ i ] + t * d[ i ];
@@ -1247,7 +1354,12 @@ struct Solver {
     SI exr_cap = 0;
     // the exact path
     ExactOffsets eo;
+    int rb = RB;                                         ///< the rings of `eo`
     double *pmax;
+    // the cells under the floor ( `tau_limit` )
+    int *bad = nullptr, *faces = nullptr, *nfaces = nullptr;
+    unsigned char *active = nullptr, *below = nullptr;
+    SI bad_cap = 0;
     // the preconditioner's trees
     double *g, *tb, *Di;
     // the reductions
@@ -1306,8 +1418,14 @@ struct Solver {
         const Tab<2> t2 = make_tab<2>();
         cuda_check( cudaMemcpyToSymbolAsync( c_tab1, &t1, sizeof( t1 ), 0, cudaMemcpyHostToDevice, queue.stream ), "copy of the ring-1 tables" );
         cuda_check( cudaMemcpyToSymbolAsync( c_tab2, &t2, sizeof( t2 ), 0, cudaMemcpyHostToDevice, queue.stream ), "copy of the ring-2 tables" );
+        load_rings();
+        return true;
+    }
+
+    /// the exact path's offsets of `rb` rings, sorted by distance ( `ExactKernel` )
+    void load_rings() {
         std::vector<int> ox, oy;
-        for ( int a = -RB; a <= RB; ++a ) for ( int b = -RB; b <= RB; ++b ) if ( a || b ) { ox.push_back( a ); oy.push_back( b ); }
+        for ( int a = -rb; a <= rb; ++a ) for ( int b = -rb; b <= rb; ++b ) if ( a || b ) { ox.push_back( a ); oy.push_back( b ); }
         std::vector<int> ord( ox.size() );
         for ( size_t i = 0; i < ord.size(); ++i ) ord[ i ] = int( i );
         std::stable_sort( ord.begin(), ord.end(), [&]( int i, int j ) { return ox[ i ] * ox[ i ] + oy[ i ] * oy[ i ] < ox[ j ] * ox[ j ] + oy[ j ] * oy[ j ]; } );
@@ -1316,6 +1434,15 @@ struct Solver {
         for ( int i : ord ) { sx.push_back( ox[ i ] ); sy.push_back( oy[ i ] ); nk.push_back( std::hypot( double( ox[ i ] ), double( oy[ i ] ) ) ); }
         upload( const_cast<int *>( eo.ox ), sx.data(), SI( sx.size() ) ); upload( const_cast<int *>( eo.oy ), sy.data(), SI( sy.size() ) );
         upload( const_cast<double *>( eo.nk ), nk.data(), SI( nk.size() ) );
+    }
+
+    /// cells that outgrow the rings ( thin parts of the masses: they reach across seeds of almost no mass ): twice as many rings
+    bool grow_rings( int n ) {
+        rb = std::min( 2 * rb, n );
+        const SI ne = SI( 2 * rb + 1 ) * ( 2 * rb + 1 ) - 1;
+        eo = ExactOffsets{ grab<int>( ne ), grab<int>( ne ), grab<double>( ne ), int( ne ) };
+        if ( ! ok ) return false;
+        load_rings();
         return true;
     }
 
@@ -1359,23 +1486,41 @@ struct Solver {
     template<class T>
     void down( T *dst, const T *src, SI n ) { if ( n > 0 ) read_back( queue, dst, src, n ); }
 
+    // ( the lists of the flagged cells: `false` when the pool has no room, nothing changed and the solve going on -- `run` rejects the diagram )
+    bool room() { const bool r = ok; ok = true; return r; }
     bool grow_ring2( SI cap ) {
         if ( cap <= p2.cap ) return true;
-        p2.vx = grab<double>( 16 * cap ); p2.vy = grab<double>( 16 * cap ); p2.ow = grab<signed char>( 16 * cap );
-        p2.cap = cap;
-        return ok;
+        Planes2 g = p2;
+        g.vx = grab<double>( 16 * cap ); g.vy = grab<double>( 16 * cap ); g.ow = grab<signed char>( 16 * cap );
+        g.cap = cap;
+        if ( ! room() ) return false;
+        p2 = g;
+        return true;
     }
     bool grow_exact( SI cap ) {
         if ( cap <= ep.cap ) return true;
-        ep.px = grab<double>( C * cap ); ep.py = grab<double>( C * cap ); ep.nb = grab<int>( C * cap ); ep.n = grab<int>( cap );
-        ep.cap = cap;
+        ExactPolys g = ep;
+        g.px = grab<double>( C * cap ); g.py = grab<double>( C * cap ); g.nb = grab<int>( C * cap ); g.n = grab<int>( cap );
+        g.cap = cap;
+        if ( ! room() ) return false;
+        ep = g;
+        return true;
+    }
+    bool grow_bad( SI cap ) {
+        if ( cap <= bad_cap ) return true;
+        bad = grab<int>( cap ); faces = grab<int>( C * cap ); nfaces = grab<int>( cap );
+        active = grab<unsigned char>( cap ); below = grab<unsigned char>( cap );
+        bad_cap = cap;
         return ok;
     }
     bool grow_extras( SI cap ) {
         if ( cap <= xs.cap ) return true;
-        xs.i = grab<int>( cap ); xs.j = grab<int>( cap ); xs.w = grab<double>( cap );
-        xs.cap = cap;
-        return ok;
+        Extras g = xs;
+        g.i = grab<int>( cap ); g.j = grab<int>( cap ); g.w = grab<double>( cap );
+        g.cap = cap;
+        if ( ! room() ) return false;
+        xs = g;
+        return true;
     }
 
     template<class Acc,class F>
@@ -1439,7 +1584,7 @@ struct Solver {
     SI n1 = 0;                                           ///< the flagged cells of the last diagram
 
     /// THE DIAGRAM OF `ps` on level n ( `Evaluator::run` ): the geometry, the masses, the weights of H
-    bool run( int n, const double *ps ) {
+    bool run( int n, const double *ps, bool integrate = true ) {
         const SI nn = SI( n ) * n;
         const double t0 = grid_now();
         exhausted = false;
@@ -1451,12 +1596,11 @@ struct Solver {
         n1 = hc.n1;
         zero_fill( queue, flag2, nn );
         SI nex = 0;
-        // ( a diagram whose flagged cells pass a budget -- a quarter of the cells in ring 2, a 32nd in the exact path -- counts as
-        // exhausted: the trial is rejected like one out of the exact path's reach, rather than the pool refusing the call )
-        const SI cap2_max = std::max<SI>( nnf / 4, 4096 ), capx_max = std::max<SI>( nnf / 32, 1024 );
-        if ( n1 > cap2_max ) { exhausted = true; n1 = 0; return true; }
+        // ( a diagram whose flagged cells do not fit in the pool counts as exhausted: the trial is rejected like one out of the exact
+        // path's reach, rather than the call refused. Doubled when there is room, else what this diagram needs )
+        auto no_room = [&]() { exhausted = true; n1 = 0; return true; };
         if ( n1 ) {
-            if ( ! grow_ring2( n1 > p2.cap ? std::min( std::max( n1, 2 * p2.cap ), cap2_max ) : p2.cap ) ) return false;
+            if ( n1 > p2.cap && ! grow_ring2( std::min( std::max( n1, 2 * p2.cap ), nnf ) ) && ! grow_ring2( n1 ) ) return no_room();
             launch_kernel( queue, &ring2_kernel, blocks_for( n1 ), BLOCK, 0, n, ps, ( const int * ) list1, n1, p2, pos2 );
             launch_kernel( queue, &neighbourhood_kernel, blocks_for( 9 * n1 ), BLOCK, 0, n, ( const int * ) list1, n1, mark, check, cnt );
             down( &hc, cnt, 1 );
@@ -1469,17 +1613,21 @@ struct Solver {
             down( &hc, cnt, 1 );
             n1 = hc.n1;
             nex = hc.nex;
-            if ( n1 > cap2_max || nex > capx_max ) { exhausted = true; n1 = 0; return true; }
             if ( nex ) {
-                if ( ! grow_exact( nex > ep.cap ? std::min( std::max( nex, 2 * ep.cap ), capx_max ) : ep.cap ) ) return false;
+                if ( nex > ep.cap && ! grow_exact( std::min( std::max( nex, 2 * ep.cap ), nnf ) ) && ! grow_exact( nex ) ) return no_room();
                 red( nn, MaxOfFn{ ps }, mx );
                 launch_kernel( queue, &copy_max, 1, 1, 0, ( const MaxV * ) mx, pmax );
                 launch_kernel( queue, &exact_kernel, blocks_for( nex ), BLOCK, 0, n, ps, ( const double * ) pmax, ( const int * ) exl, nex, eo, ep, cnt );
+                down( &hc, cnt, 1 );
+                if ( hc.exhausted && rb < n )
+                    return grow_rings( n ) && run( n, ps, integrate );
             }
             // ( a flagged cell has at most 16 faces in ring 2, `C` exact )
             const SI nxm = 16 * ( n1 - nex ) + SI( C ) * nex;
-            if ( ! grow_extras( nxm > xs.cap ? std::max( nxm, 2 * xs.cap ) : xs.cap ) ) return false;
+            if ( nxm > xs.cap && ! grow_extras( std::max( nxm, 2 * xs.cap ) ) && ! grow_extras( nxm ) ) return no_room();
         }
+        if ( ! integrate )
+            return true;
         const double t1 = grid_now();
         with_density( [&]( const auto &dens ) {
             using Dn = std::decay_t<decltype( dens )>;
@@ -1622,8 +1770,80 @@ struct Solver {
         return e;
     }
 
-    /// DAMPED NEWTON on level n ( `GridNewton2D.h::newton` ): `target` the masses in index units, `psi` the start and the solution
-    void newton( int n, double tol_rel, double tol_abs, double S, const Options &o, Stats &st ) {
+    /// THE CELLS THAT A START OR A STEP LEFT ( NEARLY ) EMPTY ( `newton::repair` of the CPU ): each one searches its own psi, one
+    /// diagram per round ( the state in the CG's vectors, free between two solves ). On return the diagram is that of `ps`
+    bool repair( int n, double *ps, Stats &st ) {
+        const SI nn = SI( n ) * n;
+        red( nn, SmallFn{ mass, target }, s1a );
+        Sum1 small;
+        down( &small, s1a, 1 );
+        if ( ! sp::WarmRepair::worth( small.s, double( nn ) ) )
+            return true;
+        RepairState rs{ r, z, p, q };
+        launch_kernel( queue, &repair_init_kernel, blocks_for( nn ), BLOCK, 0, nn, rs );
+        for ( int round = 0; round < sp::WarmRepair::MAX_ROUNDS; ++round ) {
+            launch_kernel( queue, &repair_round_kernel, blocks_for( nn ), BLOCK, 0, nn, ( const double * ) mass, ( const double * ) target, ps, rs, rhs );
+            red( nn, SumOf{ rhs }, s1a );
+            Sum1 moved;
+            down( &moved, s1a, 1 );
+            if ( moved.s == 0 )
+                break;
+            if ( ! run( n, ps ) ) return false;
+            ++st.nb_diag;
+            if ( exhausted )
+                break;
+        }
+        return true;
+    }
+
+    /// THE LIMIT OF THE STEP ( `newton::tau_limit` of the CPU, `sdotplan/Bounds.h` ): the trial at `tau` left cells under the floor.
+    /// Each one, its edges frozen as in the accepted diagram ( put back for that ), bisected on `tau`: `res` the largest `tau` that
+    /// keeps them all above the floor, 0 when they do not fall with their edges frozen. An edge may still appear before: the trial checks
+    bool tau_limit( int n, double tau, double eps0, double &res ) {
+        const SI nn = SI( n ) * n;
+        res = 0;
+        zero_fill( queue, cnt, sizeof( Counts ) );
+        if ( ! grow_bad( std::max<SI>( nnf / 32, 1024 ) ) ) return false;
+        // ( as many as the room: a step that empties more cells than that is left to the damping alone )
+        red( nn, FloorCountFn{ mass, eps0 }, s1a );
+        Sum1 nbs;
+        down( &nbs, s1a, 1 );
+        const SI nb = SI( nbs.s );
+        if ( nb > bad_cap )
+            return true;
+        launch_kernel( queue, &under_floor_kernel, blocks_for( nn ), BLOCK, 0, nn, ( const double * ) mass, eps0, bad, cnt );
+        if ( ! run( n, psi, false ) ) return false;
+        if ( exhausted )
+            return true;
+        launch_kernel( queue, &frozen_faces_kernel, blocks_for( nb ), BLOCK, 0, n, ( const int * ) bad, nb, ( const unsigned char * ) flag1, ( const unsigned char * ) flag2,
+                       ( const signed char * ) ow1, ( const int * ) pos2, ( const int * ) expos, p2, ep, faces, nfaces, active );
+        auto falling = [&]( double s ) {
+            zero_fill( queue, cnt, sizeof( Counts ) );
+            with_density( [&]( const auto &dens ) {
+                using Dn = std::decay_t<decltype( dens )>;
+                launch_kernel( queue, &frozen_mass_kernel<Dn>, blocks_for( nb ), BLOCK, 0, n, dens, ( const int * ) bad, nb, ( const int * ) faces, ( const int * ) nfaces,
+                               ( const double * ) psi, ( const double * ) x, s, eps0, ( const unsigned char * ) active, below, cnt );
+            } );
+            down( &hc, cnt, 1 );
+            return hc.nfell != 0;
+        };
+        if ( ! falling( tau ) )
+            return true;
+        std::swap( active, below );
+        double lo = 0, hi = tau;
+        for ( int round = 0; round < 48 && hi > 1e-10 && ! ( lo > 0 && hi - lo <= 0.05 * hi ); ++round ) {
+            const double mid = ( lo + hi ) / 2;
+            if ( ! falling( mid ) ) lo = mid;
+            else { hi = mid; std::swap( active, below ); }
+        }
+        res = lo;
+        return true;
+    }
+
+    /// DAMPED NEWTON on level n ( `GridNewton2D.h::newton` ): `target` the masses in index units, `psi` the start and the solution.
+    /// `domain`: what the domain holds, from the coarsest level ( a start interpolated across very sharp masses can have cells that a
+    /// far seed should cut and that the certificates of the rings let through )
+    void newton( int n, double tol_rel, double tol_abs, double S, const Options &o, Stats &st, double domain = 0 ) {
         const SI nn = SI( n ) * n;
         auto done = [&]( const Err &e ) { return e.rel <= tol_rel || e.abs <= tol_abs * S; };
         if ( ! run( n, psi ) ) { st.failed = true; return; }
@@ -1633,8 +1853,9 @@ struct Solver {
             Sum2 h2;
             red( nn, Sum2Fn{ mass, target }, s2 );
             down( &h2, s2, 1 );
-            launch_kernel( queue, &scale_kernel, blocks_for( nn ), BLOCK, 0, nn, ( const double * ) target, h2.s0 / h2.s1, target );
-            st.domain_mass = h2.s0 / S;
+            const double sm = domain > 0 ? domain * S : h2.s0;
+            launch_kernel( queue, &scale_kernel, blocks_for( nn ), BLOCK, 0, nn, ( const double * ) target, sm / h2.s1, target );
+            st.domain_mass = sm / S;
         }
         Err e = err_of( nn, target );
         if ( st.residual0 < 0 ) st.residual0 = e.abs / S;
@@ -1645,7 +1866,18 @@ struct Solver {
             down( &h1, mn, 1 );
             min_t = h1.m;
         }
-        const double eps0 = 0.5 * std::min( e.mmin, min_t );
+        if ( e.mmin < sp::WarmRepair::LO * min_t ) {
+            if ( ! repair( n, psi, st ) ) { st.failed = true; return; }
+            e = err_of( nn, target );
+            if ( ! ( e.mmin > 0 ) ) {                    // ( too many cells, or a search that failed: the last resort is the Voronoi )
+                zero_fill( queue, psi, SI( sizeof( double ) ) * nn );
+                if ( ! run( n, psi ) ) { st.failed = true; return; }
+                ++st.nb_diag;
+                e = err_of( nn, target );
+            }
+        }
+        const double eps0 = 0.5 * std::min( e.mmin, sp::WarmRepair::LO * min_t );
+        bool stuck = false;
         for ( int it = 1; it <= o.max_iter && ! done( e ) && ! exhausted; ++it ) {
             const double tl0 = grid_now();
             build_precond( n );
@@ -1654,22 +1886,48 @@ struct Solver {
             st.lin_nb_iter += pcg( n, rhs, o.cg_rtol, 20000 );
             st.t_lin += grid_now() - tl0;
             // the damping
-            double tau = 1;
+            double tau = 1, tau_min = 1e-6;
+            int limit_rounds = 0;
             while ( true ) {
                 launch_kernel( queue, &axpy_kernel, blocks_for( nn ), BLOCK, 0, nn, ( const double * ) psi, tau, ( const double * ) x, trial );
                 if ( ! run( n, trial ) ) { st.failed = true; return; }
                 ++st.nb_diag;
-                const Err e2 = err_of( nn, target );
-                if ( ( ! exhausted && e2.mmin > eps0 && e2.l2 <= ( 1 - tau / 2 ) * e.l2 ) || tau < 1e-6 ) { e = e2; break; }
+                Err e2 = err_of( nn, target );
+                if ( ! exhausted && e2.mmin <= eps0 && limit_rounds < 8 ) {
+                    ++limit_rounds;
+                    double al;
+                    if ( ! tau_limit( n, tau, eps0, al ) ) { st.failed = true; return; }
+                    if ( al > 0 ) {
+                        tau = 0.9 * al;
+                        tau_min = std::min( tau_min, tau / 64 );
+                    } else
+                        limit_rounds = 8;                // ( no limit: back on the trial and the damping alone )
+                    continue;
+                }
+                // ( a trial whose cells outgrow the exact path is rejected like one that empties a cell )
+                if ( ! exhausted && e2.l2 <= ( 1 - tau / 2 ) * e.l2 ) {
+                    if ( e2.mmin <= eps0 ) {
+                        if ( ! repair( n, trial, st ) ) { st.failed = true; return; }
+                        e2 = err_of( nn, target );
+                    }
+                    if ( ! exhausted && e2.mmin > eps0 && e2.l2 <= ( 1 - tau / 2 ) * e.l2 ) { e = e2; break; }
+                }
                 tau /= 2;
                 ++st.nb_backtracks;
+                if ( tau < tau_min ) { stuck = true; break; }
+            }
+            // ( no step: the last accepted weights stay, with their outputs )
+            if ( stuck ) {
+                if ( ! run( n, psi ) ) { st.failed = true; return; }
+                ++st.nb_diag;
+                break;
             }
             std::swap( psi, trial );
             ++st.nb_iter;
         }
         st.residual = e.abs / S;
         st.exhausted = st.exhausted || exhausted;
-        st.status = exhausted ? 6 : done( e ) ? 1 : 2;
+        st.status = exhausted || stuck ? 6 : done( e ) ? 1 : 2;
     }
 
     /// the moments of the last diagram ( level n ) into `dx` ( bx ), `rhs` ( by ), `trial` ( m2 )
@@ -1752,6 +2010,7 @@ Stats solve( const CudaQueue &queue, Alloc &allocator, int N, double ox, double 
             if ( sl.failed ) break;
         }
     }
+    double domain = 0;                                   // ( what the domain holds, from the coarsest level )
     for ( int n = n0, l = int( nus.size() ) - 1; n <= N && ! st.failed; n *= 2, --l ) {
         if ( n > n0 ) {
             launch_kernel( queue, &refine_kernel, blocks_for( SI( n ) * n ), BLOCK, 0, n / 2, ( const double * ) sv.psi, sv.trial );
@@ -1762,13 +2021,13 @@ Stats solve( const CudaQueue &queue, Alloc &allocator, int N, double ox, double 
         launch_kernel( queue, &scale_kernel, blocks_for( SI( n ) * n ), BLOCK, 0, SI( n ) * n, ( const double * ) nus[ l ], S, sv.target );
         Stats sl;
         const bool fine = n == N;
-        sv.newton( n, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl );
+        sv.newton( n, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl, domain );
+        domain = sl.domain_mass;
         add( sl );
         if ( o.trace ) { char w[ 64 ]; std::snprintf( w, 64, "level %d ( %d its )", n, sl.nb_iter ); trace( w ); }
         st.exhausted = st.exhausted || sl.exhausted;
         if ( sl.failed ) break;
-        if ( sl.exhausted ) { st.status = 6; break; }
-        if ( ! fine ) continue;
+        if ( ! fine ) continue;                          // ( a level that failed still gives a start )
         st.status = sl.status;
         st.residual = sl.residual;
         st.domain_mass = sl.domain_mass;

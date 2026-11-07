@@ -13,8 +13,9 @@
 //              extra ( i, j, w ) for the faces of the cells that came from ring 2 or from the exact path. PCG in row
 //              passes, preconditioned by the weighted semi-coarsened tent blurs ( `TensorPrecond` )
 //   start      coarse to fine: the solve on n0, 2 n0, ..., N, each level from the cubic interpolation of the previous psi
-//   damping    sharp targets ( cells a hundredth of a pixel wide beside cells of ten pixels ): the steps limited by H + lambda L,
-//              the line search on the residual, the cells a start or a step left empty repaired one by one ( `newton` )
+//   damping    sharp targets ( cells a hundredth of a pixel wide beside cells of ten pixels ): the line search on the residual,
+//              `tau` brought under the limit of the cells that a trial left under the floor, the cells that remain empty repaired
+//              one by one ( `newton` )
 //   threads    those of the CPU queue ( `Par` ): contiguous slices of rows or of cells, the sums combined in thread order
 
 #include "StencilKernel.h"
@@ -139,7 +140,7 @@ struct Evaluator {
     // stats of the last call
     int n_flag1 = 0, n_exact = 0;
     T pmax = 0;                                          // the largest psi, for the exact path ( `pe`: psi padded for it )
-    bool exhausted = false;                              // the exact path ran out of its list ( a cell wider than its 24 rings ), or
+    bool exhausted = false;                              // the exact path ran out of its list ( a cell wider than all the rings ), or
                                                          // a cell that sdot could not build ( `DistCells::failed` )
     double t_geom = 0, t_int = 0;
 
@@ -285,6 +286,39 @@ struct Evaluator {
             nbr[ e ] = o < 0 ? -1 : i + ( l2 ? T2::off_x[ o ] * N + T2::off_y[ o ] : T1::off_x[ o ] * N + T1::off_y[ o ] );
         }
         return D;
+    }
+
+    // THE MASS OF CELL i AT THE WEIGHTS `p`, ITS EDGES FROZEN: only the neighbours `ranks` cut it ( thread `t`'s scratch )
+    T frozen_mass( int t, int i, const int *ranks, int nb, const std::vector<T> &p ) {
+        T m = 0;
+        if constexpr ( Integ::simd ) {
+            constexpr int C = ExactKernel<T>::C;
+            T px[ C ], py[ C ], qx[ C ], qy[ C ], face[ C ];
+            const T a = T( i / N ), b = T( i % N ), lx = T( -0.5 ) - a, hx = T( N ) - T( 0.5 ) - a, ly = T( -0.5 ) - b, hy = T( N ) - T( 0.5 ) - b;
+            px[ 0 ] = lx; py[ 0 ] = ly; px[ 1 ] = hx; py[ 1 ] = ly; px[ 2 ] = hx; py[ 2 ] = hy; px[ 3 ] = lx; py[ 3 ] = hy;
+            int n = 4;
+            for( int e = 0; e < nb && n; ++e ) {
+                const T dx = T( ranks[ e ] / N ) - a, dy = T( ranks[ e ] % N ) - b, c = ( dx * dx + dy * dy + p[ i ] - p[ ranks[ e ] ] ) / 2;
+                int q = 0;
+                for( int v = 0; v < n && q + 2 < C; ++v ) {
+                    const int w = v + 1 == n ? 0 : v + 1;
+                    const T s0 = dx * px[ v ] + dy * py[ v ] - c, s1 = dx * px[ w ] + dy * py[ w ] - c;
+                    if( s0 <= 0 ) { qx[ q ] = px[ v ]; qy[ q ] = py[ v ]; ++q; }
+                    if( ( s0 < 0 && s1 > 0 ) || ( s0 > 0 && s1 < 0 ) ) {
+                        const T u = s0 / ( s0 - s1 );
+                        qx[ q ] = px[ v ] + u * ( px[ w ] - px[ v ] ); qy[ q ] = py[ v ] + u * ( py[ w ] - py[ v ] ); ++q;
+                    }
+                }
+                std::copy( qx, qx + q, px ); std::copy( qy, qy + q, py );
+                n = q;
+            }
+            if( n >= 3 ) integ[ t ].polygon( n, px, py, a, b, m, face );
+        } else {
+            integ[ t ].bind( p );
+            integ[ t ].cell( i, ranks, nb, m, []( int, T ) {} );
+            integ[ t ].failed = false;
+        }
+        return m;
     }
 
     void geometry( const std::vector<T> &psi ) {
@@ -456,10 +490,17 @@ struct Evaluator {
                 ig.failed = false;
             }
         }
-        for( char e : exh ) exhausted = exhausted || e;
+        bool out_of_rings = false;
+        for( char e : exh ) out_of_rings = out_of_rings || e;
+        exhausted = exhausted || out_of_rings;
         double t2 = now_ms();
         t_geom += t1 - t0;
         t_int += t2 - t1;
+        // ( sharp masses: a cell may reach far beyond its rings, over seeds of almost no mass )
+        if( out_of_rings && ek.RB < N ) {
+            ek = ExactKernel<T>( std::min( 2 * ek.RB, N ) );
+            run( psi );
+        }
     }
 
     // barycenters ( index units, relative to the seed ) and the second moments about the seed, at the last `run`
@@ -894,7 +935,6 @@ struct Options {
     int    n0 = 64;                                      ///< the coarsest level ( `N` itself: no coarse to fine )
     int    max_iter = 50;
     double cg_rtol = 1e-2;
-    double step_limit = 2;                               ///< the largest move of a bisector of the grid in a step ( index units ), see `newton`
 };
 
 struct Stats {
@@ -941,7 +981,7 @@ inline std::vector<T> refine_psi( int n, const std::vector<T> &pc, const Par &pa
 /// `psi`: start on input, solution on output. `S`: index units per unit of mass ( for `tol_abs` ).
 template<class Integ>
 void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, double tol_rel, double tol_abs, double S,
-             const Options &o, Stats &st ) {
+             const Options &o, Stats &st, double domain = 0 ) {
     const int N = ev.N;
     const Par &par = ev.par;
     const SI nn = SI( N ) * N;
@@ -972,10 +1012,12 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     ev.run( psi );
     ++st.nb_diag;
     // the targets scaled to what the domain holds ( a density with mass outside of it: a gaussian on a box ), as
-    // `sdotplan/Solve.h` does -- the cells tile the domain whatever psi
+    // `sdotplan/Solve.h` does -- the cells tile the domain whatever psi, but the finer levels take it from the coarsest: a start
+    // interpolated across very sharp masses can have cells that a far seed should cut and that the certificates of the rings let through
     {
         T sm = 0, st_ = 0;
         for( int i = 0; i < N * N; ++i ) { sm += ev.mass[ i ]; st_ += target[ i ]; }
+        if( domain > 0 ) sm = T( domain * S );
         for( auto &t : target ) t *= sm / st_;
         st.domain_mass = double( sm / S );
     }
@@ -1016,8 +1058,51 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     }
     const T eps0 = T( 0.5 ) * std::min( err.mmin, T( sdotplan::WarmRepair::LO ) * min_t );
     bool stuck = false;
-    bool limited = true;
-    T lambda = 0;
+    // THE LIMIT OF THE STEP ( `sdotplan/Bounds.h` ): the trial at `tau` left cells under the floor. Each one, its edges frozen as in
+    // the accepted diagram ( `ev` is put back on `psi` for that ), bisected on `tau`: what goes back is the largest `tau` that
+    // keeps them all above the floor, 0 when they do not fall with their edges frozen. An edge may still appear before: the trial checks
+    std::vector<int> bad, bad_nb, bad_of, cand, fell;
+    std::vector<char> below;
+    auto tau_limit = [ & ]( T tau ) {
+        bad.clear();
+        for( int i = 0; i < N * N; ++i ) if( ev.mass[ i ] <= eps0 ) bad.push_back( i );
+        ev.geometry( psi );
+        bad_nb.clear(); bad_of.assign( 1, 0 ); cand.clear();
+        for( SI q = 0; q < SI( bad.size() ); ++q ) {
+            T px[ ExactKernel<T>::C ], py[ ExactKernel<T>::C ];
+            int nbr[ ExactKernel<T>::C ];
+            bool ex = false;
+            const int n = ev.polygon( bad[ q ], px, py, nbr, ex );
+            for( int e = 0; e < n; ++e ) if( nbr[ e ] >= 0 ) bad_nb.push_back( nbr[ e ] );
+            bad_of.push_back( int( bad_nb.size() ) );
+            if( n ) cand.push_back( int( q ) );
+        }
+        auto falling = [ & ]( T s ) {
+            par.slices( N, nn, [&]( int a0, int a1, int ) {
+                for( int a = a0; a < a1; ++a ) for( int b = 0; b < N; ++b ) trial[ a * N + b ] = psi[ a * N + b ] + s * dx[ ( a + 1 ) * P + b + 1 ];
+            } );
+            below.assign( cand.size(), 0 );
+            par.slices( int( cand.size() ), SI( cand.size() ) * 1024, [&]( int c0, int c1, int t ) {
+                for( int c = c0; c < c1; ++c ) {
+                    const int q = cand[ c ];
+                    below[ c ] = ev.frozen_mass( t, bad[ q ], bad_nb.data() + bad_of[ q ], bad_of[ q + 1 ] - bad_of[ q ], trial ) <= eps0;
+                }
+            } );
+            fell.clear();
+            for( size_t c = 0; c < cand.size(); ++c ) if( below[ c ] ) fell.push_back( cand[ c ] );
+        };
+        falling( tau );
+        if( fell.empty() ) return T( 0 );
+        cand.swap( fell );
+        T lo = 0, hi = tau;
+        for( int r = 0; r < 48 && hi > T( 1e-10 ) && ! ( lo > 0 && hi - lo <= T( 0.05 ) * hi ); ++r ) {
+            const T mid = ( lo + hi ) / 2;
+            falling( mid );
+            if( fell.empty() ) lo = mid;
+            else { hi = mid; cand.swap( fell ); }
+        }
+        return lo;
+    };
     for( int it = 1; it <= o.max_iter && ! done( err ) && ! ev.exhausted; ++it ) {
         // the linear system H dx = target - m
         const double tl = now_ms();
@@ -1034,51 +1119,14 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
         par.slices( N, nn, [&]( int a0, int a1, int ) {
             for( int a = a0; a < a1; ++a ) for( int b = 0; b < N; ++b ) rhs[ ( a + 1 ) * P + b + 1 ] -= sb;
         } );
-        // THE STEP LIMIT. A face that sits where the density is low has a small weight in H, however dense the density one pixel
-        // further: a sharp edge of the target gives steps of 100 in psi where a move of one pixel would do, and a line search
-        // along such a step crawls. H + lambda L ( L the laplacian of the grid ) stiffens these faces, and these only: lambda
-        // grows until no bisector of the grid moves by more than `step_limit`, and goes back to 0 near the solution
-        const T lam0 = 1e-3;
-        auto stiffen = [ & ]( T d ) {
-            par.slices( N, nn, [&]( int a0, int a1, int ) {
-                for( int k = 0; k < 8; ++k ) {
-                    if( T1::off_x[ k ] && T1::off_y[ k ] ) continue;
-                    T *w = ev.W.data() + SI( k ) * PP;
-                    for( int a = a0; a < a1; ++a ) for( int b = 0; b < N; ++b ) {
-                        const int a2 = a + T1::off_x[ k ], b2 = b + T1::off_y[ k ];
-                        if( a2 >= 0 && a2 < N && b2 >= 0 && b2 < N ) w[ ( a + 1 ) * P + b + 1 ] += d;
-                    }
-                }
-            } );
-        };
-        auto bisector_move = [ & ]() {
-            return par.reduce( N, nn, T( 0 ), [&]( int a0, int a1 ) {
-                T j = 0;
-                for( int a = a0; a < a1; ++a ) for( int b = 0; b < N; ++b ) {
-                    const T v = dx[ ( a + 1 ) * P + b + 1 ];
-                    if( a + 1 < N ) j = std::max( j, std::abs( v - dx[ ( a + 2 ) * P + b + 1 ] ) );
-                    if( b + 1 < N ) j = std::max( j, std::abs( v - dx[ ( a + 1 ) * P + b + 2 ] ) );
-                }
-                return j / 2;
-            }, []( T &a, const T &b ) { a = std::max( a, b ); } );
-        };
-        lambda = lambda / 4 < lam0 || ! limited ? 0 : lambda / 4;
-        if( lambda > 0 ) { stiffen( lambda ); op.bind( ev ); M.build( op ); }
-        int cg_its = pcg_fused( op, M, rhs, dx, o.cg_rtol, 20000, par );
-        for( int round = 0; limited && round < 16 && bisector_move() > o.step_limit; ++round ) {
-            const T d = lambda > 0 ? 3 * lambda : lam0;
-            lambda += d;
-            stiffen( d );
-            op.bind( ev );
-            M.build( op );
-            cg_its += pcg_fused( op, M, rhs, dx, o.cg_rtol, 20000, par );
-        }
+        const int cg_its = pcg_fused( op, M, rhs, dx, o.cg_rtol, 20000, par );
         st.lin_nb_iter += cg_its;
         st.t_lin += ( now_ms() - tl ) / 1e3;
-        // damping ( a limited step is not a Newton step: nothing says that the norm of the residual decreases at the rate of `tau`, nor
-        // for a small `tau`. Newton itself takes over when it does not )
-        const T slope = lambda > 0 ? T( 0.02 ) : T( 0.5 ), tau_min = lambda > 0 ? T( 0.1 ) : T( 1e-6 );
+        // damping
+        const T slope = T( 0.5 );
+        T tau_min = T( 1e-6 );
         T tau = 1;
+        int limit_rounds = 0;
         while( true ) {
             par.slices( N, nn, [&]( int a0, int a1, int ) {
                 for( int a = a0; a < a1; ++a ) for( int b = 0; b < N; ++b ) trial[ a * N + b ] = psi[ a * N + b ] + tau * dx[ ( a + 1 ) * P + b + 1 ];
@@ -1086,6 +1134,17 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
             ev.run( trial );
             ++st.nb_diag;
             Err e2 = err_of( ev.mass );
+            if( ! ev.exhausted && e2.mmin <= eps0 && limit_rounds < 8 ) {
+                ++limit_rounds;
+                const T al = tau_limit( tau );
+                if( al > 0 ) {
+                    tau = T( 0.9 ) * al;
+                    tau_min = std::min( tau_min, tau / 64 );
+                    continue;
+                }
+                limit_rounds = 8;                        // ( no limit: back on the trial, that `tau_limit` moved, and the damping alone )
+                continue;
+            }
             // ( a trial whose cells outgrow the exact path's rings is rejected like one that empties a cell )
             if( ! ev.exhausted && e2.l2 <= ( 1 - slope * tau ) * err.l2 ) {
                 if( e2.mmin <= eps0 ) {
@@ -1102,11 +1161,8 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
         if( stuck ) {
             ev.run( psi );
             ++st.nb_diag;
-            if( ! limited ) break;
-            limited = stuck = false;
-            continue;
+            break;
         }
-        limited = true;
         psi.swap( trial );
         ++st.nb_iter;
     }
@@ -1162,6 +1218,7 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
             }
         }
     }
+    double domain = 0;                                   // ( what the domain holds, from the coarsest level )
     for( int n = n0, l = int( nus.size() ) - 1; n <= N; n *= 2, --l ) {
         if( n > n0 ) psi = refine_psi( n / 2, psi, par );
         const double S = double( n ) * n, hl = h * N / n;
@@ -1171,7 +1228,8 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
         Evaluator<DECAYED_TYPE_OF( integ )> ev( n, integ, par );
         Stats sl;
         const bool fine = n == N;
-        newton( ev, target, psi, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl );
+        newton( ev, target, psi, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl, domain );
+        domain = sl.domain_mass;
         st.nb_iter += sl.nb_iter; st.nb_diag += sl.nb_diag; st.nb_backtracks += sl.nb_backtracks; st.lin_nb_iter += sl.lin_nb_iter;
         st.t_diag += sl.t_diag; st.t_lin += sl.t_lin; ++st.nb_levels;
         if( st.residual0 < 0 ) st.residual0 = sl.residual0;

@@ -295,3 +295,23 @@ if test( "the_grid_solver_takes_sharp_targets" ):
     warm = solve( 0.95 * h, cold.weights )
     print( { k: warm.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
     assert int( warm.stats[ "nb_iter" ] ) <= 25 and int( warm.stats[ "nb_backtracks" ] ) <= 40
+
+if test( "the_grid_solver_takes_sharp_masses" ):
+    import numpy
+    from loom.testing import need
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    need( "cpu" )
+    # a thin ring holding nearly all the mass: its cells reach further than the first rings of the exact path, over seeds of almost
+    # no mass, and the start interpolated from the coarse level has cells that no certificate catches ( the target must not follow them )
+    N = 128
+    u = ( numpy.arange( N ) + 0.5 ) / N
+    r = numpy.hypot( u[ :, None ] - 0.5, u[ None, : ] - 0.5 )
+    m = numpy.exp( -( ( r - 0.3 ) / 0.02 ) ** 2 ) + 1e-3
+    m = ( m / m.sum() ).ravel()
+    target = lambda: SumOfGaussians( numpy.array( [ [ 0.5, 0.5 ] ] ), numpy.array( [ 0.2 ] ), support_box = ( [ 0.0, 0.0 ], [ 1.0, 1.0 ] ) )
+    p = OtProblem( SumOfDiracsOnAGrid( ( N, N ), weights = m ), target() ).solve( Iterative( tol = 1e-9, tuning = Tuning( grid_solver = "dedicated" ) ) )
+    ref = OtProblem( SumOfDiracsOnAGrid( ( N, N ), weights = m ), target() ).solve( Iterative( tol = 1e-9, tuning = Tuning( grid_solver = "cells" ) ) )
+    assert p.converged, p.stats
+    assert numpy.allclose( _host( p.cell_masses ), _host( ref.cell_masses ), atol = 1e-8 )

@@ -132,7 +132,7 @@ res = minimize( fun, theta0, jac = True, method = "L-BFGS-B", bounds = bounds )
 
 `callback = lambda r: ...` gives the iterations ( `r.x`, `r.fun` ): that is how the viewer below was recorded.
 
-Starting from 4 wide Gaussians of equal masses in the middle, both find the mixture the points were drawn from, up to the sampling noise of 1000 points, in 40 iterations:
+Starting from 4 wide Gaussians of equal masses in the middle, both find the mixture the points were drawn from, up to the sampling noise of 1000 points. L-BFGS stops after 51 iterations; the viewer stops at the 40th, after which nothing moves on screen:
 
 | | center | sigma | mass |
 |---|---|---|---|

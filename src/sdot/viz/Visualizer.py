@@ -191,6 +191,10 @@ class Visualizer:
     each frame. `loop`: it starts again, morphing back to the first frame. `autoplay`: it plays as soon as the page opens
     ( `?play=0|1` in the URL wins ).
 
+    The page saves the played axis as an animated GIF ( menu, "save as GIF" ): one image per frame, as the view shows it
+    ( zoom, theme ), at most 800 pixels wide ( `?gif_width=` ), the last frame held a moment. `?gif=1` saves it as soon
+    as the page opens.
+
     `frame_axis`: the name of the frame axis, or a tuple of names when the frames vary along several parameters (see
     `new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
     the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.
@@ -791,6 +795,7 @@ _HTML = r"""<!DOCTYPE html>
   }
   #menu:hover #controls, #menu.open #controls { display: block; }
   #controls a { color: inherit; }
+  #controls button.act { font-size: 12px; cursor: pointer; }
   body.dark #menuBtn { background: rgba(30,30,30,0.92); color: #ddd; }
   #controls label { display: block; margin: 2px 0; }
   #controls input[type=range] { vertical-align: middle; width: 100%; }
@@ -896,6 +901,9 @@ _HTML = r"""<!DOCTYPE html>
     <label><input type="checkbox" id="cbWheel"> wheel moves/zooms the view</label>
     <label><input type="checkbox" id="cbTouch"> touch drives the view</label>
     <a id="openFull" href="#" target="_blank" style="display:none">open in a separate page &#8599;</a>
+  </div>
+  <div class="sec" id="gifBox" style="display:none">
+    <button class="act" id="gifBtn" title="one image per frame of the played axis, as the view shows it">save as GIF</button>
   </div>
   <div class="hint"><b>?</b>: help · <b>d</b>: <span id="modeLabel">light</span></div>
 </div>
@@ -2247,6 +2255,109 @@ function togglePlay(a) {
 if (playableAxes.length && (URL_OPTS.has("play") ? URL_OPTS.get("play") !== "0" : __AUTOPLAY__)) setTimeout(() => togglePlay(playableAxes[0]), 400);
 
 // ============================================================================================
+// GIF export: the frames of the played axis ( the other axes held ), each drawn as the view shows it, then read back
+// at once ( no `preserveDrawingBuffer`: the copy happens in the same task as the draw ). Two passes over the frames,
+// so that no image is kept: the first counts the colors ( 15 bits ) to pick the 256 most frequent as the palette, the
+// second maps each pixel to the nearest entry and encodes. A frame only stores the box where it differs from the
+// previous one. The scenes have few colors ( a background, a few plain colors and their opacities ): no dithering.
+function gifLzw(idx, out) {                            // the LZW of GIF, 8-bit indices, codes up to 12 bits
+  const CLEAR = 256, EOI = 257;
+  let size = 9, next = EOI + 1, cur = 0, nb = 0, dict = new Map(), bytes = [];
+  const emit = c => { cur |= c << nb; nb += size; while (nb >= 8) { bytes.push(cur & 255); cur >>>= 8; nb -= 8; } };
+  emit(CLEAR);
+  let prefix = idx[0];
+  for (let i = 1; i < idx.length; i++) {
+    const k = idx[i], key = (prefix << 8) | k, v = dict.get(key);
+    if (v !== undefined) { prefix = v; continue; }
+    emit(prefix);
+    if (next > (1 << size) - 1 && size < 12) size++;
+    if (next < 4096) dict.set(key, next++);
+    else { emit(CLEAR); dict.clear(); size = 9; next = EOI + 1; }
+    prefix = k;
+  }
+  emit(prefix);
+  if (next > (1 << size) - 1 && size < 12) size++;
+  emit(EOI);
+  if (nb > 0) bytes.push(cur & 255);
+  out.push(8);                                         // the minimum code size, then the data in sub-blocks of 255 bytes
+  for (let i = 0; i < bytes.length; i += 255) { const b = bytes.slice(i, i + 255); out.push(b.length, ...b); }
+  out.push(0);
+}
+async function exportGif() {
+  const a = playing >= 0 ? playing : (playableAxes.length ? playableAxes[0] : focusAxis);
+  if (a === undefined || a < 0 || !axRows[a] || gifBtn.disabled) return;
+  stopPlaying();
+  const keep = frameIdx, label = gifBtn.textContent, ranks = curRanks(), n = AX_VALS[a].length;
+  const frames = Array.from({ length: n }, (_, k) => { ranks[a] = k; return frameFor(ranks, a); });
+  const maxW = parseInt(URL_OPTS.get("gif_width") || "800", 10);
+  const sc = Math.min(1, maxW / canvas.width), W = Math.max(1, Math.round(canvas.width * sc)), H = Math.max(1, Math.round(canvas.height * sc));
+  const c2 = document.createElement("canvas"); c2.width = W; c2.height = H;
+  const g2 = c2.getContext("2d", { willReadFrequently: true });
+  g2.imageSmoothingQuality = "high";
+  const pause = () => new Promise(r => setTimeout(r, 0));
+  const grab = f => { setFrame(f); g2.drawImage(canvas, 0, 0, W, H); return g2.getImageData(0, 0, W, H).data; };
+  gifBtn.disabled = true;
+  try {
+    // (1) the palette: the 256 most frequent colors ( 5 bits per channel ), each the mean of its bucket
+    const cnt = new Float64Array(32768), sum = new Float64Array(3 * 32768);
+    for (let k = 0; k < n; k++) {
+      gifBtn.textContent = "colors " + (k + 1) + "/" + n; await pause();
+      const px = grab(frames[k]);
+      for (let i = 0; i < px.length; i += 4) {
+        const key = ((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3);
+        cnt[key]++; sum[3 * key] += px[i]; sum[3 * key + 1] += px[i + 1]; sum[3 * key + 2] += px[i + 2];
+      }
+    }
+    const used = []; for (let key = 0; key < 32768; key++) if (cnt[key]) used.push(key);
+    used.sort((x, y) => cnt[y] - cnt[x]);
+    const pal = used.slice(0, 256).map(key => [0, 1, 2].map(j => Math.round(sum[3 * key + j] / cnt[key])));
+    while (pal.length < 256) pal.push([0, 0, 0]);
+    const lut = new Uint8Array(32768);                 // bucket -> nearest entry of the palette
+    for (const key of used) {
+      const r = sum[3 * key] / cnt[key], g = sum[3 * key + 1] / cnt[key], b = sum[3 * key + 2] / cnt[key];
+      let best = 0, bd = Infinity;
+      for (let e = 0; e < 256; e++) { const d = (r - pal[e][0]) ** 2 + (g - pal[e][1]) ** 2 + (b - pal[e][2]) ** 2; if (d < bd) { bd = d; best = e; } }
+      lut[key] = best;
+    }
+    // (2) the file: header, global palette, endless loop, then one image per frame
+    const out = [...Array.from("GIF89a", ch => ch.charCodeAt(0)), W & 255, W >> 8, H & 255, H >> 8, 0xF7, 0, 0];
+    for (const c of pal) out.push(c[0], c[1], c[2]);
+    out.push(0x21, 0xFF, 11, ...Array.from("NETSCAPE2.0", ch => ch.charCodeAt(0)), 3, 1, 0, 0, 0);
+    let prev = null;
+    for (let k = 0; k < n; k++) {
+      gifBtn.textContent = "GIF " + (k + 1) + "/" + n; await pause();
+      const px = grab(frames[k]), idx = new Uint8Array(W * H);
+      for (let i = 0, j = 0; j < idx.length; i += 4, j++) idx[j] = lut[((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3)];
+      let x0 = 0, y0 = 0, x1 = W - 1, y1 = H - 1;     // the box that changed since the previous frame
+      if (prev) {
+        x0 = W; y0 = H; x1 = -1; y1 = -1;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++)
+          if (idx[y * W + x] !== prev[y * W + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        if (x1 < 0) { x0 = y0 = x1 = y1 = 0; }       // nothing changed: one pixel, the delay still counts
+      }
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1, sub = new Uint8Array(bw * bh);
+      for (let y = 0; y < bh; y++) sub.set(idx.subarray((y0 + y) * W + x0, (y0 + y) * W + x0 + bw), y * bw);
+      const delay = Math.round((k === n - 1 ? 1.5 : 1 / FPS) * 100);    // in 1/100 s; the last frame held
+      out.push(0x21, 0xF9, 4, 0x04, delay & 255, delay >> 8, 0, 0);     // disposal: keep, under the next box
+      out.push(0x2C, x0 & 255, x0 >> 8, y0 & 255, y0 >> 8, bw & 255, bw >> 8, bh & 255, bh >> 8, 0);
+      gifLzw(sub, out);
+      prev = idx;
+    }
+    out.push(0x3B);
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([new Uint8Array(out)], { type: "image/gif" }));
+    link.download = (document.title.replace(/[^\w\-]+/g, "-").replace(/^-+|-+$/g, "") || "frames") + ".gif";
+    document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+  } finally {
+    gifBtn.textContent = label; gifBtn.disabled = false;
+    setFrame(keep);
+  }
+}
+const gifBtn = document.getElementById("gifBtn");
+if (shownAxes.length) { document.getElementById("gifBox").style.display = ""; gifBtn.addEventListener("click", exportGif); }
+
+// ============================================================================================
 // panel: opacity, radius, viewed dimensions, slices
 // ============================================================================================
 function syncLabels() {
@@ -2366,6 +2477,7 @@ resetView();
 // The bar of an axis takes the focus: the arrows drive it NATIVELY (and Home/End too),
 // without taking anything away from the camera -- a click on the view gives the arrows back to the orbit.
 if (focusAxis >= 0) axRows[focusAxis].inp.focus({ preventScroll: true });
+if (shownAxes.length && URL_OPTS.get("gif") === "1") setTimeout(exportGif, 400);
 </script>
 </body>
 </html>

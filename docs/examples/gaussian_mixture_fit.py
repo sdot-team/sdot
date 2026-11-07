@@ -13,8 +13,9 @@ import numpy as np
 import sdot
 
 OUT = Path( __file__ ).resolve().parents[ 1 ] / "public" / "examples"
-NB_ITER = 40
+MAX_ITER = 200      # L-BFGS runs until it converges; `settled` then cuts the frames that no longer move on screen
 NB_POINTS = 1000
+VISUAL_TOL = 2e-3   # what "no longer moves on screen" means, relative to the size of the point cloud
 
 
 def samples( n = NB_POINTS, seed = 0 ):
@@ -67,7 +68,7 @@ def fit_jax( points ):
             history.append( record( unravel( theta ), value ) )
         return float( value ), np.asarray( grad )
 
-    minimize( fun, np.asarray( theta0 ), jac = True, method = "L-BFGS-B", bounds = bounds(), options = { "maxiter": NB_ITER },
+    minimize( fun, np.asarray( theta0 ), jac = True, method = "L-BFGS-B", bounds = bounds(), options = { "maxiter": MAX_ITER },
               callback = lambda intermediate_result: history.append( record( unravel( intermediate_result.x ), intermediate_result.fun ) ) )
     return history
 
@@ -95,7 +96,7 @@ def fit_torch( points ):
         return float( value ), theta.grad.numpy()
 
     theta0 = np.concatenate( [ p.ravel() for p in start() ] )
-    minimize( fun, theta0, jac = True, method = "L-BFGS-B", bounds = bounds(), options = { "maxiter": NB_ITER },
+    minimize( fun, theta0, jac = True, method = "L-BFGS-B", bounds = bounds(), options = { "maxiter": MAX_ITER },
               callback = lambda intermediate_result: history.append( record( unflatten( intermediate_result.x ), intermediate_result.fun ) ) )
     return history
 
@@ -103,14 +104,29 @@ def fit_torch( points ):
 # ---- the pages ------------------------------------------------------------------------------------------------------
 
 def to_host( x ):
+    """a numpy COPY: SciPy updates `intermediate_result.x` in place, and `torch.as_tensor` shares its memory -- without the
+    copy, every recorded iteration would show the last one"""
     if hasattr( x, "detach" ):
-        x = x.detach()
-    return np.asarray( x, dtype = float )
+        x = x.detach().cpu().numpy()
+    return np.array( x, dtype = float )
 
 
 def record( params, value ):
     centers, sigmas, masses = ( to_host( p ) for p in params )
     return centers.reshape( -1, 2 ), sigmas, masses / masses.sum(), float( to_host( value ) )
+
+
+def settled( points, history, tol = VISUAL_TOL ):
+    """the history up to the iteration after which nothing moves on screen any more: every later iteration stays within
+    `tol` times the size of the point cloud of the last one ( centers, circles at 2 sigmas, and the opacity, which says
+    the mass )"""
+    size = np.ptp( points, axis = 0 ).max()
+    def gap( a, b ):
+        return max( np.abs( a[ 0 ] - b[ 0 ] ).max() / size, 2 * np.abs( a[ 1 ] - b[ 1 ] ).max() / size, 3 * np.abs( a[ 2 ] - b[ 2 ] ).max() )
+    last = len( history ) - 1
+    while last > 0 and gap( history[ last - 1 ], history[ -1 ] ) < tol:
+        last -= 1
+    return history[ : last + 1 ]
 
 
 def write_page( name, points, history ):
@@ -170,9 +186,11 @@ if __name__ == "__main__":
     points = samples()
     for name in sys.argv[ 1: ] or [ "jax" ]:
         t0 = time.perf_counter()
-        history = CASES[ name ]( points )
+        full = CASES[ name ]( points )
+        history = settled( points, full )
         centers, sigmas, masses, w2 = history[ -1 ]
-        print( f"{ name }: W2 { history[ 0 ][ 3 ] :.4g} -> { w2 :.4g} in { len( history ) - 1 } iterations, { time.perf_counter() - t0 :.1f}s" )
+        print( f"{ name }: W2 { full[ 0 ][ 3 ] :.4g} -> { full[ -1 ][ 3 ] :.4g} in { len( full ) - 1 } iterations, "
+               f"settled on screen after { len( history ) - 1 } ( W2 { w2 :.4g} ), { time.perf_counter() - t0 :.1f}s" )
         for c, s, m in zip( centers, sigmas, masses ):
             print( f"  center ( { c[ 0 ] :+.3f}, { c[ 1 ] :+.3f} )  sigma { s :.3f}  mass { m :.3f}" )
         write_page( name, points, history )

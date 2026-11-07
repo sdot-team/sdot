@@ -87,6 +87,11 @@ x = sdot.quantization( target, 6000, seed = 0 )
 ></iframe>
 <p style="text-align: right; margin: 0"><a :href="withBase('/guide/codim-mesh-klein.html')" target="_blank">Open in a separate page ↗</a></p>
 
+The viewer starts from the random draw ( iteration 0 ). The first transport is then shown Newton step by Newton step, as the
+barycenters of the cells for the weights of each step ( fractional iterations between 0 and 1: three steps here, five with the density below ): the Voronoi cells first, since the weights
+start at zero, then cells that take their mass. The diracs move to the last ones: that is iteration 1, where Lloyd from a random
+start does most of its work. Iterations 2 to 4 and the last one only even the spacing out.
+
 The diracs end at the barycenters of their cells: slightly inside the curved parts of the surface, by the sagitta of a cell.
 
 ## A density on the surface

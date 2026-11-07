@@ -170,3 +170,53 @@ if test( "what_the_card_grid_solver_does_not_take_goes_to_the_positions" ):
                        ( SumOfDiracsOnAGrid( ( 32, 32 ), frame = [ 0.5, 0.5 ] ), Box( [ 0.0, 0.0 ], [ 1.0, 1.0 ] ) ) ):
         p = OtProblem( g, target ).solve( Iterative( tol = 1e-10 ) )
         assert p.converged and "grid_solver" not in p.stats, p.stats
+
+
+if test( "the_card_grid_solver_takes_sharp_targets" ):
+    import numpy
+    from sdot.OtProblem import OtProblem, Iterative, Tuning
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    _on_card()
+    # ( `test_SumOfDiracsOnAGrid.py`: thin rings on a dark background, the diracs and the image a fraction of a pixel apart )
+    N = 128
+    h = 1 / N
+    def rings( x, y, shift ):
+        v = 0 * x
+        for cx, cy, r in ( ( 0.35, 0.4, 0.2 ), ( 0.7, 0.65, 0.15 ) ):
+            d = numpy.hypot( x - cx - shift, y - cy ) - r
+            v = v + numpy.maximum( 1 - ( d / ( 2.5 * h ) ) ** 2, 0 ) ** 2.5
+        return v + 3e-3 * v.mean()
+    p = ( numpy.arange( N ) + 0.5 ) * h
+    q = numpy.arange( N + 1 ) * h
+    def solve( shift, weights0 = None ):
+        v = rings( q[ :, None ], q[ None, : ], shift )
+        img = Image( values = numpy.stack( [ v[ :-1, :-1 ], v[ :-1, 1: ], v[ 1:, :-1 ], v[ 1:, 1: ] ], -1 ), degree = 1 )
+        src = SumOfDiracsOnAGrid( ( N, N ), weights = rings( p[ :, None ], p[ None, : ], 0.0 ).reshape( -1 ) )
+        return OtProblem( src, img ).solve( Iterative( tol = 1e-3 / N ** 2, max_iter = 100, weights0 = weights0, tuning = Tuning( grid_solver = "dedicated" ) ) )
+
+    cold = solve( 0.7 * h )
+    print( { k: cold.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
+    nu = rings( p[ :, None ], p[ None, : ], 0.0 ).reshape( -1 )
+    assert numpy.abs( _host( cold.cell_masses ) - nu / nu.sum() ).max() < 1e-3 / N ** 2
+    warm = solve( 0.95 * h, cold.weights )
+    print( { k: warm.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
+    assert warm.converged and int( warm.stats[ "nb_iter" ] ) <= 25 and int( warm.stats[ "nb_backtracks" ] ) <= 40
+
+
+if test( "the_card_grid_solver_takes_sharp_masses" ):
+    import numpy
+    from sdot.distributions.Box import Box
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    _on_card()
+    # a thin ring holding nearly all the mass: its cells reach further than the first rings of the exact path, over seeds of almost
+    # no mass, and a large part of the cells of the interpolated start goes through ring 2 and the exact path
+    N = 128
+    u = ( numpy.arange( N ) + 0.5 ) / N
+    r = numpy.hypot( u[ :, None ] - 0.5, u[ None, : ] - 0.5 )
+    m = numpy.exp( -( ( r - 0.3 ) / 0.02 ) ** 2 ) + 1e-3
+    m = ( m / m.sum() ).ravel()
+    p = OtProblem( SumOfDiracsOnAGrid( ( N, N ), weights = m ), Box( [ 0.0, 0.0 ], [ 1.0, 1.0 ] ) ).solve( Iterative( tol = 1e-9, tuning = Tuning( grid_solver = "dedicated" ) ) )
+    assert p.converged, p.stats
+    assert numpy.allclose( _host( p.cell_masses ), m, rtol = 0, atol = 1e-8 )

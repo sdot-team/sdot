@@ -1,6 +1,6 @@
 ---
 title: Fokker-Planck Diffusion
-description: Linear diffusion with particles, the entropy being replaced by its Moreau-Yosida regularization (Leclerc-Mérigot-Santambrogio-Stra scheme).
+description: Linear diffusion with particles, the entropy being replaced by its Moreau-Yosida regularization (L.-Mérigot-Santambrogio-Stra scheme).
 tags: [pde, diffusion, gradient-flow, 2d]
 image: /examples/img/fokker-planck.png
 order: 9

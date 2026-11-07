@@ -1,6 +1,6 @@
-"""The outputs of `tomography-tents.md`: a cylinder of material pierced by packed bubbles, reconstructed from its projections with tents, coarse
-to fine, every iteration of the L-BFGS recorded ( `docs/public/examples/tomography-tents.html` and the card of the gallery
-`docs/public/examples/img/tomography-tents.png` ).
+"""The outputs of the tomography example of `guide/distributions/projected.md`: a cylinder of material pierced by packed bubbles,
+reconstructed from its projections with tents, coarse to fine, every iteration of the L-BFGS recorded
+( `docs/public/examples/tomography-tents.html` and the card of the gallery `docs/public/examples/img/tomography-tents.png` ).
 
 The `# region` blocks are what the page shows; the rest ( the reference object, the page ) is not the point of the example.
 

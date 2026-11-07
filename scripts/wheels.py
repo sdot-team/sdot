@@ -138,7 +138,7 @@ def main():
         build( a, loom, dist )
     # only this version's sdot wheels: `--pull dist` also brings back what an earlier build left on another machine
     wheels = sorted( dist.glob( f"sdot-{ current_version() }-*.whl" ) )
-    print( wheels, current_version )
+    print( "++++++++++++++++", wheels, current_version() )
     if a.publish:
         run( sys.executable, "-m", "pip", "install", "--quiet", "twine" )
         run( sys.executable, "-m", "twine", "upload", "--skip-existing", "--repository-url", a.publish, *wheels,
