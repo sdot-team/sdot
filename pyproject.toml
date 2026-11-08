@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sdot"
 version = "2026.11.3.1"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "loom-ffi>=2026.11.03.1",
@@ -20,4 +21,5 @@ artifacts = ["src/sdot/precompiled-kernels/**"]
 [tool.hatch.build.targets.sdist]
 only-include = [
     "src",
+    "README.md",
 ]
