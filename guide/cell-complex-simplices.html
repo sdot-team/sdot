@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Simplices and distances</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; color: #111; }
+  canvas { display: block; }
+  #controls {
+    display: none; position: absolute; top: 30px; left: 0;
+    max-height: calc(100vh - 50px); overflow-y: auto;
+    background: rgba(255,255,255,0.88); padding: 8px 12px; border-radius: 6px;
+    font-family: sans-serif; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    width: 244px; box-sizing: border-box;
+  }
+  #controls *, #controls { box-sizing: border-box; }
+  #menu { position: fixed; top: 10px; left: 10px; z-index: 2; }
+  #menuBtn {
+    display: block; width: 30px; height: 30px; padding: 0; cursor: pointer; border: none;
+    border-radius: 6px; background: rgba(255,255,255,0.88); color: #333; font-size: 18px; line-height: 1;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  #menu:hover #controls, #menu.open #controls { display: block; }
+  #controls a { color: inherit; }
+  body.dark #menuBtn { background: rgba(30,30,30,0.92); color: #ddd; }
+  #controls label { display: block; margin: 2px 0; }
+  #controls input[type=range] { vertical-align: middle; width: 100%; }
+  #controls select { font-size: 12px; }
+  #controls .hint { color: #666; margin-top: 6px; }
+  #controls .sec { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; }
+  #controls .val { color: #666; font-variant-numeric: tabular-nums; }
+  /* the frame axes: in plain sight, right of the menu button -- one row per axis */
+  #anim {
+    display: none; position: fixed; top: 10px; left: 48px; z-index: 1;
+    width: min(460px, calc(100vw - 96px)); box-sizing: border-box; padding: 2px 8px;
+    background: rgba(255,255,255,0.88); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    font-family: sans-serif; font-size: 13px;
+    grid-template-columns: auto minmax(40px, 1fr) auto; align-items: center; column-gap: 8px;
+  }
+  #anim .row { display: contents; }
+  #anim .row > * { margin: 2px 0; }
+  #anim input[type=range] { width: 100%; accent-color: #2a7de1; }
+  #anim .play {
+    cursor: pointer; border: none; border-radius: 50%; background: #2a7de1; color: #fff; padding: 0;
+    width: 22px; height: 22px; font-size: 10px; line-height: 22px; flex: none;
+  }
+  #anim .play.on { background: #444; }
+  #anim .gap { width: 22px; flex: none; }
+  #anim .lab { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #anim .cnt { color: #888; font-size: 11px; margin-left: 4px; }
+  body.dark #anim { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #anim input[type=range] { accent-color: #8ab4f8; }
+  body.dark #anim .play { background: #8ab4f8; color: #172033; }
+  body.dark #anim .play.on { background: #ddd; }
+  body.dark #anim .cnt { color: #999; }
+  #slices .row { display: flex; align-items: center; gap: 6px; }
+  #slices .row span { flex: none; width: 62px; }
+  #axes select { width: 58px; }
+  #nav {
+    position: fixed; top: 10px; right: 10px; z-index: 1; width: 30px; height: 30px; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; border-radius: 6px;
+    background: rgba(255,255,255,0.88); color: #888; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    transition: background 0.2s, color 0.2s, transform 0.2s;
+  }
+  #nav svg { width: 20px; height: 20px; }
+  #nav.on { color: #2a7de1; box-shadow: 0 0 0 2px #2a7de1; }
+  #nav.pulse { transform: scale(1.15); background: #2a7de1; color: #fff; }
+  body.dark #nav { background: rgba(30,30,30,0.92); color: #999; }
+  body.dark #nav.on { color: #8ab4f8; box-shadow: 0 0 0 2px #8ab4f8; }
+  body.dark #nav.pulse { background: #8ab4f8; color: #172033; }
+  #help {
+    display: none; position: fixed; top: 48px; right: 10px; z-index: 2;
+    background: rgba(255,255,255,0.95); padding: 10px 14px; border-radius: 6px;
+    font-family: sans-serif; font-size: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  #help table { border-collapse: collapse; }
+  #help td { padding: 1px 0; }
+  #help td:first-child { padding-right: 10px; color: #333; white-space: nowrap; }
+  #help td:last-child { color: #666; }
+  body.dark { background: #1a1a1a; color: #ddd; }
+  body.dark #controls { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #controls .hint, body.dark #controls .val { color: #aaa; }
+  body.dark #controls .sec { border-top-color: #555; }
+  body.dark #controls input[type=range] { accent-color: #8ab4f8; }
+  body.dark #help { background: rgba(30,30,30,0.95); color: #ccc; }
+  body.dark #help td:first-child { color: #ddd; }
+  body.dark #help td:last-child { color: #aaa; }
+</style>
+</head>
+<body data-theme="light">
+<div id="menu">
+<button id="menuBtn" title="menu">&#9776;</button>
+<div id="controls">
+  <div id="counts"></div>
+  <div class="sec">
+    <label><input type="checkbox" id="cbFaces" checked> faces</label>
+    <label>opacity <span class="val" id="opVal"></span>
+      <input id="op" type="range" min="0.05" max="1" step="0.01" value="1"></label>
+    <label>edges: <select id="edgeMode">
+      <option value="hide">hidden removed</option>
+      <option value="ghost" selected>hidden as ghost</option>
+      <option value="all">all visible</option>
+      <option value="none">none</option>
+    </select></label>
+  </div>
+  <div class="sec" id="ptBox">
+    <label><input type="checkbox" id="cbPoints" checked> points</label>
+    <label id="depthLbl" style="display:none"><input type="checkbox" id="cbDepth"> colored by depth</label>
+    <label>radius <span class="val" id="rVal"></span>
+      <input id="r" type="range" min="0" max="1" step="0.001" value="0.5"></label>
+  </div>
+  <div class="sec" id="edlBox" style="display:none">
+    <label><input type="checkbox" id="cbEdl" checked> eye-dome lighting</label>
+    <label>strength <span class="val" id="edlVal"></span>
+      <input id="edlK" type="range" min="0" max="1" step="0.01" value="0.5"></label>
+    <label><input type="checkbox" id="cbAo" checked> ambient occlusion</label>
+    <label>strength <span class="val" id="aoKVal"></span>
+      <input id="aoK" type="range" min="0" max="1" step="0.01" value="0.7"></label>
+    <label>radius ( &times; points ) <span class="val" id="aoRVal"></span>
+      <input id="aoR" type="range" min="1" max="20" step="0.5" value="5"></label>
+  </div>
+  <div class="sec" id="axes" style="display:none">
+    views on <select id="axX"></select><select id="axY"></select><select id="axZ"></select>
+  </div>
+  <div id="slices"></div>
+  <div class="sec">
+    <label><input type="checkbox" id="cbWheel"> wheel moves/zooms the view</label>
+    <label><input type="checkbox" id="cbTouch"> touch drives the view</label>
+    <a id="openFull" href="#" target="_blank" style="display:none">open in a separate page &#8599;</a>
+  </div>
+  <div class="hint"><b>?</b>: help · <b>d</b>: <span id="modeLabel">light</span></div>
+</div>
+</div>
+<div id="anim"></div>
+<button id="nav" title="navigation: wheel, pinch and touch move / zoom the view">
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg>
+</button>
+<div id="help">
+  <b>Keyboard shortcuts</b>
+  <table>
+    <tr><td>&larr; / &rarr;</td><td id="hTime">frame -1 / +1 (a bar of the top row has the focus)</td></tr>
+    <tr><td>Home / End</td><td>first / last frame</td></tr>
+    <tr><td>Space</td><td>play / pause</td></tr>
+    <tr><td>drag</td><td id="hDrag">orbit</td></tr>
+    <tr><td>Shift + drag</td><td>move (pan)</td></tr>
+    <tr><td>wheel</td><td>move · Ctrl/pinch: zoom towards the cursor</td></tr>
+    <tr><td>&larr; &rarr; &uarr; &darr;</td><td id="hArrows">rotate (Shift/Ctrl: faster)</td></tr>
+    <tr><td>+ / -</td><td>zoom in / out</td></tr>
+    <tr><td>[ / ]</td><td>point radius - / +</td></tr>
+    <tr><td>f</td><td>faces</td></tr>
+    <tr><td>e</td><td>hidden-edge mode</td></tr>
+    <tr><td>p</td><td>points</td></tr>
+    <tr><td>c</td><td>points colored by depth (3D)</td></tr>
+    <tr><td>o</td><td>ortho / perspective projection</td></tr>
+    <tr><td>0 · double-click</td><td>reset the view</td></tr>
+    <tr><td>d</td><td>light / dark</td></tr>
+    <tr><td>?</td><td>show / hide this help</td></tr>
+  </table>
+</div>
+<canvas id="c"></canvas>
+<script>
+// ============================================================================================
+// data -- everything is encoded in base64 in the page (self-contained file, openable as file://)
+// ============================================================================================
+function b64bytes(s) {
+  const raw = atob(s), b = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) b[i] = raw.charCodeAt(i);
+  return b;
+}
+function decF32(s) { const b = b64bytes(s); return new Float32Array(b.buffer, 0, b.length / 4); }
+function decI32(s) { const b = b64bytes(s); return new Int32Array(b.buffer, 0, b.length / 4); }
+function decU16(s) { const b = b64bytes(s); return new Uint16Array(b.buffer, 0, b.length / 2); }
+
+const D      = 2;                  // dimension of the WORLD (size of the position vectors)
+const BOUNDS = [[-0.05000000074505806, 1.0499999523162842], [-0.05000000074505806, 1.0499999523162842]];             // [lo, hi] per dimension
+
+// ONE single vertex pool for the whole scene (POS, with stride D); a primitive only refers to it by
+// INDICES, and its color is only an index into COLORS. This is what keeps the weight of the
+// file down: a cube vertex serves 6 triangles and 3 edges, it is stored only once, and
+// a color costs only 2 bytes per primitive instead of 4 per vertex.
+const POS    = decF32("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");
+const COLORS = [[0.7529411764705882, 0.7529411764705882, 0.7529411764705882, 1.0], [0.0, 0.0, 0.0, 1.0], [0.26666666666666666, 0.00392156862745098, 0.32941176470588235, 1.0], [0.2823529411764706, 0.12941176470588237, 0.4470588235294118, 1.0], [0.25882352941176473, 0.23921568627450981, 0.5176470588235295, 1.0], [0.2196078431372549, 0.3411764705882353, 0.5490196078431373, 1.0], [0.17647058823529413, 0.43529411764705883, 0.5568627450980392, 1.0], [0.1411764705882353, 0.5215686274509804, 0.5529411764705883, 1.0], [0.11764705882352941, 0.6039215686274509, 0.5372549019607843, 1.0], [0.16470588235294117, 0.6901960784313725, 0.49411764705882355, 1.0], [0.3176470588235294, 0.7686274509803922, 0.40784313725490196, 1.0], [0.5254901960784314, 0.8313725490196079, 0.28627450980392155, 1.0], [0.7607843137254902, 0.8745098039215686, 0.13333333333333333, 1.0], [0.9921568627450981, 0.9058823529411765, 0.1411764705882353, 1.0], [0.8392156862745098, 0.15294117647058825, 0.1568627450980392, 1.0]], COLORS_DARK = [[0.35294117647058826, 0.35294117647058826, 0.35294117647058826, 1.0], [1.0, 1.0, 1.0, 1.0], [0.26666666666666666, 0.00392156862745098, 0.32941176470588235, 1.0], [0.2823529411764706, 0.12941176470588237, 0.4470588235294118, 1.0], [0.25882352941176473, 0.23921568627450981, 0.5176470588235295, 1.0], [0.2196078431372549, 0.3411764705882353, 0.5490196078431373, 1.0], [0.17647058823529413, 0.43529411764705883, 0.5568627450980392, 1.0], [0.1411764705882353, 0.5215686274509804, 0.5529411764705883, 1.0], [0.11764705882352941, 0.6039215686274509, 0.5372549019607843, 1.0], [0.16470588235294117, 0.6901960784313725, 0.49411764705882355, 1.0], [0.3176470588235294, 0.7686274509803922, 0.40784313725490196, 1.0], [0.5254901960784314, 0.8313725490196079, 0.28627450980392155, 1.0], [0.7607843137254902, 0.8745098039215686, 0.13333333333333333, 1.0], [0.9921568627450981, 0.9058823529411765, 0.1411764705882353, 1.0], [0.8392156862745098, 0.15294117647058825, 0.1568627450980392, 1.0]];
+let PAL = COLORS;                      // the table of the CURRENT theme             // table of distinct colors, as [r, g, b, a]
+
+// polygons of FREE length: POLY_OFF slices POLY_V (POLY_OFF[p] .. POLY_OFF[p+1]). They are only
+// triangulated here, at display time -- the file itself keeps the faces as they are.
+const POLY_V = decI32(""), POLY_OFF = decI32("AAAAAA=="), POLY_C = decU16("");
+const EDG_V  = decI32("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"),  EDG_C    = decU16("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA4ADgAOAA==");
+const PNT_V  = decI32("LgEAAC8BAAAwAQAAMQEAADIBAAAzAQAANAEAADUBAAA2AQAANwEAADgBAAA5AQAAOgEAADsBAAA8AQAAPQEAAD4BAAA/AQAAQAEAAEEBAABCAQAAQwEAAEQBAABFAQAARgEAAEcBAABIAQAASQEAAEoBAABLAQAATAEAAE0BAABOAQAATwEAAFABAABRAQAAUgEAAFMBAABUAQAAVQEAAFYBAABXAQAAWAEAAFkBAABaAQAAWwEAAFwBAABdAQAAXgEAAF8BAABgAQAAYQEAAGIBAABjAQAAZAEAAGUBAABmAQAAZwEAAGgBAABpAQAAagEAAGsBAABsAQAAbQEAAG4BAABvAQAAcAEAAHEBAAByAQAAcwEAAHQBAAB1AQAAdgEAAHcBAAB4AQAAeQEAAHoBAAB7AQAAfAEAAH0BAAB+AQAAfwEAAIABAACBAQAAggEAAIMBAACEAQAAhQEAAIYBAACHAQAAiAEAAIkBAACKAQAAiwEAAIwBAACNAQAAjgEAAI8BAACQAQAAkQEAAJIBAACTAQAAlAEAAJUBAACWAQAAlwEAAJgBAACZAQAAmgEAAJsBAACcAQAAnQEAAJ4BAACfAQAAoAEAAKEBAACiAQAAowEAAKQBAAClAQAApgEAAKcBAACoAQAAqQEAAKoBAACrAQAArAEAAK0BAACuAQAArwEAALABAACxAQAAsgEAALMBAAC0AQAAtQEAALYBAAC3AQAAuAEAALkBAAC6AQAAuwEAALwBAAC9AQAAvgEAAL8BAADAAQAAwQEAAMIBAADDAQAAxAEAAMUBAADGAQAAxwEAAMgBAADJAQAAygEAAMsBAADMAQAAzQEAAM4BAADPAQAA0AEAANEBAADSAQAA0wEAANQBAADVAQAA1gEAANcBAADYAQAA2QEAANoBAADbAQAA3AEAAN0BAADeAQAA3wEAAOABAADhAQAA4gEAAOMBAADkAQAA5QEAAOYBAADnAQAA6AEAAOkBAADqAQAA6wEAAOwBAADtAQAA7gEAAO8BAADwAQAA8QEAAPIBAADzAQAA9AEAAPUBAAD2AQAA9wEAAPgBAAD5AQAA+gEAAPsBAAD8AQAA/QEAAP4BAAD/AQAAAAIAAAECAAACAgAAAwIAAAQCAAAFAgAABgIAAAcCAAAIAgAACQIAAAoCAAALAgAADAIAAA0CAAAOAgAADwIAABACAAARAgAAEgIAABMCAAAUAgAAFQIAABYCAAAXAgAAGAIAABkCAAAaAgAAGwIAABwCAAAdAgAAHgIAAB8CAAAgAgAAIQIAACICAAAjAgAAJAIAACUCAAAmAgAAJwIAACgCAAApAgAAKgIAACsCAAAsAgAALQIAAC4CAAAvAgAAMAIAADECAAAyAgAAMwIAADQCAAA1AgAANgIAADcCAAA4AgAAOQIAADoCAAA7AgAAPAIAAD0CAAA+AgAAPwIAAEACAABBAgAAQgIAAEMCAABEAgAARQIAAEYCAABHAgAASAIAAEkCAABKAgAASwIAAEwCAABNAgAATgIAAE8CAABQAgAAUQIAAFICAABTAgAAVAIAAFUCAABWAgAAVwIAAFgCAABZAgAAWgIAAFsCAABcAgAAXQIAAF4CAABfAgAAYAIAAGECAABiAgAAYwIAAGQCAABlAgAAZgIAAGcCAABoAgAAaQIAAGoCAABrAgAAbAIAAG0CAABuAgAAbwIAAHACAABxAgAAcgIAAHMCAAB0AgAAdQIAAHYCAAB3AgAAeAIAAHkCAAB6AgAAewIAAHwCAAB9AgAAfgIAAH8CAACAAgAAgQIAAIICAACDAgAAhAIAAIUCAACGAgAAhwIAAIgCAACJAgAAigIAAIsCAACMAgAAjQIAAI4CAACPAgAAkAIAAJECAACSAgAAkwIAAJQCAACVAgAAlgIAAJcCAACYAgAAmQIAAJoCAACbAgAAnAIAAJ0CAACeAgAAnwIAAKACAAChAgAAogIAAKMCAACkAgAApQIAAKYCAACnAgAAqAIAAKkCAACqAgAAqwIAAKwCAACtAgAArgIAAK8CAACwAgAAsQIAALICAACzAgAAtAIAALUCAAC2AgAAtwIAALgCAAC5AgAAugIAALsCAAC8AgAAvQIAAL4CAAC/AgAAwAIAAMECAADCAgAAwwIAAMQCAADFAgAAxgIAAMcCAADIAgAAyQIAAMoCAADLAgAAzAIAAM0CAADOAgAAzwIAANACAADRAgAA0gIAANMCAADUAgAA1QIAANYCAADXAgAA2AIAANkCAADaAgAA2wIAANwCAADdAgAA3gIAAN8CAADgAgAA4QIAAOICAADjAgAA5AIAAOUCAADmAgAA5wIAAOgCAADpAgAA6gIAAOsCAADsAgAA7QIAAO4CAADvAgAA8AIAAPECAADyAgAA8wIAAPQCAAD1AgAA9gIAAPcCAAD4AgAA+QIAAPoCAAD7AgAA/AIAAP0CAAD+AgAA/wIAAAADAAABAwAAAgMAAAMDAAAEAwAABQMAAAYDAAAHAwAACAMAAAkDAAAKAwAACwMAAAwDAAANAwAADgMAAA8DAAAQAwAAEQMAABIDAAATAwAAFAMAABUDAAAWAwAAFwMAABgDAAAZAwAAGgMAABsDAAAcAwAAHQMAAB4DAAAfAwAAIAMAACEDAAAiAwAAIwMAACQDAAAlAwAAJgMAACcDAAAoAwAAKQMAACoDAAArAwAALAMAAC0DAAAuAwAALwMAADADAAAxAwAAMgMAADMDAAA0AwAANQMAADYDAAA3AwAAOAMAADkDAAA6AwAAOwMAADwDAAA9AwAAPgMAAD8DAABAAwAAQQMAAEIDAABDAwAARAMAAEUDAABGAwAARwMAAEgDAABJAwAASgMAAEsDAABMAwAATQMAAE4DAABPAwAAUAMAAFEDAABSAwAAUwMAAFQDAABVAwAAVgMAAFcDAABYAwAAWQMAAFoDAABbAwAAXAMAAF0DAABeAwAAXwMAAGADAABhAwAAYgMAAGMDAABkAwAAZQMAAGYDAABnAwAAaAMAAGkDAABqAwAAawMAAGwDAABtAwAAbgMAAG8DAABwAwAAcQMAAHIDAABzAwAAdAMAAHUDAAB2AwAAdwMAAHgDAAB5AwAAegMAAHsDAAB8AwAAfQMAAH4DAAB/AwAAgAMAAIEDAACCAwAAgwMAAIQDAACFAwAAhgMAAIcDAACIAwAAiQMAAIoDAACLAwAAjAMAAI0DAACOAwAAjwMAAJADAACRAwAAkgMAAJMDAACUAwAAlQMAAJYDAACXAwAAmAMAAJkDAACaAwAAmwMAAJwDAACdAwAAngMAAJ8DAACgAwAAoQMAAKIDAACjAwAApAMAAKUDAACmAwAApwMAAKgDAACpAwAAqgMAAKsDAACsAwAArQMAAK4DAACvAwAAsAMAALEDAACyAwAAswMAALQDAAC1AwAAtgMAALcDAAC4AwAAuQMAALoDAAC7AwAAvAMAAL0DAAC+AwAAvwMAAMADAADBAwAAwgMAAMMDAADEAwAAxQMAAMYDAADHAwAAyAMAAMkDAADKAwAAywMAAMwDAADNAwAAzgMAAM8DAADQAwAA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kwUAAJQFAACVBQAAlgUAAJcFAACYBQAAmQUAAJoFAACbBQAAnAUAAJ0FAACeBQAAnwUAAKAFAAChBQAAogUAAKMFAACkBQAApQUAAKYFAACnBQAAqAUAAKkFAACqBQAAqwUAAKwFAACtBQAArgUAAK8FAACwBQAAsQUAALIFAACzBQAAtAUAALUFAAC2BQAAtwUAALgFAAC5BQAAugUAALsFAAC8BQAAvQUAAL4FAAC/BQAAwAUAAMEFAADCBQAAwwUAAMQFAADFBQAAxgUAAMcFAADIBQAAyQUAAMoFAADLBQAAzAUAAM0FAADOBQAAzwUAANAFAADRBQAA0gUAANMFAADUBQAA1QUAANYFAADXBQAA2AUAANkFAADaBQAA2wUAANwFAADdBQAA3gUAAN8FAADgBQAA4QUAAOIFAADjBQAA5AUAAOUFAADmBQAA5wUAAOgFAADpBQAA6gUAAOsFAADsBQAA7QUAAO4FAADvBQAA8AUAAPEFAADyBQAA8wUAAPQFAAD1BQAA9gUAAPcFAAD4BQAA+QUAAPoFAAD7BQAA/AUAAP0FAAD+BQAA/wUAAAAGAAABBgAAAgYAAAMGAAAEBgAABQYAAAYGAAAHBgAACAYAAAkGAAAKBgAACwYAAAwGAAANBgAADgYAAA8GAAAQBgAAEQYAABIGAAATBgAAFAYAABUGAAAWBgAAFwYAABgGAAAZBgAAGgYAABsGAAAcBgAAHQYAAB4GAAAfBgAAIAYAACEGAAAiBgAAIwYAACQGAAAlBgAAJgYAACcGAAAoBgAAKQYAACoGAAArBgAALAYAAC0GAAAuBgAALwYAADAGAAAxBgAAMgYAADMGAAA0BgAANQYAADYGAAA3BgAAOAYAADkGAAA6BgAAOwYAADwGAAA9BgAAPgYAAD8GAABABgAAQQYAAEIGAABDBgAARAYAAEUGAABGBgAARwYAAEgGAABJBgAASgYAAEsGAABMBgAATQYAAE4GAABPBgAAUAYAAFEGAABSBgAAUwYAAFQGAABVBgAAVgYAAFcGAABYBgAAWQYAAFoGAABbBgAAXAYAAF0GAABeBgAAXwYAAGAGAABhBgAAYgYAAGMGAABkBgAAZQYAAGYGAABnBgAAaAYAAGkGAABqBgAAawYAAGwGAABtBgAAbgYAAG8GAABwBgAAcQYAAHIGAABzBgAAdAYAAHUGAAB2BgAAdwYAAHgGAAB5BgAAegYAAHsGAAB8BgAAfQYAAH4GAAB/BgAAgAYAAIEGAACCBgAAgwYAAIQGAACFBgAAhgYAAIcGAACIBgAAiQYAAIoGAACLBgAAjAYAAI0GAACOBgAAjwYAAJAGAACRBgAAkgYAAJMGAACUBgAAlQYAAJYGAACXBgAAmAYAAJkGAACaBgAAmwYAAJwGAACdBgAAngYAAJ8GAACgBgAAoQYAAKIGAACjBgAApAYAAKUGAACmBgAApwYAAKgGAACpBgAAqgYAAKsGAACsBgAArQYAAK4GAACvBgAAsAYAALEGAACyBgAAswYAALQGAAC1BgAAtgYAALcGAAC4BgAAuQYAALoGAAC7BgAAvAYAAL0GAAC+BgAAvwYAAMAGAADBBgAAwgYAAMMGAADEBgAAxQYAAMYGAADHBgAAyAYAAMkGAADKBgAAywYAAMwGAADNBgAAzgYAAM8GAADQBgAA0QYAANIGAADTBgAA1AYAANUGAADWBgAA1wYAANgGAADZBgAA2gYAANsGAADcBgAA3QYAAN4GAADfBgAA4AYAAOEGAADiBgAA4wYAAOQGAADlBgAA5gYAAOcGAADoBgAA6QYAAOoGAADrBgAA7AYAAO0GAADuBgAA7wYAAPAGAADxBgAA8gYAAPMGAAD0BgAA9QYAAPYGAAD3BgAA+AYAAPkGAAD6BgAA+wYAAPwGAAD9BgAA/gYAAP8GAAAABwAAAQcAAAIHAAADBwAABAcAAAUHAAAGBwAABwcAAAgHAAAJBwAACgcAAAsHAAAMBwAADQcAAA4HAAAPBwAAEAcAABEHAAASBwAAEwcAABQHAAAVBwAAFgcAABcHAAAYBwAAGQcAABoHAAAbBwAAHAcAAB0HAAAeBwAAHwcAACAHAAAhBwAAIgcAACMHAAAkBwAAJQcAACYHAAAnBwAAKAcAACkHAAAqBwAAKwcAACwHAAAtBwAALgcAAC8HAAAwBwAAMQcAADIHAAAzBwAANAcAADUHAAA2BwAANwcAADgHAAA5BwAAOgcAADsHAAA8BwAAPQcAAD4HAAA/BwAAQAcAAEEHAABCBwAAQwcAAEQHAABFBwAARgcAAEcHAABIBwAASQcAAEoHAABLBwAATAcAAE0HAABOBwAATwcAAFAHAABRBwAAUgcAAFMHAABUBwAAVQcAAFYHAABXBwAAWAcAAFkHAABaBwAAWwcAAFwHAABdBwAAXgcAAF8HAABgBwAAYQcAAGIHAABjBwAAZAcAAGUHAABmBwAAZwcAAGgHAABpBwAAagcAAGsHAABsBwAAbQcAAG4HAABvBwAAcAcAAHEHAAByBwAAcwcAAHQHAAB1BwAAdgcAAHcHAAB4BwAAeQcAAHoHAAB7BwAAfAcAAH0HAAB+BwAAfwcAAIAHAACBBwAAggcAAIMHAACEBwAAhQcAAIYHAACHBwAAiAcAAIkHAACKBwAAiwcAAIwHAACNBwAAjgcAAI8HAACQBwAAkQcAAJIHAACTBwAAlAcAAJUHAACWBwAAlwcAAJgHAACZBwAAmgcAAJsHAACcBwAAnQcAAJ4HAACfBwAAoAcAAKEHAACiBwAAowcAAKQHAAClBwAApgcAAKcHAACoBwAAqQcAAKoHAACrBwAArAcAAK0HAACuBwAArwcAALAHAACxBwAAsgcAALMHAAC0BwAAtQcAALYHAAC3BwAAuAcAALkHAAC6BwAAuwcAALwHAAC9BwAAvgcAAL8HAADABwAAwQcAAMIHAADDBwAAxAcAAMUHAADGBwAAxwcAAMgHAADJBwAAygcAAMsHAADMBwAAzQcAAM4HAADPBwAA0AcAANEHAADSBwAA0wcAANQHAADVBwAA1gcAANcHAADYBwAA2QcAANoHAADbBwAA3AcAAN0HAADeBwAA3wcAAOAHAADhBwAA4gcAAOMHAADkBwAA5QcAAOYHAADnBwAA6AcAAOkHAADqBwAA6wcAAOwHAADtBwAA7gcAAO8HAADwBwAA8QcAAPIHAADzBwAA9AcAAPUHAAD2BwAA9wcAAPgHAAD5BwAA+gcAAPsHAAD8BwAA/QcAAP4HAAD/BwAAAAgAAAEIAAACCAAAAwgAAAQIAAAFCAAABggAAAcIAAAICAAACQgAAAoIAAALCAAADAgAAA0IAAAOCAAADwgAABAIAAARCAAAEggAABMIAAAUCAAAFQgAABYIAAAXCAAAGAgAABkIAAAaCAAAGwgAABwIAAAdCAAAHggAAB8IAAAgCAAAIQgAACIIAAAjCAAAJAgAACUIAAAmCAAAJwgAACgIAAApCAAAKggAACsIAAAsCAAALQgAAC4IAAAvCAAAMAgAADEIAAAyCAAAMwgAADQIAAA1CAAANggAADcIAAA4CAAAOQgAADoIAAA7CAAAPAgAAD0IAAA+CAAAPwgAAEAIAABBCAAAQggAAEMIAABECAAARQgAAEYIAABHCAAASAgAAEkIAABKCAAASwgAAEwIAABNCAAATggAAE8IAABQCAAAUQgAAFIIAABTCAAAVAgAAFUIAABWCAAAVwgAAFgIAABZCAAAWggAAFsIAABcCAAAXQgAAF4IAABfCAAAYAgAAGEIAABiCAAAYwgAAGQIAABlCAAAZggAAGcIAABoCAAAaQgAAGoIAABrCAAAbAgAAG0IAABuCAAAbwgAAHAIAABxCAAAcggAAHMIAAB0CAAAdQgAAHYIAAB3CAAAeAgAAHkIAAB6CAAAewgAAHwIAAB9CAAAfggAAH8IAACACAAAgQgAAIIIAACDCAAAhAgAAIUIAACGCAAAhwgAAIgIAACJCAAAiggAAIsIAACMCAAAjQgAAI4IAACPCAAAkAgAAJEIAACSCAAAkwgAAJQIAACVCAAAlggAAJcIAACYCAAAmQgAAJoIAACbCAAAnAgAAJ0IAACeCAAAnwgAAKAIAAChCAAAoggAAKMIAACkCAAApQgAAKYIAACnCAAAqAgAAKkIAACqCAAAqwgAAKwIAACtCAAArggAAK8IAACwCAAAsQgAALIIAACzCAAAtAgAALUIAAC2CAAAtwgAALgIAAC5CAAAuggAALsIAAC8CAAAvQgAAL4IAAC/CAAAwAgAAMEIAADCCAAAwwgAAMQIAADFCAAAxggAAMcIAADICAAAyQgAAMoIAADLCAAAzAgAAM0IAADOCAAAzwgAANAIAADRCAAA0ggAANMIAADUCAAA1QgAANYIAADXCAAA2AgAANkIAADaCAAA2wgAANwIAADdCAAA3ggAAN8IAADgCAAA4QgAAOIIAADjCAAA5AgAAOUIAADmCAAA5wgAAOgIAADpCAAA6ggAAOsIAADsCAAA7QgAAO4IAADvCAAA8AgAAPEIAADyCAAA8wgAAPQIAAD1CAAA9ggAAPcIAAD4CAAA+QgAAPoIAAD7CAAA/AgAAP0IAAD+CAAA/wgAAAAJAAABCQAAAgkAAAMJAAAECQAABQkAAAYJAAAHCQAACAkAAAkJAAAKCQAACwkAAAwJAAANCQAADgkAAA8JAAAQCQAAEQkAABIJAAATCQAAFAkAABUJAAAWCQAAFwkAABgJAAAZCQAAGgkAABsJAAAcCQAAHQkAAB4JAAAfCQAAIAkAACEJAAAiCQAAIwkAACQJAAAlCQAAJgkAACcJAAAoCQAAKQkAACoJAAArCQAALAkAAC0JAAAuCQAALwkAADAJAAAxCQAAMgkAADMJAAA0CQAANQkAADYJAAA3CQAAOAkAADkJAAA6CQAAOwkAADwJAAA9CQAAPgkAAD8JAABACQAAQQkAAEIJAABDCQAARAkAAEUJAABGCQAARwkAAEgJAABJCQAASgkAAEsJAABMCQAATQkAAE4JAABPCQAAUAkAAFEJAABSCQAAUwkAAFQJAABVCQAAVgkAAFcJAABYCQAAWQkAAFoJAABbCQAAXAkAAF0JAABeCQAAXwkAAGAJAABhCQAAYgkAAGMJAABkCQAAZQkAAGYJAABnCQAAaAkAAGkJAABqCQAAawkAAGwJAABtCQAAbgkAAG8JAABwCQAAcQkAAHIJAABzCQAAdAkAAHUJAAB2CQAAdwkAAHgJAAB5CQAAegkAAHsJAAB8CQAAfQkAAH4JAAB/CQAAgAkAAIEJAACCCQAAgwkAAIQJAACFCQAAhgkAAIcJAACICQAAiQkAAIoJAACLCQAAjAkAAI0JAACOCQAAjwkAAJAJAACRCQAAkgkAAJMJAACUCQAAlQkAAJYJAACXCQAAmAkAAJkJAACaCQAAmwkAAJwJAACdCQAAngkAAJ8JAACgCQAAoQkAAKIJAACjCQAApAkAAKUJAACmCQAApwkAAKgJAACpCQAAqgkAAKsJAACsCQAArQkAAK4JAACvCQAAsAkAALEJAACyCQAAswkAALQJAAC1CQAAtgkAALcJAAC4CQAAuQkAALoJAAC7CQAAvAkAAL0JAAC+CQAAvwkAAMAJAADBCQAAwgkAAMMJAADECQAAxQkAAMYJAADHCQAAyAkAAMkJAADKCQAAywkAAMwJAADNCQAAzgkAAM8JAADQCQAA0QkAANIJAADTCQAA1AkAANUJAADWCQAA1wkAANgJAADZCQAA2gkAANsJAADcCQAA3QkAAN4JAADfCQAA4AkAAOEJAADiCQAA4wkAAOQJAADlCQAA5gkAAOcJAADoCQAA6QkAAOoJAADrCQAA7AkAAO0JAADuCQAA7wkAAPAJAADxCQAA8gkAAPMJAAD0CQAA9QkAAPYJAAD3CQAA+AkAAPkJAAD6CQAA+wkAAPwJAAD9CQAA/gkAAP8JAAAACgAAAQoAAAIKAAADCgAABAoAAAUKAAAGCgAABwoAAAgKAAAJCgAACgoAAAsKAAAMCgAADQoAAA4KAAAPCgAAEAoAABEKAAASCgAAEwoAABQKAAAVCgAAFgoAABcKAAAYCgAAGQoAABoKAAAbCgAAHAoAAB0KAAAeCgAAHwoAACAKAAAhCgAAIgoAACMKAAAkCgAAJQoAACYKAAAnCgAAKAoAACkKAAAqCgAAKwoAACwKAAAtCgAALgoAAC8KAAAwCgAAMQoAADIKAAAzCgAANAoAADUKAAA2CgAANwoAADgKAAA5CgAAOgoAADsKAAA8CgAAPQoAAD4KAAA/CgAAQAoAAEEKAABCCgAAQwoAAEQKAABFCgAARgoAAEcKAABICgAASQoAAEoKAABLCgAATAoAAE0KAABOCgAATwoAAFAKAABRCgAAUgoAAFMKAABUCgAAVQoAAFYKAABXCgAAWAoAAFkKAABaCgAAWwoAAFwKAABdCgAAXgoAAF8KAABgCgAAYQoAAGIKAABjCgAAZAoAAGUKAABmCgAAZwoAAGgKAABpCgAAagoAAGsKAABsCgAAbQoAAG4KAABvCgAAcAoAAHEKAAByCgAAcwoAAHQKAAB1CgAAdgoAAHcKAAB4CgAAeQoAAHoKAAB7CgAAfAoAAH0KAAB+CgAAfwoAAIAKAACBCgAAggoAAIMKAACECgAAhQoAAIYKAACHCgAAiAoAAIkKAACKCgAAiwoAAIwKAACNCgAAjgoAAI8KAACQCgAAkQoAAJIKAACTCgAAlAoAAJUKAACWCgAAlwoAAJgKAACZCgAAmgoAAJsKAACcCgAAnQoAAJ4KAACfCgAAoAoAAKEKAACiCgAAowoAAKQKAAClCgAApgoAAKcKAACoCgAAqQoAAKoKAACrCgAArAoAAK0KAACuCgAArwoAALAKAACxCgAAsgoAALMKAAC0CgAAtQoAALYKAAC3CgAAuAoAALkKAAC6CgAAuwoAALwKAAC9CgAAvgoAAL8KAADACgAAwQoAAMIKAADDCgAAxAoAAMUKAADGCgAAxwoAAMgKAADJCgAAygoAAMsKAADMCgAAzQoAAM4KAADPCgAA0AoAANEKAADSCgAA0woAANQKAADVCgAA1goAANcKAADYCgAA2QoAANoKAADbCgAA3AoAAN0KAADeCgAA3woAAOAKAADhCgAA4goAAOMKAADkCgAA5QoAAOYKAADnCgAA6AoAAOkKAADqCgAA6woAAOwKAADtCgAA7goAAO8KAADwCgAA8QoAAA=="),  PNT_C    = decU16("AgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAEAAQABAAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAFAAUABQAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAGAAYABgAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAHAAcABwAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAJAAkACQAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACgAKAAoACwALAAsACwALAAsACwALAAsACwALAAsACwALAAsACwALAAsACwALAAsACwALAAsACwALAAsACwAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAAMAAwADAANAA0ADQANAA0ADQANAA0ADQA="), PNT_R = decF32("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+
+const HPOLY  = [].map(h => ({                                     // polytopes in H-rep
+  nb: h.nb, dirs: decF32(h.dirs), offs: decF32(h.offs), fcol: h.fcol, ecol: h.ecol, edg: h.edg,
+}));
+// FRAMES: each one is only a RANGE in the lists above (they share nothing else than
+// the vertex pool) -- FR_* gives the bounds, FR_VAL the abscissae on the axes ( NB_AXES per frame ).
+const AXES = ["time"], PLAYABLE = [true], FPS = 5.0, NB_AXES = AXES.length;
+const FR_VAL = decF32("AAAAAA==");
+const FR_POLY = decI32("AAAAAAAAAAA="), FR_EDG = decI32("AAAAANQAAAA=");
+const FR_PNT = decI32("AAAAAMQJAAA="), FR_HP = decI32("AAAAAAAAAAA=");
+const NB_FRAMES = FR_VAL.length / NB_AXES;
+
+const RMIN = 0.0002444444340136316, RMAX = 0.4399999812245369, R0 = 0.007333333020408948;
+const BG = [null, null];                      // [ light, dark ], `null`: the theme's
+
+const NB_V = POS.length / D, NB_POLY = POLY_OFF.length - 1, NB_EDG = EDG_V.length / 2;
+
+// ============================================================================================
+// projection world -> 3D: which dimensions we look at, and where we cut the others
+// ============================================================================================
+// AX = the dimensions shown in x, y, z (z = -1 in 2D: everything is flat). SLICE fixes the value
+// of the NON-shown dimensions -- this is the slice setting, only polytopes truly undergo it
+// (see sliceHalfspaces); an already triangulated mesh is simply projected.
+let AX = [0, 1, D >= 3 ? 2 : -1];
+const SLICE = new Float32Array(D);
+for (let k = 0; k < D; k++) SLICE[k] = 0.5 * (BOUNDS[k][0] + BOUNDS[k][1]);
+
+function px(src, i) { return AX[0] >= 0 ? src[i * D + AX[0]] : 0; }
+function py(src, i) { return AX[1] >= 0 ? src[i * D + AX[1]] : 0; }
+function pz(src, i) { return AX[2] >= 0 ? src[i * D + AX[2]] : 0; }
+
+// ============================================================================================
+// polytopes: slice then vertex enumeration (in the browser, at each change)
+// ============================================================================================
+// { dir . x <= off } in dimension D, restricted to the shown dimensions and the fixed slices:
+// dir_seen . y <= off - sum( dir_k * SLICE[k] ) over the hidden dimensions. A slice of
+// half-spaces remains a set of half-spaces -- hence a polytope, which we know how to re-enumerate.
+function sliceHalfspaces(h) {
+  const A = [], b = [];
+  for (let i = 0; i < h.nb; i++) {
+    const a0 = AX[0] >= 0 ? h.dirs[i * D + AX[0]] : 0;
+    const a1 = AX[1] >= 0 ? h.dirs[i * D + AX[1]] : 0;
+    const a2 = AX[2] >= 0 ? h.dirs[i * D + AX[2]] : 0;
+    let rhs = h.offs[i];
+    for (let k = 0; k < D; k++)
+      if (k !== AX[0] && k !== AX[1] && k !== AX[2]) rhs -= h.dirs[i * D + k] * SLICE[k];
+    const n = Math.hypot(a0, a1, a2);
+    // plane that became constant: either the constraint is empty (the slice misses the polytope),
+    // or it is always true and says nothing anymore.
+    if (n < 1e-12) { if (rhs < -1e-9) return null; continue; }
+    A.push([a0 / n, a1 / n, a2 / n]); b.push(rhs / n);   // NORMALIZED planes: a single eps everywhere
+  }
+  return { A, b };
+}
+
+// bounding box added to every polytope: without it, an unbounded polytope would have no
+// vertex to enumerate, hence nothing to show. It is EXACTLY the scene's box, the one the
+// camera frames -- and it is already padded on the Python side, so it trims nothing bounded.
+function clipPlanes() {
+  const c = [], r = [];
+  for (let a = 0; a < 3; a++) {
+    const k = AX[a];
+    const lo = k >= 0 ? BOUNDS[k][0] : -1, hi = k >= 0 ? BOUNDS[k][1] : 1;
+    const mid = 0.5 * (lo + hi), half = Math.max(1e-6, 0.5 * (hi - lo));
+    const e = [0, 0, 0]; e[a] = 1;
+    c.push(e.slice()); r.push(mid + half);
+    c.push(e.map(v => -v)); r.push(-(mid - half));
+  }
+  return { A: c, b: r };
+}
+
+function feasible(A, b, x, eps) {
+  for (let m = 0; m < A.length; m++)
+    if (A[m][0] * x[0] + A[m][1] * x[1] + A[m][2] * x[2] > b[m] + eps) return false;
+  return true;
+}
+
+// V-representation of a 3D polytope given as half-spaces: every vertex is the intersection of 3
+// planes (and is feasible for all the others); a face is the set of vertices carried by
+// one same plane, put back in cyclic order around their center.
+function polyhedron3D(A, b) {
+  const n = A.length, eps = 1e-6 * Math.max(1, Math.max(...b.map(Math.abs)));
+  const V = [], key = new Map();
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) for (let k = j + 1; k < n; k++) {
+    const a = A[i], c = A[j], e = A[k];
+    const det = a[0] * (c[1] * e[2] - c[2] * e[1])
+              - a[1] * (c[0] * e[2] - c[2] * e[0])
+              + a[2] * (c[0] * e[1] - c[1] * e[0]);
+    if (Math.abs(det) < 1e-9) continue;                       // (nearly) dependent planes: no vertex
+    const d0 = b[i], d1 = b[j], d2 = b[k];
+    const x = ( d0 * (c[1] * e[2] - c[2] * e[1]) - a[1] * (d1 * e[2] - c[2] * d2)
+              + a[2] * (d1 * e[1] - c[1] * d2) ) / det;
+    const y = ( a[0] * (d1 * e[2] - c[2] * d2) - d0 * (c[0] * e[2] - c[2] * e[0])
+              + a[2] * (c[0] * d2 - d1 * e[0]) ) / det;
+    const z = ( a[0] * (c[1] * d2 - d1 * e[1]) - a[1] * (c[0] * d2 - d1 * e[0])
+              + d0 * (c[0] * e[1] - c[1] * e[0]) ) / det;
+    const p = [x, y, z];
+    if (!feasible(A, b, p, eps)) continue;
+    const kk = p.map(v => Math.round(v / (eps * 10))).join(",");   // coincident vertices merged
+    if (key.has(kk)) continue;
+    key.set(kk, V.length); V.push(p);
+  }
+  if (V.length < 3) return null;
+
+  // which planes each vertex lies on: this is what then lets us recognize an
+  // edge carried by the CLIPPING BOX, which is not an edge of the polytope (see buildScene).
+  const vpl = V.map(() => []);
+  const faces = [], fpl = [];
+  for (let p = 0; p < n; p++) {
+    const on = [];
+    for (let v = 0; v < V.length; v++) {
+      const q = V[v];
+      if (Math.abs(A[p][0] * q[0] + A[p][1] * q[1] + A[p][2] * q[2] - b[p]) < eps * 10) {
+        on.push(v); vpl[v].push(p);
+      }
+    }
+    if (on.length < 3) continue;
+    const nz = A[p];
+    let u = Math.abs(nz[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    u = [u[0] - nz[0] * (u[0] * nz[0] + u[1] * nz[1] + u[2] * nz[2]),
+         u[1] - nz[1] * (u[0] * nz[0] + u[1] * nz[1] + u[2] * nz[2]),
+         u[2] - nz[2] * (u[0] * nz[0] + u[1] * nz[1] + u[2] * nz[2])];
+    const ul = Math.hypot(u[0], u[1], u[2]); u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    const w = [nz[1] * u[2] - nz[2] * u[1], nz[2] * u[0] - nz[0] * u[2], nz[0] * u[1] - nz[1] * u[0]];
+    const ctr = [0, 0, 0];
+    for (const v of on) { ctr[0] += V[v][0]; ctr[1] += V[v][1]; ctr[2] += V[v][2]; }
+    ctr[0] /= on.length; ctr[1] /= on.length; ctr[2] /= on.length;
+    // angle around the center in the plane's (u, w) frame: cyclic order, oriented towards
+    // the outside (w = normal x u, and the normal points out of the polytope).
+    const ang = q => {
+      const dx = q[0] - ctr[0], dy = q[1] - ctr[1], dz = q[2] - ctr[2];
+      return Math.atan2(dx * w[0] + dy * w[1] + dz * w[2], dx * u[0] + dy * u[1] + dz * u[2]);
+    };
+    on.sort((p1, p2) => ang(V[p1]) - ang(V[p2]));
+    faces.push(on); fpl.push(p);
+  }
+  return { V, faces, fpl, vpl };
+}
+
+// same thing flat: a vertex is the intersection of 2 lines, and there is only one face.
+function polygon2D(A, b) {
+  const n = A.length, eps = 1e-6 * Math.max(1, Math.max(...b.map(Math.abs)));
+  const V = [], key = new Map();
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const det = A[i][0] * A[j][1] - A[i][1] * A[j][0];
+    if (Math.abs(det) < 1e-9) continue;
+    const x = (b[i] * A[j][1] - A[i][1] * b[j]) / det;
+    const y = (A[i][0] * b[j] - b[i] * A[j][0]) / det;
+    const p = [x, y, 0];
+    if (!feasible(A, b, p, eps)) continue;
+    const kk = p.map(v => Math.round(v / (eps * 10))).join(",");
+    if (key.has(kk)) continue;
+    key.set(kk, V.length); V.push(p);
+  }
+  if (V.length < 3) return null;
+  const vpl = V.map(() => []);
+  for (let p = 0; p < n; p++) for (let v = 0; v < V.length; v++)
+    if (Math.abs(A[p][0] * V[v][0] + A[p][1] * V[v][1] - b[p]) < eps * 10) vpl[v].push(p);
+  const ctr = V.reduce((a, q) => [a[0] + q[0] / V.length, a[1] + q[1] / V.length, 0], [0, 0, 0]);
+  const idx = V.map((_, i) => i);
+  idx.sort((p1, p2) => Math.atan2(V[p1][1] - ctr[1], V[p1][0] - ctr[0])
+                     - Math.atan2(V[p2][1] - ctr[1], V[p2][0] - ctr[0]));
+  return { V, faces: [idx], fpl: [-1], vpl };
+}
+
+// ============================================================================================
+// building the rendered scene (projected 3D positions + sliced polytopes)
+// ============================================================================================
+let TRI = { pos: null, nrm: null, col: null, n: 0 };
+let LIN = { a: null, b: null, col: null, n: 0 };
+let PNT = { pos: null, col: null, rad: null, n: 0 };
+
+// The pool is projected ONCE per choice of viewed dimensions, not at each frame: it is the
+// only array that carries the whole scene, whereas the rest of a rebuild only costs the
+// displayed frame.
+let PR = new Float32Array(0);
+function projectPool() {
+  PR = new Float32Array(NB_V * 3);
+  for (let i = 0; i < NB_V; i++) {
+    PR[3 * i] = px(POS, i); PR[3 * i + 1] = py(POS, i); PR[3 * i + 2] = pz(POS, i);
+  }
+}
+
+let frameIdx = 0;
+
+function buildScene() {
+  // 1. bounds of the displayed frame in each primitive list
+  const p0 = FR_POLY[frameIdx], p1 = FR_POLY[frameIdx + 1];
+  const e0 = FR_EDG[frameIdx],  e1 = FR_EDG[frameIdx + 1];
+  const v0 = FR_PNT[frameIdx],  v1 = FR_PNT[frameIdx + 1];
+  const h0 = FR_HP[frameIdx],   h1 = FR_HP[frameIdx + 1];
+
+  // 2. polytopes: slice -> enumeration -> triangles (fan) + edges (deduplicated)
+  const hp = [], hpc = [], hl = [], hlc = [];
+  for (let hi = h0; hi < h1; hi++) {
+    const h = HPOLY[hi];
+    const s = sliceHalfspaces(h);
+    if (!s) continue;                                   // empty slice: nothing to show
+    const box = clipPlanes();
+    const A = s.A.concat(box.A), b = Array.from(s.b).concat(box.b);
+    const poly = AX[2] >= 0 ? polyhedron3D(A, b) : polygon2D(A, b);
+    if (!poly) continue;
+    // The box is a means of SHOWING an open polytope, not a part of it: its planes
+    // fill the face through which the polytope leaves the field (otherwise we would see inside), but
+    // they yield no edge -- an edge lying on the box is the box being drawn,
+    // and it would reappear on its own as soon as the faces are unchecked.
+    const nReal = s.A.length;
+    const onBox = (i0, i1) => poly.vpl[i0].some(q => q >= nReal && poly.vpl[i1].indexOf(q) >= 0);
+    const seen = new Set();
+    for (const f of poly.faces) {
+      for (let k = 1; k + 1 < f.length; k++) {
+        for (const v of [f[0], f[k], f[k + 1]])
+          hp.push(poly.V[v][0], poly.V[v][1], poly.V[v][2]);
+        hpc.push(h.fcol);
+      }
+      if (!h.edg) continue;                             // the caller draws its edges itself
+      for (let k = 0; k < f.length; k++) {
+        const i0 = f[k], i1 = f[(k + 1) % f.length];
+        const kk = Math.min(i0, i1) + "," + Math.max(i0, i1);
+        if (seen.has(kk)) continue;                     // an edge is carried by 2 faces
+        seen.add(kk);
+        if (onBox(i0, i1)) continue;
+        hl.push(poly.V[i0][0], poly.V[i0][1], poly.V[i0][2],
+                poly.V[i1][0], poly.V[i1][1], poly.V[i1][2]);
+        hlc.push(h.ecol);
+      }
+    }
+  }
+
+  // 3. triangles. The normal is computed AFTER projection (it only makes sense in the viewed
+  //    space) -> flat shading, hence one vertex per triangle corner: it is a display buffer,
+  //    not a storage format, the expense stays in GPU memory.
+  let nTri = hp.length / 9;
+  for (let p = p0; p < p1; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
+  TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9),
+          col: new Float32Array(nTri * 12), n: nTri };
+  let t = 0;
+  function putTri(a, b, c, col) {
+    const o = t * 9;
+    TRI.pos[o    ] = a[0]; TRI.pos[o + 1] = a[1]; TRI.pos[o + 2] = a[2];
+    TRI.pos[o + 3] = b[0]; TRI.pos[o + 4] = b[1]; TRI.pos[o + 5] = b[2];
+    TRI.pos[o + 6] = c[0]; TRI.pos[o + 7] = c[1]; TRI.pos[o + 8] = c[2];
+    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    let ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    let nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const nl = Math.hypot(nx, ny, nz);
+    if (nl < 1e-20) { nx = 0; ny = 0; nz = 1; } else { nx /= nl; ny /= nl; nz /= nl; }
+    for (let k = 0; k < 3; k++) {
+      TRI.nrm[o + k * 3] = nx; TRI.nrm[o + k * 3 + 1] = ny; TRI.nrm[o + k * 3 + 2] = nz;
+      for (let q = 0; q < 4; q++) TRI.col[t * 12 + k * 4 + q] = col[q];
+    }
+    t++;
+  }
+  const at = i => [PR[3 * i], PR[3 * i + 1], PR[3 * i + 2]];
+  for (let p = p0; p < p1; p++) {
+    const o0 = POLY_OFF[p], o1 = POLY_OFF[p + 1], col = PAL[POLY_C[p]];
+    for (let k = o0 + 1; k + 1 < o1; k++)                 // fan from the first vertex
+      putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col);
+  }
+  for (let i = 0; i + 8 < hp.length; i += 9)
+    putTri(hp.slice(i, i + 3), hp.slice(i + 3, i + 6), hp.slice(i + 6, i + 9), hpc[i / 9]);
+
+  // 4. edges: one INSTANCE per edge (two ends), widened into a quadrilateral in the
+  //    shader -- gl.lineWidth is capped at 1 pixel on most drivers.
+  const nLin = (e1 - e0) + hl.length / 6;
+  LIN = { a: new Float32Array(nLin * 3), b: new Float32Array(nLin * 3),
+          col: new Float32Array(nLin * 4), n: nLin };
+  let e = 0;
+  function putLin(a, b, col) {
+    LIN.a[e * 3] = a[0]; LIN.a[e * 3 + 1] = a[1]; LIN.a[e * 3 + 2] = a[2];
+    LIN.b[e * 3] = b[0]; LIN.b[e * 3 + 1] = b[1]; LIN.b[e * 3 + 2] = b[2];
+    for (let q = 0; q < 4; q++) LIN.col[e * 4 + q] = col[q];
+    e++;
+  }
+  for (let i = e0; i < e1; i++)
+    putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), PAL[EDG_C[i]]);
+  for (let i = 0; i + 5 < hl.length; i += 6)
+    putLin(hl.slice(i, i + 3), hl.slice(i + 3, i + 6), hlc[i / 6]);
+
+  // 5. points
+  const nPnt = v1 - v0;
+  PNT = { pos: new Float32Array(nPnt * 3), col: new Float32Array(nPnt * 4),
+          rad: PNT_R.subarray(v0, v1), n: nPnt };
+  for (let i = 0; i < nPnt; i++) {
+    const v = PNT_V[v0 + i], col = PAL[PNT_C[v0 + i]];
+    PNT.pos[i * 3] = PR[3 * v]; PNT.pos[i * 3 + 1] = PR[3 * v + 1]; PNT.pos[i * 3 + 2] = PR[3 * v + 2];
+    for (let q = 0; q < 4; q++) PNT.col[i * 4 + q] = col[q];
+  }
+
+  upload();
+  pivotDirty = true;                                    // the scene changed: nothing aimed at anymore
+  centerRays.length = 0;
+  document.getElementById("counts").textContent =
+    PNT.n + " points · " + LIN.n + " edges · " + TRI.n + " triangles";
+  sceneBuilt = true;
+}
+
+// ============================================================================================
+// linear algebra (just what the camera needs)
+// ============================================================================================
+function mul(a, e) {                                   // a * e, 4x4 matrices in column-major
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
+    let s = 0;
+    for (let k = 0; k < 4; k++) s += a[k * 4 + r] * e[c * 4 + k];
+    o[c * 4 + r] = s;
+  }
+  return o;
+}
+function perspective(fov, asp, n, f) {
+  const t = 1 / Math.tan(fov / 2), o = new Float32Array(16);
+  o[0] = t / asp; o[5] = t; o[10] = (f + n) / (n - f); o[11] = -1; o[14] = 2 * f * n / (n - f);
+  return o;
+}
+function ortho(hw, hh, n, f) {
+  const o = new Float32Array(16);
+  o[0] = 1 / hw; o[5] = 1 / hh; o[10] = 2 / (n - f); o[14] = (f + n) / (n - f); o[15] = 1;
+  return o;
+}
+
+// ============================================================================================
+// camera
+// ============================================================================================
+const FLAT = D <= 2;                                   // 2D: flat, no orbit
+const FOV = 45 * Math.PI / 180;
+
+// The camera's orientation is a QUATERNION, not an (azimuth, elevation) pair. There is no
+// reference plane here -- no ground, no world "up": two Euler angles would
+// impose one, and the same gesture would then not produce the same motion depending on the starting
+// orientation (squashing near the poles, elevation stop, impossible roll). With a quaternion,
+// a drag always applies the SAME rotation, expressed in the SCREEN frame.
+const cam = { target: [0, 0, 0], dist: 3, rot: [0, 0, 0, 1], pivotZ: 3, ortho: FLAT };
+
+function qMul(a, b) {                                  // Hamilton product: `b` first, then `a`
+  return [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+          a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+          a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+          a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+}
+function qAxis(ax, ang) {                              // rotation by angle `ang` around `ax`
+  const h = 0.5 * ang, s = Math.sin(h);
+  return [ax[0] * s, ax[1] * s, ax[2] * s, Math.cos(h)];
+}
+function qNorm(q) {                                    // rounding drifts: renormalize
+  const l = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  return [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
+}
+function qApply(q, v) {                                // v rotated by q
+  const t = [2 * (q[1] * v[2] - q[2] * v[1]),
+             2 * (q[2] * v[0] - q[0] * v[2]),
+             2 * (q[0] * v[1] - q[1] * v[0])];
+  return [v[0] + q[3] * t[0] + q[1] * t[2] - q[2] * t[1],
+          v[1] + q[3] * t[1] + q[2] * t[0] - q[0] * t[2],
+          v[2] + q[3] * t[2] + q[0] * t[1] - q[1] * t[0]];
+}
+
+function sceneSphere() {                               // center + radius of the VIEWED dimensions
+  const c = [0, 0, 0]; let r = 0;
+  for (let a = 0; a < 3; a++) {
+    const k = AX[a];
+    const lo = k >= 0 ? BOUNDS[k][0] : 0, hi = k >= 0 ? BOUNDS[k][1] : 0;
+    c[a] = 0.5 * (lo + hi); r += 0.25 * (hi - lo) * (hi - lo);
+  }
+  return { c, r: Math.max(Math.sqrt(r), 1e-6) };
+}
+// the box the camera frames at the start: the TIGHT one of the viewed dimensions ( BOUNDS has a margin for the sliders )
+const TIGHT = [[0.0, 1.0], [0.0, 1.0]], FIT_MARGIN = 0.04;
+function resetView() {
+  const s = sceneSphere();
+  // three-quarter view by default -- a starting orientation like any other, with no special
+  // status: nothing later takes it up as a reference.
+  cam.rot = FLAT ? [0, 0, 0, 1]
+                 : qNorm(qMul(qAxis([0, 1, 0], 0.6), qAxis([1, 0, 0], -0.35)));
+  // FIT THE BOX, not its sphere: its corners in the screen frame of that orientation, the target at their middle, and the
+  // distance at which the farthest one touches the border ( the field of view is vertical, `asp` widens it )
+  const asp = canvas.width / Math.max(canvas.height, 1);
+  const b = camBasis(), corners = [];
+  for (let m = 0; m < 8; m++) {
+    const p = [0, 1, 2].map(a => AX[a] >= 0 ? TIGHT[AX[a]][(m >> a) & 1] : 0);
+    corners.push(p);
+  }
+  const proj = corners.map(p => [b.right, b.up, b.fwd].map(e => e[0] * p[0] + e[1] * p[1] + e[2] * p[2]));
+  const lo = [0, 1, 2].map(k => Math.min(...proj.map(q => q[k]))), hi = [0, 1, 2].map(k => Math.max(...proj.map(q => q[k])));
+  const mid = [0, 1, 2].map(k => 0.5 * (lo[k] + hi[k]));
+  cam.target = [0, 1, 2].map(i => mid[0] * b.right[i] + mid[1] * b.up[i] + mid[2] * b.fwd[i]);
+  const t = Math.tan(FOV / 2) * (1 - FIT_MARGIN);
+  let dist = 0;
+  for (const q of proj) {
+    const x = Math.abs(q[0] - mid[0]), y = Math.abs(q[1] - mid[1]);
+    const zf = FLAT ? 0 : -(q[2] - mid[2]);                 // ( how far the corner stands in front of the target )
+    dist = Math.max(dist, zf + x / (t * asp), zf + y / t);
+  }
+  cam.dist = Math.max(dist, 1e-6 * s.r);
+  cam.pivotZ = cam.dist; pivotDirty = true; centerRays.length = 0;
+  draw();
+}
+function camEye() {
+  const b = qApply(cam.rot, [0, 0, 1]);                // the axis that "comes out" of the screen
+  return [cam.target[0] + cam.dist * b[0],
+          cam.target[1] + cam.dist * b[1],
+          cam.target[2] + cam.dist * b[2]];
+}
+function camBasis() {                                  // right / up of the screen, in world
+  return { right: qApply(cam.rot, [1, 0, 0]),
+           up:    qApply(cam.rot, [0, 1, 0]),
+           fwd:   qApply(cam.rot, [0, 0, -1]) };
+}
+function viewMatrix() {                                // world -> camera, taken directly from `rot`
+  // no `lookAt`: it would need a world "up", exactly the assumption we refuse
+  // (and it would degenerate when the camera looks straight at it).
+  const b = camBasis(), e = camEye(), r = b.right, u = b.up, f = b.fwd;
+  return new Float32Array([
+    r[0], u[0], -f[0], 0,
+    r[1], u[1], -f[1], 0,
+    r[2], u[2], -f[2], 0,
+    -(r[0] * e[0] + r[1] * e[1] + r[2] * e[2]),
+    -(u[0] * e[0] + u[1] * e[1] + u[2] * e[2]),
+      f[0] * e[0] + f[1] * e[1] + f[2] * e[2], 1,
+  ]);
+}
+function orthoHalfH() { return cam.dist * Math.tan(FOV / 2); }
+
+// ============================================================================================
+// aiming: which point of the scene lies under a pixel
+// ============================================================================================
+// Zooming towards the cursor and the rotation pivot need a 3D point, not a pixel. Reading it
+// from the depth buffer is out of reach in WebGL2 (`readPixels` can only read back a
+// color), and an extra render pass for that would be costly. So we cast a ray into the
+// primitives of the displayed frame, which are ALREADY there on the CPU side (`TRI`/`LIN`/`PNT`):
+// linear cost, but paid once per GESTURE, never per rendered frame.
+
+function aimPlane(sx, sy) {                            // aimed point, in the target's plane
+  const b = camBasis(), hh = orthoHalfH();
+  const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1);
+  const u = (2 * sx / w - 1) * hh * (w / h), v = (1 - 2 * sy / h) * hh;
+  return [cam.target[0] + u * b.right[0] + v * b.up[0],
+          cam.target[1] + u * b.right[1] + v * b.up[1],
+          cam.target[2] + u * b.right[2] + v * b.up[2]];
+}
+function screenRay(sx, sy) {
+  const b = camBasis(), e = camEye(), p = aimPlane(sx, sy);
+  if (cam.ortho)                                       // parallel rays: it is the origin that moves
+    return { o: [p[0] - cam.dist * b.fwd[0], p[1] - cam.dist * b.fwd[1],
+                 p[2] - cam.dist * b.fwd[2]], d: b.fwd };
+  const d = [p[0] - e[0], p[1] - e[1], p[2] - e[2]];
+  const l = Math.hypot(d[0], d[1], d[2]) || 1;
+  return { o: e, d: [d[0] / l, d[1] / l, d[2] / l] };
+}
+
+const AIM_PX = 18;                                     // aiming tolerance, in pixels
+
+function pickWorld(sx, sy) {
+  const r = screenRay(sx, sy), o = r.o, d = r.d;
+  const h = Math.max(canvas.clientHeight, 1);
+  // width of a pixel, in world units, at distance `t` along the ray
+  const wpx = cam.ortho ? () => 2 * orthoHalfH() / h
+                        : t => 2 * Math.tan(FOV / 2) * t / h;
+
+  // 1. faces first: EXACT intersection (Möller-Trumbore). This is what the eye sees.
+  let best = Infinity;
+  const P = TRI.pos;
+  for (let i = 0; i < TRI.n; i++) {
+    const j = i * 9;
+    const ax = P[j], ay = P[j + 1], az = P[j + 2];
+    const e1x = P[j + 3] - ax, e1y = P[j + 4] - ay, e1z = P[j + 5] - az;
+    const e2x = P[j + 6] - ax, e2y = P[j + 7] - ay, e2z = P[j + 8] - az;
+    const hx = d[1] * e2z - d[2] * e2y, hy = d[2] * e2x - d[0] * e2z, hz = d[0] * e2y - d[1] * e2x;
+    const det = e1x * hx + e1y * hy + e1z * hz;
+    if (det > -1e-12 && det < 1e-12) continue;         // ray parallel to the triangle's plane
+    const f = 1 / det, wx = o[0] - ax, wy = o[1] - ay, wz = o[2] - az;
+    const u = f * (wx * hx + wy * hy + wz * hz);
+    if (u < 0 || u > 1) continue;
+    const qx = wy * e1z - wz * e1y, qy = wz * e1x - wx * e1z, qz = wx * e1y - wy * e1x;
+    const v = f * (d[0] * qx + d[1] * qy + d[2] * qz);
+    if (v < 0 || u + v > 1) continue;
+    const t = f * (e2x * qx + e2y * qy + e2z * qz);
+    if (t > 1e-9 && t < best) best = t;
+  }
+
+  // 2. otherwise edges and points: nothing SOLID to pierce (wireframe, cloud), so we accept what
+  //    passes close enough to the ray -- tolerance in pixels, so that it does not depend on zoom.
+  if (best === Infinity) {
+    const A = LIN.a, B = LIN.b;
+    for (let i = 0; i < LIN.n; i++) {
+      const k = i * 3;
+      const vx = B[k] - A[k], vy = B[k + 1] - A[k + 1], vz = B[k + 2] - A[k + 2];
+      const wx = o[0] - A[k], wy = o[1] - A[k + 1], wz = o[2] - A[k + 2];
+      const bb = d[0] * vx + d[1] * vy + d[2] * vz, cc = vx * vx + vy * vy + vz * vz;
+      const dd = d[0] * wx + d[1] * wy + d[2] * wz, ee = vx * wx + vy * wy + vz * wz;
+      const den = cc - bb * bb;                        // (|d| = 1); zero <=> ray and edge parallel
+      let s = Math.abs(den) < 1e-12 ? 0 : (ee - bb * dd) / den;
+      s = Math.max(0, Math.min(1, s));
+      const px2 = A[k] + s * vx, py2 = A[k + 1] + s * vy, pz2 = A[k + 2] + s * vz;
+      const t = (px2 - o[0]) * d[0] + (py2 - o[1]) * d[1] + (pz2 - o[2]) * d[2];
+      if (t <= 1e-9 || t >= best) continue;
+      if (Math.hypot(px2 - o[0] - t * d[0], py2 - o[1] - t * d[1], pz2 - o[2] - t * d[2])
+          < AIM_PX * wpx(t)) best = t;
+    }
+    const Q = PNT.pos, rad = PNT.rad;
+    for (let i = 0; i < PNT.n; i++) {
+      const k = i * 3;
+      const t = (Q[k] - o[0]) * d[0] + (Q[k + 1] - o[1]) * d[1] + (Q[k + 2] - o[2]) * d[2];
+      if (t <= 1e-9 || t >= best) continue;
+      if (Math.hypot(Q[k] - o[0] - t * d[0], Q[k + 1] - o[1] - t * d[1], Q[k + 2] - o[2] - t * d[2])
+          < rad[i] + AIM_PX * wpx(t)) best = t;
+    }
+  }
+  return best === Infinity ? null
+                           : [o[0] + best * d[0], o[1] + best * d[1], o[2] + best * d[2]];
+}
+
+function depthAt(sx, sy) {                             // depth of the aimed point, along fwd
+  const c = pickWorld(sx, sy);
+  if (c === null) return cam.dist;                     // background: for lack of better, the target's plane
+  const e = camEye(), f = camBasis().fwd;
+  return Math.max(1e-6, (c[0] - e[0]) * f[0] + (c[1] - e[1]) * f[1] + (c[2] - e[2]) * f[2]);
+}
+function aimAt(sx, sy, z) {                            // the point of the ray located at depth z
+  const r = screenRay(sx, sy), f = camBasis().fwd;
+  const c = r.d[0] * f[0] + r.d[1] * f[1] + r.d[2] * f[2];   // 1 in orthographic
+  const e = camEye(), o = r.o;
+  const t = (z - ((o[0] - e[0]) * f[0] + (o[1] - e[1]) * f[1] + (o[2] - e[2]) * f[2])) / c;
+  return [o[0] + t * r.d[0], o[1] + t * r.d[1], o[2] + t * r.d[2]];
+}
+
+// Depth of the rotation pivot. The pivot always lies ON the center-of-screen ray; only its depth is
+// in question. It is the best of three estimates:
+//  1. a TRIANGULATION from the center rays recorded at the start of the previous rotations: the user
+//     centers what interests them, rotates, re-centers it from another angle -- the rays then
+//     cross at that very point, in all 3 axes, after a few rotations/moves. Stale rays (the user
+//     moved on to something else) pass far from the candidate and are discounted (IRLS);
+//  2. otherwise what the scene shows at the center of the screen (solid pick);
+//  3. otherwise the previous depth `cam.dist`.
+// It is only recomputed if the view moved OTHERWISE than by a rotation -- a rotation must above
+// all not redefine its own pivot mid-gesture, it would drift under the hand.
+const centerRays = [];                                 // lines { o, d } through the screen center
+const MAX_RAYS = 8;
+function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+function perp(v, u) { const c = dot3(v, u); return [v[0] - c * u[0], v[1] - c * u[1], v[2] - c * u[2]]; }
+function recordCenterRay(e, f) {
+  const s = sceneSphere(), last = centerRays[centerRays.length - 1];
+  const L = { o: e.slice(), d: f.slice() };
+  if (last && dot3(last.d, f) > 0.99999 &&
+      Math.hypot(...perp([e[0] - last.o[0], e[1] - last.o[1], e[2] - last.o[2]], last.d)) < 1e-3 * s.r)
+    centerRays[centerRays.length - 1] = L;             // same line again: just refresh it
+  else centerRays.push(L);
+  if (centerRays.length > MAX_RAYS) centerRays.shift();
+}
+function triangulateDepth(e, f) {                      // depth along `f` from `e`, or null
+  const n = centerRays.length;
+  if (n === 0) return null;
+  const sigma = 0.03 * sceneSphere().r;
+  const base = centerRays.map((_, i) => Math.pow(0.8, n - 1 - i));   // recent rays count more
+  let w = base.slice(), t = 0;
+  for (let it = 0; it < 4; it++) {
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) {
+      const L = centerRays[i], pf = perp(f, L.d);
+      const pw = perp([e[0] - L.o[0], e[1] - L.o[1], e[2] - L.o[2]], L.d);
+      num -= w[i] * dot3(pw, pf); den += w[i] * dot3(pf, pf);
+    }
+    if (den < 0.03) return null;                       // rays (nearly) parallel: no depth information
+    t = num / den;
+    for (let i = 0; i < n; i++) {
+      const L = centerRays[i];
+      const q = perp([e[0] + t * f[0] - L.o[0], e[1] + t * f[1] - L.o[1], e[2] + t * f[2] - L.o[2]], L.d);
+      w[i] = base[i] / (1 + dot3(q, q) / (sigma * sigma));
+    }
+  }
+  return t > 1e-6 && t < 20 * (cam.dist + sceneSphere().r) ? t : null;
+}
+let pivotDirty = true;
+function pivotDepth(record) {
+  if (pivotDirty) {
+    pivotDirty = false;
+    const e = camEye(), f = camBasis().fwd;
+    const zt = triangulateDepth(e, f);
+    if (record) recordCenterRay(e, f);
+    cam.pivotZ = zt !== null ? zt : depthAt(canvas.clientWidth / 2, canvas.clientHeight / 2);
+  }
+  return cam.pivotZ;
+}
+
+// ============================================================================================
+// WebGL
+// ============================================================================================
+const canvas = document.getElementById("c");
+const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
+if (!gl) document.body.innerHTML = "<p style='font-family:sans-serif;padding:20px'>WebGL2 "
+  + "unavailable in this browser.</p>";
+
+function prog(vs, fs) {
+  function sh(t, src) {
+    const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+    return s;
+  }
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw gl.getProgramInfoLog(p);
+  return p;
+}
+
+const pFace = prog(`#version 300 es
+in vec3 aPos; in vec3 aNrm; in vec4 aCol;
+uniform mat4 uMVP; uniform mat4 uMV;
+out vec4 vCol; out vec3 vN;
+void main() { gl_Position = uMVP * vec4(aPos, 1.0); vN = mat3(uMV) * aNrm; vCol = aCol; }`,
+`#version 300 es
+precision highp float;
+in vec4 vCol; in vec3 vN; out vec4 oCol;
+uniform float uAlpha;
+void main() {
+  // frontal lighting, DOUBLE-SIDED (abs): the inside of an open cell stays readable.
+  vec3 n = normalize(vN);
+  float d = abs(dot(n, normalize(vec3(0.25, 0.45, 1.0))));
+  oCol = vec4(vCol.rgb * (0.45 + 0.55 * d), vCol.a * uAlpha);
+}`);
+
+const pLine = prog(`#version 300 es
+in vec2 aCorner; in vec3 aA; in vec3 aB; in vec4 aCol;
+uniform mat4 uMVP; uniform vec2 uHalfVP; uniform float uW;
+out vec4 vCol;
+void main() {
+  // an edge = one INSTANCE widened into a quadrilateral on SCREEN (gl.lineWidth does not exceed 1px
+  // on most drivers).
+  vec4 ca = uMVP * vec4(aA, 1.0), cb = uMVP * vec4(aB, 1.0);
+  vec2 sa = ca.xy / max(ca.w, 1e-5) * uHalfVP, sb = cb.xy / max(cb.w, 1e-5) * uHalfVP;
+  vec2 dir = sb - sa;
+  float l = length(dir);
+  dir = l > 1e-6 ? dir / l : vec2(1.0, 0.0);
+  vec4 c = mix(ca, cb, aCorner.x);
+  c.xy += vec2(-dir.y, dir.x) * (uW * 0.5 * aCorner.y) / uHalfVP * max(c.w, 1e-5);
+  gl_Position = c; vCol = aCol;
+}`,
+`#version 300 es
+precision highp float;
+in vec4 vCol; out vec4 oCol; uniform float uAlpha;
+void main() { oCol = vec4(vCol.rgb, vCol.a * uAlpha); }`);
+
+const pPoint = prog(`#version 300 es
+in vec3 aPos; in vec4 aCol; in float aRad;
+uniform mat4 uMVP; uniform mat4 uMV; uniform float uSizeK; uniform float uOrtho; uniform float uR; uniform float uRScale;
+uniform float uDepthCol; uniform vec2 uDepthRange;
+out vec4 vCol; out vec3 vC; out float vR;
+// the depth colors: warm in front, cool behind
+vec3 depthRamp(float t) {
+  const vec3 c0 = vec3(0.85, 0.22, 0.16), c1 = vec3(0.97, 0.70, 0.22), c2 = vec3(0.30, 0.68, 0.62), c3 = vec3(0.20, 0.28, 0.62);
+  return t < 1.0 / 3.0 ? mix(c0, c1, 3.0 * t) : t < 2.0 / 3.0 ? mix(c1, c2, 3.0 * t - 1.0) : mix(c2, c3, 3.0 * t - 2.0);
+}
+void main() {
+  gl_Position = uMVP * vec4(aPos, 1.0);
+  // a zero radius = a point with no size of its own (a Dirac): the slider sizes it.
+  // A point with its own radius keeps it at the slider's start, and the slider scales it.
+  float r = aRad > 0.0 ? aRad * uRScale : uR;
+  float zv = -(uMV * vec4(aPos, 1.0)).z;
+  gl_PointSize = clamp(uSizeK * r / (uOrtho > 0.5 ? 1.0 : max(zv, 1e-4)), 1.0, 1024.0);
+  vC = (uMV * vec4(aPos, 1.0)).xyz; vR = r;
+  vCol = uDepthCol > 0.5 ? vec4(depthRamp(clamp((zv - uDepthRange.x) / (uDepthRange.y - uDepthRange.x), 0.0, 1.0)), aCol.a) : aCol;
+}`,
+`#version 300 es
+precision highp float;
+in vec4 vCol; in vec3 vC; in float vR; out vec4 oCol;
+uniform mat4 uP; uniform float uSphere;
+// a light from the upper left, in front ( view space )
+const vec3 L = vec3(-0.45, 0.55, 0.70);
+void main() {
+  vec2 d = gl_PointCoord * 2.0 - 1.0;
+  float q = dot(d, d);
+  if (q > 1.0) discard;                                // disc, not square
+  if (uSphere > 0.5) {
+    // a true SPHERE ( 3D ): the depth of its surface at this pixel, so that spheres cut into one another and the
+    // ambient occlusion sees relief, and a diffuse + specular light on its normal
+    vec3 n = vec3(d.x, -d.y, sqrt(max(0.0, 1.0 - q)));
+    vec4 c = uP * vec4(vC + vR * n, 1.0);
+    gl_FragDepth = 0.5 * c.z / c.w + 0.5;
+    vec3 l = normalize(L);
+    float diff = max(dot(n, l), 0.0), spec = pow(max(dot(reflect(-l, n), vec3(0.0, 0.0, 1.0)), 0.0), 24.0);
+    oCol = vec4(vCol.rgb * (0.32 + 0.68 * diff) + 0.28 * spec, vCol.a);
+  } else {
+    gl_FragDepth = gl_FragCoord.z;
+    float l = 0.55 + 0.45 * sqrt(max(0.0, 1.0 - q));   // sphere shading
+    oCol = vec4(vCol.rgb * l, vCol.a);
+  }
+}`);
+
+// EYE-DOME LIGHTING (3D): the scene is drawn into a texture, then each pixel is darkened by how far its
+// neighbours stand IN FRONT of it -- the silhouettes and the steps in depth come out, with no normal and no
+// light to set up. It is what point cloud viewers use (ParaView, CloudCompare, Potree): a lone dirac is a disc
+// with no surface around it, which neither the sphere shading nor an ambient occlusion can give a depth to.
+const pEdl = prog(`#version 300 es
+void main() {                                          // one triangle that covers the screen
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`,
+`#version 300 es
+precision highp float;
+uniform sampler2D uCol; uniform sampler2D uDep;
+uniform float uNear, uFar, uOrtho, uRef, uK, uRad;
+uniform float uAo, uAoRad, uSizeK;
+out vec4 oCol;
+float viewDepth(float d) {                             // the distance along the view axis
+  float z = 2.0 * d - 1.0;
+  return uOrtho > 0.5 ? z * uFar : 2.0 * uNear * uFar / (uFar + uNear - z * (uFar - uNear));
+}
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy), sz = textureSize(uDep, 0);
+  float zc = viewDepth(texelFetch(uDep, c, 0).r);
+  // in perspective, the differences are RELATIVE to the depth (a log depth): the same object looks the
+  // same near and far. In orthographic, relative to the size of the scene.
+  float ref = uOrtho > 0.5 ? uRef : zc;
+  float s = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = 0.7853982 * float(i);
+    ivec2 q = clamp(c + ivec2(round(uRad * vec2(cos(a), sin(a)))), ivec2(0), sz - 1);
+    s += max(0.0, zc - viewDepth(texelFetch(uDep, q, 0).r)) / ref;
+  }
+  vec4 col = texelFetch(uCol, c, 0);
+  float shade = exp(-uK * s / 8.0);
+  // AMBIENT OCCLUSION ( screen space, from the depths only ): the neighbours within uAoRad ( world ) that stand in
+  // front darken the pixel, less and less as they stand farther in front -- the hollows and contacts come out
+  if (uAo > 0.0 && texelFetch(uDep, c, 0).r < 0.99999) {
+    float rpx = uAoRad * uSizeK / (uOrtho > 0.5 ? 1.0 : max(zc, 1e-6));
+    float occ = 0.0;
+    for (int i = 0; i < 24; i++) {
+      float t = (float(i) + 0.5) / 24.0;
+      float a = 2.3999632 * float(i);                  // the golden angle: a spiral
+      ivec2 q = clamp(c + ivec2(round(rpx * sqrt(t) * vec2(cos(a), sin(a)))), ivec2(0), sz - 1);
+      float dz = zc - viewDepth(texelFetch(uDep, q, 0).r);
+      occ += dz > 0.05 * uAoRad ? clamp(2.0 - dz / (2.0 * uAoRad), 0.0, 1.0) : 0.0;
+    }
+    shade *= 1.0 - uAo * occ / 24.0;
+  }
+  oCol = vec4(col.rgb * shade, 1.0);
+}`);
+const edl = { fb: null, col: null, dep: null, w: 0, h: 0, vao: gl.createVertexArray() };
+function edlTargets(w, h) {                            // (re)allocated when the canvas changes size
+  if (edl.w === w && edl.h === h) return;
+  if (edl.fb) { gl.deleteFramebuffer(edl.fb); gl.deleteTexture(edl.col); gl.deleteTexture(edl.dep); }
+  const tex = (internal, format, type) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return t;
+  };
+  edl.col = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE);
+  edl.dep = tex(gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT);
+  edl.fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, edl.fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, edl.col, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, edl.dep, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  edl.w = w; edl.h = h;
+}
+function edlStrength() { return 20 * Math.pow(100, parseFloat(ui.edlK.value)); }
+function aoRadius() { return parseFloat(ui.aoR.value) * pointRadius(); }
+
+const buf = {};
+["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad"]
+  .forEach(k => buf[k] = gl.createBuffer());
+
+gl.bindBuffer(gl.ARRAY_BUFFER, buf.linCorner);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW);
+
+const vaoFace = gl.createVertexArray(), vaoLine = gl.createVertexArray(), vaoPoint = gl.createVertexArray();
+
+function attr(p, name, b, size, divisor) {
+  const loc = gl.getAttribLocation(p, name);
+  if (loc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
+  if (divisor) gl.vertexAttribDivisor(loc, divisor);
+}
+gl.bindVertexArray(vaoFace);
+attr(pFace, "aPos", buf.triPos, 3); attr(pFace, "aNrm", buf.triNrm, 3); attr(pFace, "aCol", buf.triCol, 4);
+gl.bindVertexArray(vaoLine);
+attr(pLine, "aCorner", buf.linCorner, 2);
+attr(pLine, "aA", buf.linA, 3, 1); attr(pLine, "aB", buf.linB, 3, 1); attr(pLine, "aCol", buf.linCol, 4, 1);
+gl.bindVertexArray(vaoPoint);
+attr(pPoint, "aPos", buf.pntPos, 3); attr(pPoint, "aCol", buf.pntCol, 4); attr(pPoint, "aRad", buf.pntRad, 1);
+gl.bindVertexArray(null);
+
+function up(b, data) { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
+function upload() {
+  up(buf.triPos, TRI.pos); up(buf.triNrm, TRI.nrm); up(buf.triCol, TRI.col);
+  up(buf.linA, LIN.a); up(buf.linB, LIN.b); up(buf.linCol, LIN.col);
+  up(buf.pntPos, PNT.pos); up(buf.pntCol, PNT.col); up(buf.pntRad, PNT.rad);
+}
+
+// ============================================================================================
+// drawing
+// ============================================================================================
+const ui = {
+  faces: document.getElementById("cbFaces"), points: document.getElementById("cbPoints"),
+  edgeMode: document.getElementById("edgeMode"), op: document.getElementById("op"),
+  r: document.getElementById("r"),
+  edl: document.getElementById("cbEdl"), edlK: document.getElementById("edlK"),
+  ao: document.getElementById("cbAo"), aoK: document.getElementById("aoK"), aoR: document.getElementById("aoR"),
+  depth: document.getElementById("cbDepth"),
+};
+function pointRadius() { return RMIN * Math.pow(RMAX / RMIN, parseFloat(ui.r.value)); }
+ui.r.value = Math.log(R0 / RMIN) / Math.log(RMAX / RMIN);      // ( the start: R0, i.e. the given radii as they are )
+// every point has its own radius: the slider is a factor on them
+const PNT_SIZED = PNT_R.length > 0 && PNT_R.every(r => r > 0);
+
+function draw() {
+  const w = canvas.width, h = canvas.height;
+  const dark = document.body.classList.contains("dark");
+  const useEdl = D >= 3 && (ui.edl.checked || ui.ao.checked);   // the post pass: eye-dome lighting and / or occlusion
+  if (useEdl) { edlTargets(w, h); gl.bindFramebuffer(gl.FRAMEBUFFER, edl.fb); }
+  gl.viewport(0, 0, w, h);
+  const bg = BG[dark ? 1 : 0] !== null ? BG[dark ? 1 : 0] : (dark ? [0.10, 0.10, 0.10] : [1, 1, 1]);
+  gl.clearColor(bg[0], bg[1], bg[2], 1);
+  gl.clearDepth(1);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthMask(true);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const s = sceneSphere();
+  // The clipping planes follow the DEPTH OF THE SCENE, not `cam.dist`: after an orbit (re-pivoting)
+  // or a pan, the target no longer sits at the scene's center, and planes centered on it would cut the scene.
+  const eye = camEye(), fw = camBasis().fwd;
+  const dc = (s.c[0] - eye[0]) * fw[0] + (s.c[1] - eye[1]) * fw[1] + (s.c[2] - eye[2]) * fw[2];
+  const near = Math.max(dc - 1.5 * s.r, 1e-3 * s.r), far = Math.max(dc, 0) + 1.5 * s.r;
+  const asp = w / Math.max(h, 1);
+  const P = cam.ortho ? ortho(orthoHalfH() * asp, orthoHalfH(), -far, far)
+                      : perspective(FOV, asp, near, far);
+  const V = viewMatrix();
+  const MVP = mul(P, V);
+  const alpha = parseFloat(ui.op.value);
+  const showFaces = ui.faces.checked, mode = ui.edgeMode.value;
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // (1) PURE DEPTH pass on the faces: this is what makes hidden-edge removal possible,
+  // including when the faces are not displayed or are transparent.
+  const needDepth = TRI.n > 0 && (mode === "hide" || mode === "ghost" || showFaces);
+  gl.enable(gl.POLYGON_OFFSET_FILL);
+  gl.polygonOffset(1.0, 1.0);
+  if (needDepth) {
+    gl.useProgram(pFace); gl.bindVertexArray(vaoFace);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMVP"), false, MVP);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMV"), false, V);
+    gl.uniform1f(gl.getUniformLocation(pFace, "uAlpha"), 1);
+    gl.colorMask(false, false, false, false);
+    gl.depthMask(true);
+    gl.drawArrays(gl.TRIANGLES, 0, TRI.n * 3);
+    gl.colorMask(true, true, true, true);
+  }
+
+  // (2) visible faces -- the depth is already written, we only color what is in front
+  if (showFaces && TRI.n > 0) {
+    gl.useProgram(pFace); gl.bindVertexArray(vaoFace);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMVP"), false, MVP);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMV"), false, V);
+    gl.uniform1f(gl.getUniformLocation(pFace, "uAlpha"), alpha);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(!needDepth);
+    gl.drawArrays(gl.TRIANGLES, 0, TRI.n * 3);
+    gl.depthMask(true);
+  }
+
+  gl.disable(gl.POLYGON_OFFSET_FILL);
+
+  // (3) edges. "ghost" = two passes: first ALL of them, with no depth test and very pale
+  // (the hidden ones), then only the visible ones in full color on top.
+  if (mode !== "none" && LIN.n > 0) {
+    gl.useProgram(pLine); gl.bindVertexArray(vaoLine);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pLine, "uMVP"), false, MVP);
+    gl.uniform2f(gl.getUniformLocation(pLine, "uHalfVP"), w / 2, h / 2);
+    gl.uniform1f(gl.getUniformLocation(pLine, "uW"), 1.6 * (window.devicePixelRatio || 1));
+    gl.depthMask(false);
+    if (mode === "ghost" || mode === "all") {
+      gl.disable(gl.DEPTH_TEST);
+      gl.uniform1f(gl.getUniformLocation(pLine, "uAlpha"), mode === "all" ? 1 : 0.22);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, LIN.n);
+      gl.enable(gl.DEPTH_TEST);
+    }
+    if (mode !== "all") {
+      gl.depthFunc(gl.LEQUAL);
+      gl.uniform1f(gl.getUniformLocation(pLine, "uAlpha"), 1);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, LIN.n);
+    }
+    gl.depthMask(true);
+  }
+
+  // (4) points
+  if (ui.points.checked && PNT.n > 0) {
+    gl.useProgram(pPoint); gl.bindVertexArray(vaoPoint);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pPoint, "uMVP"), false, MVP);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pPoint, "uMV"), false, V);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uOrtho"), cam.ortho ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uSizeK"),
+      cam.ortho ? (h / 2) / orthoHalfH() : (h / 2) / Math.tan(FOV / 2));
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uR"), pointRadius());
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uRScale"), pointRadius() / R0);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uDepthCol"), D >= 3 && ui.depth.checked ? 1 : 0);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pPoint, "uP"), false, P);
+    gl.uniform1f(gl.getUniformLocation(pPoint, "uSphere"), D >= 3 ? 1 : 0);
+    gl.uniform2f(gl.getUniformLocation(pPoint, "uDepthRange"), dc - s.r, dc + s.r);   // ( the scene's sphere, along the view )
+    gl.depthFunc(gl.LEQUAL);
+    gl.drawArrays(gl.POINTS, 0, PNT.n);
+  }
+
+  // (5) eye-dome lighting: the texture to the screen, darkened where the neighbours are in front
+  if (useEdl) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+    gl.useProgram(pEdl); gl.bindVertexArray(edl.vao);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, edl.col);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, edl.dep);
+    gl.uniform1i(gl.getUniformLocation(pEdl, "uCol"), 0);
+    gl.uniform1i(gl.getUniformLocation(pEdl, "uDep"), 1);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uNear"), near);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uFar"), far);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uOrtho"), cam.ortho ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uRef"), s.r);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uK"), ui.edl.checked ? edlStrength() : 0);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uAo"), ui.ao.checked ? parseFloat(ui.aoK.value) : 0);
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uAoRad"), aoRadius());
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uSizeK"), cam.ortho ? (h / 2) / orthoHalfH() : (h / 2) / Math.tan(FOV / 2));
+    gl.uniform1f(gl.getUniformLocation(pEdl, "uRad"), 1.5 * (window.devicePixelRatio || 1));
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.enable(gl.DEPTH_TEST);
+  }
+  gl.bindVertexArray(null);
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(window.innerWidth * dpr);
+  canvas.height = Math.round(window.innerHeight * dpr);
+  canvas.style.width = window.innerWidth + "px";
+  canvas.style.height = window.innerHeight + "px";
+  if (viewUntouched && typeof resetView === "function") resetView();   // ( the page resized before anyone moved the view: refit )
+  else draw();
+}
+
+// ============================================================================================
+// interactions
+// ============================================================================================
+// The wheel comes and goes: we do not want to re-aim at each notch. The captured depth is only
+// taken again if the cursor moved, or after a pause -- in the meantime the gesture keeps its own.
+let wheelAim = { x: 1e9, y: 1e9, z: 0, t: -1e9 };
+function wheelDepth(sx, sy, now) {
+  if (Math.hypot(sx - wheelAim.x, sy - wheelAim.y) > 8 || now - wheelAim.t > 250)
+    wheelAim.z = depthAt(sx, sy);
+  wheelAim.x = sx; wheelAim.y = sy; wheelAim.t = now;
+  return wheelAim.z;
+}
+function panBy(dxPix, dyPix, z) {
+  const b = camBasis();
+  // pixels -> world at the depth `z` of what we MOVE (that of the grabbed point), and not at
+  // that of the target: in perspective the two differ, and it is the former that makes the
+  // scenery follow the cursor exactly. In orthographic the scale does not depend on depth.
+  const d = cam.ortho ? cam.dist : (z === undefined ? pivotDepth() : z);
+  const k = 2 * d * Math.tan(FOV / 2) / Math.max(canvas.clientHeight, 1);
+  for (let i = 0; i < 3; i++)
+    cam.target[i] += -dxPix * k * b.right[i] + dyPix * k * b.up[i];
+  pivotDirty = true;
+}
+function zoomBy(f, sx, sy, z) {
+  // The aiming comes BEFORE the change of `dist`: the eye depends on it, so aiming afterwards would cast
+  // the ray from a camera that has already moved.
+  const p = sx === undefined ? null : aimAt(sx, sy, z === undefined ? depthAt(sx, sy) : z);
+  const d0 = cam.dist;
+  cam.dist = Math.max(1e-6, Math.min(cam.dist * f, 1e9));
+  const g = cam.dist / d0;                             // factor ACTUALLY applied (bounds)
+  // The aimed point stays still: eye and target move closer to it by the same factor `g`.
+  // This is exact in BOTH projections, because the on-screen position of a point depends on
+  // the target only through the gap `p - target`, which here is multiplied by `g` just like
+  // the half-height of the view. Nothing to aim at (background): `depthAt` returns the target's plane, and
+  // the zoom then falls back on the usual behavior, centered on the cursor.
+  if (p) for (let i = 0; i < 3; i++) cam.target[i] = p[i] + g * (cam.target[i] - p[i]);
+  // everything that remained visible moved closer by the same factor; the pivot, however, must be redone --
+  // a zoom towards the cursor makes the scene SLIDE, hence changes what occupies the center.
+  wheelAim.z *= g;
+  pivotDirty = true;
+  return g;
+}
+function zoomAtCenter(f) {                             // keyboard: no cursor, we aim at the center
+  zoomBy(f, canvas.clientWidth / 2, canvas.clientHeight / 2, pivotDepth());
+}
+function orbitBy(dx, dy) {
+  if (FLAT) { panBy(dx, dy); return; }                 // in 2D there is nothing to rotate
+  // The pivot is at the CENTER OF THE SCREEN, at the depth of what is there -- not at that of the
+  // target, which means nothing anymore after a lateral move. `cam.dist` is NOT touched:
+  // it carries the zoom level in orthographic, and the re-pivoting must stay invisible.
+  const z = pivotDepth(true), e = camEye(), f = camBasis().fwd;
+  const pv = [e[0] + z * f[0], e[1] + z * f[1], e[2] + z * f[2]];
+
+  // The rotation is expressed in the SCREEN frame, hence POST-multiplied: `dx` turns around
+  // the screen's up axis, `dy` around its right axis -- whatever the current orientation. Hence
+  // the absence of a stop: there is no pole, and roll appears naturally along a curved
+  // gesture (two rotations about different axes do not commute), as on a real trackball.
+  const k = 0.008;
+  cam.rot = qNorm(qMul(cam.rot,
+                       qMul(qAxis([0, 1, 0], -dx * k), qAxis([1, 0, 0], -dy * k))));
+
+  // the target is repositioned so that the PIVOT itself does not move: the eye ends up at distance `z` from
+  // `pv`, still on its axis -- so `pv` stays at the center of the screen, at the same depth.
+  const g = camBasis().fwd, s = cam.dist - z;
+  cam.target = [pv[0] + s * g[0], pv[1] + s * g[1], pv[2] + s * g[2]];
+}
+
+// Coordinates of an event WITHIN the canvas -- it fills the window, but we do not assume it.
+function evPos(e) { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+
+let drag = null;
+canvas.style.cursor = FLAT ? "grab" : "move";
+canvas.addEventListener("mousedown", e => {
+  const pan = e.shiftKey || e.button === 1 || e.button === 2;
+  pivotDirty = true;                                   // new gesture: the pivot must be redone
+  // The depth of the move is that of the GRABBED point, frozen for the whole gesture:
+  // recomputing it at each movement would make the speed jump whenever the cursor crosses an edge.
+  drag = { x: e.clientX, y: e.clientY, pan, z: pan ? depthAt(...evPos(e)) : 0 };
+});
+window.addEventListener("mousemove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan) panBy(dx, dy, drag.z); else orbitBy(dx, dy);
+  draw();
+});
+window.addEventListener("mouseup", () => { drag = null; });
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+canvas.addEventListener("dblclick", resetView);
+
+// wheel: a touchpad pinch arrives as a `wheel` with ctrlKey (convention
+// shared with a mouse's Ctrl+wheel) -> zoom; otherwise scrolling = move.
+// `?wheel=0` in the URL (e.g. when embedded in an iframe) leaves the wheel to the host page.
+// `?touch=0` does the same for touch gestures. Both can be switched back on from the menu.
+// Without the parameter, the default comes from Python (`to_html( wheel, touch )`).
+const URL_OPTS = new URLSearchParams(location.search);
+let wheelEnabled = URL_OPTS.has("wheel") ? URL_OPTS.get("wheel") !== "0" : true;
+let touchEnabled = URL_OPTS.has("touch") ? URL_OPTS.get("touch") !== "0" : true;
+canvas.addEventListener("wheel", e => {
+  if (!wheelEnabled) return;
+  e.preventDefault();
+  const [sx, sy] = evPos(e);
+  if (e.ctrlKey || e.metaKey) zoomBy(Math.exp(e.deltaY * 0.01), sx, sy);
+  else panBy(-e.deltaX, -e.deltaY, wheelDepth(sx, sy, e.timeStamp));
+  draw();
+}, { passive: false });
+
+let touch = null;
+canvas.addEventListener("touchstart", e => {
+  if (!touchEnabled) return;
+  e.preventDefault();
+  pivotDirty = true;                                   // new gesture: the pivot must be redone
+  if (e.touches.length === 1) touch = { mode: "rot", x: e.touches[0].clientX, y: e.touches[0].clientY };
+  else if (e.touches.length === 2) {
+    const [a, b] = e.touches;
+    const cx = (a.clientX + b.clientX) / 2, cy = (a.clientY + b.clientY) / 2;
+    const r = canvas.getBoundingClientRect();
+    // depth of the pinched point, frozen for the gesture -- as for the mouse move
+    touch = { mode: "pinch", d: Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY),
+              x: cx, y: cy, z: depthAt(cx - r.left, cy - r.top) };
+  }
+}, { passive: false });
+canvas.addEventListener("touchmove", e => {
+  if (!touchEnabled) return;
+  e.preventDefault();
+  if (!touch) return;
+  if (touch.mode === "rot" && e.touches.length === 1) {
+    orbitBy(e.touches[0].clientX - touch.x, e.touches[0].clientY - touch.y);
+    touch.x = e.touches[0].clientX; touch.y = e.touches[0].clientY;
+  } else if (touch.mode === "pinch" && e.touches.length === 2) {
+    const [a, b] = e.touches;
+    const d = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+    const mx = (a.clientX + b.clientX) / 2, my = (a.clientY + b.clientY) / 2;
+    const r = canvas.getBoundingClientRect();
+    // the pinch zooms on what it HOLDS, then moves at the depth of that same point --
+    // which we moved closer to by the factor `zoomBy` actually applied.
+    touch.z *= zoomBy(touch.d / Math.max(d, 1), mx - r.left, my - r.top, touch.z);
+    panBy(mx - touch.x, my - touch.y, touch.z);
+    touch.d = d; touch.x = mx; touch.y = my;
+  }
+  draw();
+}, { passive: false });
+canvas.addEventListener("touchend", e => { if (e.touches.length === 0) touch = null; });
+
+function pick(e, a, b, c) { return (e.ctrlKey || e.metaKey) ? c : (e.shiftKey ? b : a); }
+const helpPanel = document.getElementById("help");
+
+// menu: shown on hover, or toggled by a click (touch screens have no hover)
+const menu = document.getElementById("menu");
+document.getElementById("menuBtn").addEventListener("click", () => menu.classList.toggle("open"));
+const cbWheel = document.getElementById("cbWheel"), cbTouch = document.getElementById("cbTouch");
+cbWheel.checked = wheelEnabled; cbTouch.checked = touchEnabled;
+const navBtn = document.getElementById("nav");
+function syncNav() {
+  cbWheel.checked = wheelEnabled; cbTouch.checked = touchEnabled;
+  const on = wheelEnabled || touchEnabled;
+  navBtn.classList.toggle("on", on);
+  navBtn.title = on ? "navigation on: wheel, pinch and touch move / zoom the view (click: give them back to the page)"
+                    : "navigation off: click so that the wheel, pinch and touch move / zoom the view";
+}
+cbWheel.addEventListener("change", () => { wheelEnabled = cbWheel.checked; syncNav(); });
+cbTouch.addEventListener("change", () => { touchEnabled = cbTouch.checked; syncNav(); });
+navBtn.addEventListener("click", () => {
+  const on = !(wheelEnabled || touchEnabled);
+  wheelEnabled = on; touchEnabled = on; syncNav();
+});
+syncNav();
+// the switch is off and someone scrolls over the view: show where it is
+let navPulse = 0;
+canvas.addEventListener("wheel", () => {
+  if (wheelEnabled) return;
+  navBtn.classList.add("pulse");
+  clearTimeout(navPulse); navPulse = setTimeout(() => navBtn.classList.remove("pulse"), 700);
+}, { passive: true });
+// embedded: offer the standalone page -- unless there is none (`srcdoc` iframe of a notebook)
+if (window.self !== window.top && location.href !== "about:srcdoc") {
+  const a = document.getElementById("openFull");
+  a.href = location.pathname; a.style.display = "block";
+}
+window.addEventListener("keydown", e => {
+  if (e.key === "?") { e.preventDefault(); helpPanel.style.display = helpPanel.style.display === "block" ? "none" : "block"; return; }
+  if (e.key === "Escape") { helpPanel.style.display = "none"; return; }
+  // Space comes BEFORE the early return below: the time bar keeps the focus (so that the
+  // arrows drive it natively), and playback must remain accessible in that state.
+  if (e.key === " " && playableAxes.length) { e.preventDefault(); togglePlay(); return; }
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+  const s = pick(e, 12, 40, 90);
+  switch (e.key) {
+    case "ArrowLeft":  e.preventDefault(); orbitBy(-s, 0); break;
+    case "ArrowRight": e.preventDefault(); orbitBy( s, 0); break;
+    case "ArrowUp":    e.preventDefault(); orbitBy(0, -s); break;
+    case "ArrowDown":  e.preventDefault(); orbitBy(0,  s); break;
+    case "+": case "=": e.preventDefault(); zoomAtCenter(1 / Math.pow(1.2, pick(e, 1, 2, 5))); break;
+    case "-": case "_": e.preventDefault(); zoomAtCenter(Math.pow(1.2, pick(e, 1, 2, 5))); break;
+    case "0": e.preventDefault(); resetView(); return;
+    case "[": case "]":
+      e.preventDefault();
+      ui.r.value = Math.max(0, Math.min(1, parseFloat(ui.r.value) + (e.key === "]" ? 0.03 : -0.03)));
+      syncLabels(); break;
+    case "f": case "F": ui.faces.checked = !ui.faces.checked; break;
+    case "p": case "P": ui.points.checked = !ui.points.checked; break;
+    case "c": case "C": ui.depth.checked = !ui.depth.checked; break;
+    case "e": case "E": {
+      const opts = ["hide", "ghost", "all", "none"];
+      ui.edgeMode.value = opts[(opts.indexOf(ui.edgeMode.value) + 1) % opts.length];
+      break;
+    }
+    case "o": case "O": cam.ortho = !cam.ortho; break;
+    default: return;
+  }
+  draw();
+});
+
+// ============================================================================================
+// time / parameter bar
+// ============================================================================================
+// The frames form a grid over the axes: on each axis, the RANK of a frame among the distinct values. With one axis the
+// rank is the frame's own index ( frames in the order given, equal values allowed ). A combination that no frame
+// has shows the NEAREST frame, the axis just moved weighing the most -- the bars then snap to what is shown.
+const AX_VALS = [], FR_RANK = new Int32Array(NB_FRAMES * NB_AXES);
+for (let a = 0; a < NB_AXES; a++) {
+  const col = Array.from({ length: NB_FRAMES }, (_, f) => FR_VAL[f * NB_AXES + a]);
+  if (NB_AXES === 1) { AX_VALS.push(col); col.forEach((_, f) => { FR_RANK[f] = f; }); continue; }
+  const vals = Array.from(new Set(col)).sort((x, y) => x - y);
+  AX_VALS.push(vals);
+  col.forEach((v, f) => { FR_RANK[f * NB_AXES + a] = vals.indexOf(v); });
+}
+const FRAME_AT = new Map();
+for (let f = NB_FRAMES - 1; f >= 0; f--) FRAME_AT.set(Array.from(FR_RANK.subarray(f * NB_AXES, (f + 1) * NB_AXES)).join(","), f);
+function frameFor(ranks, moved) {
+  const exact = FRAME_AT.get(ranks.join(","));
+  if (exact !== undefined) return exact;
+  let best = 0, bestCost = Infinity;
+  for (let f = 0; f < NB_FRAMES; f++) {
+    let c = 0;
+    for (let a = 0; a < NB_AXES; a++) c += Math.abs(FR_RANK[f * NB_AXES + a] - ranks[a]) * (a === moved ? 1000 : 1);
+    if (c < bestCost) { bestCost = c; best = f; }
+  }
+  return best;
+}
+const fmtVal = v => Number.isInteger(v) ? String(v) : String(parseFloat(v.toPrecision(4)));
+
+// the bar: one row per axis that takes more than one value -- [ play ] [ slider ] name = value  k/n
+// ( no play button anywhere: no column for it either )
+const animBox = document.getElementById("anim"), axRows = [];
+const anyPlay = PLAYABLE.some((p, a) => p && AX_VALS[a].length > 1);
+if (!anyPlay) animBox.style.gridTemplateColumns = "minmax(40px, 1fr) auto";
+for (let a = 0; a < NB_AXES; a++) {
+  if (AX_VALS[a].length < 2) { axRows.push(null); continue; }
+  const row = document.createElement("div"); row.className = "row";
+  const btn = document.createElement(PLAYABLE[a] ? "button" : "span");
+  btn.className = PLAYABLE[a] ? "play" : "gap";
+  if (!anyPlay) btn.style.display = "none";
+  if (PLAYABLE[a]) { btn.innerHTML = "&#9654;"; btn.title = "play / pause " + AXES[a] + " (Space)"; }
+  const inp = document.createElement("input");
+  inp.type = "range"; inp.min = 0; inp.max = AX_VALS[a].length - 1; inp.step = 1; inp.title = AXES[a];
+  const lab = document.createElement("span"); lab.className = "lab";
+  row.append(btn, inp, lab);
+  animBox.appendChild(row);
+  inp.addEventListener("input", () => {
+    stopPlaying();
+    const r = curRanks(); r[a] = parseInt(inp.value, 10);
+    setFrame(frameFor(r, a));
+  });
+  inp.addEventListener("focus", () => { focusAxis = a; });
+  if (PLAYABLE[a]) btn.addEventListener("click", () => togglePlay(a));
+  axRows.push({ btn, inp, lab });
+}
+const shownAxes = axRows.map((r, a) => r ? a : -1).filter(a => a >= 0);
+const playableAxes = shownAxes.filter(a => PLAYABLE[a]);
+let focusAxis = playableAxes.length ? playableAxes[0] : (shownAxes.length ? shownAxes[0] : -1);
+if (shownAxes.length) animBox.style.display = "grid";
+
+let playing = -1, playTimer = null;          // `playing`: the axis being played, -1 when paused
+const curRanks = () => Array.from(FR_RANK.subarray(frameIdx * NB_AXES, (frameIdx + 1) * NB_AXES));
+
+function setFrame(i) {
+  frameIdx = Math.max(0, Math.min(NB_FRAMES - 1, i));
+  for (const a of shownAxes) {
+    const r = FR_RANK[frameIdx * NB_AXES + a], row = axRows[a];
+    row.inp.value = r;
+    row.lab.innerHTML = AXES[a] + " = " + fmtVal(FR_VAL[frameIdx * NB_AXES + a]) +
+      '<span class="cnt">' + (r + 1) + "/" + AX_VALS[a].length + "</span>";
+  }
+  buildScene();                                       // only the displayed frame is rebuilt
+  draw();
+}
+function stopPlaying() {
+  if (playing >= 0) { axRows[playing].btn.innerHTML = "&#9654;"; axRows[playing].btn.classList.remove("on"); }
+  playing = -1;
+  clearInterval(playTimer);
+}
+// the frame after the current one along the played axis, the other axes held ( -1: the end, no loop )
+function nextFrame() {
+  const r = curRanks(), n = AX_VALS[playing].length;
+  if (r[playing] + 1 < n) r[playing]++; else if (LOOP) r[playing] = 0; else return -1;
+  return frameFor(r, playing);
+}
+// MORPH: from one frame to the next in `MORPH` eased steps, the points matched by rank ( same count ); only the point
+// positions move, the rest of the scene is the frame's. A hold of a moment on each frame.
+const MORPH = 0, LOOP = false, HOLD = MORPH > 0 ? Math.round(0.8 * FPS) : 0;
+function pointPositions(f) {                           // the projected positions of the points of frame `f`
+  const v0 = FR_PNT[f], v1 = FR_PNT[f + 1], out = new Float32Array((v1 - v0) * 3);
+  for (let i = 0; i < v1 - v0; i++) {
+    const v = PNT_V[v0 + i];
+    out[3 * i] = PR[3 * v]; out[3 * i + 1] = PR[3 * v + 1]; out[3 * i + 2] = PR[3 * v + 2];
+  }
+  return out;
+}
+let sub = 0, hold = 0, morphA = null, morphB = null;
+function step() {
+  if (hold > 0) { hold--; return; }
+  const next = nextFrame();
+  if (next < 0) { stopPlaying(); return; }
+  const n0 = FR_PNT[frameIdx + 1] - FR_PNT[frameIdx], n1 = FR_PNT[next + 1] - FR_PNT[next];
+  if (MORPH > 0 && n0 === n1 && n0 > 0) {
+    if (sub === 0) { morphA = PNT.pos.slice(); morphB = pointPositions(next); }
+    if (++sub < MORPH) {
+      const t = 0.5 - 0.5 * Math.cos(Math.PI * sub / MORPH);
+      for (let k = 0; k < morphA.length; k++) PNT.pos[k] = morphA[k] + t * (morphB[k] - morphA[k]);
+      up(buf.pntPos, PNT.pos);
+      draw();
+      return;
+    }
+    sub = 0;
+  }
+  setFrame(next);
+  hold = HOLD;
+}
+// plays axis `a` ( by default the one with the focus, else the first playable ); again on the axis being played: pause
+function togglePlay(a) {
+  if (a === undefined) a = PLAYABLE[focusAxis] && axRows[focusAxis] ? focusAxis : (playing >= 0 ? playing : playableAxes[0]);
+  if (a === undefined || a < 0 || !axRows[a] || !PLAYABLE[a]) return;
+  const was = playing;
+  stopPlaying();
+  if (was === a) return;
+  playing = a; focusAxis = a;
+  axRows[a].btn.innerHTML = "&#10074;&#10074;"; axRows[a].btn.classList.add("on");
+  if (curRanks()[a] >= AX_VALS[a].length - 1 && !LOOP) { const r = curRanks(); r[a] = 0; setFrame(frameFor(r, a)); }
+  sub = 0; hold = 0;
+  playTimer = setInterval(step, 1000 / FPS);
+}
+if (playableAxes.length && (URL_OPTS.has("play") ? URL_OPTS.get("play") !== "0" : false)) setTimeout(() => togglePlay(playableAxes[0]), 400);
+
+// ============================================================================================
+// panel: opacity, radius, viewed dimensions, slices
+// ============================================================================================
+function syncLabels() {
+  document.getElementById("opVal").textContent = parseFloat(ui.op.value).toFixed(2);
+  document.getElementById("rVal").textContent = PNT_SIZED ? "\u00d7 " + (pointRadius() / R0).toPrecision(3) : pointRadius().toPrecision(3);
+  document.getElementById("edlVal").textContent = edlStrength().toFixed(0);
+  document.getElementById("aoKVal").textContent = parseFloat(ui.aoK.value).toFixed(2);
+  document.getElementById("aoRVal").textContent = parseFloat(ui.aoR.value).toFixed(1);
+  draw();
+}
+ui.op.addEventListener("input", syncLabels);
+ui.r.addEventListener("input", syncLabels);
+ui.faces.addEventListener("change", draw);
+ui.points.addEventListener("change", draw);
+ui.edgeMode.addEventListener("change", draw);
+ui.edl.addEventListener("change", draw);
+ui.depth.addEventListener("change", draw);
+ui.depth.checked = URL_OPTS.has("depth") ? URL_OPTS.get("depth") !== "0" : false;
+ui.op.value = URL_OPTS.has("opacity") ? URL_OPTS.get("opacity") : 1.0;
+ui.edlK.addEventListener("input", syncLabels);
+ui.ao.addEventListener("change", draw);
+ui.aoK.addEventListener("input", syncLabels);
+ui.aoR.addEventListener("input", syncLabels);
+if (D >= 3) document.getElementById("edlBox").style.display = "block";
+if (D >= 3) document.getElementById("depthLbl").style.display = "block";
+if (PNT_V.length === 0) document.getElementById("ptBox").style.display = "none";
+
+// beyond 3 dimensions: we choose the 3 we look at, and fix the others (the SLICE).
+if (D > 3) {
+  document.getElementById("axes").style.display = "block";
+  const sels = [document.getElementById("axX"), document.getElementById("axY"), document.getElementById("axZ")];
+  sels.forEach((sel, a) => {
+    for (let k = 0; k < D; k++) sel.add(new Option("x" + k, k));
+    sel.value = AX[a];
+    sel.addEventListener("change", () => {
+      const v = parseInt(sel.value, 10);
+      const other = sels.findIndex((s, i) => i !== a && parseInt(s.value, 10) === v);
+      if (other >= 0) { sels[other].value = AX[a]; AX[other] = AX[a]; }   // we SWAP
+      AX[a] = v;
+      projectPool(); buildSlices(); buildScene(); resetView();
+    });
+  });
+  buildSlices();
+}
+function buildSlices() {
+  const box = document.getElementById("slices");
+  box.innerHTML = "";
+  const hidden = [];
+  for (let k = 0; k < D; k++) if (k !== AX[0] && k !== AX[1] && k !== AX[2]) hidden.push(k);
+  if (!hidden.length) return;
+  box.className = "sec";
+  const t = document.createElement("div");
+  t.textContent = "slice";
+  box.appendChild(t);
+  for (const k of hidden) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const lab = document.createElement("span");
+    const inp = document.createElement("input");
+    inp.type = "range"; inp.min = BOUNDS[k][0]; inp.max = BOUNDS[k][1];
+    inp.step = (BOUNDS[k][1] - BOUNDS[k][0]) / 400 || 0.01;
+    inp.value = SLICE[k];
+    const upd = () => { lab.textContent = "x" + k + " = " + parseFloat(inp.value).toPrecision(3); };
+    upd();
+    inp.addEventListener("input", () => { SLICE[k] = parseFloat(inp.value); upd(); buildScene(); draw(); });
+    row.appendChild(lab); row.appendChild(inp);
+    box.appendChild(row);
+  }
+}
+
+if (FLAT) {
+  document.getElementById("hDrag").textContent = "move (pan)";
+  document.getElementById("hArrows").textContent = "move (Shift/Ctrl: faster)";
+}
+
+// dark mode: `?theme=dark|light`, else the theme of the page that embeds this one ( its `dark` class, followed live: a
+// VitePress page, same origin ), else the system preference; then toggled with [d]. Colors given per theme switch with it.
+let sceneBuilt = false;
+(function () {
+  const ml = window.matchMedia("(prefers-color-scheme: dark)");
+  const asked = URL_OPTS.get("theme");
+  let host = null;
+  try { if (window.parent !== window) host = window.parent.document.documentElement; } catch (e) { host = null; }
+  let cur = asked ? asked === "dark" : host ? host.classList.contains("dark") : ml.matches;
+  function setTheme(on) {
+    cur = on;
+    document.body.classList.toggle("dark", on);
+    document.body.dataset.theme = on ? "dark" : "light";
+    document.getElementById("modeLabel").textContent = on ? "dark" : "light";
+    const pal = on ? COLORS_DARK : COLORS;
+    if (pal !== PAL) { PAL = pal; if (sceneBuilt) buildScene(); }
+    draw();
+  }
+  setTheme(cur);
+  if (!asked && host)
+    new MutationObserver(() => setTheme(host.classList.contains("dark"))).observe(host, { attributes: true, attributeFilter: ["class"] });
+  else if (!asked)
+    ml.addEventListener("change", e => setTheme(e.matches));
+  document.addEventListener("keydown", e => {
+    if ((e.key === "d" || e.key === "D") && e.target.tagName !== "SELECT" && e.target.tagName !== "INPUT")
+      { e.preventDefault(); setTheme(!cur); }
+  });
+})();
+
+// the view refits the box on a resize until the user moves it
+let viewUntouched = true;
+canvas.addEventListener("pointerdown", () => { viewUntouched = false; }, { passive: true });
+canvas.addEventListener("wheel", () => { if (wheelEnabled) viewUntouched = false; }, { passive: true });
+canvas.addEventListener("touchstart", () => { if (touchEnabled) viewUntouched = false; }, { passive: true });
+window.addEventListener("keydown", () => { viewUntouched = false; });
+window.addEventListener("resize", resize);
+projectPool();
+setFrame(NB_FRAMES - 1);          // the final state first -- it is what we want to see first
+syncLabels();
+resize();                         // BEFORE framing: the latter depends on the window's aspect ratio
+resetView();
+// The bar of an axis takes the focus: the arrows drive it NATIVELY (and Home/End too),
+// without taking anything away from the camera -- a click on the view gives the arrows back to the orbit.
+if (focusAxis >= 0) axRows[focusAxis].inp.focus({ preventScroll: true });
+</script>
+</body>
+</html>
