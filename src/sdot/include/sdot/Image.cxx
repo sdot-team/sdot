@@ -101,6 +101,7 @@ namespace detail {
     /// derivative goes through it ( the adjoints read the image at `ramp = 0` )
     template<class TF,int D,class Idx>
     struct RampPixel : PolynomialPixel<TF,D,1,Idx> {
+        static constexpr bool is_ramp = true;              ///< ( what an integrand that takes constant densities only skips )
         HD void add_value_grad_at( auto &&, const auto &, TF ) const { assert( false && "no derivative through the ramp of an image" ); }
         HD void integrate_over_simplex_bwd( auto &&... ) const { assert( false && "no derivative through the ramp of an image" ); }
     };

@@ -560,7 +560,8 @@ void solve( const CpuQueue &queue, auto &pd, const auto &pd_in, const auto &dom,
     // the stages: an image ( `at( s, eps )` ) follows `R_eps B_s`: blurred and P1 ( `eps = p / 2` ) if the way is longer than a
     // pixel, then the ramps tightening towards the jumps; another distribution its blur `s` alone, kept above its own scale
     // ( under it, `at` smooths nothing )
-    constexpr bool ramps = requires { conv.at( 0.0, 0.0 ); };
+    // ( not under a radial integrand nor with a sink: their pieces take a constant density only, `integration/RadialExp.h`, `InBall.h` )
+    constexpr bool ramps = requires { conv.at( 0.0, 0.0 ); } && ! radial && ! sink;
     auto run_surprised = [&]() {
         const NewtonOptions plain = newton.o;
         double s_prev = 1e300, e_prev = 1e300;

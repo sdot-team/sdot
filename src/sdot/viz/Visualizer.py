@@ -202,6 +202,9 @@ class Visualizer:
     `flat_points`: in 2D, the points are flat discs ( no sphere shading ) -- what a disc of the plane is, a particle of
     a reconstruction for instance.
 
+    `add_curve` puts CURVES beside the scene ( a loss, a metric along a descent ): a panel at the bottom of the page, one
+    small chart per curve, with a cursor at the abscissa of the displayed frame; a click in a chart goes to the nearest frame.
+
     `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
     density drawn under diracs.
     """
@@ -242,6 +245,7 @@ class Visualizer:
         self._edge_v, self._edge_c                 = [], []
         self._pnt_v,  self._pnt_c,  self._pnt_r    = [], [], []
         self._hpolys                               = []           # polytopes in H-representation
+        self._curves                               = []           # see `add_curve`
 
         # the next free index of the scale. Reset to zero at each FRAME (see `new_frame`):
         # a color must say WHAT, not HOW MANY were drawn before.
@@ -433,6 +437,25 @@ class Visualizer:
         their range and sets the clipping of unbounded polytopes.
         """
         self._pool( positions )
+        return self
+
+    def add_curve( self, name, y, x = None, log_y = False, color = None ):
+        """A curve drawn beside the scene, in the panel of the curves. `y`: its values; `x`: their abscissas ON THE FIRST
+        FRAME AXIS ( an iteration, a time: the unit of `new_frame( value )` ), `0, 1, 2, ...` by default. A curve may have
+        more samples than there are frames ( every iteration of a descent that keeps one frame out of ten ). The cursor of
+        the chart follows the displayed frame, and shows the value of the nearest sample. `log_y`: a log scale ( the
+        values `<= 0` are then left out ). Several curves with the same `name` share a chart ( `color` tells them
+        apart: one per theme as a pair, the scale of the scene by default )."""
+        y = np.asarray( y, dtype = float ).reshape( -1 )
+        x = np.arange( len( y ), dtype = float ) if x is None else np.asarray( x, dtype = float ).reshape( -1 )
+        if len( x ) != len( y ):
+            raise ValueError( f"add_curve: { len( x ) } abscissas for { len( y ) } values" )
+        ok = np.isfinite( y ) & np.isfinite( x ) & ( ( y > 0 ) if log_y else True )
+        nb = sum( c[ "name" ] == name for c in self._curves )
+        col = scale_color( nb ) if color is None else color
+        pair = col if _is_pair( col ) else ( col, col )
+        self._curves.append( dict( name = str( name ), x = [ float( v ) for v in x[ ok ] ], y = [ float( v ) for v in y[ ok ] ],
+                                   log = bool( log_y ), color = [ list( _rgb( c ) ) for c in pair ] ) )
         return self
 
     def add_points( self, positions, radius = 0.0, color = None, opacity = 1.0, frames = True ):
@@ -724,7 +747,7 @@ class Visualizer:
         d       = self.nb_dims
         bounds  = self.bounds()
         span    = max( hi - lo for lo, hi in bounds )
-        r0      = span / 150                                    # starting radius of bare points
+        r0      = span / 300                                    # starting radius of bare points
 
         poly_off = np.concatenate( [ [ 0 ], np.cumsum( self._poly_len ) ] ).astype( np.int32 )
 
@@ -745,6 +768,7 @@ class Visualizer:
             "__PNT_C__"   : _b64( self.point_colors ),
             "__PNT_R__"   : _b64( self.point_radii ),
             "__HPOLY__"   : json.dumps( self._hpolys ),
+            "__CURVES__"  : json.dumps( self._curves ),
             "__FR_VAL__"  : _b64( np.array( [ f[ "values" ] for f in self._frames ], np.float32 ) ),
             "__FR_POLY__" : _b64( self._frame_ranges( "poly" ) ),
             "__FR_EDG__"  : _b64( self._frame_ranges( "edge" ) ),
@@ -827,6 +851,28 @@ _HTML = r"""<!DOCTYPE html>
   body.dark #anim .play { background: #8ab4f8; color: #172033; }
   body.dark #anim .play.on { background: #ddd; }
   body.dark #anim .cnt { color: #999; }
+  /* the curves ( `add_curve` ): a strip at the bottom, one chart per name */
+  #curves {
+    display: none; position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 1; gap: 8px;
+    overflow-x: auto; pointer-events: none; font-family: sans-serif; font-size: 11px;
+  }
+  #curves .chart {
+    flex: 1 1 220px; min-width: 200px; max-width: 420px; pointer-events: auto; cursor: crosshair;
+    background: rgba(255,255,255,0.88); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); padding: 4px 8px 2px;
+  }
+  #curves .chart .ttl { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+  #curves .chart .ttl span:first-child { overflow: hidden; text-overflow: ellipsis; }
+  #curves .chart .ttl .v { font-variant-numeric: tabular-nums; color: #666; }
+  #curves svg { display: block; width: 100%; height: 84px; overflow: visible; }
+  #curves .plot { position: relative; }
+  #curves .plot .dec { position: absolute; right: 2px; font-size: 9px; color: #888; }
+  #curves svg text { fill: #888; font-size: 9px; }
+  #curves svg .axis { stroke: #bbb; stroke-width: 1; }
+  #curves svg .cur { stroke: #333; stroke-width: 1; stroke-dasharray: 3 2; }
+  body.dark #curves svg .cur { stroke: #eee; }
+  body.dark #curves .chart { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #curves .chart .ttl .v { color: #aaa; }
+  body.dark #curves svg .axis { stroke: #555; }
   #slices .row { display: flex; align-items: center; gap: 6px; }
   #slices .row span { flex: none; width: 62px; }
   #axes select { width: 58px; }
@@ -898,6 +944,7 @@ _HTML = r"""<!DOCTYPE html>
   </div>
   <div id="slices"></div>
   <div class="sec">
+    <label id="curvesLbl" style="display:none"><input type="checkbox" id="cbCurves" checked> curves</label>
     <label><input type="checkbox" id="cbWheel"> wheel moves/zooms the view</label>
     <label><input type="checkbox" id="cbTouch"> touch drives the view</label>
     <a id="openFull" href="#" target="_blank" style="display:none">open in a separate page &#8599;</a>
@@ -909,6 +956,7 @@ _HTML = r"""<!DOCTYPE html>
 </div>
 </div>
 <div id="anim"></div>
+<div id="curves"></div>
 <button id="nav" title="navigation: wheel, pinch and touch move / zoom the view">
   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
     <path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg>
@@ -929,6 +977,7 @@ _HTML = r"""<!DOCTYPE html>
     <tr><td>e</td><td>hidden-edge mode</td></tr>
     <tr><td>p</td><td>points</td></tr>
     <tr><td>c</td><td>points colored by depth (3D)</td></tr>
+    <tr><td>g</td><td>curves (when the scene has some)</td></tr>
     <tr><td>o</td><td>ortho / perspective projection</td></tr>
     <tr><td>0 · double-click</td><td>reset the view</td></tr>
     <tr><td>d</td><td>light / dark</td></tr>
@@ -966,6 +1015,7 @@ const POLY_V = decI32("__POLY_V__"), POLY_OFF = decI32("__POLY_OFF__"), POLY_C =
 const EDG_V  = decI32("__EDG_V__"),  EDG_C    = decU16("__EDG_C__");
 const PNT_V  = decI32("__PNT_V__"),  PNT_C    = decU16("__PNT_C__"), PNT_R = decF32("__PNT_R__");
 
+const CURVES = __CURVES__;             // { name, x, y, log, color: [ light, dark ] }, see `add_curve`
 const HPOLY  = __HPOLY__.map(h => ({                                     // polytopes in H-rep
   nb: h.nb, dirs: decF32(h.dirs), offs: decF32(h.offs), fcol: h.fcol, ecol: h.ecol, edg: h.edg,
 }));
@@ -1609,32 +1659,38 @@ void main() { oCol = vec4(vCol.rgb, vCol.a * uAlpha); }`);
 const pPoint = prog(`#version 300 es
 in vec3 aPos; in vec4 aCol; in float aRad;
 uniform mat4 uMVP; uniform mat4 uMV; uniform float uSizeK; uniform float uOrtho; uniform float uR; uniform float uRScale;
-uniform float uDepthCol; uniform vec2 uDepthRange;
-out vec4 vCol; out vec3 vC; out float vR;
+uniform float uDepthCol; uniform vec2 uDepthRange; uniform vec2 uHalfVP;
+out vec4 vCol; out vec3 vC; out float vR; out vec2 vD;
+// a point = one INSTANCE, a square on SCREEN of its radius ( gl_PointSize is capped by the drivers, at 64 to 511 pixels:
+// zooming in on a point with a radius of its own, it stopped growing )
+const vec2 CORNER[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
 // the depth colors: warm in front, cool behind
 vec3 depthRamp(float t) {
   const vec3 c0 = vec3(0.85, 0.22, 0.16), c1 = vec3(0.97, 0.70, 0.22), c2 = vec3(0.30, 0.68, 0.62), c3 = vec3(0.20, 0.28, 0.62);
   return t < 1.0 / 3.0 ? mix(c0, c1, 3.0 * t) : t < 2.0 / 3.0 ? mix(c1, c2, 3.0 * t - 1.0) : mix(c2, c3, 3.0 * t - 2.0);
 }
 void main() {
-  gl_Position = uMVP * vec4(aPos, 1.0);
+  vec4 c = uMVP * vec4(aPos, 1.0);
   // a zero radius = a point with no size of its own (a Dirac): the slider sizes it.
   // A point with its own radius keeps it at the slider's start, and the slider scales it.
   float r = aRad > 0.0 ? aRad * uRScale : uR;
   float zv = -(uMV * vec4(aPos, 1.0)).z;
-  gl_PointSize = clamp(uSizeK * r / (uOrtho > 0.5 ? 1.0 : max(zv, 1e-4)), 1.0, 1024.0);
+  float px = max(uSizeK * r / (uOrtho > 0.5 ? 1.0 : max(zv, 1e-4)), 0.5);      // its radius on screen: half a pixel at least
+  vD = CORNER[gl_VertexID];
+  c.xy += vD * px / uHalfVP * max(c.w, 1e-5);
+  gl_Position = c;
   vC = (uMV * vec4(aPos, 1.0)).xyz; vR = r;
   vCol = uDepthCol > 0.5 ? vec4(depthRamp(clamp((zv - uDepthRange.x) / (uDepthRange.y - uDepthRange.x), 0.0, 1.0)), aCol.a) : aCol;
 }`,
 `#version 300 es
 precision highp float;
-in vec4 vCol; in vec3 vC; in float vR; out vec4 oCol;
+in vec4 vCol; in vec3 vC; in float vR; in vec2 vD; out vec4 oCol;
 uniform mat4 uP; uniform float uSphere;
 const float FLATPTS = __FLATPTS__;
 // a light from the upper left, in front ( view space )
 const vec3 L = vec3(-0.45, 0.55, 0.70);
 void main() {
-  vec2 d = gl_PointCoord * 2.0 - 1.0;
+  vec2 d = vec2(vD.x, -vD.y);
   float q = dot(d, d);
   if (q > 1.0) discard;                                // disc, not square
   if (uSphere > 0.5) {
@@ -1749,7 +1805,7 @@ gl.bindVertexArray(vaoLine);
 attr(pLine, "aCorner", buf.linCorner, 2);
 attr(pLine, "aA", buf.linA, 3, 1); attr(pLine, "aB", buf.linB, 3, 1); attr(pLine, "aCol", buf.linCol, 4, 1);
 gl.bindVertexArray(vaoPoint);
-attr(pPoint, "aPos", buf.pntPos, 3); attr(pPoint, "aCol", buf.pntCol, 4); attr(pPoint, "aRad", buf.pntRad, 1);
+attr(pPoint, "aPos", buf.pntPos, 3, 1); attr(pPoint, "aCol", buf.pntCol, 4, 1); attr(pPoint, "aRad", buf.pntRad, 1, 1);
 gl.bindVertexArray(null);
 
 function up(b, data) { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
@@ -1865,6 +1921,7 @@ function draw() {
     gl.uniform1f(gl.getUniformLocation(pPoint, "uOrtho"), cam.ortho ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(pPoint, "uSizeK"),
       cam.ortho ? (h / 2) / orthoHalfH() : (h / 2) / Math.tan(FOV / 2));
+    gl.uniform2f(gl.getUniformLocation(pPoint, "uHalfVP"), w / 2, h / 2);
     gl.uniform1f(gl.getUniformLocation(pPoint, "uR"), pointRadius());
     gl.uniform1f(gl.getUniformLocation(pPoint, "uRScale"), pointRadius() / R0);
     gl.uniform1f(gl.getUniformLocation(pPoint, "uDepthCol"), D >= 3 && ui.depth.checked ? 1 : 0);
@@ -1872,7 +1929,7 @@ function draw() {
     gl.uniform1f(gl.getUniformLocation(pPoint, "uSphere"), D >= 3 ? 1 : 0);
     gl.uniform2f(gl.getUniformLocation(pPoint, "uDepthRange"), dc - s.r, dc + s.r);   // ( the scene's sphere, along the view )
     gl.depthFunc(gl.LEQUAL);
-    gl.drawArrays(gl.POINTS, 0, PNT.n);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, PNT.n);
   }
 
   // (5) eye-dome lighting: the texture to the screen, darkened where the neighbours are in front
@@ -1903,9 +1960,11 @@ function draw() {
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(window.innerWidth * dpr);
-  canvas.height = Math.round(window.innerHeight * dpr);
+  // ( the panel of the curves, when shown, takes the bottom of the page: the view keeps what is above it )
+  const h = Math.max(50, window.innerHeight - (curveBox.style.display === "flex" ? curveBox.offsetHeight + 14 : 0));
+  canvas.height = Math.round(h * dpr);
   canvas.style.width = window.innerWidth + "px";
-  canvas.style.height = window.innerHeight + "px";
+  canvas.style.height = h + "px";
   if (viewUntouched && typeof resetView === "function") resetView();   // ( the page resized before anyone moved the view: refit )
   else draw();
 }
@@ -2196,6 +2255,95 @@ function setFrame(i) {
   }
   buildScene();                                       // only the displayed frame is rebuilt
   draw();
+  curveCursors();
+}
+
+// ============================================================================================
+// the CURVES ( `add_curve` ): one chart per name, the abscissa on the first frame axis. Each chart: its curves, the
+// extreme values of both axes, a cursor at the displayed frame with the value of the nearest sample of each curve.
+const curveBox = document.getElementById("curves"), charts = [];
+const CW = 300, CH = 84, CL = 4, CR = 4, CT = 4, CB = 12;
+const fmtY = v => v === 0 ? "0" : (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3 ? v.toExponential(2) : String(parseFloat(v.toPrecision(4))));
+function buildCurves() {
+  const NS = "http://www.w3.org/2000/svg", names = [];
+  for (const c of CURVES) if (c.x.length && !names.includes(c.name)) names.push(c.name);
+  for (const name of names) {
+    const cs = CURVES.filter(c => c.name === name && c.x.length), log = cs.some(c => c.log);
+    const ty = v => log ? Math.log10(v) : v;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const c of cs) for (let i = 0; i < c.x.length; i++) {
+      x0 = Math.min(x0, c.x[i]); x1 = Math.max(x1, c.x[i]); y0 = Math.min(y0, ty(c.y[i])); y1 = Math.max(y1, ty(c.y[i]));
+    }
+    if (x1 <= x0) x1 = x0 + 1;
+    if (y1 <= y0) { const m = Math.abs(y0) * 0.05 || 1; y0 -= m; y1 += m; }
+    const sx = x => CL + (x - x0) / (x1 - x0) * (CW - CL - CR), sy = y => CH - CB - (ty(y) - y0) / (y1 - y0) * (CH - CT - CB);
+    const div = document.createElement("div"); div.className = "chart";
+    const ttl = document.createElement("div"); ttl.className = "ttl";
+    const nm = document.createElement("span"); nm.textContent = name + (log ? " ( log )" : ""); nm.title = name;
+    const val = document.createElement("span"); val.className = "v";
+    ttl.append(nm, val);
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + CW + " " + CH); svg.setAttribute("preserveAspectRatio", "none");
+    const mk = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); svg.appendChild(e); return e; };
+    mk("line", { class: "axis", x1: CL, x2: CW - CR, y1: CH - CB, y2: CH - CB, "vector-effect": "non-scaling-stroke" });
+    const paths = cs.map(c => mk("polyline", { fill: "none", "stroke-width": 1.4, "vector-effect": "non-scaling-stroke",
+      points: c.x.map((x, i) => sx(x).toFixed(2) + "," + sy(c.y[i]).toFixed(2)).join(" ") }));
+    const cur = mk("line", { class: "cur", y1: CT, y2: CH - CB, "vector-effect": "non-scaling-stroke" });
+    // a log scale shows its DECADES: a line and its value at each power of ten in range ( the labels in HTML: the svg is
+    // stretched in width, its height is in pixels )
+    const plot = document.createElement("div"); plot.className = "plot";
+    plot.appendChild(svg);
+    if (log) for (let k = Math.ceil(y0 - 1e-9); k <= Math.floor(y1 + 1e-9); k++) {
+      const y = CH - CB - (k - y0) / (y1 - y0) * (CH - CT - CB);
+      mk("line", { class: "axis", x1: CL, x2: CW - CR, y1: y, y2: y, "stroke-dasharray": "2 3", "vector-effect": "non-scaling-stroke" });
+      const t = document.createElement("span"); t.className = "dec"; t.style.top = Math.max(0, y - 10) + "px"; t.textContent = "1e" + k;
+      plot.appendChild(t);
+    }
+    div.append(ttl, plot);
+    // the labels in HTML, over the svg ( which is stretched ): the range of y at the left, of x at the bottom
+    const lab = document.createElement("div"); lab.className = "ttl"; lab.style.color = "#888"; lab.style.fontSize = "9px";
+    const inv = v => log ? Math.pow(10, v) : v;
+    lab.innerHTML = "<span>y: " + fmtY(inv(y0)) + " &hellip; " + fmtY(inv(y1)) + "</span><span>" + AXES[0] + ": " + fmtVal(x0) + " &hellip; " + fmtVal(x1) + "</span>";
+    div.appendChild(lab);
+    curveBox.appendChild(div);
+    // a click ( or a drag ) goes to the frame whose value on the first axis is the nearest
+    const go = e => {
+      const r = svg.getBoundingClientRect(), x = x0 + ((e.clientX - r.left) / r.width * CW - CL) / (CW - CL - CR) * (x1 - x0);
+      let best = 0, bd = Infinity;
+      AX_VALS[0].forEach((v, k) => { const d = Math.abs(v - x); if (d < bd) { bd = d; best = k; } });
+      stopPlaying();
+      const rk = curRanks(); rk[0] = best; setFrame(frameFor(rk, 0));
+    };
+    svg.addEventListener("pointerdown", e => { svg.setPointerCapture(e.pointerId); go(e); });
+    svg.addEventListener("pointermove", e => { if (e.buttons & 1) go(e); });
+    charts.push({ cs, paths, cur, val, sx });
+  }
+  if (charts.length) {
+    curveBox.style.display = "flex";
+    document.getElementById("curvesLbl").style.display = "block";
+    const cb = document.getElementById("cbCurves");
+    cb.addEventListener("change", () => { curveBox.style.display = cb.checked ? "flex" : "none"; resize(); });
+    document.addEventListener("keydown", e => {
+      if ((e.key === "g" || e.key === "G") && e.target.tagName !== "SELECT" && !(e.target.tagName === "INPUT" && e.target.type !== "range"))
+        { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }
+    });
+  }
+}
+function curveCursors() {
+  if (!charts.length) return;
+  const dark = document.body.classList.contains("dark"), x = FR_VAL[frameIdx * NB_AXES];
+  for (const ch of charts) {
+    ch.cur.setAttribute("x1", ch.sx(x)); ch.cur.setAttribute("x2", ch.sx(x));
+    const vals = [];
+    ch.cs.forEach((c, k) => {
+      const col = c.color[dark ? 1 : 0];
+      ch.paths[k].setAttribute("stroke", "rgb(" + col.map(v => Math.round(255 * v)).join(",") + ")");
+      let lo = 0, hi = c.x.length - 1;                 // the nearest sample ( abscissas in increasing order )
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c.x[m] <= x) lo = m; else hi = m; }
+      vals.push(fmtY(c.y[Math.abs(c.x[hi] - x) < Math.abs(c.x[lo] - x) ? hi : lo]));
+    });
+    ch.val.textContent = vals.join(" · ");
+  }
 }
 function stopPlaying() {
   if (playing >= 0) { axRows[playing].btn.innerHTML = "&#9654;"; axRows[playing].btn.classList.remove("on"); }
@@ -2450,6 +2598,7 @@ let sceneBuilt = false;
     const pal = on ? COLORS_DARK : COLORS;
     if (pal !== PAL) { PAL = pal; if (sceneBuilt) buildScene(); }
     draw();
+    curveCursors();
   }
   setTheme(cur);
   if (!asked && host)
@@ -2470,6 +2619,7 @@ canvas.addEventListener("touchstart", () => { if (touchEnabled) viewUntouched = 
 window.addEventListener("keydown", () => { viewUntouched = false; });
 window.addEventListener("resize", resize);
 projectPool();
+buildCurves();
 setFrame(NB_FRAMES - 1);          // the final state first -- it is what we want to see first
 syncLabels();
 resize();                         // BEFORE framing: the latter depends on the window's aspect ratio

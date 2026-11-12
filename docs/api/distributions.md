@@ -51,6 +51,50 @@ with the needs. Called by `SdotPlanNd.add_to_viz` for the target density.
 
 The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
 
+## `SumOfDiracsOnAGrid`
+
+```python
+SumOfDiracsOnAGrid(shape, weights=None, frame=None, cell_frame=None, origin=None, target_mass=1.0, **kwargs)
+```
+
+Sum of weighted diracs at the CENTRES of the cells of a regular grid: no coordinates are stored, only the grid.
+
+The dirac of multi-index `k` ( C order: the first axis the slowest, that of `weights` ) is at
+`origin + frame^T ( k + 1/2 )`, the rows of the FIELD `frame` being the edges of ONE cell -- the convention of `Image`:
+`SumOfDiracsOnAGrid( shape )` puts a dirac at the centre of each pixel of an `Image` of that shape.
+
+What the constructor takes is said for the WHOLE grid, as for `Image`: by default the grid fits in the unit square
+( cube... ) at `origin`, its longest side of length 1, the proportions kept. `frame` gives the edges of the whole grid
+( rows, or their lengths for an axis-aligned grid ), `cell_frame` those of one cell ( the field ).
+
+It does all a `SumOfDiracs` does, except move its diracs. The 2D and 3D solver on the CPU takes a path of its own for a
+grid ( `PowerDiagram_Grid`: no positions are made ); the others read `positions`, computed when they are asked for.
+
+| Attribute | |
+|---|---|
+| `domain` | The support as half-spaces `( directions, offsets )`, or `None`. `periodicity = target.domain` pairs its opposite facets. |
+| `grid` | `( origin, cell_frame, shape )` on the host |
+| `mass` | The total mass of the distribution ( 1 once normalized: the solvers normalize the distributions they are given ). |
+| `positions` | the positions of the diracs, `[ nb_diracs, d ]`, COMPUTED ( in the framework of the frame ) -- for what asks for them |
+| `shape` | the number of cells along each axis |
+
+### `.add_to_viz(viz, color='#d62728', **kwargs)`
+
+The diracs, as points.
+
+### `.as_sum_of_diracs()`
+
+the same diracs, as a `SumOfDiracs` ( positions computed )
+
+### `.bounding_half_spaces()`
+
+The support of the distribution as half-spaces `( directions, offsets )`, or `None` when it is not bounded.
+
+### `.normalized_version(nb_dims=None)`
+
+the same grid, its weights scaled to `target_mass` -- still a grid: no positions are made. In 1D, the diracs on their
+positions: `SdotPlan1d` has no path of its own for a grid
+
 ## `ProjectedSumOfDiracs`
 
 ```python

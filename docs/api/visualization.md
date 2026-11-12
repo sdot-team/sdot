@@ -23,6 +23,10 @@ when they have as many -- the same diracs moving ( a transport, a descent ) with
 each frame. `loop`: it starts again, morphing back to the first frame. `autoplay`: it plays as soon as the page opens
 ( `?play=0|1` in the URL wins ).
 
+The page saves the played axis as an animated GIF ( menu, "save as GIF" ): one image per frame, as the view shows it
+( zoom, theme ), at most 800 pixels wide ( `?gif_width=` ), the last frame held a moment. `?gif=1` saves it as soon
+as the page opens.
+
 `frame_axis`: the name of the frame axis, or a tuple of names when the frames vary along several parameters (see
 `new_frame`). `playable`: whether the axis gets a play button -- a bool for all the axes, or one per axis. Either way
 the bar of the axes sits next to the menu button, in plain sight: it is what a reader of the doc has to touch.

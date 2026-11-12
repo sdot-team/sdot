@@ -9,7 +9,7 @@ The geometry under the plans: power diagrams, their cells, and what speeds them 
 ## `PowerDiagram`
 
 ```python
-PowerDiagram(positions=None, weights=None, *args, accelerator=None, **kwargs)
+PowerDiagram(positions=None, weights=None, *args, accelerator=None, nb_boxes=None, **kwargs)
 ```
 
 Power diagram ( Laguerre ) -- THE VIEW, and what all the storages have in common.
@@ -97,6 +97,16 @@ exactly `d + 1` cells, faces of zero measure included ).
 The support of the periodicity ( the domain of a diagram without one ) as half-spaces `( directions, offsets )`: what a
 display draws dashed ( `add_to_viz` ). `None` for an unbounded diagram.
 
+### `.dual(_method=None)`
+
+THE DUAL of the diagram in its domain: `[ m, d + 1 ]` int32, the seeds ( indices of `positions` ) of each simplex -- the
+regular triangulation of the seeds restricted to the domain, one simplex per vertex of the diagram between `d + 1` cells
+( the vertices on the boundary of the domain are not simplices ). Each simplex once, its seeds in increasing order.
+
+Always a triangulation. On seeds in general position, THE regular one. Where seeds are tied ( `d + 2` or more on a sphere,
+a grid ), a valid choice among the triangulations of the tie -- in 2D the one rounding leans to ( the same on every call
+with the same seeds and the same device ), in 3D the one of a symbolic perturbation. Not with a periodicity nor groups.
+
 ### `.hessian_rows(items=None, host=True)`
 
 The derivatives of the measures with respect to the weights, row by row: `( nb_nbrs, ids, vals )`, the neighbors of each cell and the coefficients ( host arrays ).
@@ -114,6 +124,14 @@ The solution `x` of `L x = rhs`, `L` being the derivative of the measures with r
 The elements of the group of `periodicity` up to the ring `nb_rings`, as affine maps `[ m, d, d + 1 ]` ( `[ M | V ]`, the map
 `x -> M x + V` ), the identity first: ring 1 holds those whose image of the support touches the support. What a display
 repeats the cells by ( see `add_to_viz` ); the identity alone without a periodicity.
+
+### `.potential_integrals()`
+
+per value of the distribution ( an `Image`'s pixels ), the integral over it of the Kantorovich potential
+`|x - p_i|^2 - w_i` on the cell of `i`: the derivative of a transport cost with respect to the image's values, at
+these weights, by the envelope theorem. One sweep, piece by piece ( cell x pixel ). A polynomial image
+( `Image( degree = P )` ): the integral against each Bernstein basis function of each pixel, shaped like its `coeffs`.
+Not differentiable.
 
 ### `.show(filename=None, title=None, height=500, **kwargs)`
 
@@ -573,6 +591,12 @@ The accelerator of the seeds of `power_diagram` -- its positions AND its weights
 The shortcut one almost always wants: a BSP built on other weights than those
 of the diagram would remain CORRECT (the majorant would only prune less well) but
 would have no reason to be good.
+
+### `.take_sorted_positions(positions)`
+
+`positions` in the tree's order, as its construction wrote them -- if they are the very array the tree was built on
+( the same object: concrete, so nothing to differentiate through ), else `None`. Given ONCE, then dropped: it is a copy
+of the cloud, which a tree kept for later diagrams would otherwise hold
 
 ## `SpatialAccelerator`
 

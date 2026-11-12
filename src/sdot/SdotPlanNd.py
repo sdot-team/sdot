@@ -157,7 +157,11 @@ def _origin_as_shift( problem ):
     target = copy.copy( dst )
     target.origin = o0
     source = copy.copy( problem.source )
-    source.positions = RealTensor[ source.num_dirac, source.dim ]( problem.source.positions.raw - shift[ None, : ] )
+    p = problem.source.positions.raw
+    if isinstance( p, np.ndarray ) and not isinstance( shift, np.ndarray ) and not loom.is_traced( shift ):
+        from .groups import _arr                      # host diracs, a Torch origin: the diracs in its framework ( Jax mixes alone )
+        p = _arr( shift, p )
+    source.positions = RealTensor[ source.num_dirac, source.dim ]( p - shift[ None, : ] )
     moved = copy.copy( problem )
     moved._source, moved._target = source, target
     return moved, shift
@@ -1922,7 +1926,8 @@ class SdotPlanNd( Displayable ):
             cost = ( second - 2 * px + pp * mass ).sum() + ( weights * ( nu_eff - m ) ).sum()
 
             # an empty cell keeps its seed as barycenter ( there is nothing else to say )
-            full = loom.ops().stack( [ loom.ops().where( mass.raw > 0, f.raw / loom.ops().where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 )
+            ops = loom.ops( mass.raw )                    # ( the framework of the moments, not the default one )
+            full = ops.stack( [ ops.where( mass.raw > 0, f.raw / ops.where( mass.raw > 0, mass.raw, 1.0 ), p.raw ) for f, p in zip( first, pos ) ], axis = 1 )
             if per is not None:
                 full = at.unfold( full )
 

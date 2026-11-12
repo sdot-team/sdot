@@ -39,7 +39,58 @@ if test( "PowerDiagram( nb_boxes = K ): the boxes in turn give the measures of t
             assert abs( m.sum() - 1 ) < 1e-12, ( name, K, m.sum() )
             assert np.abs( m - ref ).max() < 1e-12, ( name, K, np.abs( m - ref ).max() )
 
-if test( "PowerDiagram of spread positions ( Jax ): one box per device gives the measures of the ordinary diagram" ):
+if test( "PowerDiagram( nb_boxes = K ): differentiable ( Jax, Torch ), the gradient of the ordinary diagram wrt positions and weights" ):
+    import numpy as np
+    import loom
+    from errand import has_tag
+    from loom.tensor.Dtype import Dtype
+    from sdot.Cell import set_kernel_dtype
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    fw = next( ( n for n in ( "jax", "torch" ) if has_tag( f"driver={ n }" ) ), None )
+    if fw is None:
+        print( "numpy: forward only" )
+    else:
+        if fw == "jax":
+            import jax
+            jax.config.update( "jax_enable_x64", True )
+        old, loom.default_framework = loom.default_framework, fw
+        set_kernel_dtype( "FP64" )
+        o = loom.ops( None )
+        arr = lambda a: o.array( np.asarray( a, dtype = np.float64 ), Dtype.fp( 64 ) )
+        bnd = box_half_spaces( [ 0, 0 ], [ 1, 1 ] )
+        for name, pos, w in _cases():
+            pos, w = pos[ :512 ], w[ :512 ]
+            C = arr( np.random.default_rng( 2 ).random( len( pos ) ) )
+
+            def grads( **kw ):
+                return o.grad( lambda p, q: o.sum( PowerDiagram( p, q, boundaries = bnd, **kw ).measures.value * C ), argnums = ( 0, 1 ) )( arr( pos ), arr( w ) )
+
+            gp, gw = grads()
+            for K in [ 1, 3, 16 ]:
+                if K > len( pos ) // 2:
+                    continue
+                # ( rows of 8 vertices: the widening, the restart and the tape's are part of the test )
+                hp, hw = grads( nb_boxes = K, msg_capacity = 8 )
+                ep = np.abs( np.asarray( loom.to_numpy( hp ) ) - np.asarray( loom.to_numpy( gp ) ) ).max()
+                ew = np.abs( np.asarray( loom.to_numpy( hw ) ) - np.asarray( loom.to_numpy( gw ) ) ).max()
+                assert ep < 1e-11 and ew < 1e-11, ( name, K, ep, ew )
+        loom.default_framework = old
+
+if test( "PowerDiagram( nb_boxes = K, max_resident = M ): out of core, the measures of the ordinary diagram" ):
+    import numpy as np
+    from sdot.Cell import set_kernel_dtype
+    from sdot.PowerDiagram import PowerDiagram, box_half_spaces
+    set_kernel_dtype( "FP64" )
+    bnd = box_half_spaces( [ 0, 0 ], [ 1, 1 ] )
+    for name, pos, w in _cases():
+        ref = np.asarray( PowerDiagram( pos, w, boundaries = bnd ).measures.value )
+        for K, M in [ ( 4, 1 ), ( 16, 2 ) ]:
+            pd = PowerDiagram( pos, w, boundaries = bnd, nb_boxes = K, max_resident = M, msg_capacity = 8 )
+            m = np.asarray( pd.measures.value )
+            assert abs( m.sum() - 1 ) < 1e-12, ( name, K, m.sum() )
+            assert np.abs( m - ref ).max() < 1e-12, ( name, K, np.abs( m - ref ).max() )
+
+if test( "PowerDiagram of spread positions ( Jax ): one box or two per device give the measures of the ordinary diagram" ):
     import jax
     jax.config.update( "jax_enable_x64", True )
     import numpy as np
@@ -58,9 +109,10 @@ if test( "PowerDiagram of spread positions ( Jax ): one box per device gives the
             mesh = Mesh( np.array( jax.devices()[ :nd ] ), ( "p", ) )
             ranks = loom.JaxRanks( mesh )
             # spread by loom, or a Jax array already sharded along the seeds: the same thing
-            for p in [ loom.spread( pos, ranks ), jax.device_put( pos, NamedSharding( mesh, P( "p", None ) ) ) ]:
+            for p, nb_boxes in [ ( loom.spread( pos, ranks ), None ), ( jax.device_put( pos, NamedSharding( mesh, P( "p", None ) ) ), None ),
+                                 ( loom.spread( pos, ranks ), 2 * nd ) ]:      # ( several boxes per device )
                 # ( small capacities: the overflow of a row and of an inbox, and the restart, are part of the test )
-                pd = PowerDiagram( p, w, boundaries = bnd, msg_capacity = 8, inbox_capacity = 4 )
+                pd = PowerDiagram( p, w, boundaries = bnd, nb_boxes = nb_boxes, msg_capacity = 8, inbox_capacity = 4 )
                 m = pd.measures
                 assert loom.spread_of( m ) is not None and loom.spread_of( m ).ranks == ranks
                 m = loom.gather_to_host( m )
@@ -96,12 +148,13 @@ if test( "PowerDiagram of spread positions ( MPI + numpy ): each rank holds a bl
     assert size > 1, "one process: not started by the launcher"     # ( 4 by default, `--ranks 8` asks for more )
     bnd = box_half_spaces( [ 0, 0 ], [ 1, 1 ] )
     ranks = loom.MpiRanks()
-    for name, pos, w in _cases():
+    # one box per rank, two ( boxes of one size ), three ( boxes of different sizes: lists of boxes )
+    for ( name, pos, w ), nb_boxes in [ ( c, k ) for c in _cases() for k in ( None, 2 * size, 3 * size ) ]:
         m = len( pos ) // size
         block = lambda a: a[ rank * m:( rank + 1 ) * m ].copy()
         # ( small capacities: the overflow of a row and of an inbox, and the restart, are part of the test )
         pd = PowerDiagram( loom.spread( block( pos ), ranks ), loom.spread( block( w ), ranks ), boundaries = bnd,
-                           msg_capacity = 8, inbox_capacity = 4 )
+                           nb_boxes = nb_boxes, msg_capacity = 8, inbox_capacity = 4 )
         res = pd.measures
         assert isinstance( res.value, np.ndarray ) and res.value.shape == ( m, ), ( name, res.value.shape )
         full = loom.gather_to_host( res )

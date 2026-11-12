@@ -233,10 +233,12 @@ class AaBsp( SpatialAccelerator ):
         ( the same object: concrete, so nothing to differentiate through ), else `None`. Given ONCE, then dropped: it is a copy
         of the cloud, which a tree kept for later diagrams would otherwise hold"""
         kept = getattr( self, "_sorted_for", None )
-        if kept is None or getattr( positions, "raw", positions ) is not getattr( kept[ 0 ], "raw", kept[ 0 ] ):
+        raw = getattr( positions, "raw", positions )
+        if kept is None or raw is not getattr( kept[ 0 ], "raw", kept[ 0 ] ):
             return None
+        # a Torch tensor on the tape is concrete too, but the copy the kernel wrote is not on it: gathered instead
         self._sorted_for = None
-        return kept[ 1 ]
+        return None if getattr( raw, "requires_grad", False ) else kept[ 1 ]
 
     def _init_on_card( self, pos, weights, max_seeds_per_leaf ):
         """THE CARD'S BUILD ( `gpu/Bsp2D.cuh::build_tree` ): the same tree as `_build_in_kernel` ( slices, boxes, median

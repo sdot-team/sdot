@@ -249,7 +249,12 @@ struct RadialExpDist {
 
     HD void for_each_piece( const auto &cell, auto &&ws, auto &&func ) const {
         dist.for_each_piece( cell, ws, [&]( const auto &pc, const auto &dens ) {
-            func( pc, RadialExpDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, weight, eps } );
+            // the ramp of a constant image ( `Image.h` ) is never set under a radial integrand ( `sdotplan/Solve.h` ), but
+            // `Image::for_each_piece` instantiates it all the same
+            if constexpr ( requires { DECAYED_TYPE_OF( dens )::is_ramp; } )
+                assert( false && "a radial integrand ( `radial_func` ): no ramp of an image" );
+            else
+                func( pc, RadialExpDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, weight, eps } );
         } );
     }
 };

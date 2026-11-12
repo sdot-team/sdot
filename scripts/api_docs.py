@@ -31,7 +31,7 @@ the solver, `OtProblem` to solve again and again. See [Guide: plans and settings
                  [ "w2", "plan", "ot_solve", "OtProblem", "Iterative", "Direct", "OtNotConverged", "SdotPlanNd", "SdotPlan1d", "ContinuousOtPlan1d", "RadialExp",
                    "quantization", "wrap" ] ),
     "distributions": ( "Distributions", """The sources ( diracs ) and the targets ( densities ). See [Guide: Distributions](/guide/distributions/).""",
-                       [ "SumOfDiracs", "SumOfDiracs1d", "ProjectedSumOfDiracs", "ProjectedSumOfTents", "ProjectedSumOfAnisotropicTents", "Box", "ConvexHull", "Polytope",
+                       [ "SumOfDiracs", "SumOfDiracs1d", "SumOfDiracsOnAGrid", "ProjectedSumOfDiracs", "ProjectedSumOfTents", "ProjectedSumOfAnisotropicTents", "Box", "ConvexHull", "Polytope",
                          "Image", "SplineGrid", "SumOfGaussians", "Mesh", "CodimMesh" ] ),
     "power-diagram": ( "Power Diagrams", """The geometry under the plans: power diagrams, their cells, and what speeds them up. For seeds at the same position, see [Guide: Duplicates and Close Seeds](/guide/duplicates).""",
                        [ "PowerDiagram", "Groups", "Voronoi", "Cell", "CellComplex", "Faces", "Face", "CellGeometry", "box_half_spaces", "AaBsp", "SpatialAccelerator", "set_kernel_dtype",

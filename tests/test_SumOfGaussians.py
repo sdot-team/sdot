@@ -109,6 +109,7 @@ if test( "the_support_follows_traced_parameters" ):
     import sdot
     need( "cpu" )
     need( "grad" )
+    need( "jax" )                                   # ( the test calls jax itself: `jax.grad`, `jax.jit` )
     import jax
     import jax.numpy as jnp
     # no `support_box`: the domain is the box of the gaussians up to `support_sigmas`, read off their parameters even when

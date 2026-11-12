@@ -219,9 +219,10 @@ angle of a sinogram ) and differentiable end to end. It is requested from an `Ot
 ContinuousOtPlan1d(src_dist, dst_dist, with_barycenters=False, with_potentials=False, with_gradient=False, method='exact', scale=8)
 ```
 
-THE TRANSPORT between two CONTINUOUS distributions on a line: today a `ProjectedSumOfTents` ( the source ) against
-an `Image` ( the target ), batched over the items of both ( e.g. the angles of a sinogram ), differentiable with
-respect to the tents' points and half-widths.
+THE TRANSPORT between two CONTINUOUS distributions on a line: a `ProjectedSumOfTents` ( the source ) against an
+`Image` ( the target ), batched over the items of both ( e.g. the angles of a sinogram ), differentiable with respect
+to the tents' points and half-widths; or an `Image` against an `Image`, pixels of degree 0 or 1, the cost only
+( `sdot::image_ot_1d`, `ImageOt1d.h`: no sort, the merge of the two images' pixels ).
 
 `cost` is W2^2 ( both sides normalized to mass 1 ); `barycenters` ( b_i = int T t_i, `[ n ]` ) and `potentials` ( the
 derivative with respect to the mass of each tent, centered ) are stored only when asked for.

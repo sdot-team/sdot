@@ -244,7 +244,8 @@ class PowerDiagram( Aggregate, Displayable ):
 
         DISTRIBUTED ( `distributed.py` ): `positions` spread over several devices ( a Jax array with a `NamedSharding` along the seeds )
         give one box of seeds per device, the cells that a box cannot finish travelling to the boxes that can still cut them; `measures`
-        then comes back spread the same way. `nb_boxes = K`: the same sweep, the `K` boxes in turn on one device. 2D, a domain, and
+        then comes back spread the same way. `nb_boxes = K`: the same sweep in `K` boxes ( the boxes in turn on one device, or
+        several per device ), and `max_resident = M` keeps at most `M` of them loaded at a time ( out of core ). 2D, a domain, and
         `measures` only for now.
         """
         # the SUPPORT of the distribution bounds the domain, for free and without changing the

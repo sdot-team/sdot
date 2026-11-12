@@ -309,7 +309,7 @@ class Image( Distribution ):
             from loom.tensor.Dtype import Dtype
             vals = self.coeffs if self.is_polynomial else self.values
             scaled = ( self.target_mass / mass * vals ).value
-            scaled = loom.ops().astype( scaled, Dtype.of( vals.value ) )
+            scaled = loom.ops( scaled ).astype( scaled, Dtype.of( vals.value ) )      # ( its framework, not the default one )
             data = dict( coeffs = scaled, nb_coeffs = self.nb_coeffs.value ) if self.is_polynomial else dict( values = scaled )
             return Image(
                 nb_dims = self.nb_dims.value,

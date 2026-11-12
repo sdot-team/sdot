@@ -570,7 +570,10 @@ class PeriodicSetup:
 
 def _ops_unfold( q, M ):
     import loom
-    return loom.ops().sum( M * q[ :, :, None ], axis = 1 )
+    if isinstance( M, np.ndarray ) and not loom.is_traced( q ):     # ( a host map, Torch points: Torch takes no `ndarray * Tensor` )
+        from .groups import _arr
+        M = _arr( q, M )
+    return loom.ops( q ).sum( M * q[ :, :, None ], axis = 1 )
 
 
 def setup_for( positions, boundaries, periodicity ):
@@ -588,7 +591,7 @@ def setup_for( positions, boundaries, periodicity ):
     ps = PeriodicSetup( gens, boundaries )
     folded, ps.fold_M, ps.fold_c = ps.fold( positions )
     if not loom.is_traced( folded ) and not ps.translation_only:
-        f = np.asarray( folded, dtype = float ).reshape( -1, d )
+        f = np.asarray( loom.ops( folded ).to_numpy( folded ), dtype = float ).reshape( -1, d )    # ( detached: a bounding box )
         if len( f ) and ( ( f.min( axis = 0 ) < ps.region_lo ) | ( f.max( axis = 0 ) > ps.region_hi ) ).any():
             ps = PeriodicSetup( gens, boundaries, seed_box = ( f.min( axis = 0 ), f.max( axis = 0 ) ) )
             folded, ps.fold_M, ps.fold_c = ps.fold( positions )

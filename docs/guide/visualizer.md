@@ -120,6 +120,15 @@ Some options for animations:
 - Points are shared between frames only when the **same array** is passed again. A page with many frames weighs what its frames hold: keep one frame out of several for a long descent (`np.geomspace` spacing suits Lloyd, which moves a lot at first).
 - Colors are numbered again from zero at each frame, so what is drawn at the same rank in each frame keeps its color.
 
+### Curves beside the frames
+
+`viz.add_curve( name, y, x = None, log_y = False )` draws a curve in a panel at the bottom of the page: a loss, a metric, anything that has one value per step. `x` is in the unit of the frame axis (the `value` of `new_frame`), so a curve may have a sample at every iteration while the scene keeps one frame out of ten. The cursor of each chart follows the displayed frame and shows the value there; a click in a chart goes to the nearest frame. Curves with the same `name` share a chart, and `g` shows or hides the panel.
+
+```python
+viz.add_curve( "loss", losses, log_y = True )                  # one value per iteration
+viz.add_curve( "mean move", moves, x = recorded_iterations )   # or explicit abscissas
+```
+
 ## A sweep over several parameters
 
 With a tuple for `frame_axis`, the frames form a grid over several parameters, and each axis gets its own row in the bar. `new_frame` takes one value per axis, or a dict that names only the axes that change. `playable` says which axes have a play button: a sweep over a parameter is read by moving its slider, a time by playing it.

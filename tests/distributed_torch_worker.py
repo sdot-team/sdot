@@ -29,11 +29,12 @@ def work( rank, size, port ):
     set_kernel_dtype( "FP64" )
     bnd = box_half_spaces( [ 0, 0 ], [ 1, 1 ] )
     ranks = loom.TorchRanks()
-    for name, pos, w in _cases():
+    # one box per rank, two ( boxes of one size ), three ( boxes of different sizes: lists of boxes )
+    for ( name, pos, w ), nb_boxes in [ ( c, k ) for c in _cases() for k in ( None, 2 * size, 3 * size ) ]:
         m = len( pos ) // size
         block = lambda a: torch.as_tensor( a[ rank * m:( rank + 1 ) * m ].copy() )
         pd = PowerDiagram( loom.spread( block( pos ), ranks ), loom.spread( block( w ), ranks ), boundaries = bnd,
-                           msg_capacity = 8, inbox_capacity = 4 )
+                           nb_boxes = nb_boxes, msg_capacity = 8, inbox_capacity = 4 )
         res = pd.measures
         assert isinstance( res.value, torch.Tensor ) and tuple( res.value.shape ) == ( m, ), ( name, res.value.shape )
         full = loom.gather_to_host( res )

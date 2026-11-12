@@ -520,10 +520,18 @@ struct InBallDist : InBallCutsFacets<dist_cuts_facets<Dist>()> {
     HD void for_each_piece( const auto &cell, auto &&ws, auto &&func ) const {
         if ( ! ( r2 > 0 ) )
             return;
+        // a piece cut by the sphere. The ramp of a constant image ( `Image.h` ) is never set with a sink ( `sdotplan/Solve.h` ),
+        // but `Image::for_each_piece` instantiates it all the same
+        auto cut_piece = [&]( const auto &pc, const auto &dens ) {
+            if constexpr ( requires { DECAYED_TYPE_OF( dens )::is_ramp; } )
+                assert( false && "integration in a ball: no ramp of an image" );
+            else
+                func( pc, InBallDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, r2 } );
+        };
         dist.for_each_piece( cell, ws, [&]( const auto &pc, const auto &dens ) {
             const int n = pc.nb_vertices();
             if ( n == 0 || ! pc.bounded() )
-                return func( pc, InBallDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, r2 } );
+                return cut_piece( pc, dens );
             // inside: every vertex in the ball ( convex ); outside: the box of the piece misses the ball
             bool inside = true;
             TF lo[ D ], hi[ D ];
@@ -547,7 +555,7 @@ struct InBallDist : InBallCutsFacets<dist_cuts_facets<Dist>()> {
             }
             if ( e2 >= r2 )
                 return;
-            func( pc, InBallDensity<DECAYED_TYPE_OF( dens ),TF,D>{ dens, center, r2 } );
+            cut_piece( pc, dens );
         } );
     }
 

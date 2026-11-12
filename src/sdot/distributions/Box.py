@@ -1,6 +1,7 @@
 import numpy
 
 from .Image import Image
+from ..groups import _arr          # ( a host constant in the framework of a value: a Torch tensor on the tape refuses numpy )
 
 
 def _host_or_traced( a ):
@@ -73,13 +74,13 @@ class Box:
             else:
                 frame = _host_or_traced( self.frame )               # ( traced: the integration derives it, `diagram::AffineAcc` )
                 if frame.ndim == 1:
-                    frame = numpy.diag( frame ) if isinstance( frame, numpy.ndarray ) else frame[ :, None ] * numpy.eye( d )
+                    frame = numpy.diag( frame ) if isinstance( frame, numpy.ndarray ) else frame[ :, None ] * _arr( frame, numpy.eye( d ) )
                 else:
                     frame = frame.reshape( d, d )
             # ( a traced density stays traced: the plan is differentiable with respect to it -- with a zero derivative, the
             # distribution being normalized -- rather than refusing it )
             dens = getattr( self.density, "raw", self.density )
-            values = numpy.full( ( 1, ) * d, float( dens ) ) if isinstance( dens, ( int, float, numpy.number ) ) else numpy.ones( ( 1, ) * d ) * dens
+            values = numpy.full( ( 1, ) * d, float( dens ) ) if isinstance( dens, ( int, float, numpy.number ) ) else _arr( dens, numpy.ones( ( 1, ) * d ) ) * dens
             self._images[ d ] = Image( values = values, origin = origin, pixel_frame = frame,
                                      target_mass = self._target_mass )
         return self._images[ d ]
