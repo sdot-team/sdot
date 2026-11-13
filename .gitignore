@@ -21,7 +21,7 @@ src/sdot/precompiled-kernels/*
 !src/sdot/precompiled-kernels/README.md
 
 # the runner ( errand )
-.errand/
+errand-outputs/
 runs/
 
 # misc
