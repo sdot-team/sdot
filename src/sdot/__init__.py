@@ -10,8 +10,8 @@ _compilation.register_include_root( _here / "include" )
 # in a checkout, filled in a wheel. Read-only as far as we are concerned -- the user may well not be allowed to write
 # in the installation. For a checkout, `SDOT_CATALOGUE_DIR` can name another one EXPLICITLY (a checkout's headers move, so
 # a catalogue registered by default would silently serve stale binaries)
-# the transport's linear solvers (`sdot/sdotplan/Linear.cpp`): Eigen, header-only,
-# which loom downloads once into its cache at the first compiled kernel (`loom/compilation/externals.py`)
+# the transport's linear solvers (`sdot/sdotplan/Linear.cpp`): Eigen, header-only. Declared only: loom downloads it once
+# into its cache at the first kernel that asks for it (`externals = [ "eigen" ]`, see `loom/compilation/externals.py`)
 _compilation.register_external( "eigen", "3.4.0", "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz",
                                 "8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72" )
 

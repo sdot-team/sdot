@@ -399,7 +399,7 @@ class PowerDiagram_Bsp( PowerDiagram ):
             + f"sdot::gpu2d::laplacian_solve<{ variant }, { 'false' if backward else 'true' }>( queue, batch_axes, inputs.power_diagram, inputs.w, { src }, inputs.options, { dst }, "
               f"outputs.work, args.errors, args.allocator, { dens_expr }, { limits } );"
             + ( "\nargs.computed_grads.from_x.rhs = true;" if backward else "" ),
-            includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], allocator = True )
+            includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ], allocator = True )
         loom.ffi_call(
             f"power_diagram_card_laplacian_solve_{ d }d_{ dens[ 'kind' ] }",
             code( "inputs.rhs", "outputs.x" ),

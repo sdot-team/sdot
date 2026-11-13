@@ -1,7 +1,7 @@
 // THE DOMAIN UNIT of the linear solvers ( see `Linear.h` ): compiled once per
 // compiler, linked by the kernels that name `sdot/sdotplan/Linear.cpp` in their `sources`.
-// Eigen is the one that loom downloads ( `sdot/__init__.py` -> `loom/compilation/externals.py`,
-// on the include path ), or failing that the system's ( `<eigen3/...>` ); what is missing is
+// Eigen is the one that loom downloads for the kernels that link this unit ( `externals = [ "eigen" ]`,
+// see `loom/compilation/externals.py` ), or failing that the system's ( `<eigen3/...>` ); what is missing is
 // simply not offered. No OpenMP anywhere: the parallel loops run on loom's thread pool.
 
 #include "Linear.h"

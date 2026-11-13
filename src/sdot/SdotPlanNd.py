@@ -533,7 +533,7 @@ def _card_linear_solves( row, col, val, dia, rhs, method = "mg", tol = 1e-6, smo
         "sdotplan_card_linear_2d",
         FfiCode.inline( "sdot::gpu2d::linear_solves( queue, args.inputs.row, args.inputs.col, args.inputs.val, args.inputs.dia, args.inputs.rhs, "
                         "args.inputs.options, args.outputs.solution, args.outputs.iterations, args.allocator );",
-                        includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], allocator = True ),
+                        includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ], allocator = True ),
         row = IntTensor[ axis( n + 1, "num_lin_row" ), dict( size = 64 ) ]( row ),
         col = IntTensor[ axis( max( nnz, 1 ), "num_lin_nnz" ), dict( size = 64 ) ]( np.asarray( col, dtype = np.int64 ).reshape( -1 )[ :max( nnz, 1 ) ] ),
         val = RealTensor[ axis( max( nnz, 1 ), "num_lin_val" ) ]( np.asarray( val, dtype = np.float64 ).reshape( -1 )[ :max( nnz, 1 ) ] ),
@@ -992,7 +992,7 @@ class SdotPlanNd( Displayable ):
             # `queue`, and it drives its own parallelism ( a hundred diagrams in a single call ),
             # so there is no per-item functor nor `run_parallel` to generate around it.
             FfiCode.inline( includes = [ "sdot/sdotplan/Solve.h" ],
-                sources = [ "sdot/sdotplan/Linear.cpp" ],
+                sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ],
                 code = "\n".join( [
                     # the expressions that `PowerDiagram` generates name `inputs` / `outputs` ( the shape
                     # of a per-item kernel ): we FIND them again here under their name, and nothing needs to know it
@@ -1112,7 +1112,7 @@ class SdotPlanNd( Displayable ):
                       f"{ dist_expr } ),TK_grid>( inputs.dom_cell, { dist_expr }, n, ox, oy, hl ); }}" )
         loom.ffi_call(
             "sdot_grid_solve_2d",
-            FfiCode.inline( includes = [ "sdot/grid/GridNewton2D.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], code = "\n".join( [
+            FfiCode.inline( includes = [ "sdot/grid/GridNewton2D.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ], code = "\n".join( [
                 "auto &inputs = args.inputs; auto &outputs = args.outputs;",
                 "using TK_grid = double;",
                 "auto op = [&]( int k ) { return double( inputs.options( k ) ); };",
@@ -1447,7 +1447,7 @@ class SdotPlanNd( Displayable ):
                 "args.outputs.weights, args.outputs.history, args.outputs.stats, args.outputs.cell_masses, args.outputs.barycenters, "
                 "args.outputs.cost, args.outputs.clusters, args.outputs.sorted_weights_out, args.outputs.node_wa_out, args.outputs.node_wb_out, args.outputs.work, "
                 f"args.errors, args.allocator, { dens_expr }, { limits }{ group_outs } );",
-                includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], allocator = True ),
+                includes = [ "sdot/gpu/Newton2D.cuh" ], sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ], allocator = True ),
             failures = pd._card_failures(),
             power_diagram = pd,
             nu = self._masses,

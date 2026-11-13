@@ -526,6 +526,9 @@ void gather_ellipses( const CpuQueue &queue, const auto &points, const auto &cov
 // sides of the polygon of a clipped trapezoid ( Green: area = - the integral of u ds along the border, u the coordinate
 // across; the cut itself, where ds = 0, adds nothing ). No sort of the vertices.
 //
+// With OPEN = 1 the side from the last vertex back to the first is left out: a LINE of V vertices, that stands for the
+// area between it and the axis of the detector through the origin ( lines that close together make a polygon ).
+//
 //   verts [ K, N, 2 V ] ( x0, y0, x1, y1, .. ), weights [ K, N ]; `params`: [ s_min, h, .. ] ( the rest is not read ). A
 //   polygon must not cover more than L cells;
 //   deposit: hist( a, j ) += weight_i x the area of polygon i in cell j;
@@ -580,13 +583,13 @@ SDOT_P1D_HD SI polygon_window( const Params<TF> &pr, const TF *xy, TF nx, TF ny,
     return j0;
 }
 
-template<int V,int L,class TF,class Hist>
+template<int V,int L,int OPEN,class TF,class Hist>
 SDOT_P1D_HD void deposit_polygon_one( const Params<TF> &pr, const Hist &hist, SI a, const TF *xy, TF nx, TF ny, TF weight, bool atomic ) {
     TF sv[ V ], uv[ V ], e[ L + 1 ], A[ L + 1 ];
     const SI j0 = polygon_window<V,L>( pr, xy, nx, ny, sv, uv, e );
     for ( int l = 0; l <= L; ++l )
         A[ l ] = 0;
-    for ( int v = 0; v < V; ++v ) {
+    for ( int v = 0; v < V - OPEN; ++v ) {
         const int w = v + 1 < V ? v + 1 : 0;
         for ( int l = 0; l <= L; ++l )
             A[ l ] -= clipped_trapezoid<TF>( sv[ v ], uv[ v ], sv[ w ], uv[ w ], e[ l ], nullptr );
@@ -603,7 +606,7 @@ SDOT_P1D_HD void deposit_polygon_one( const Params<TF> &pr, const Hist &hist, SI
 }
 
 /// what one polygon gathers over the angles a0 .. a1: ( dL/dverts [ 2 V ], dL/dweight ) into `out`
-template<int V,int L,class TF,class VN,class VG>
+template<int V,int L,int OPEN,class TF,class VN,class VG>
 SDOT_P1D_HD void gather_polygon( const Params<TF> &pr, const VN &Nr, const VG &g, SI a0, SI a1, const TF *xy, TF weight, TF *out ) {
     for ( int c = 0; c <= 2 * V; ++c )
         out[ c ] = 0;
@@ -616,7 +619,7 @@ SDOT_P1D_HD void gather_polygon( const Params<TF> &pr, const VN &Nr, const VG &g
         TF gw = 0;
         for ( int l = 0; l <= L; ++l ) {         // sum_l g_l ( A_l+1 - A_l ) = sum over the edges of c_l A_l
             const TF c = ( l < L ? TF( g( a, j0 + l ) ) : TF( 0 ) ) - ( l > 0 ? TF( g( a, j0 + l - 1 ) ) : TF( 0 ) );
-            for ( int v = 0; v < V; ++v ) {
+            for ( int v = 0; v < V - OPEN; ++v ) {
                 const int w = v + 1 < V ? v + 1 : 0;
                 gw += c * clipped_trapezoid<TF>( sv[ v ], uv[ v ], sv[ w ], uv[ w ], e[ l ], d );
                 gs[ v ] += c * d[ 0 ]; gu[ v ] += c * d[ 1 ];
@@ -631,7 +634,7 @@ SDOT_P1D_HD void gather_polygon( const Params<TF> &pr, const VN &Nr, const VG &g
     }
 }
 
-template<int V,int L>
+template<int V,int L,int OPEN>
 void deposit_polygons( const CpuQueue &queue, const auto &verts, const auto &weights, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( verts )>::TF>;
     const auto P = view( verts );
@@ -649,13 +652,13 @@ void deposit_polygons( const CpuQueue &queue, const auto &verts, const auto &wei
                 TF xy[ 2 * V ];
                 for ( int c = 0; c < 2 * V; ++c )
                     xy[ c ] = TF( P( b, i, c ) );
-                deposit_polygon_one<V,L>( pr, Hb, a, xy, nx, ny, TF( W( b, i ) ), false );
+                deposit_polygon_one<V,L,OPEN>( pr, Hb, a, xy, nx, ny, TF( W( b, i ) ), false );
             }
         }
     } );
 }
 
-template<int V,int L>
+template<int V,int L,int OPEN>
 void gather_polygons( const CpuQueue &queue, const auto &verts, const auto &weights, const auto &normals, const auto &params,
                       const auto &g, auto &&grad_verts, auto &&grad_weights ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( verts )>::TF>;
@@ -673,7 +676,7 @@ void gather_polygons( const CpuQueue &queue, const auto &verts, const auto &weig
             TF xy[ 2 * V ], out[ 2 * V + 1 ];
             for ( int c = 0; c < 2 * V; ++c )
                 xy[ c ] = TF( P( b, i, c ) );
-            gather_polygon<V,L>( pr, Nr, Gr[ b ], SI( 0 ), A, xy, TF( W( b, i ) ), out );
+            gather_polygon<V,L,OPEN>( pr, Nr, Gr[ b ], SI( 0 ), A, xy, TF( W( b, i ) ), out );
             for ( int c = 0; c < 2 * V; ++c )
                 GP( b, i, c ) = out[ c ];
             GW( b, i ) = out[ 2 * V ];
@@ -968,7 +971,7 @@ void gather_ellipses( const Queue &queue, const auto &points, const auto &covs, 
 
 // polygons ( see the CPU section ), as the ellipses
 
-template<int V,int L,class TF,class VP,class VW,class VN,class VH>
+template<int V,int L,int OPEN,class TF,class VP,class VW,class VN,class VH>
 __global__ void __launch_bounds__( BLOCK ) deposit_polygons_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VW W, VN Nr, VH H, SI nb_obj_blocks, SI tiles ) {
     const Params<TF> pr = read_params<TF>( PP, M, A, N, 0 );
     const BlockPos bp( nb_obj_blocks, tiles );
@@ -982,10 +985,10 @@ __global__ void __launch_bounds__( BLOCK ) deposit_polygons_kernel( View<TF,1> P
     const auto Hb = H[ bp.b ];
     const SI a0 = pr.A * bp.tile / tiles, a1 = pr.A * ( bp.tile + 1 ) / tiles;
     for ( SI a = a0; a < a1; ++a )
-        deposit_polygon_one<V,L>( pr, Hb, a, xy, TF( Nr( a, 0 ) ), TF( Nr( a, 1 ) ), weight, true );
+        deposit_polygon_one<V,L,OPEN>( pr, Hb, a, xy, TF( Nr( a, 0 ) ), TF( Nr( a, 1 ) ), weight, true );
 }
 
-template<int V,int L,class TF,class VP,class VW,class VN,class VG,class VGP,class VGW>
+template<int V,int L,int OPEN,class TF,class VP,class VW,class VN,class VG,class VGP,class VGW>
 __global__ void __launch_bounds__( BLOCK ) gather_polygons_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VW W, VN Nr, VG Gr, VGP GP, VGW GW, SI nb_obj_blocks, SI tiles ) {
     const Params<TF> pr = read_params<TF>( PP, M, A, N, 0 );
     const BlockPos bp( nb_obj_blocks, tiles );
@@ -996,7 +999,7 @@ __global__ void __launch_bounds__( BLOCK ) gather_polygons_kernel( View<TF,1> PP
     TF xy[ 2 * V ], out[ 2 * V + 1 ];
     for ( int c = 0; c < 2 * V; ++c )
         xy[ c ] = TF( P( b, i, c ) );
-    gather_polygon<V,L>( pr, Nr, Gr[ b ], pr.A * bp.tile / tiles, pr.A * ( bp.tile + 1 ) / tiles, xy, TF( W( b, i ) ), out );
+    gather_polygon<V,L,OPEN>( pr, Nr, Gr[ b ], pr.A * bp.tile / tiles, pr.A * ( bp.tile + 1 ) / tiles, xy, TF( W( b, i ) ), out );
     for ( int c = 0; c < 2 * V; ++c ) {
         if ( tiles == 1 ) GP( b, i, c ) = out[ c ];
         else atomicAdd( &GP( b, i, c ), out[ c ] );
@@ -1005,7 +1008,7 @@ __global__ void __launch_bounds__( BLOCK ) gather_polygons_kernel( View<TF,1> PP
     else atomicAdd( &GW( b, i ), out[ 2 * V ] );
 }
 
-template<int V,int L,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int V,int L,int OPEN,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void deposit_polygons( const Queue &queue, const auto &verts, const auto &weights, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( verts )>::TF>;
     const SI NB = verts.shape( 0 ), N = verts.shape( 1 ), A = normals.shape( 0 ), M = hist.shape( 2 );
@@ -1015,11 +1018,11 @@ void deposit_polygons( const Queue &queue, const auto &verts, const auto &weight
     const auto Nr = view( normals );
     const auto H = view( hist );
     const auto PP = view( params );
-    launch_kernel( queue, &deposit_polygons_kernel<V,L,TF,decltype( P ),decltype( W ),decltype( Nr ),decltype( H )>,
+    launch_kernel( queue, &deposit_polygons_kernel<V,L,OPEN,TF,decltype( P ),decltype( W ),decltype( Nr ),decltype( H )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, W, Nr, H, nb, tiles );
 }
 
-template<int V,int L,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int V,int L,int OPEN,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void gather_polygons( const Queue &queue, const auto &verts, const auto &weights, const auto &normals, const auto &params,
                       const auto &g, auto &&grad_verts, auto &&grad_weights ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( verts )>::TF>;
@@ -1032,7 +1035,7 @@ void gather_polygons( const Queue &queue, const auto &verts, const auto &weights
     const auto GP = view( grad_verts );
     const auto GW = view( grad_weights );
     const auto PP = view( params );
-    launch_kernel( queue, &gather_polygons_kernel<V,L,TF,decltype( P ),decltype( W ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GW )>,
+    launch_kernel( queue, &gather_polygons_kernel<V,L,OPEN,TF,decltype( P ),decltype( W ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GW )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, W, Nr, Gr, GP, GW, nb, tiles );
 }
 

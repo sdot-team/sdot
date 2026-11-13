@@ -919,7 +919,7 @@ class PowerDiagram( Aggregate, Displayable ):
         tk = "double" if fp_size( dom.kernel_dtype ) == 64 else "float"
         x = RealTensor[ self.num_point ]()
         b = RealTensor[ self.num_point ]( getattr( rhs, "raw", rhs ) )
-        code = lambda src, dst, backward = False: FfiCode.inline( includes = [ "sdot/sdotplan/Adjoint.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], code = "\n".join( [
+        code = lambda src, dst, backward = False: FfiCode.inline( includes = [ "sdot/sdotplan/Adjoint.h" ], sources = [ "sdot/sdotplan/Linear.cpp" ], externals = [ "eigen" ], code = "\n".join( [
             "auto &inputs = args.inputs; auto &outputs = args.outputs;",
             *( [ "auto &grad_of_inputs = args.grad_of_inputs; auto &grad_of_outputs = args.grad_of_outputs;" ] if backward else [] ),
             # ( `batch_axes`: a `vmap` of the right-hand side -- the diagram is the same for all, and is swept once )
