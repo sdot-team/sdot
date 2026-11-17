@@ -56,7 +56,7 @@ DOCS = HERE.parent / "docs" / "guide" / "bench"
 
 BASELINES = { "cgal", "geogram" }      # the benches whose programs `build_baselines.py` builds on the machine
 FILES = { "diagram": "bench_diagram.py", "newton": "bench_newton.py", "sequence": "bench_sequence.py", "cgal": "bench_cgal.py", "geogram": "bench_geogram.py",
-          "one_d": "bench_1d.py", "grid": "bench_grid.py" }
+          "one_d": "bench_1d.py", "grid": "bench_grid.py", "grid_diagram": "bench_grid_diagram.py" }
 
 # the clouds of `bench_diagram` / `bench_cgal` / `bench_geogram` ( a list of runs: one errand call each, a comma is a matrix )
 CLOUDS = [
@@ -68,6 +68,11 @@ DENSITIES = [
     "--case=image --reps=1",
     "--case=gauss4 --sigma=0.02 --reps=1",
 ]
+
+# the diagrams of diracs on a grid: the grid cases of `cases.py` ( weights 0, mild, sharp ), N = 256 .. 2048
+GRID_CASES = "--case=grid_voronoi,grid_sines,grid_sharp"
+GRID_NS = "--n=65536,262144,1048576"
+GRID_TS = "2,4,8,16,32,64,96"                            # ( the thread counts between 1 and all the cores, at 1024 x 1024 )
 
 # the sizes of the scaling with the number of diracs
 NS = "1000,10000,100000,1000000,10000000"
@@ -130,8 +135,20 @@ JOBS = {
 
     # the grid page ( `bench_grid.py` ): N x N diracs against an image of 512 x 512 affine pixels, the dedicated solver and the
     # same diracs as a cloud, over N, all the cores
-    "grid":        ( "cpu", "grid", [ "--side=64,128,256,512,1024,2048,4096 --solver=dedicated,generic --threads=-1" ], "default" ),
+    "grid":        ( "cpu", "grid", [ "--side=64,128,256,512,1024,2048,4096 --solver=dedicated,generic --threads=-1",
+                                      "--side=1024 --solver=dedicated,generic --threads=1,2,4,8,16,32,64,96" ], "default" ),   # ( over the threads )
     "gpu_grid":    ( "gpu", "grid", [ "--side=64,128,256,512,1024,2048 --solver=dedicated,generic --device=default" ], "default" ),
+
+    # one diagram of diracs on a grid ( `bench_grid_diagram.py`: the dedicated geometry; the same seeds as a cloud for sdot, CGAL,
+    # geogram ): one thread, and all the cores where a library has threads. The former certificate ( `cert` ) up to 1024 x 1024
+    "grid_dedicated": ( "cpu", "grid_diagram", [ f"{ GRID_CASES } { GRID_NS } --method=zones --threads={{T}}",
+                                                 f"{ GRID_CASES } --n=1048576 --method=zones --threads={ GRID_TS }",
+                                                 f"{ GRID_CASES } --n=65536,262144,1048576 --method=cert --threads=1" ], "default" ),
+    "grid_sdot":      ( "cpu", "diagram", [ f"{ GRID_CASES } { GRID_NS } --threads={{T}}", f"{ GRID_CASES } --n=1048576 --threads={ GRID_TS }" ], "default" ),
+    "grid_cgal":      ( "cpu", "cgal",    [ f"{ GRID_CASES } { GRID_NS } --output=measures --threads=1" ], "default" ),
+    "grid_geogram":   ( "cpu", "geogram", [ f"{ GRID_CASES } { GRID_NS } --threads={{T}}", f"{ GRID_CASES } --n=1048576 --threads={ GRID_TS }" ], "default" ),
+    "gpu_grid_diagram": ( "gpu", "diagram", [ f"{ GRID_CASES } { GRID_NS } --kernel=float,double" ], "default" ),
+    "gpu_grid_dedicated": ( "gpu", "grid_diagram", [ f"{ GRID_CASES } { GRID_NS } --method=zones,cert --device=default" ], "default" ),
 }
 
 # `--quick`: the flags each bench gets instead of its own
@@ -143,6 +160,7 @@ QUICK = {
     "newton":   "--n=3000 --reps=1 --image-size=64",
     "one_d":    "--reps=1",
     "grid":     "--side=64,128 --reps=1",
+    "grid_diagram": "--n=16384 --reps=1",
 }
 
 # result keys worth keeping ( the others are diagnostics of the benches )
@@ -153,7 +171,8 @@ KEEP = { "n", "dim", "threads", "kernel", "output", "status", "converged", "iter
          "geogram", "t_triangulation", "t_rvd", "t_linear", "max_diff_sdot", "residual_sdot", "grid", "residual", "level", "triangulations",
          "mean_neighbours", "simplices", "clock_ghz", "sm_clock_ghz", "t_ctor", "ns_per_seed_scratch", "t_scratch", "ns_per_seed_scratch_kernel",
          "t_total_cpp", "t_jit_kernels", "t_eager_kernels", "batch", "pixels", "method", "backend", "problem", "m", "error", "t_kernels", "skipped",
-         "side", "solver", "precision", "ns_per_dirac", "grid_solver" }
+         "side", "solver", "precision", "ns_per_dirac", "grid_solver", "path", "t_geometry", "ns_per_seed_geometry", "flagged",
+         "exact_path", "rounds", "mass_error" }
 
 
 def errand_root():
@@ -218,7 +237,9 @@ def run_jobs( root, env, kinds, jobs, stamp, args ):
         flags = lambda r: [ *with_quick( r, bench, args.quick ), *on_cpu ]
         for call in ( c for r in runs for c in split_process_wide( flags( with_threads( r ) ) ) ):
             out = f"runs/sdot-page/{ env }/{ stamp }/{ job }/{{name}}-{{params}}"
-            cmd = [ sys.executable, "-m", "errand", "run", "--env", env, "-k", "bench", "--out", out,
+            # ( the target `bench_*.py::*` names the bench entries -- errand has no `-k` since its ADR 0011 --, and a comma in a value
+            # is a matrix only under `--grid=,` )
+            cmd = [ sys.executable, "-m", "errand", "run", "--env", env, "--grid=,", "--out", out,
                     *queue, f"{ rel }/{ FILES[ bench ] }::*", *call ]
             print( f"\n== { env } { job }: { ' '.join( cmd[ 2: ] ) }", flush = True )
             code = subprocess.call( cmd, cwd = root )

@@ -321,13 +321,14 @@ struct __attribute__(( visibility( "default" ) )) LocalN {
     HD bool canon_inside( int i, const canon::Gen<D> &j ) const {
         canon::DD y[ D ];
         y_of( i, y );
-        const int sg = canon::sign_of<D>( frame_of( i ), y, j );
-        if ( sg )
-            return sg > 0;
         int cuts[ D ];
         for ( int r = 0; r < D; ++r ) cuts[ r ] = vk[ r ][ i ];
         canon::Gen<D> g[ D + 1 ];
         gens_of( cuts, g );
+        // ( the band widened by the conditioning of the vertex: what its solve does not resolve is a tie )
+        const int sg = canon::sign_of<D>( frame_of( i ), y, j, canon::tie_band() * std::fmax( 1.0, canon::condition<D>( g ) ) );
+        if ( sg )
+            return sg > 0;
         return canon::sos_inside<D>( g, j );
     }
 

@@ -5,8 +5,11 @@
 // A port of `bench/experiments/grid_stencil/newton.cpp`. No positions are stored: everything is in INDEX UNITS ( seed
 // `( a, b )` at `( a, b )`, the domain `[ -1/2, N - 1/2 ]^2`, `psi = w / h^2` ), physical units only at the edges.
 //
-//   geometry   ring-1 stencil + certificate ( fused, `StencilKernel.h` ), ring 2 on the flagged cells, cross-level
-//              certificate, exact clipping on what is left ( `ExactKernel.h` )
+//   geometry   ring-1 stencil ( `StencilKernel.h` ) + the ZONE CERTIFICATE: the ring-1 cells contain the true ones, so the sum of
+//              their areas on a zone exceeds the zone exactly where a cell is wrong. Rounds: the cells that touch a bad zone
+//              rebuilt with more seeds ( ring 2 in SIMD, then the seeds within 4 sqrt 2, 8 sqrt 2, .. by `ExactKernel.h` ), filling
+//              a table of the halves of the bad zones, until none is bad.
+//              ( `use_zones = false`: the former local certificates, ring 2 on the flagged cells, exact clipping with psi_max )
 //   integrals  the uniform density in SIMD ( the area, the lengths of the faces ); any other density cell by cell: the cell is
 //              rebuilt from its neighbours as a sdot cell ( `ProviderList` ) and integrated by `measure_and_facets`
 //   linear     H = dm / dpsi, matrix-free: per cell 8 weights toward the ring-1 neighbours in SoA planes, plus a short list of
@@ -21,6 +24,7 @@
 #include "StencilKernel.h"
 #include "ExactKernel.h"
 #include "GridDensities.h"
+#include "../cell/Engine2Reg.h"
 #include "../sdotplan/Sweep.h"
 #include "../sdotplan/Bounds.h"
 #include "../sdotplan/WarmRepair.h"
@@ -30,6 +34,8 @@
 #include <cstring>
 #include <numeric>
 #include <vector>
+#include <unordered_map>
+#include <cstdint>
 
 namespace sdot {
 namespace grid {
@@ -134,7 +140,7 @@ struct Evaluator {
     // outputs
     std::vector<T> mass;                                 // N * N, index units
     NoInitVector<T> W;                                   // 8 planes of P1 * P1: weight toward the ring-1 neighbour in direction k
-    struct Extra { int i, j; T w; };
+    struct Extra { int i, j; T w; unsigned char l = 0; };   // ( l: the fused zones, the level of the cell that wrote it )
     std::vector<Extra> extras;                           // faces toward the seeds out of ring 1
     std::vector<std::vector<Extra>> ex_th;               // ( the same, per thread, before they are gathered )
     // stats of the last call
@@ -143,10 +149,56 @@ struct Evaluator {
     bool exhausted = false;                              // the exact path ran out of its list ( a cell wider than all the rings ), or
                                                          // a cell that sdot could not build ( `DistCells::failed` )
     double t_geom = 0, t_int = 0;
+    // ZONE CERTIFICATE ( `use_zones`, see `geometry_zones` )
+    bool use_zones = true;
+    int zone0 = 8;                                       // side of the zones of the ring-1 table, in pixels
+    T zone_min = T( 1 );                                 // the zones of the next tables halve down to this side
+    bool zone_predict = true;                            // ring 2 before the first table on the cells the local certificate flags
+    bool use_reg = true;                                 // the rounds past ring 2 in the register kernel of the cells
+    bool use_tree = false;                               // past ring 2: the exact cell at once, by a mipmap of affine majorants
+                                                         // ( measured 1.6 - 3.3x slower than doubling the radius: 110 - 270 blocks per cell )
+    bool fused_zones = true;                             // the zones in ONE pass with the integration ( `run_zones` ): no plane, no polygon
+                                                         // kept, a level and a box per cell; false: `geometry_zones`, then the integration
+    std::vector<unsigned char> lvl;                      // ( fused ) the level of each cell: 0, 1 ring 1, 2.. the seeds within sqrt( 2 ) 2^( lvl - 1 ), 255 exact
+    std::vector<float> zbx;                              // ( fused ) the box of each cell, floats rounded outward ( lo > hi: empty )
+    ExactKernel<T> ek1{ 1 };                             // ( fused ) ring 1 as a polygon, on `p1`
+    bool fused_last = false;                             // the last diagram came from `run_zones` ( `polygon` builds the cells from `lvl` )
+    bool use_prev = false;                               // ring 1 = the 3 x 3 stencil and the cuts past it of the previous call ( `prev_*` )
+    bool rebuild_tree = false;                           // the cells of the bad zones of the first table to their exact cell at once, by
+                                                         // the mipmap of affine majorants ( `tree_clip` ): one table, no rounds
+    std::vector<int> prev_off, prev_nb;                  // per cell, the neighbours past ring 1 of the last call ( `use_prev` )
+    std::vector<int> ek_idx;                             // ( the index in `ek` of an offset, ( 2 RB + 1 )^2 )
+    int ek_idx_RB = -1;
+    int ek_index( int dx, int dy ) {
+        const int R = ek.RB, S = 2 * R + 1;
+        if( ek_idx_RB != R ) {
+            ek_idx.assign( size_t( S ) * S, -1 );
+            for( int q = 0; q < int( ek.ox.size() ); ++q ) ek_idx[ size_t( ek.ox[ q ] + R ) * S + ek.oy[ q ] + R ] = q;
+            ek_idx_RB = R;
+        }
+        return std::abs( dx ) > R || std::abs( dy ) > R ? -1 : ek_idx[ size_t( dx + R ) * S + dy + R ];
+    }
+    struct Maj { T gx, gy, c; };                         // psi_j - |x_j|^2 <= gx a_j + gy b_j + c on a block ( index coordinates )
+    std::vector<std::vector<Maj>> pmip;                  // affine majorants of psi over blocks of side mip_ls << l ( l = 0: leaves )
+    int mip_ls = 4;
+    struct Poly { int n = 0, nm = 0; bool exh = false, fin = false, glob = false; T R = 0; std::vector<T> x, y; std::vector<int> pl; };   // ( pl: offsets of `ek`, -1: box -- or the neighbours themselves if `glob`; the offsets [ 0, nm ) cut it, those within R; fin: exact )
+    std::vector<int> slot;                               // N * N: the polygon of a rebuilt cell in `polys` ( -1: the ring-1 planes )
+    std::vector<Poly> polys;                             // ( the first `nb_polys` are in use )
+    int nb_polys = 0;
+    std::vector<T> area1, area2;                         // N * N: the areas of the ring-1 cells, of the ring-2 cells rebuilt
+    std::vector<int> round_cells, round_bad;             // per round ( 0: ring 1 ): the cells built, the bad zones of its table
+    int n_rounds = 0;
+    double t_zone[ 4 ] = {};                             // ( ms, cumulated: ring 1, its table, rebuilds, tables )
 
     Evaluator( int N, const Integ &integ, Par par ) : N( N ), P1( N + 2 ), par( par ), integ( par.nt, integ ),
-        flag1( N * N ), flag2( N * N ), mark( N * N ), pl1( N, false, false ), pl2( N, false, false ), row_th( par.nt ),
+        flag1( N * N ), flag2( N * N ), mark( N * N ), pl1( 1, false, false ), pl2( 1, false, false ), row_th( par.nt ),
         fine_th( par.nt ), mass( N * N ), W( 8 * ( N + 2 ) * ( N + 2 ) ), ex_th( par.nt ) {
+    }
+    /// the planes of every cell, for the paths that keep them ( `geometry_zones`, `geometry_cert`: not the fused zones )
+    void ensure_planes() {
+        if( pl1.N == N ) return;
+        pl1 = typename K1::Planes( N, false, false );
+        pl2 = typename K2::Planes( N, false, false );
         // ( the padding of the ring-1 planes is read: their initial values, in parallel; the interior of `W` is written by each `run` )
         par.slices( pl1.slots, SI( pl1.slots ) * pl1.P * K1::D * 17, [&]( int s0, int s1, int ) { pl1.fill( s0, s1 ); } );
     }
@@ -264,6 +316,13 @@ struct Evaluator {
     // ( -1: the box ). From the ring-1 planes, the ring-2 planes or the exact path, as the certificates decided. `exh`: set when
     // the exact path ran out of its list.
     int polygon( int i, T *px, T *py, int *nbr, bool &exh ) const {
+        if( fused_last ) return level_polygon( i, lvl[ i ], px, py, nbr, exh );
+        if( use_zones && flag1[ i ] ) {
+            const Poly &q = polys[ slot[ i ] ];
+            for( int e = 0; e < q.n; ++e ) { px[ e ] = q.x[ e ]; py[ e ] = q.y[ e ]; nbr[ e ] = q.glob || q.pl[ e ] < 0 ? q.pl[ e ] : i + ek.ox[ q.pl[ e ] ] * N + ek.oy[ q.pl[ e ] ]; }
+            exh = exh || q.exh;
+            return q.n;
+        }
         if( flag1[ i ] && flag2[ i ] ) {
             int pl[ ExactKernel<T>::C ], n;
             T qx[ ExactKernel<T>::C ], qy[ ExactKernel<T>::C ];
@@ -322,6 +381,669 @@ struct Evaluator {
     }
 
     void geometry( const std::vector<T> &psi ) {
+        fused_last = false;
+        if( use_zones ) geometry_zones( psi );
+        else geometry_cert( psi );
+    }
+
+    // THE MIPMAP OF AFFINE MAJORANTS of f = psi - |x|^2 ( concave where psi'' <= 2: nearly flat on smooth targets, so the plane
+    // stays tight on large blocks ): on a leaf ( `mip_ls` x `mip_ls` seeds ), the least-squares slope and the offset
+    // that puts the plane above every seed; on a group of 2 x 2 blocks, the mean slope of the children and an offset above
+    // their planes on their boxes ( a corner of each )
+    void build_mip( const std::vector<T> &psi ) {
+        mip_ls = std::min( 4, N );
+        pmip.clear();
+        for( int side = mip_ls; side <= N; side *= 2 ) {
+            const int m = N / side;
+            std::vector<Maj> v( size_t( m ) * m );
+            if( side == mip_ls ) {
+                T su2 = 0;
+                for( int c = 0; c < side; ++c ) su2 += ( c - T( side - 1 ) / 2 ) * ( c - T( side - 1 ) / 2 );
+                su2 *= side;
+                for( int u = 0; u < m; ++u )
+                    for( int w = 0; w < m; ++w ) {
+                        T sx = 0, sy = 0;
+                        for( int c = 0; c < side; ++c ) for( int d = 0; d < side; ++d ) {
+                            const T ja = T( u * side + c ), jb = T( w * side + d ), f = psi[ size_t( u * side + c ) * N + w * side + d ] - ja * ja - jb * jb;
+                            sx += f * ( c - T( side - 1 ) / 2 ); sy += f * ( d - T( side - 1 ) / 2 );
+                        }
+                        Maj &q = v[ size_t( u ) * m + w ];
+                        q.gx = side > 1 ? sx / su2 : 0; q.gy = side > 1 ? sy / su2 : 0;
+                        q.c = -std::numeric_limits<T>::infinity();
+                        for( int c = 0; c < side; ++c ) for( int d = 0; d < side; ++d ) {
+                            const int ja = u * side + c, jb = w * side + d;
+                            q.c = std::max( q.c, psi[ size_t( ja ) * N + jb ] - T( ja ) * ja - T( jb ) * jb - q.gx * ja - q.gy * jb );
+                        }
+                    }
+            } else {
+                const auto &q = pmip.back();
+                const int mq = 2 * m, hs = side / 2;
+                for( int u = 0; u < m; ++u )
+                    for( int w = 0; w < m; ++w ) {
+                        Maj &r = v[ size_t( u ) * m + w ];
+                        r.gx = r.gy = 0;
+                        for( int c = 0; c < 4; ++c ) { const Maj &k = q[ size_t( 2 * u + c / 2 ) * mq + 2 * w + c % 2 ]; r.gx += k.gx / 4; r.gy += k.gy / 4; }
+                        r.c = -std::numeric_limits<T>::infinity();
+                        for( int c = 0; c < 4; ++c ) {
+                            const int cu = 2 * u + c / 2, cw = 2 * w + c % 2;
+                            const Maj &k = q[ size_t( cu ) * mq + cw ];
+                            // max over the child's box of ( g_k - g_r ) . x + c_k: at a corner
+                            const T dgx = k.gx - r.gx, dgy = k.gy - r.gy;
+                            const T xa = dgx > 0 ? T( cu * hs + hs - 1 ) : T( cu * hs ), xb = dgy > 0 ? T( cw * hs + hs - 1 ) : T( cw * hs );
+                            r.c = std::max( r.c, dgx * xa + dgy * xb + k.c );
+                        }
+                        r.c += T( 1e-12 ) * ( T( 1 ) + std::abs( r.c ) );
+                    }
+            }
+            pmip.push_back( std::move( v ) );
+        }
+    }
+
+    /// THE EXACT CELL i from a polygon that contains it ( px, py, nbr: neighbours, -1 box ), cut by every seed of a block of
+    /// the mipmap that can still cut it ( the majorant of the block against each vertex ). Near blocks first. The seeds with |dx|, |dy| <= `skip` already cut it.
+    /// False if the polygon outgrows the arrays.
+    bool tree_clip( int i, const std::vector<T> &psi, T *px, T *py, int *nbr, int &n, int skip ) const {
+        constexpr int C = ExactKernel<T>::C;
+        const int a = i / N, b = i % N, L = int( pmip.size() );
+        const T pi = psi[ i ];
+        T qx[ C ], qy[ C ], sv[ C ]; int qn[ C ];
+        struct It { int l, u, v; };
+        It st[ 4 * 64 ];
+        int sp = 0;
+        st[ sp++ ] = { L - 1, 0, 0 };
+        while( sp && n ) {
+            const It it = st[ --sp ];
+            const int side = mip_ls << it.l, m = N / side;
+            const Maj &M = pmip[ it.l ][ size_t( it.u ) * m + it.v ];
+            // seed j cuts vertex P ( absolute ) off when psi_j - |x_j - P|^2 > psi_i - |P - x_i|^2; with f_j <= g . x_j + c,
+            // psi_j - |x_j - P|^2 <= ( g + 2 P ) . x_j + c - |P|^2: affine in x_j, its maximum over the box is at a corner
+            const T X0 = T( it.u * side ), X1 = T( it.u * side + side - 1 ), Y0 = T( it.v * side ), Y1 = T( it.v * side + side - 1 );
+            bool keep = false;
+            for( int e = 0; e < n && ! keep; ++e ) {
+                const T Px = px[ e ] + a, Py = py[ e ] + b, hx = M.gx + 2 * Px, hy = M.gy + 2 * Py;
+                const T val = hx * ( hx > 0 ? X1 : X0 ) + hy * ( hy > 0 ? Y1 : Y0 ) + M.c - Px * Px - Py * Py;
+                const T r2 = px[ e ] * px[ e ] + py[ e ] * py[ e ];
+                keep = val > pi - r2 - T( 1e-11 ) * ( T( 1 ) + std::abs( M.c ) + Px * Px + Py * Py + std::abs( pi ) );
+            }
+            if( ! keep ) continue;
+            if( it.l ) {
+                // the four children, the nearest to the seed popped first
+                It ch[ 4 ]; T dd[ 4 ];
+                const int hs = side / 2;
+                for( int c = 0; c < 4; ++c ) {
+                    ch[ c ] = { it.l - 1, 2 * it.u + c / 2, 2 * it.v + c % 2 };
+                    const T cx0 = T( ch[ c ].u * hs - a ), cy0 = T( ch[ c ].v * hs - b );
+                    const T dx = std::clamp( T( 0 ), cx0, cx0 + hs - 1 ), dy = std::clamp( T( 0 ), cy0, cy0 + hs - 1 );
+                    dd[ c ] = dx * dx + dy * dy;
+                }
+                int ord[ 4 ] = { 0, 1, 2, 3 };
+                std::sort( ord, ord + 4, [&]( int p, int q ) { return dd[ p ] > dd[ q ]; } );
+                for( int c = 0; c < 4; ++c ) st[ sp++ ] = ch[ ord[ c ] ];
+                continue;
+            }
+            for( int c = 0; c < side && n; ++c )
+                for( int d = 0; d < side && n; ++d ) {
+                    const int ja = it.u * side + c, jb = it.v * side + d, kx = ja - a, ky = jb - b;
+                    if( std::abs( kx ) <= skip && std::abs( ky ) <= skip ) continue;
+                    const T fx = T( kx ), fy = T( ky ), cc = ( fx * fx + fy * fy + pi - psi[ size_t( ja ) * N + jb ] ) / 2;
+                    bool out = false;
+                    for( int e = 0; e < n; ++e ) { sv[ e ] = fx * px[ e ] + fy * py[ e ] - cc; out |= sv[ e ] > 0; }
+                    if( ! out ) continue;
+                    if( n + 1 >= C ) return false;
+                    int q = 0;
+                    for( int e = 0; e < n; ++e ) {
+                        const int f = e + 1 == n ? 0 : e + 1;
+                        if( sv[ e ] <= 0 ) {
+                            qx[ q ] = px[ e ]; qy[ q ] = py[ e ]; qn[ q++ ] = nbr[ e ];
+                            if( sv[ f ] > 0 ) { const T t = sv[ e ] / ( sv[ e ] - sv[ f ] ); qx[ q ] = px[ e ] + t * ( px[ f ] - px[ e ] ); qy[ q ] = py[ e ] + t * ( py[ f ] - py[ e ] ); qn[ q++ ] = ja * N + jb; }
+                        } else if( sv[ f ] <= 0 ) { const T t = sv[ e ] / ( sv[ e ] - sv[ f ] ); qx[ q ] = px[ e ] + t * ( px[ f ] - px[ e ] ); qy[ q ] = py[ e ] + t * ( py[ f ] - py[ e ] ); qn[ q++ ] = nbr[ e ]; }
+                    }
+                    n = q;
+                    for( int e = 0; e < n; ++e ) { px[ e ] = qx[ e ]; py[ e ] = qy[ e ]; nbr[ e ] = qn[ e ]; }
+                }
+        }
+        return true;
+    }
+
+    // THE SEEDS [ o, o1 ) OF `ek` as cuts for the register kernel of the cells ( `cell/Engine2Reg.h` ): no radius of security
+    struct RingProvider {
+        const T *pi; int P, N, a, b; const int *ox, *oy; int o, o1;
+        template<class S>
+        bool next( const S &, NothingLocal &, Plane<T,2> &p ) {
+            while( o < o1 ) {
+                const int q = o++, na = a + ox[ q ], nb = b + oy[ q ];
+                if( na < 0 || na >= N || nb < 0 || nb >= N ) continue;
+                const T kx = T( ox[ q ] ), ky = T( oy[ q ] );
+                p.dir[ 0 ] = kx; p.dir[ 1 ] = ky; p.off = ( kx * kx + ky * ky + pi[ 0 ] - pi[ ox[ q ] * P + oy[ q ] ] ) / 2; p.id = q;
+                return true;
+            }
+            return false;
+        }
+    };
+    /// the polygon ( px, py, pl, n ) of cell i cut further by the seeds [ o0, o1 ) of `ek`, in the registers ( `pe` padded by
+    /// `ek.RB` ). False when it does not fit ( the caller goes to `ExactKernel` )
+    bool reg_clip( int i, T *px, T *py, int *pl, int &n, int o0, int o1 ) const {
+        constexpr int C = ExactKernel<T>::C;
+        constexpr SI words = Local2<T>::words_for( C );
+        alignas( 64 ) std::int32_t buf[ words + 16 ];
+        Carver cv{ buf, words + 16 };
+        Local2<T> c;
+        if( ! c.attach( cv, C ) || n > C ) return false;
+        for( int e = 0; e < n; ++e ) { c.vx[ e ] = px[ e ]; c.vy[ e ] = py[ e ]; c.cid[ e ] = pl[ e ]; }
+        c.nb = n;
+        if( n == 0 ) return true;
+        const int a = i / N, b = i % N, P = N + 2 * ek.RB;
+        RingProvider f{ pe.data() + size_t( a + ek.RB ) * P + ( b + ek.RB ), P, N, a, b, ek.ox.data(), ek.oy.data(), o0, o1 };
+        NothingLocal loc;
+        if( run_2d_registers( c, f, loc ) ) return false;
+        n = c.nb;
+        for( int e = 0; e < n; ++e ) { px[ e ] = c.vx[ e ]; py[ e ] = c.vy[ e ]; pl[ e ] = c.cid[ e ]; }
+        return true;
+    }
+
+    // the area of the polygon ( px, py, n ) inside the box [ x0, x1 ] x [ y0, y1 ] ( same frame )
+    static T rect_area( const T *px, const T *py, int n, T x0, T x1, T y0, T y1 ) {
+        constexpr int C = ExactKernel<T>::C + 8;
+        T ax[ C ], ay[ C ], bx[ C ], by[ C ];
+        int m = std::min( n, C - 8 );
+        // ( in a frame centred on the box: the pieces of a far cell lose no digits )
+        const T cx = ( x0 + x1 ) / 2, cy = ( y0 + y1 ) / 2;
+        x0 -= cx; x1 -= cx; y0 -= cy; y1 -= cy;
+        for( int e = 0; e < m; ++e ) { ax[ e ] = px[ e ] - cx; ay[ e ] = py[ e ] - cy; }
+        auto cut = [&]( T *sx, T *sy, int k, T *dx, T *dy, T kx, T ky, T c ) {   // keep kx x + ky y <= c
+            int q = 0;
+            for( int e = 0; e < k; ++e ) {
+                const int f = e + 1 == k ? 0 : e + 1;
+                const T s0 = kx * sx[ e ] + ky * sy[ e ] - c, s1 = kx * sx[ f ] + ky * sy[ f ] - c;
+                if( s0 <= 0 ) { dx[ q ] = sx[ e ]; dy[ q ] = sy[ e ]; ++q; }
+                if( ( s0 <= 0 ) != ( s1 <= 0 ) ) { const T u = s0 / ( s0 - s1 ); dx[ q ] = sx[ e ] + u * ( sx[ f ] - sx[ e ] ); dy[ q ] = sy[ e ] + u * ( sy[ f ] - sy[ e ] ); ++q; }
+            }
+            return q;
+        };
+        m = cut( ax, ay, m, bx, by, -1, 0, -x0 );
+        m = cut( bx, by, m, ax, ay, 1, 0, x1 );
+        m = cut( ax, ay, m, bx, by, 0, -1, -y0 );
+        m = cut( bx, by, m, ax, ay, 0, 1, y1 );
+        T s = 0;
+        for( int e = 0; e < m; ++e ) { const int f = e + 1 == m ? 0 : e + 1; s += ax[ e ] * ay[ f ] - ay[ e ] * ax[ f ]; }
+        return s / 2;
+    }
+
+    // THE ZONE CERTIFICATE. A cell built from fewer seeds contains the true one, so on a zone Z the excess
+    // E_Z = sum_i |C_i n Z| - |Z| is >= 0 ( rounding aside ), and E_Z = 0 proves every cell exact in Z: no radius of security, no
+    // psi_max. The tables come with the cells: ring 1 on every cell fills a table of `zone0`-pixel zones; the cells that touch a
+    // bad zone are rebuilt with more seeds ( ring 2 in SIMD, then the seeds within 4 sqrt 2, 8 sqrt 2, .. ) and fill a table of
+    // the halves of the bad zones ( every cell touching such a zone was rebuilt: it touches the bad parent ); and so on until no
+    // zone is bad. Past the list of `ek`, the exact path ( psi_max ). A cell rebuilt but out of the bad zones is exact: the zones
+    // it touches are clean, at this round or at an earlier one ( where its larger cell was exact already ).
+    void geometry_zones( const std::vector<T> &psi ) {
+        ensure_planes();
+        const SI nn = SI( N ) * N;
+        constexpr int C = ExactKernel<T>::C;
+        const T inf = std::numeric_limits<T>::infinity();
+        double tz = now_ms();
+        auto lap = [&]( int k ) { const double t = now_ms(); t_zone[ k ] += t - tz; tz = t; };
+
+        // ---- ring 1 on every cell, with its areas
+        pad( 1, psi, p1 );
+        area1.resize( nn );
+        par.slices( N, nn * 16, [&]( int a0, int a1, int t ) {
+            auto &rb = row_th[ t ];
+            rb.resize( size_t( N ) * ( 1 + 2 * K1::D ) );
+            T *hess = rb.data() + N;
+            signed char *own = reinterpret_cast<signed char *>( hess + N * K1::D );
+            for( int a = a0; a < a1; ++a )
+                for( int b0 = 0; b0 < N; b0 += B )
+                    K1::row_block( N, p1.data(), a, b0, B, area1.data() + size_t( a ) * N, hess, own, nullptr, &pl1 );
+        } );
+        std::fill( flag1.begin(), flag1.end(), 0 );
+        std::fill( flag2.begin(), flag2.end(), 0 );
+        slot.assign( nn, -1 );
+        nb_polys = 0; n_flag1 = n_exact = n_rounds = 0;
+        round_cells.clear(); round_bad.clear();
+        lap( 0 );
+
+        // ---- tools
+        const T lo = T( -0.5 ), hi = T( N ) - T( 0.5 );
+        auto bbox = [&]( const T *px, const T *py, int n, int i, T *bb ) {
+            bb[ 0 ] = bb[ 2 ] = inf; bb[ 1 ] = bb[ 3 ] = -inf;
+            for( int e = 0; e < n; ++e ) { bb[ 0 ] = std::min( bb[ 0 ], px[ e ] ); bb[ 1 ] = std::max( bb[ 1 ], px[ e ] ); bb[ 2 ] = std::min( bb[ 2 ], py[ e ] ); bb[ 3 ] = std::max( bb[ 3 ], py[ e ] ); }
+            bb[ 0 ] += i / N; bb[ 1 ] += i / N; bb[ 2 ] += i % N; bb[ 3 ] += i % N;
+        };
+        // the rounding of the pieces of a zone ( side s, area az ): each cell loses ~eps |v| s, |v| its reach from the centre of the
+        // zone; the rest of the tolerance is what no mass cares about
+        auto reach = [&]( const T *bb, T cx, T cy ) { return std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ); };
+        auto ztol = [&]( T az, T sr ) { return T( 1e-14 ) * ( az + sr ); };   // ( 1e-12 let a cell 5e-9 too large pass in a zone of long cells )
+        // a stencil cell given inverted by the planes ( an edge of negative length ) is empty: its seeds leave it no room
+        auto inverted = [&]( const T *px, const T *py, int n, const double *dx, const double *dy ) {
+            T sc = 1;
+            for( int e = 0; e < n; ++e ) sc = std::max( sc, std::abs( px[ e ] ) + std::abs( py[ e ] ) );
+            for( int e = 0; e < n; ++e ) {
+                const int f = e + 1 == n ? 0 : e + 1;
+                if( T( -dy[ e ] ) * ( px[ f ] - px[ e ] ) + T( dx[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc ) return true;
+            }
+            return false;
+        };
+        auto shoelace = [&]( const T *px, const T *py, int n ) { T s = 0; for( int e = 0; e < n; ++e ) { const int f = e + 1 == n ? 0 : e + 1; s += px[ e ] * py[ f ] - py[ e ] * px[ f ]; } return s / 2; };
+        auto take = [&]( int i ) -> Poly & {             // ( the polygon of a rebuilt cell )
+            if( slot[ i ] < 0 ) {
+                slot[ i ] = nb_polys++;
+                if( nb_polys > int( polys.size() ) ) polys.emplace_back();
+                flag1[ i ] = 1;
+            }
+            return polys[ slot[ i ] ];
+        };
+        auto put = [&]( Poly &p, const T *px, const T *py, const int *pl, int n ) { p.n = n; p.x.assign( px, px + n ); p.y.assign( py, py + n ); p.pl.assign( pl, pl + n ); };
+        // THE TABLE of a round: zones of side s ( a grid from the corner of the domain, clipped to it ), those of `zid( u, v ) >= 0`;
+        // `get( i, px, py, ar )`: the polygon of cell i ( relative to its seed ) and its area. What goes back: the bad zones, and
+        // the cells of `cells` whose box meets one of them
+        std::vector<T> bxs( 4 * size_t( nn ) );          // ( the boxes of the cells, absolute; +inf: empty )
+        struct Table { std::vector<char> bad; std::vector<int> next; int nb_bad = 0; };
+        auto table = [&]( T s, int nzs, const std::vector<int> &cells, int nzones, auto &&zid, auto &&zuv, auto &&get ) {
+            Table tb;
+            std::vector<std::vector<T>> Et( par.nt );
+            auto zr = [&]( int u, int v, T *r ) { r[ 0 ] = lo + u * s; r[ 1 ] = std::min( hi, lo + ( u + 1 ) * s ); r[ 2 ] = lo + v * s; r[ 3 ] = std::min( hi, lo + ( v + 1 ) * s ); };
+            auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
+            par.slices( int( cells.size() ), SI( cells.size() ) * 64, [&]( int q0, int q1, int t ) {
+                auto &E = Et[ t ];
+                E.assign( 2 * size_t( nzones ), T( 0 ) );
+                T px[ C ], py[ C ], bb[ 4 ], r[ 4 ], ar;
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = cells[ q ], n = get( i, px, py, ar );
+                    if( n < 3 ) { bxs[ 4 * size_t( i ) ] = inf; continue; }
+                    bbox( px, py, n, i, bb );
+                    std::copy( bb, bb + 4, &bxs[ 4 * size_t( i ) ] );
+                    const int u0 = zof( bb[ 0 ] ), u1 = zof( bb[ 1 ] ), v0 = zof( bb[ 2 ] ), v1 = zof( bb[ 3 ] );
+                    for( int u = u0; u <= u1; ++u )
+                        for( int v = v0; v <= v1; ++v ) {
+                            const int z = zid( u, v );
+                            if( z < 0 ) continue;
+                            zr( u, v, r );
+                            const T pc = u0 == u1 && v0 == v1 ? ar : rect_area( px, py, n, r[ 0 ] - i / N, r[ 1 ] - i / N, r[ 2 ] - i % N, r[ 3 ] - i % N );
+                            E[ 2 * z ] += pc;
+                            E[ 2 * z + 1 ] += ( reach( bb, ( r[ 0 ] + r[ 1 ] ) / 2, ( r[ 2 ] + r[ 3 ] ) / 2 ) + s ) * s;
+                        }
+                }
+            } );
+            std::vector<T> E( 2 * size_t( nzones ), T( 0 ) );
+            for( auto &e : Et ) if( e.size() ) for( size_t z = 0; z < E.size(); ++z ) E[ z ] += e[ z ];
+            tb.bad.assign( nzones, 0 );
+            for( int z = 0; z < nzones; ++z ) {
+                T r[ 4 ]; int u, v; zuv( z, u, v ); zr( u, v, r );
+                const T az = ( r[ 1 ] - r[ 0 ] ) * ( r[ 3 ] - r[ 2 ] );
+                tb.bad[ z ] = E[ 2 * z ] - az > ztol( az, E[ 2 * z + 1 ] );
+                tb.nb_bad += tb.bad[ z ];
+            }
+            if( ! tb.nb_bad ) return tb;
+            std::vector<std::vector<int>> nx( par.nt );
+            par.slices( int( cells.size() ), SI( cells.size() ) * 16, [&]( int q0, int q1, int t ) {
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = cells[ q ];
+                    const T *bb = &bxs[ 4 * size_t( i ) ];
+                    if( bb[ 0 ] == inf ) continue;
+                    bool hit = false;
+                    for( int u = zof( bb[ 0 ] ); u <= zof( bb[ 1 ] ) && ! hit; ++u )
+                        for( int v = zof( bb[ 2 ] ); v <= zof( bb[ 3 ] ) && ! hit; ++v ) { const int z = zid( u, v ); hit = z >= 0 && tb.bad[ z ]; }
+                    if( hit ) nx[ t ].push_back( i );
+                }
+            } );
+            for( auto &x : nx ) tb.next.insert( tb.next.end(), x.begin(), x.end() );
+            return tb;
+        };
+
+        // ---- the cuts of the previous call past ring 1 ( `use_prev` ): the cells that had some start from their ring-1 polygon
+        // cut by them ( a superset of the cell still: the zones check it )
+        if( use_prev && prev_off.size() == size_t( nn ) + 1 && prev_off[ nn ] ) {
+            std::vector<int> xc;
+            for( int i = 0; i < nn; ++i ) if( prev_off[ i + 1 ] > prev_off[ i ] ) xc.push_back( i );
+            for( int i : xc ) take( i );
+            ek_index( 0, 0 );                            // ( the table, before the threads )
+            const int PP = pl1.plane(), nm1 = ek.nb_within( std::sqrt( T( 2 ) ) );
+            par.slices( int( xc.size() ), SI( xc.size() ) * 64, [&]( int q0, int q1, int ) {
+                T px[ C ], py[ C ], qx[ C ], qy[ C ], sv[ C ]; int pl[ C ], ql[ C ];
+                const int S = 2 * ek.RB + 1;
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = xc[ q ], ii = pl1.row( i / N ) + i % N + 1;
+                    int n = K1::D;
+                    for( int e = 0; e < K1::D; ++e ) {
+                        px[ e ] = pl1.vx[ ( ( e + K1::D - 1 ) % K1::D ) * PP + ii ];
+                        py[ e ] = pl1.vy[ ( ( e + K1::D - 1 ) % K1::D ) * PP + ii ];
+                        const int o = pl1.ow[ e * PP + ii ];
+                        pl[ e ] = o < 0 ? -1 : ek_idx[ size_t( T1::off_x[ o ] + ek.RB ) * S + T1::off_y[ o ] + ek.RB ];
+                    }
+                    Poly &p = polys[ slot[ i ] ];
+                    p.exh = p.fin = p.glob = false; p.nm = nm1; p.R = std::sqrt( T( 2 ) );
+                    if( inverted( px, py, K1::D, T1::dir_x, T1::dir_y ) ) { put( p, px, py, pl, 0 ); continue; }
+                    for( int r = prev_off[ i ]; r < prev_off[ i + 1 ] && n; ++r ) {
+                        const int j = prev_nb[ r ], dx = j / N - i / N, dy = j % N - i % N;
+                        if( std::abs( dx ) > ek.RB || std::abs( dy ) > ek.RB ) continue;
+                        const int o = ek_idx[ size_t( dx + ek.RB ) * S + dy + ek.RB ];
+                        const T fx = T( dx ), fy = T( dy ), cc = ( fx * fx + fy * fy + psi[ i ] - psi[ j ] ) / 2;
+                        bool out = false;
+                        for( int e = 0; e < n; ++e ) { sv[ e ] = fx * px[ e ] + fy * py[ e ] - cc; out |= sv[ e ] > 0; }
+                        if( ! out || n + 1 >= C ) continue;
+                        int m = 0;
+                        for( int e = 0; e < n; ++e ) {
+                            const int f = e + 1 == n ? 0 : e + 1;
+                            if( sv[ e ] <= 0 ) {
+                                qx[ m ] = px[ e ]; qy[ m ] = py[ e ]; ql[ m++ ] = pl[ e ];
+                                if( sv[ f ] > 0 ) { const T t = sv[ e ] / ( sv[ e ] - sv[ f ] ); qx[ m ] = px[ e ] + t * ( px[ f ] - px[ e ] ); qy[ m ] = py[ e ] + t * ( py[ f ] - py[ e ] ); ql[ m++ ] = o; }
+                            } else if( sv[ f ] <= 0 ) { const T t = sv[ e ] / ( sv[ e ] - sv[ f ] ); qx[ m ] = px[ e ] + t * ( px[ f ] - px[ e ] ); qy[ m ] = py[ e ] + t * ( py[ f ] - py[ e ] ); ql[ m++ ] = pl[ e ]; }
+                        }
+                        n = m;
+                        for( int e = 0; e < n; ++e ) { px[ e ] = qx[ e ]; py[ e ] = qy[ e ]; pl[ e ] = ql[ e ]; }
+                    }
+                    put( p, px, py, pl, n );
+                }
+            } );
+        }
+
+        // ---- ring 2 in SIMD on a list of cells, its planes read back as polygons ( offsets of T2 turned into those of `ek` )
+        const T R2s = 2 * std::sqrt( T( 2 ) );           // ( the disc of radius 2 sqrt 2 is the square ring 2 )
+        auto ring2_cells = [&]( const std::vector<int> &cl2 ) {
+            if( cl2.empty() ) return;
+            for( int i : cl2 ) take( i );
+            pad( 2, psi, p2 );
+            area2.resize( nn );
+            const int nm2 = ek.nb_within( R2s );
+            int to_ek[ T2::nb_offsets ];
+            for( int o = 0; o < T2::nb_offsets; ++o )
+                for( int q = 0; q < nm2; ++q ) if( ek.ox[ q ] == T2::off_x[ o ] && ek.oy[ q ] == T2::off_y[ o ] ) to_ek[ o ] = q;
+            const int nc = int( ( cl2.size() + B - 1 ) / B );
+            par.slices( nc, SI( cl2.size() ) * 64, [&]( int c0, int c1, int ) {
+                T px[ K2::D ], py[ K2::D ]; int pl[ K2::D ];
+                for( int c = c0; c < c1; ++c ) {
+                    const int *cl = cl2.data() + size_t( c ) * B, n = int( std::min<size_t>( B, cl2.size() - size_t( c ) * B ) );
+                    K2::cells_block( N, p2.data(), cl, n, area2.data(), nullptr, nullptr, &pl2 );
+                    const int PQ = pl2.plane();
+                    for( int x = 0; x < n; ++x ) {
+                        const int i = cl[ x ], ii = pl2.row( i / N ) + i % N + 2;
+                        for( int e = 0; e < K2::D; ++e ) {
+                            px[ e ] = pl2.vx[ ( ( e + K2::D - 1 ) % K2::D ) * PQ + ii ];
+                            py[ e ] = pl2.vy[ ( ( e + K2::D - 1 ) % K2::D ) * PQ + ii ];
+                            const int o = pl2.ow[ e * PQ + ii ];
+                            pl[ e ] = o < 0 ? -1 : to_ek[ o ];
+                        }
+                        Poly &p = polys[ slot[ i ] ];
+                        p.exh = p.fin = p.glob = false; p.nm = nm2; p.R = R2s;
+                        if( inverted( px, py, K2::D, T2::dir_x, T2::dir_y ) ) { put( p, px, py, pl, 0 ); continue; }
+                        // ( the vertices of the empty directions repeat: vertex e goes when e + 1 is the same point )
+                        int m = 0;
+                        for( int e = 0; e < K2::D; ++e ) {
+                            const int f = e + 1 == K2::D ? 0 : e + 1;
+                            if( px[ f ] == px[ e ] && py[ f ] == py[ e ] && m + ( K2::D - e ) > 3 ) continue;
+                            px[ m ] = px[ e ]; py[ m ] = py[ e ]; pl[ m ] = pl[ e ]; ++m;
+                        }
+                        put( p, px, py, pl, m );
+                    }
+                }
+            } );
+        };
+        // ---- a guess, not a proof: ring 2 on the cells whose ring-1 faces do not match their neighbours' ( the local
+        // certificate ); the tables check everything anyway
+        if( zone_predict ) {
+            std::vector<std::vector<int>> pt( par.nt );
+            par.slices( N, nn * 8, [&]( int a0, int a1, int t ) {
+                typename K1::CertTables ct;
+                for( int a = a0; a < a1; ++a ) {
+                    K1::certify_row( pl1, ct, a, flag2.data(), T( 1e-9 ) );
+                    for( int b = 0; b < N; ++b ) if( flag2[ a * N + b ] ) pt[ t ].push_back( a * N + b );
+                }
+            } );
+            std::fill( flag2.begin(), flag2.end(), 0 );
+            std::vector<int> pr;
+            for( auto &x : pt ) for( int i : x ) if( slot[ i ] < 0 ) pr.push_back( i );   // ( not those cut by the previous cuts )
+            ring2_cells( pr );
+            round_cells.push_back( int( pr.size() ) );
+        } else
+            round_cells.push_back( 0 );
+        lap( 2 );
+
+        // ---- round 0: the table of ring 1, by blocks of B cells of a row read from the planes ( contiguous ): their boxes, the
+        // inverted ones ( empty for good: a polygon of 0 vertices ); a cell inside one zone adds its area, the others their pieces
+        T s = T( zone0 );
+        int nzs = int( std::ceil( T( N ) / s ) );
+        std::vector<char> emp( nn, 0 );
+        Table tb;
+        {
+            const int PP = pl1.plane(), nz2 = nzs * nzs;
+            std::vector<std::vector<T>> Et( par.nt );
+            auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
+            par.slices( N, nn * 16, [&]( int a0, int a1, int t ) {
+                auto &E = Et[ t ];
+                E.assign( 2 * size_t( nz2 ), T( 0 ) );
+                for( int a = a0; a < a1; ++a )
+                    for( int b0 = 0; b0 < N; b0 += B ) {
+                        const int i0 = pl1.row( a ) + b0 + 1, n = std::min( B, N - b0 );
+                        alignas( 64 ) T x0[ B ], x1[ B ], y0[ B ], y1[ B ], sc[ B ];
+                        alignas( 64 ) unsigned char inv[ B ];
+                        #pragma omp simd
+                        for( int x = 0; x < B; ++x ) { x0[ x ] = y0[ x ] = inf; x1[ x ] = y1[ x ] = -inf; sc[ x ] = 1; inv[ x ] = 0; }
+                        for( int k = 0; k < K1::D; ++k ) {
+                            const T *vx = pl1.vx.data() + k * PP + i0, *vy = pl1.vy.data() + k * PP + i0;
+                            #pragma omp simd
+                            for( int x = 0; x < B; ++x ) {
+                                x0[ x ] = vx[ x ] < x0[ x ] ? vx[ x ] : x0[ x ]; x1[ x ] = vx[ x ] > x1[ x ] ? vx[ x ] : x1[ x ];   // ( not fmin / fmax: libm calls with gcc )
+                                y0[ x ] = vy[ x ] < y0[ x ] ? vy[ x ] : y0[ x ]; y1[ x ] = vy[ x ] > y1[ x ] ? vy[ x ] : y1[ x ];
+                                const T a1 = std::abs( vx[ x ] ) + std::abs( vy[ x ] );
+                                sc[ x ] = a1 > sc[ x ] ? a1 : sc[ x ];
+                            }
+                        }
+                        // edge k from plane vertex k - 1 to plane vertex k, along ( -dir_y, dir_x )
+                        for( int k = 0; k < K1::D; ++k ) {
+                            const int km = ( k + K1::D - 1 ) % K1::D;
+                            const T *vx = pl1.vx.data() + k * PP + i0, *vy = pl1.vy.data() + k * PP + i0, *wx = pl1.vx.data() + km * PP + i0, *wy = pl1.vy.data() + km * PP + i0;
+                            const T tx = -T( T1::dir_y[ k ] ), ty = T( T1::dir_x[ k ] );
+                            #pragma omp simd
+                            for( int x = 0; x < B; ++x ) inv[ x ] |= tx * ( vx[ x ] - wx[ x ] ) + ty * ( vy[ x ] - wy[ x ] ) < -T( 1e-9 ) * sc[ x ];
+                        }
+                        for( int x = 0; x < n; ++x ) {
+                            const int b = b0 + x, i = a * N + b;
+                            T *bb = &bxs[ 4 * size_t( i ) ];
+                            if( slot[ i ] >= 0 ) {               // ( rebuilt in ring 2 )
+                                const Poly &p = polys[ slot[ i ] ];
+                                if( p.n < 3 ) { bb[ 0 ] = inf; continue; }
+                                bbox( p.x.data(), p.y.data(), p.n, i, bb );
+                                const int u0 = zof( bb[ 0 ] ), u1 = zof( bb[ 1 ] ), v0 = zof( bb[ 2 ] ), v1 = zof( bb[ 3 ] );
+                                for( int u = u0; u <= u1; ++u )
+                                    for( int v = v0; v <= v1; ++v ) {
+                                        const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s );
+                                        const int z = u * nzs + v;
+                                        E[ 2 * z ] += u0 == u1 && v0 == v1 ? shoelace( p.x.data(), p.y.data(), p.n ) : rect_area( p.x.data(), p.y.data(), p.n, r0 - a, r1 - a, r2 - b, r3 - b );
+                                        E[ 2 * z + 1 ] += ( reach( bb, ( r0 + r1 ) / 2, ( r2 + r3 ) / 2 ) + s ) * s;
+                                    }
+                                continue;
+                            }
+                            bb[ 0 ] = x0[ x ] + a; bb[ 1 ] = x1[ x ] + a; bb[ 2 ] = y0[ x ] + b; bb[ 3 ] = y1[ x ] + b;
+                            if( inv[ x ] ) { emp[ i ] = 1; continue; }
+                            const int u0 = zof( bb[ 0 ] ), u1 = zof( bb[ 1 ] ), v0 = zof( bb[ 2 ] ), v1 = zof( bb[ 3 ] );
+                            if( u0 == u1 && v0 == v1 ) {
+                                const int z = u0 * nzs + v0;
+                                E[ 2 * z ] += area1[ i ];
+                                E[ 2 * z + 1 ] += ( reach( bb, lo + ( u0 + T( 0.5 ) ) * s, lo + ( v0 + T( 0.5 ) ) * s ) + s ) * s;
+                                continue;
+                            }
+                            T px[ K1::D ], py[ K1::D ];
+                            for( int e = 0; e < K1::D; ++e ) { px[ e ] = pl1.vx[ ( ( e + K1::D - 1 ) % K1::D ) * PP + i0 + x ]; py[ e ] = pl1.vy[ ( ( e + K1::D - 1 ) % K1::D ) * PP + i0 + x ]; }
+                            for( int u = u0; u <= u1; ++u )
+                                for( int v = v0; v <= v1; ++v ) {
+                                    const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s );
+                                    const int z = u * nzs + v;
+                                    E[ 2 * z ] += rect_area( px, py, K1::D, r0 - a, r1 - a, r2 - b, r3 - b );
+                                    E[ 2 * z + 1 ] += ( reach( bb, ( r0 + r1 ) / 2, ( r2 + r3 ) / 2 ) + s ) * s;
+                                }
+                        }
+                    }
+            } );
+            std::vector<T> E( 2 * size_t( nz2 ), T( 0 ) );
+            for( auto &e : Et ) if( e.size() ) for( size_t z = 0; z < E.size(); ++z ) E[ z ] += e[ z ];
+            tb.bad.assign( nz2, 0 );
+            // ( a prefix sum of the bad zones: does a box meet one, in O( 1 ) )
+            std::vector<int> ps( size_t( nzs + 1 ) * ( nzs + 1 ), 0 );
+            for( int u = 0; u < nzs; ++u )
+                for( int v = 0; v < nzs; ++v ) {
+                    const int z = u * nzs + v;
+                    const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s ), az = ( r1 - r0 ) * ( r3 - r2 );
+                    tb.bad[ z ] = E[ 2 * z ] - az > ztol( az, E[ 2 * z + 1 ] );
+                    tb.nb_bad += tb.bad[ z ];
+                    ps[ size_t( u + 1 ) * ( nzs + 1 ) + v + 1 ] = tb.bad[ z ] + ps[ size_t( u ) * ( nzs + 1 ) + v + 1 ] + ps[ size_t( u + 1 ) * ( nzs + 1 ) + v ] - ps[ size_t( u ) * ( nzs + 1 ) + v ];
+                }
+            for( int i = 0; i < nn; ++i ) if( emp[ i ] ) { take( i ).n = 0; polys[ slot[ i ] ].exh = false; }
+            if( tb.nb_bad ) {
+                std::vector<std::vector<int>> nx( par.nt );
+                par.slices( N, nn * 4, [&]( int a0, int a1, int t ) {
+                    for( int i = a0 * N; i < a1 * N; ++i ) {
+                        if( emp[ i ] ) continue;
+                        const T *bb = &bxs[ 4 * size_t( i ) ];
+                        if( bb[ 0 ] == inf ) continue;
+                        const int u0 = zof( bb[ 0 ] ), u1 = zof( bb[ 1 ] ) + 1, v0 = zof( bb[ 2 ] ), v1 = zof( bb[ 3 ] ) + 1;
+                        if( ps[ size_t( u1 ) * ( nzs + 1 ) + v1 ] - ps[ size_t( u0 ) * ( nzs + 1 ) + v1 ] - ps[ size_t( u1 ) * ( nzs + 1 ) + v0 ] + ps[ size_t( u0 ) * ( nzs + 1 ) + v0 ] ) nx[ t ].push_back( i );
+                    }
+                } );
+                for( auto &x : nx ) tb.next.insert( tb.next.end(), x.begin(), x.end() );
+            }
+        }
+        std::vector<int> cells, zgrid;
+        round_bad.push_back( tb.nb_bad );
+        lap( 1 );
+
+        // ---- the next rounds
+        std::vector<std::pair<int,int>> bad_uv;          // the bad zones of the last table, at side s
+        for( int z = 0; z < int( tb.bad.size() ); ++z ) if( tb.bad[ z ] ) bad_uv.push_back( { z / nzs, z % nzs } );
+        bool padded = false;
+        if( rebuild_tree && tb.nb_bad ) {
+            // every cell of the bad zones to its exact cell, by the mipmap: the bad zones then hold exact cells only, no more table
+            build_mip( psi );
+            const std::vector<int> &cl = tb.next;
+            std::vector<char> had( cl.size() );
+            for( size_t q = 0; q < cl.size(); ++q ) { had[ q ] = slot[ cl[ q ] ] >= 0; take( cl[ q ] ); }
+            const int PP = pl1.plane();
+            par.slices( int( cl.size() ), SI( cl.size() ) * 1024, [&]( int q0, int q1, int ) {
+                T px[ C ], py[ C ]; int nb[ C ], n;
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = cl[ q ];
+                    Poly &p = polys[ slot[ i ] ];
+                    if( had[ q ] ) {
+                        n = p.n; std::copy( p.x.begin(), p.x.end(), px ); std::copy( p.y.begin(), p.y.end(), py );
+                        for( int e = 0; e < n; ++e ) nb[ e ] = p.glob || p.pl[ e ] < 0 ? p.pl[ e ] : i + ek.ox[ p.pl[ e ] ] * N + ek.oy[ p.pl[ e ] ];
+                    } else {
+                        const int ii = pl1.row( i / N ) + i % N + 1;
+                        n = K1::D;
+                        for( int e = 0; e < K1::D; ++e ) {
+                            px[ e ] = pl1.vx[ ( ( e + K1::D - 1 ) % K1::D ) * PP + ii ];
+                            py[ e ] = pl1.vy[ ( ( e + K1::D - 1 ) % K1::D ) * PP + ii ];
+                            const int o = pl1.ow[ e * PP + ii ];
+                            nb[ e ] = o < 0 ? -1 : i + T1::off_x[ o ] * N + T1::off_y[ o ];
+                        }
+                    }
+                    p.exh = n && ! tree_clip( i, psi, px, py, nb, n, 1 );   // ( every seed of the 3 x 3 stencil cut it already )
+                    put( p, px, py, nb, n );
+                    p.glob = true; p.fin = true;
+                }
+            } );
+            n_rounds = 1;
+            round_cells.push_back( int( cl.size() ) ); round_bad.push_back( 0 );
+            lap( 2 );
+            tb.nb_bad = 0;
+        }
+        for( int k = 1; tb.nb_bad; ++k ) {
+            // the cells of the bad zones: ring 2 for those still in ring 1, the others from their polygon with the seeds within twice
+            // their radius ( past the list of `ek`: the exact path, once )
+            std::vector<int> fresh, more;
+            for( int i : tb.next ) {
+                if( slot[ i ] < 0 ) fresh.push_back( i );
+                else if( ! polys[ slot[ i ] ].fin ) more.push_back( i );
+            }
+            if( fresh.empty() && more.empty() ) break;
+            ring2_cells( fresh );
+            if( more.size() && ! padded ) { pad( ek.RB, psi, pe ); pmax = *std::max_element( psi.begin(), psi.end() ); if( use_tree ) build_mip( psi ); padded = true; }
+            par.slices( int( more.size() ), SI( more.size() ) * 4096, [&]( int q0, int q1, int ) {
+                T px[ C ], py[ C ]; int pl[ C ], n;
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = more[ q ];
+                    Poly &p = polys[ slot[ i ] ];
+                    if( use_tree && ! p.glob ) {             // ( from the ring-2 polygon, its neighbours made global )
+                        n = p.n; std::copy( p.x.begin(), p.x.end(), px ); std::copy( p.y.begin(), p.y.end(), py );
+                        int nb[ C ];
+                        for( int e = 0; e < n; ++e ) nb[ e ] = p.pl[ e ] < 0 ? -1 : i + ek.ox[ p.pl[ e ] ] * N + ek.oy[ p.pl[ e ] ];
+                        const int skip = p.R <= R2s * T( 1.0001 ) ? 2 : -1;
+                        if( tree_clip( i, psi, px, py, nb, n, skip ) ) {
+                            put( p, px, py, nb, n );
+                            p.glob = true; p.fin = true; p.exh = false;
+                            continue;
+                        }
+                    }
+                    const T R = 2 * p.R;
+                    const bool last = R > T( ek.RB );
+                    const int nm = last ? -1 : ek.nb_within( R );
+                    n = p.n; std::copy( p.x.begin(), p.x.end(), px ); std::copy( p.y.begin(), p.y.end(), py ); std::copy( p.pl.begin(), p.pl.end(), pl );
+                    if( ! last && use_reg && reg_clip( i, px, py, pl, n, p.nm, nm ) ) p.exh = false;
+                    else {
+                        n = p.n; std::copy( p.x.begin(), p.x.end(), px ); std::copy( p.y.begin(), p.y.end(), py ); std::copy( p.pl.begin(), p.pl.end(), pl );
+                        p.exh = ! ek.clip_range( N, pe.data(), last ? pmax : inf, i / N, i % N, px, py, pl, n, p.nm, nm );
+                    }
+                    put( p, px, py, pl, n );
+                    p.nm = last ? int( ek.ox.size() ) : nm; p.R = R; p.fin = last;
+                }
+            } );
+            cells.clear();
+            cells.insert( cells.end(), fresh.begin(), fresh.end() );
+            cells.insert( cells.end(), more.begin(), more.end() );
+            n_rounds = k;
+            lap( 2 );
+            // the table of the halves of the bad zones ( or of the bad zones, at `zone_min` )
+            const bool split = s / 2 >= zone_min;
+            std::vector<std::pair<int,int>> zs;
+            for( auto [ u, v ] : bad_uv )
+                for( int cu = 0; cu <= int( split ); ++cu )
+                    for( int cv = 0; cv <= int( split ); ++cv ) {
+                        const int uu = split ? 2 * u + cu : u, vv = split ? 2 * v + cv : v;
+                        if( lo + uu * ( split ? s / 2 : s ) >= hi || lo + vv * ( split ? s / 2 : s ) >= hi ) continue;
+                        zs.push_back( { uu, vv } );
+                    }
+            if( split ) { s /= 2; nzs = int( std::ceil( T( N ) / s ) ); }
+            zgrid.assign( size_t( nzs ) * nzs, -1 );     // ( the zones of the table, by their place in the grid of side s )
+            for( int z = 0; z < int( zs.size() ); ++z ) zgrid[ size_t( zs[ z ].first ) * nzs + zs[ z ].second ] = z;
+            auto rebuilt = [&]( int i, T *px, T *py, T &ar ) {
+                const Poly &p = polys[ slot[ i ] ];
+                std::copy( p.x.begin(), p.x.end(), px ); std::copy( p.y.begin(), p.y.end(), py );
+                ar = p.n >= 3 ? shoelace( px, py, p.n ) : T( 0 );
+                return p.n;
+            };
+            tb = table( s, nzs, cells, int( zs.size() ),
+                        [&]( int u, int v ) { return zgrid[ size_t( u ) * nzs + v ]; },
+                        [&]( int z, int &u, int &v ) { u = zs[ z ].first; v = zs[ z ].second; }, rebuilt );
+            round_cells.push_back( int( cells.size() ) ); round_bad.push_back( tb.nb_bad );
+            bad_uv.clear();
+            for( int z = 0; z < int( zs.size() ); ++z ) if( tb.bad[ z ] ) bad_uv.push_back( zs[ z ] );
+            lap( 3 );
+        }
+        n_flag1 = nb_polys;
+        for( int q = 0; q < nb_polys; ++q ) n_exact += polys[ q ].fin;
+
+        // the cuts past ring 1, for the next call ( the cells of ring 1 have none )
+        if( use_prev ) {
+            prev_off.assign( size_t( nn ) + 1, 0 );
+            std::vector<std::pair<int,int>> pj;
+            for( int i = 0; i < nn; ++i ) {
+                if( slot[ i ] < 0 ) continue;
+                const Poly &p = polys[ slot[ i ] ];
+                for( int e = 0; e < p.n; ++e ) {
+                    if( p.pl[ e ] < 0 ) continue;
+                    const int j = p.glob ? p.pl[ e ] : i + ek.ox[ p.pl[ e ] ] * N + ek.oy[ p.pl[ e ] ];
+                    if( std::abs( j / N - i / N ) > 1 || std::abs( j % N - i % N ) > 1 ) pj.push_back( { i, j } );
+                }
+            }
+            std::sort( pj.begin(), pj.end() );
+            pj.erase( std::unique( pj.begin(), pj.end() ), pj.end() );
+            prev_nb.resize( pj.size() );
+            for( size_t r = 0; r < pj.size(); ++r ) { ++prev_off[ pj[ r ].first + 1 ]; prev_nb[ r ] = pj[ r ].second; }
+            for( int i = 0; i < nn; ++i ) prev_off[ i + 1 ] += prev_off[ i ];
+        }
+    }
+
+    void geometry_cert( const std::vector<T> &psi ) {
+        ensure_planes();
         const T tol = 1e-9;
         const SI nn = SI( N ) * N;
         // ring 1 on every cell, then its certificate ( a row needs the rows a - 1 .. a + 1: two launches )
@@ -375,7 +1097,253 @@ struct Evaluator {
         }
     }
 
+    /// THE CELL OF SEED i AT LEVEL lv ( `run_zones` ), relative to its seed, edge e toward `nbr[ e ]` ( -1: the box ): 0 or 1 ring 1
+    /// ( `p1` ), 2.. the seeds within sqrt( 2 ) 2^( lv - 1 ), 255 the exact clipping with psi_max ( `pe`, `pmax` )
+    int level_polygon( int i, int lv, T *px, T *py, int *nbr, bool &exh ) const {
+        int pl[ ExactKernel<T>::C ], n;
+        const int a = i / N, b = i % N;
+        if( lv <= 1 ) {
+            ek1.clip( N, p1.data(), std::numeric_limits<T>::infinity(), a, b, px, py, pl, n, 8 );
+            for( int e = 0; e < n; ++e ) nbr[ e ] = pl[ e ] < 0 ? -1 : i + ek1.ox[ pl[ e ] ] * N + ek1.oy[ pl[ e ] ];
+            return n;
+        }
+        const bool last = lv == 255;
+        const int nm = last ? -1 : ek.nb_within( std::sqrt( T( 2 ) ) * T( 1 << std::min( lv - 1, 20 ) ) );
+        if( ! ek.clip( N, pe.data(), last ? pmax : std::numeric_limits<T>::infinity(), a, b, px, py, pl, n, nm ) ) exh = true;
+        for( int e = 0; e < n; ++e ) nbr[ e ] = pl[ e ] < 0 ? -1 : i + ek.ox[ pl[ e ] ] * N + ek.oy[ pl[ e ] ];
+        return n;
+    }
+    int next_level( int lv ) const {
+        if( lv == 255 ) return 255;
+        const int nl = std::max( lv, 1 ) + 1;
+        return std::sqrt( T( 2 ) ) * T( 1 << std::min( nl - 1, 20 ) ) > T( ek.RB ) ? 255 : nl;
+    }
+
+    /// THE DIAGRAM OF `psi` BY THE ZONE CERTIFICATE, FUSED ( `gpu/GridNewton2D.cuh::run_zones` ): each block of B cells of a row built
+    /// in ring 1 ( a rolling buffer of planes per thread ), integrated in SIMD and added to the first table at once; then the cells of
+    /// the bad zones rebuilt a level further ( `level_polygon` ), integrated and added to the table of the halves of the bad zones,
+    /// until no zone is bad. What a cell keeps: its level and its box.
+    void run_zones( const std::vector<T> &psi ) {
+        const double t0 = now_ms();
+        const SI nn = SI( N ) * N;
+        constexpr int C = ExactKernel<T>::C;
+        const T inf = std::numeric_limits<T>::infinity(), lo = T( -0.5 ), hi = T( N ) - T( 0.5 );
+        pad( 1, psi, p1 );
+        lvl.assign( nn, 0 );
+        fused_last = true;
+        zbx.resize( 4 * size_t( nn ) );
+        n_flag1 = n_exact = n_rounds = 0;
+        round_cells.clear(); round_bad.clear();
+        for( auto &e : ex_th ) e.clear();
+        double tz = now_ms();
+        auto lap = [&]( int k ) { const double t = now_ms(); t_zone[ k ] += t - tz; tz = t; };
+        const T sn = T( 1e-13 );                         // ( a cell past a zone line by rounding only is in one zone, see the card's )
+        auto ztol = [&]( T az, T sr ) { return T( 1e-14 ) * ( az + sr ); };
+        auto put_box = [&]( int i, const T *bb ) {
+            float *z = &zbx[ 4 * size_t( i ) ];
+            z[ 0 ] = std::nextafter( float( bb[ 0 ] + sn ), -INFINITY ); z[ 1 ] = std::nextafter( float( bb[ 1 ] - sn ), INFINITY );
+            z[ 2 ] = std::nextafter( float( bb[ 2 ] + sn ), -INFINITY ); z[ 3 ] = std::nextafter( float( bb[ 3 ] - sn ), INFINITY );
+        };
+        auto empty_box = [&]( int i ) { zbx[ 4 * size_t( i ) ] = 1; zbx[ 4 * size_t( i ) + 1 ] = 0; };
+        // the pieces of a polygon cell ( absolute box bb ) in the zones of side s that `in( u, v )` counts
+        auto pieces = [&]( int i, const T *px, const T *py, int n, T ar, const T *bb, T s, int nzs, auto &&in, std::vector<T> &E ) {
+            auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
+            const int a = i / N, b = i % N;
+            const int u0 = zof( bb[ 0 ] + sn ), u1 = zof( bb[ 1 ] - sn ), v0 = zof( bb[ 2 ] + sn ), v1 = zof( bb[ 3 ] - sn );
+            for( int u = u0; u <= u1; ++u )
+                for( int v = v0; v <= v1; ++v ) {
+                    if( ! in( u, v ) ) continue;
+                    const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s );
+                    const size_t z = size_t( u ) * nzs + v;
+                    E[ 2 * z ] += u0 == u1 && v0 == v1 ? ar : rect_area( px, py, n, r0 - a, r1 - a, r2 - b, r3 - b );
+                    const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
+                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + s ) * s;
+                }
+        };
+        // a polygon cell integrated ( its faces out of ring 1 tagged with its level ) and added to a table
+        auto integrate_poly = [&]( int t, int i, const T *px, const T *py, const int *nbr, int n, int lv ) {
+            T face[ C ];
+            clear_faces( i );
+            if( n < 3 ) { mass[ i ] = 0; return; }
+            integ[ t ].polygon( n, px, py, T( i / N ), T( i % N ), mass[ i ], face );
+            for( int e = 0; e < n; ++e ) {
+                const int j = nbr[ e ];
+                if( j < 0 || face[ e ] == 0 ) continue;
+                const T w = face[ e ] / ( 2 * std::hypot( T( j / N - i / N ), T( j % N - i % N ) ) );
+                const int k = dir1( j / N - i / N, j % N - i % N );
+                if( k >= 0 ) W[ k * P1 * P1 + ( i / N + 1 ) * P1 + i % N + 1 ] = w;
+                else ex_th[ t ].push_back( { i, j, w, ( unsigned char ) lv } );
+            }
+        };
+        auto box_of = [&]( int i, const T *px, const T *py, int n, T *bb, T &ar ) {
+            bb[ 0 ] = bb[ 2 ] = inf; bb[ 1 ] = bb[ 3 ] = -inf; ar = 0;
+            for( int e = 0; e < n; ++e ) {
+                const int f = e + 1 == n ? 0 : e + 1;
+                bb[ 0 ] = std::min( bb[ 0 ], px[ e ] ); bb[ 1 ] = std::max( bb[ 1 ], px[ e ] ); bb[ 2 ] = std::min( bb[ 2 ], py[ e ] ); bb[ 3 ] = std::max( bb[ 3 ], py[ e ] );
+                ar += px[ e ] * py[ f ] - py[ e ] * px[ f ];
+            }
+            ar /= 2;
+            bb[ 0 ] += i / N; bb[ 1 ] += i / N; bb[ 2 ] += i % N; bb[ 3 ] += i % N;
+        };
+
+        // ---- ring 1, every cell: built, integrated, into the first table
+        T s = T( zone0 );
+        int nzs = int( std::ceil( T( N ) / s ) );
+        std::vector<std::vector<T>> Et( par.nt );
+        std::vector<std::vector<int>> fine_l( par.nt );
+        par.slices( N, nn * 64, [&]( int a0, int a1, int t ) {
+            auto &E = Et[ t ];
+            E.assign( 2 * size_t( nzs ) * nzs, T( 0 ) );
+            auto &fl = fine_l[ t ];
+            fl.clear();
+            typename K1::Planes rp( N, true, false );    // ( the rows of this thread only, in a ring )
+            rp.fill( 0, rp.slots );
+            const int PP = rp.plane();
+            auto &rb = row_th[ t ];
+            rb.resize( size_t( N ) * ( 1 + 2 * K1::D ) );
+            T *area = rb.data(), *hess = area + N;
+            signed char *own = reinterpret_cast<signed char *>( hess + N * K1::D );
+            auto all = []( int, int ) { return true; };
+            for( int a = a0; a < a1; ++a )
+                for( int b0 = 0; b0 < N; b0 += B ) {
+                    const int n = std::min( B, N - b0 );
+                    K1::row_block( N, p1.data(), a, b0, B, area, hess, own, nullptr, &rp );
+                    const int i0 = rp.row( a ) + b0 + 1;
+                    alignas( 64 ) T vx[ 8 ][ B ], vy[ 8 ][ B ], face[ 8 ][ B ], ms[ B ], sa[ B ], sb[ B ];
+                    alignas( 64 ) unsigned char bad[ B ] = {};
+                    for( int k = 0; k < 8; ++k )
+                        for( int x = 0; x < B; ++x ) { vx[ k ][ x ] = rp.vx[ k * PP + i0 + x ]; vy[ k ][ x ] = rp.vy[ k * PP + i0 + x ]; }
+                    for( int x = 0; x < B; ++x ) { sa[ x ] = a; sb[ x ] = b0 + x; }
+                    if constexpr ( Integ::has_simd ) integ[ t ].template cells<8,B>( vx, vy, sa, sb, ms, face, bad );
+                    else for( int x = 0; x < B; ++x ) bad[ x ] = 1;
+                    for( int x = 0; x < n; ++x ) {
+                        const int i = a * N + b0 + x;
+                        // the polygon ( vertex e = plane vertex e - 1 ), inverted: empty
+                        T px[ 8 ], py[ 8 ], sc = 1;
+                        for( int e = 0; e < 8; ++e ) { px[ e ] = vx[ ( e + 7 ) & 7 ][ x ]; py[ e ] = vy[ ( e + 7 ) & 7 ][ x ]; sc = std::max( sc, std::abs( px[ e ] ) + std::abs( py[ e ] ) ); }
+                        bool inv = false;
+                        for( int e = 0; e < 8; ++e ) { const int f = ( e + 1 ) & 7; inv |= -T( T1::dir_y[ e ] ) * ( px[ f ] - px[ e ] ) + T( T1::dir_x[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc; }
+                        if( inv ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                        if( bad[ x ] ) fl.push_back( i );
+                        else {
+                            mass[ i ] = ms[ x ];
+                            const signed char *ow = rp.ow.data() + i0 + x;
+                            for( int k = 0; k < 8; ++k )
+                                W[ k * P1 * P1 + ( a + 1 ) * P1 + b0 + x + 1 ] = ow[ k * PP ] >= 0 ? face[ k ][ x ] * T( 0.5 ) * T( T1::dir_inv_norm[ k ] ) : T( 0 );
+                        }
+                        T bb[ 4 ], ar;
+                        box_of( i, px, py, 8, bb, ar );
+                        put_box( i, bb );
+                        pieces( i, px, py, 8, area[ b0 + x ], bb, s, nzs, all, E );
+                    }
+                }
+        } );
+        // ( the cells the SIMD rules could not take: the scalar rule on their ring-1 polygon )
+        par.slices( par.nt, nn, [&]( int t0_, int t1_, int ) {
+            for( int t = t0_; t < t1_; ++t )
+                for( int i : fine_l[ t ] ) {
+                    T px[ C ], py[ C ]; int nbr[ C ]; bool e = false;
+                    const int n = level_polygon( i, 1, px, py, nbr, e );
+                    integrate_poly( t, i, px, py, nbr, n, 1 );
+                }
+        } );
+        std::vector<T> E( 2 * size_t( nzs ) * nzs, T( 0 ) );
+        for( auto &e : Et ) if( e.size() ) for( size_t z = 0; z < E.size(); ++z ) E[ z ] += e[ z ];
+        std::vector<char> bad( size_t( nzs ) * nzs, 0 ), prev;
+        int nbad = 0;
+        auto judge = [&]( T s, int nzs, auto &&in ) {
+            nbad = 0;
+            bad.assign( size_t( nzs ) * nzs, 0 );
+            for( int u = 0; u < nzs; ++u )
+                for( int v = 0; v < nzs; ++v ) {
+                    if( ! in( u, v ) ) continue;
+                    const size_t z = size_t( u ) * nzs + v;
+                    const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s ), az = ( r1 - r0 ) * ( r3 - r2 );
+                    bad[ z ] = E[ 2 * z ] - az > ztol( az, E[ 2 * z + 1 ] );
+                    nbad += bad[ z ];
+                }
+        };
+        judge( s, nzs, []( int, int ) { return true; } );
+        round_bad.push_back( nbad ); round_cells.push_back( 0 );
+        lap( 0 );
+
+        // ---- the rounds
+        bool padded = false;
+        std::vector<std::vector<int>> rl_th( par.nt );
+        for( int k = 1; nbad && k < 64; ++k ) {
+            // the cells whose box meets a bad zone
+            par.slices( N, nn, [&]( int a0, int a1, int t ) {
+                auto &rl = rl_th[ t ];
+                rl.clear();
+                auto zof = [&]( float x ) { return std::clamp( int( std::floor( ( T( x ) - lo ) / s ) ), 0, nzs - 1 ); };
+                for( int i = a0 * N; i < a1 * N; ++i ) {
+                    const float *z = &zbx[ 4 * size_t( i ) ];
+                    if( z[ 0 ] > z[ 1 ] ) continue;
+                    bool hit = false;
+                    for( int u = zof( z[ 0 ] ); u <= zof( z[ 1 ] ) && ! hit; ++u )
+                        for( int v = zof( z[ 2 ] ); v <= zof( z[ 3 ] ) && ! hit; ++v ) hit = bad[ size_t( u ) * nzs + v ];
+                    if( hit ) rl.push_back( i );
+                }
+            } );
+            std::vector<int> rl;
+            for( auto &x : rl_th ) rl.insert( rl.end(), x.begin(), x.end() );
+            if( rl.empty() ) break;
+            if( ! padded ) { pad( ek.RB, psi, pe ); pmax = *std::max_element( psi.begin(), psi.end() ); padded = true; }
+            // the next table: the halves of the bad zones
+            const bool split = s / 2 >= zone_min;
+            const T s2 = split ? s / 2 : s;
+            const int nz2 = int( std::ceil( T( N ) / s2 ) ), ratio = split ? 2 : 1;
+            prev.swap( bad );
+            const int pnzs = nzs;
+            auto in2 = [&]( int u, int v ) { return bool( prev[ size_t( u / ratio ) * pnzs + v / ratio ] ); };
+            std::vector<int> live( par.nt, 0 ), exh( par.nt, 0 );
+            par.slices( int( rl.size() ), SI( rl.size() ) * 4096, [&]( int q0, int q1, int t ) {
+                auto &E = Et[ t ];
+                E.assign( 2 * size_t( nz2 ) * nz2, T( 0 ) );
+                T px[ C ], py[ C ]; int nbr[ C ];
+                for( int q = q0; q < q1; ++q ) {
+                    const int i = rl[ q ], nl = next_level( lvl[ i ] );
+                    live[ t ] += lvl[ i ] != 255;
+                    lvl[ i ] = ( unsigned char ) nl;
+                    bool e = false;
+                    const int n = level_polygon( i, nl, px, py, nbr, e );
+                    exh[ t ] |= e;
+                    integrate_poly( t, i, px, py, nbr, n, nl );
+                    if( n < 3 ) { empty_box( i ); continue; }
+                    T bb[ 4 ], ar;
+                    box_of( i, px, py, n, bb, ar );
+                    put_box( i, bb );
+                    pieces( i, px, py, n, ar, bb, s2, nz2, in2, E );
+                }
+            } );
+            E.assign( 2 * size_t( nz2 ) * nz2, T( 0 ) );
+            for( auto &e : Et ) if( e.size() == E.size() ) for( size_t z = 0; z < E.size(); ++z ) E[ z ] += e[ z ];
+            s = s2; nzs = nz2;
+            judge( s, nzs, in2 );
+            n_rounds = k;
+            round_cells.push_back( int( rl.size() ) ); round_bad.push_back( nbad );
+            int nlive = 0; for( int x : live ) nlive += x;
+            bool ex = false; for( int x : exh ) ex = ex || x;
+            if( ex ) exhausted = true;
+            if( ! nlive ) break;
+        }
+        lap( 2 );
+        for( int i = 0; i < nn; ++i ) { n_flag1 += lvl[ i ] > 1; n_exact += lvl[ i ] == 255; }
+        // the faces out of ring 1: those of the last level of each cell
+        for( auto &x : ex_th ) x.erase( std::remove_if( x.begin(), x.end(), [&]( const Extra &e ) { return e.l != std::max<unsigned char>( lvl[ e.i ], 1 ); } ), x.end() );
+        gather_extras();
+        if constexpr ( ! Integ::exact )
+            symmetrize();
+        t_geom += now_ms() - t0;
+        if( exhausted && ek.RB < N ) {                   // ( a cell past the rings: twice as many )
+            ek = ExactKernel<T>( std::min( 2 * ek.RB, N ) );
+            exhausted = false;
+            run_zones( psi );
+        }
+    }
+
     void run( const std::vector<T> &psi ) {
+        if constexpr ( Integ::simd ) if( use_zones && fused_zones ) { run_zones( psi ); return; }
         double t0 = now_ms();
         exhausted = false;
         geometry( psi );

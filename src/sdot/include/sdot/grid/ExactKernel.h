@@ -27,25 +27,37 @@ struct ExactKernel {
 
     static constexpr int C = 128;
 
+    // the number of offsets within distance r ( the list is sorted by distance )
+    int nb_within( T r ) const { return int( std::upper_bound( nk.begin(), nk.end(), r * ( 1 + T( 1e-12 ) ) ) - nk.begin() ); }
+
     // the cell as a polygon relative to the seed: n vertices, edge e from vertex e to e+1 carries the
     // offset index pl[ e ] ( -1: box ). Returns false if the list was exhausted before the security radius.
-    bool clip( int N, const T *psi_pad, T psi_max, int a, int b, T *px, T *py, int *pl, int &n ) const {
-        const int P = N + 2 * RB;
-        T qx[ C ], qy[ C ];
-        int ql[ C ];
+    // `nmax` >= 0: only the first `nmax` offsets ( the nearest ), no security radius ( a superset of the cell ), returns true.
+    bool clip( int N, const T *psi_pad, T psi_max, int a, int b, T *px, T *py, int *pl, int &n, int nmax = -1 ) const {
         n = 4;
         px[ 0 ] = -a - T( 0.5 ); py[ 0 ] = -b - T( 0.5 ); pl[ 0 ] = -1;
         px[ 1 ] = N - T( 0.5 ) - a; py[ 1 ] = -b - T( 0.5 ); pl[ 1 ] = -1;
         px[ 2 ] = N - T( 0.5 ) - a; py[ 2 ] = N - T( 0.5 ) - b; pl[ 2 ] = -1;
         px[ 3 ] = -a - T( 0.5 ); py[ 3 ] = N - T( 0.5 ) - b; pl[ 3 ] = -1;
+        return clip_range( N, psi_pad, psi_max, a, b, px, py, pl, n, 0, nmax );
+    }
+
+    // the polygon ( px, py, pl, n ) clipped further by the offsets [ o0, nmax ) ( nmax < 0: to the end of the list, with the
+    // security radius ); what `clip` does from the box
+    bool clip_range( int N, const T *psi_pad, T psi_max, int a, int b, T *px, T *py, int *pl, int &n, int o0, int nmax = -1 ) const {
+        const int P = N + 2 * RB;
+        T qx[ C ], qy[ C ];
+        int ql[ C ];
+        if( n == 0 ) return true;
         const T *pi = psi_pad + ( a + RB ) * P + ( b + RB );
         T R2 = 0;
         for( int e = 0; e < n; ++e ) R2 = std::max( R2, px[ e ] * px[ e ] + py[ e ] * py[ e ] );
-        bool done = false;
-        for( size_t o = 0; o < ox.size(); ++o ) {
+        bool done = nmax >= 0;
+        const size_t no = nmax >= 0 ? std::min( size_t( nmax ), ox.size() ) : ox.size();
+        for( size_t o = o0; o < no; ++o ) {
             if( n + 1 >= C ) return false;               // ( a cut adds one vertex at most )
             const T R = std::sqrt( R2 ), k = nk[ o ];
-            if( k >= R && k * k - 2 * k * R + pi[ 0 ] - psi_max > 0 ) { done = true; break; }
+            if( k >= R && k * k - 2 * k * R + pi[ 0 ] - psi_max > 0 ) { done = true; break; }   // ( never with psi_max = +inf )
             const int na = a + ox[ o ], nb = b + oy[ o ];
             if( na < 0 || na >= N || nb < 0 || nb >= N ) continue;
             const T kx = ox[ o ], ky = oy[ o ];

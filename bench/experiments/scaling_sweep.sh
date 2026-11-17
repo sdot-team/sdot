@@ -5,7 +5,7 @@
 THREADS=${1:-"1 2 4 8 16"}
 OUT=runs/scaling-${2:-n20}
 B=sdot-ffi/bench
-run() { python -m errand run -k bench --out "$OUT/$1-{params}" "$B/$2::*" "${@:3}"; }
+run() { python -m errand run -x --out "$OUT/$1-{params}" "$B/$2::*" "${@:3}"; }
 
 echo "== $(hostname): $(grep -m1 'model name' /proc/cpuinfo); allowed CPUs: $(taskset -cp $$ | cut -d: -f2)"
 lscpu | grep -E 'Socket|Core|Thread|NUMA|MHz' || true

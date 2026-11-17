@@ -511,7 +511,7 @@ class PowerDiagram_Bsp( PowerDiagram ):
 
     # ---- what the `SdotPlanNd` solver writes -------------------------------------------------------------
 
-    def _solver_weights_call( self ):
+    def _solver_weights_call( self, quad = False ):
         """`( C++ expression of the diagram with WRITABLE weights, kwargs of the call, what has to be
         taken back afterwards )`: the sorted weights and the tree majorants are OUTPUTS of the call
         ( `PowerDiagram_Bsp.h::with_weights` ), which `_solver_weights_after` adopts"""
@@ -521,6 +521,12 @@ class PowerDiagram_Bsp( PowerDiagram ):
         args = dict( sorted_weights_out = sw, node_wa_out = wa, node_wb_out = wb )
         expr = ( "inputs.power_diagram.with_weights( outputs.sorted_weights_out, outputs.node_wa_out, "
                  "outputs.node_wb_out" )
+        # `quad`: the quadratic majorant written too ( `with_weights_quad`, the CPU solver: `sdotplan/Sweep.h::set_weights` )
+        # ( only if the tree keeps one at the current weights: `AaBsp.quad_min_fraction` )
+        if quad and AaBsp.use_quad_majorants and self.tree.node_wc.is_defined:
+            args.update( node_wc_out = RealTensor[ self.tree.num_bsp_node, self.tree.dim ](), node_wq_out = RealTensor[ self.tree.num_bsp_node ]() )
+            expr = ( "inputs.power_diagram.with_weights_quad( outputs.sorted_weights_out, outputs.node_wa_out, "
+                     "outputs.node_wb_out, outputs.node_wc_out, outputs.node_wq_out" )
         # the memory too ( `memory > 0` ): the solver redoes it at each sweep, in two fresh
         # outputs that it initializes from the previous memories
         if self.memo_counts.is_defined:
@@ -537,6 +543,11 @@ class PowerDiagram_Bsp( PowerDiagram ):
         self.sorted_weights = produced[ "sorted_weights_out" ]
         self.tree.node_wa = produced[ "node_wa_out" ]
         self.tree.node_wb = produced[ "node_wb_out" ]
+        if "node_wc_out" in produced:                   # ( `with_weights_quad` )
+            self.tree.node_wc = produced[ "node_wc_out" ]
+            self.tree.node_wq = produced[ "node_wq_out" ]
+        else:
+            self.tree.drop_quad_majorants()              # ( the kernel wrote the affine pair only, see `PowerDiagram_Bsp::with_weights` )
         if "memo_counts_out" in produced:
             self.memo_nbrs = produced[ "memo_nbrs_out" ].raw
             self.memo_counts = produced[ "memo_counts_out" ].raw

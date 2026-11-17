@@ -13,6 +13,22 @@ dependencies = [
     "scipy",
 ]
 
+# releasing: `python -m loom.release` ( make version | bump_version | kernels | wheels | wheels_all | check_wheels | publish ) ( see loom's `loom/release` )
+[tool.loom.release]
+frameworks = ["jax", "numpy", "torch", "cupy"]     # those installed on each build machine
+catalogue  = "sdot.catalogue"
+smoke      = "scripts/smoke.py"
+# what the documentation shows: a user starts with these, so their kernels are in the catalogue ( `sdot.catalogue` runs them
+# too ), and they run on the installed wheel with nothing compiled
+checks     = ["docs/snippets/hello_numpy.py", "docs/snippets/hello_jax.py", "docs/snippets/hello_torch.py",
+              "docs/snippets/hello_cupy.py", "docs/snippets/plan.py", "docs/snippets/ot_solve.py",
+              "docs/snippets/ot_problem.py", "docs/snippets/distributions.py", "docs/snippets/distributions_1d.py",
+              "docs/snippets/duplicates_plan.py"]
+check_with = ["jax"]
+# the wheels: `make wheels_all` builds them in loom's environments ( loom-<platform>, see loom/release/envs.py ), the
+# machines that build them said in loom-builders.py ( untracked, written by loom when absent )
+platforms  = ["macos-arm64", "linux-x86_64", "windows-x86_64"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/sdot"]
 # the precompiled kernels are build products, ignored by git: say that the wheel ships them anyway

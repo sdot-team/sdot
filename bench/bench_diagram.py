@@ -41,7 +41,7 @@ The reference numbers are those of `reference_lmo.py` ( CPU ) and `reference_lmo
 from errand import Param, bench
 
 
-CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal" ]
+CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal", "grid_voronoi", "grid_sines", "grid_sharp" ]
 
 if p := bench( "diagram",
                case      = Param( "uniform", choices = CASE_CHOICES, help = "the case ( see cases.py ); `uniform` uses --dim" ),

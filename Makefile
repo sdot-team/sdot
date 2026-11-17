@@ -1,17 +1,20 @@
 # The loom website lives under docs/ ( VitePress ), with its own package.json, so the project root
 # stays a Python package root. `npm install` is idempotent, so there is no separate step to remember.
 
-.PHONY: help site site-build site-deploy api-docs anim local_kernels wheels local_wheels publish
+.PHONY: help site site-build site-deploy api-docs anim version bump_version kernels wheels wheels_all check_wheels publish
 
 help:
 	@echo "  make site          the website, live reloading   ( docs/, VitePress )"
 	@echo "  make site-build    the website into docs/.vitepress/dist"
 	@echo "  make api-docs      the API reference ( docs/api/*.md ) from the docstrings"
 	@echo "  make site-deploy   site-build, then push it to the gh-pages branch ( https://sdot-team.github.io/sdot/ )"
-	@echo "  make local_kernels measure the choices and build the kernels ( src/sdot/precompiled-kernels/ ) for this machine, per framework"
-	@echo "  make wheels        every wheel ( mac, manylinux, windows ) under dist/, from the environments of errand-envs.py"
-	@echo "  make local_wheels  local_kernels, then the sdot wheel of this machine under dist/, validated ( loom-ffi is released from loom )"
-	@echo "  make publish       upload dist/ to PyPI ( TWINE_PASSWORD = your PyPI token )"
+	@echo "  make version       print the version ( and the loom it requires )"
+	@echo "  make bump_version  write today's next version ( TO=x.y.z.n to choose it )"
+	@echo "  make kernels       the precompiled kernels of this machine, every framework it has"
+	@echo "  make wheels        the sdot wheel of this machine into dist/: kernels, wheel, check"
+	@echo "  make wheels_all    make wheels for every platform of pyproject.toml, in loom's build environments ( PLATFORMS=... for some )"
+	@echo "  make check_wheels  install this version's wheel in a clean venv and run the checks"
+	@echo "  make publish       upload this version's wheels of dist/ ( TWINE_PASSWORD = your PyPI token )"
 	@echo "  make anim          regenerate the tutorials' animations ( docs/public/anim/*.gif ) -- needs jax + matplotlib"
 
 site: docs/node_modules
@@ -43,23 +46,31 @@ docs/node_modules: docs/package.json
 	@touch $@
 
 
-# ── the wheels ──
+# ── releasing ──
+# reminders: the work is in loom ( `python -m loom.release`, docs/guide/releasing.md in loom ), configured by [tool.loom.release]
+PYTHON ?= python
 
-PYTHON     ?= python
-FRAMEWORKS ?= jax numpy torch
+version:
+	$(PYTHON) -m loom.release show_version
 
-# make.exe and a Python are all Windows has: the loops and the paths are in scripts/wheels.py
-local_kernels:
-	$(PYTHON) scripts/wheels.py --kernels $(FRAMEWORKS) --no-build
+bump_version:
+	$(PYTHON) -m loom.release bump_version $(if $(TO),--to $(TO))
 
-# each environment builds its own wheels ( every framework ) in its copy of the tree, `--pull dist` brings them back
-WHEEL_ENVS ?= mac_wheels,lin_wheels,win_wheels
+kernels:
+	$(PYTHON) -m loom.release make_kernels
 
 wheels:
-	errand run --env $(WHEEL_ENVS) --pull dist make local_wheels
+	$(PYTHON) -m loom.release make_wheels
 
-local_wheels:
-	$(PYTHON) scripts/wheels.py --kernels $(FRAMEWORKS)
+# every platform of [tool.loom.release] in loom's build environments ( through errand ), the wheels brought back into dist/.
+# Some of them only: PLATFORMS=linux-x86_64,windows-x86_64
+PLATFORMS ?= all
+
+wheels_all:
+	$(PYTHON) -m loom.release dispatch_wheels $(PLATFORMS)
+
+check_wheels:
+	$(PYTHON) -m loom.release check_wheels
 
 publish:
-	$(PYTHON) scripts/wheels.py --no-build --publish https://upload.pypi.org/legacy/
+	$(PYTHON) -m loom.release publish_wheels

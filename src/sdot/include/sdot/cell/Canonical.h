@@ -186,9 +186,12 @@ HD inline void system( const Gen<D> *g, const int *ord, DD ( *A )[ D ], DD *b ) 
     }
 }
 
-/// Gaussian elimination with partial pivoting, in place: `false` if singular ( relative to the rows )
+/// Gaussian elimination with partial pivoting, in place: `false` if singular -- a pivot within `rel` of the largest coefficient.
+/// In double-double ( `solve` ), the rounding of the double-double only: a system of doubles NEARLY singular ( three bisectors that
+/// would share a line on a grid of thirds, rounded: a pivot of `1e-17` ) has a vertex, the same in every cell -- rejecting it made
+/// the vertex non-canonical, decided by the geometry in one cell and by the predicates in another.
 template<int D,class T>
-HD inline bool gauss( T ( *A )[ D ], T *x ) {
+HD inline bool gauss( T ( *A )[ D ], T *x, double rel = 1e-14, double *cond = nullptr ) {
     auto mag = []( const T &v ) { if constexpr ( std::is_same_v<T,DD> ) return std::fabs( v.hi ); else return std::fabs( v ); };
     double scale = 0;
     for ( int r = 0; r < D; ++r ) for ( int c = 0; c < D; ++c ) scale = std::fmax( scale, mag( A[ r ][ c ] ) );
@@ -196,7 +199,8 @@ HD inline bool gauss( T ( *A )[ D ], T *x ) {
     for ( int c = 0; c < D; ++c ) {
         int piv = c;
         for ( int r = c + 1; r < D; ++r ) if ( mag( A[ r ][ c ] ) > mag( A[ piv ][ c ] ) ) piv = r;
-        if ( ! ( mag( A[ piv ][ c ] ) > 1e-14 * scale ) ) return false;
+        if ( ! ( mag( A[ piv ][ c ] ) > rel * scale ) ) return false;
+        if ( cond ) *cond = std::fmax( c ? *cond : 1.0, scale / mag( A[ piv ][ c ] ) );
         if ( piv != c ) {
             for ( int k = 0; k < D; ++k ) { const T t = A[ c ][ k ]; A[ c ][ k ] = A[ piv ][ k ]; A[ piv ][ k ] = t; }
             const T t = x[ c ]; x[ c ] = x[ piv ]; x[ piv ] = t;
@@ -223,9 +227,24 @@ template<int D>
     if ( ! order<D>( g, D + 1, ord ) ) return false;
     DD A[ D ][ D ];
     system<D>( g, ord, A, y );
-    if ( ! gauss<D,DD>( A, y ) ) return false;
+    if ( ! gauss<D,DD>( A, y, tie_band() ) ) return false;
     s0 = ord[ 0 ];
     return true;
+}
+
+/// THE CONDITIONING of the system of the vertex of generators `g` ( the largest coefficient over the smallest pivot ): its position
+/// is known to `cond` times the rounding of the double-double, and so is a predicate there -- the band of a tie, widened by as
+/// much ( `canon_inside` ). A system NEARLY singular ( three bisectors that would share a line on a grid of thirds, rounded ) has a
+/// vertex, but its predicates are ties where they are below what the solve resolves. `0` if the vertex is not canonical.
+template<int D>
+[[gnu::noinline]] HD double condition( const Gen<D> *g ) {
+    int ord[ D + 1 ];
+    if ( ! order<D>( g, D + 1, ord ) ) return 0;
+    DD A[ D ][ D ], y[ D ];
+    system<D>( g, ord, A, y );
+    double cond = 1;
+    if ( ! gauss<D,DD>( A, y, tie_band(), &cond ) ) return 0;
+    return cond;
 }
 
 /// `> 0`: the point `y` ( relative to `q_s0` of the generator `o` ) is INSIDE the half-space of `j` -- `pow_j - pow_s0` for a seed,
@@ -272,18 +291,20 @@ template<int D>
     const Gen<D> &o = g[ ord[ 0 ] ];
     DD A[ D ][ D ], b[ D ];
     system<D>( g, ord, A, b );
-    double At[ D ][ D ], z[ D ];
-    for ( int r = 0; r < D; ++r ) for ( int c = 0; c < D; ++c ) At[ r ][ c ] = A[ c ][ r ].hi;
+    // ( in double-double, with the band of `solve`: at a vertex whose system is NEARLY singular -- a grid of thirds, rounded -- the
+    // doubles would give up, and an arbitrary "inside" is not a perturbation: two copies of one point would disagree )
+    DD At[ D ][ D ], zd[ D ];
+    for ( int r = 0; r < D; ++r ) for ( int c = 0; c < D; ++c ) At[ r ][ c ] = A[ c ][ r ];
     if ( j.kind == SEED ) {
         DD dv[ D ];
         rel<D>( j, o, dv );
-        for ( int d = 0; d < D; ++d ) z[ d ] = -2 * dv[ d ].hi;
+        for ( int d = 0; d < D; ++d ) zd[ d ] = { -2 * dv[ d ].hi, -2 * dv[ d ].lo };
     } else {
-        for ( int d = 0; d < D; ++d ) z[ d ] = - j.p[ d ];
+        for ( int d = 0; d < D; ++d ) zd[ d ] = dd( - j.p[ d ] );
     }
-    if ( ! gauss<D,double>( At, z ) ) return true;
-    double zs = 1;
-    for ( int d = 0; d < D; ++d ) zs += std::fabs( z[ d ] );
+    if ( ! gauss<D,DD>( At, zd, tie_band() ) ) return true;
+    double z[ D ], zs = 1;
+    for ( int d = 0; d < D; ++d ) { z[ d ] = zd[ d ].hi; zs += std::fabs( z[ d ] ); }
     // the ranks in play, ascending
     int ranks[ D + 2 ], nr = 0;
     auto push = [&]( int r ) { for ( int i = 0; i < nr; ++i ) if ( ranks[ i ] == r ) return; ranks[ nr++ ] = r; };
@@ -293,25 +314,30 @@ template<int D>
     for ( int a = 1; a < nr; ++a ) for ( int c = a; c > 0 && ranks[ c ] < ranks[ c - 1 ]; --c ) { const int t = ranks[ c ]; ranks[ c ] = ranks[ c - 1 ]; ranks[ c - 1 ] = t; }
     for ( int q = 0; q < nr; ++q ) {
         const int rk = ranks[ q ];
-        double df = 0;
+        DD df;                                           // ( integer multiples of `z`: exact up to the double-double )
         for ( int r = 0; r < D; ++r ) {
             const Gen<D> &e = g[ ord[ r + 1 ] ];
             if ( e.kind != SEED ) continue;
-            df += z[ r ] * ( double( o.rank == rk ) - double( e.rank == rk ) );
+            const int k = int( o.rank == rk ) - int( e.rank == rk );
+            if ( k ) df = k > 0 ? df + zd[ r ] : df - zd[ r ];
         }
         if ( j.kind == SEED )
-            df += double( o.rank == rk ) - double( j.rank == rk );
-        if ( std::fabs( df ) > 1e-9 * zs )
-            return df > 0;
+            df = df + dd( double( int( o.rank == rk ) - int( j.rank == rk ) ) );
+        if ( std::fabs( df.hi ) > 1e-9 * zs )
+            return df.hi > 0;
     }
 
     // THE LATTICE, perturbed: the images of one seed share its weight, and four of them can be on one sphere whatever the seeds ( the
     // corners of a period: A, A + e1, A + e2, A + e1 + e2 ). The relative shifts are deformed by `( I + eps M )`, `M` a fixed generic
     // matrix -- a lattice still, the same in every frame. `d_k` moves by `u_k = M ( s_k - s_o )`: the row `2 d_k . y = |d_k|^2 - ...`
     // by `2 u_k . ( d_k - y )`, and the predicate of a seed by `2 u_j . ( d_j - y )`.
-    double y[ D ], Ad[ D ][ D ];
-    for ( int r = 0; r < D; ++r ) { y[ r ] = b[ r ].hi; for ( int c = 0; c < D; ++c ) Ad[ r ][ c ] = A[ r ][ c ].hi; }
-    if ( ! gauss<D,double>( Ad, y ) ) return true;
+    double y[ D ];
+    {
+        DD yd[ D ];
+        for ( int r = 0; r < D; ++r ) yd[ r ] = b[ r ];
+        if ( ! gauss<D,DD>( A, yd, tie_band() ) ) return true;
+        for ( int r = 0; r < D; ++r ) y[ r ] = yd[ r ].hi;
+    }
     auto lattice_move = [&]( const Gen<D> &e, double *u ) {
         for ( int r = 0; r < D; ++r ) {
             u[ r ] = 0;

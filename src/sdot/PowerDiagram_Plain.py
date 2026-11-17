@@ -46,7 +46,7 @@ class PowerDiagram_Plain( PowerDiagram ):
 
     # ---- what the `SdotPlanNd` solver writes ( see `PowerDiagram_Bsp` ) ----------------------------
 
-    def _solver_weights_call( self ):
+    def _solver_weights_call( self, quad = False ):
         w = RealTensor[ self.num_point ]()
         return ( "inputs.power_diagram.with_weights( outputs.weights_out )",
                  dict( weights_out = loom.out( w ) ), dict( weights_out = w ) )

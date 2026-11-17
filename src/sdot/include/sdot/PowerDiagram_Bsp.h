@@ -4,6 +4,7 @@
 // globals the generated source happens to define around us. Written to the build include tree.
 #include <sdot/generated/aggregates/PowerDiagram_Bsp.h>
 #include <loom/support/common_macros.h>
+#include <loom/support/containers/NoneTensor.h>
 #include "diagram/Common.h"
 #include "AaBsp.h"
 #include "engine/Seeds.h"
@@ -33,6 +34,9 @@ struct PowerDiagram_Bsp {
     /// the memory ( `memo_nbrs / memo_counts`, see `ProviderBsp` ): named or `Unbound`, at compile time
     static constexpr bool has_memo = DECAYED_TYPE_OF( memo_counts )::is_valid;
 
+    /// the quadratic majorant of the tree ( `AaBsp.node_wc / node_wq` ), at compile time
+    static constexpr bool has_quad = has_weights && DECAYED_TYPE_OF( tree.node_wc )::is_valid && DECAYED_TYPE_OF( tree.node_wq )::is_valid;
+
     template<class TK,bool SLACK = false>
     HD auto provider( SI k0 ) const { return ProviderBsp<PowerDiagram_Bsp,TK,ct_dim,has_weights,has_memo,SLACK>( *this, k0 ); }
 
@@ -48,12 +52,21 @@ struct PowerDiagram_Bsp {
         constexpr bool contig = engine::dense_view<DECAYED_TYPE_OF( sorted_positions )>() && engine::dense_view<DECAYED_TYPE_OF( sorted_weights )>()
             && engine::dense_view<DECAYED_TYPE_OF( tree.node_begin )>() && engine::dense_view<DECAYED_TYPE_OF( tree.node_end )>()
             && engine::dense_view<DECAYED_TYPE_OF( tree.node_box )>() && engine::dense_view<DECAYED_TYPE_OF( tree.node_wa )>()
-            && engine::dense_view<DECAYED_TYPE_OF( tree.node_wb )>();
-        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo,contig>;
+            && engine::dense_view<DECAYED_TYPE_OF( tree.node_wb )>() && engine::dense_view<DECAYED_TYPE_OF( tree.node_wc )>()
+            && engine::dense_view<DECAYED_TYPE_OF( tree.node_wq )>();
+        using S = engine::BspSeeds<TF,TI,ct_dim,has_weights,has_memo,contig,has_quad>;
         return S{ engine::view2<TF>( sorted_positions ), engine::opt_view1<TF>( sorted_weights ),
                   typename S::Tree{ engine::view1<TI>( tree.node_begin ), engine::view1<TI>( tree.node_end ), engine::view3<TF>( tree.node_box ),
-                                    engine::opt_view2<TF>( tree.node_wa ), engine::opt_view1<TF>( tree.node_wb ) },
+                                    engine::opt_view2<TF>( tree.node_wa ), engine::opt_view1<TF>( tree.node_wb ),
+                                    engine::opt_view2<TF>( tree.node_wc ), engine::opt_view1<TF>( tree.node_wq ) },
                   engine::opt_view2<int>( memo_nbrs ), engine::opt_view1<int>( memo_counts ) };
+    }
+
+    /// the quadratic majorant DROPPED ( a `NoneTensor` of the same declaration ): with the weights and the affine majorants read
+    /// elsewhere, the stored one would describe the old weights -- and the affine one alone is still a majorant
+    template<class T> HD static auto no_quad( const T & ) {
+        using U = DECAYED_TYPE_OF( std::declval<T>() );
+        return NoneTensor<typename U::TF,typename U::Shape,typename U::AxisNames>{};
     }
 
     /// THE SAME DIAGRAM, the weights and the tree's majorants read ELSEWHERE -- views that
@@ -62,14 +75,34 @@ struct PowerDiagram_Bsp {
     /// that of `PowerDiagram_Bsp.py` / `AaBsp.py` ( the same as `kernel_form` above ).
     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_ ) const {
         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
-                                    tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
+                                    tree.node_box, node_wa_, node_wb_, no_quad( tree.node_wc ), no_quad( tree.node_wq ),
+                                    tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
         return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
                                          tree_, sorted_positions, sorted_weights_, memo_nbrs, memo_counts, nb_memo };
     }
     /// ... and the memory also read elsewhere ( the solver writes it at each sweep )
     HD auto with_weights( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_, auto &&memo_nbrs_, auto &&memo_counts_ ) const {
         auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
-                                    tree.node_box, node_wa_, node_wb_, tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
+                                    tree.node_box, node_wa_, node_wb_, no_quad( tree.node_wc ), no_quad( tree.node_wq ),
+                                    tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
+        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
+                                         tree_, sorted_positions, sorted_weights_, memo_nbrs_, memo_counts_, nb_memo };
+    }
+
+    /// THE SAME, the QUADRATIC majorant written elsewhere too ( `node_wc / node_wq`: the CPU solver redoes it with the affine one,
+    /// `sdotplan/Sweep.h::set_weights` )
+    HD auto with_weights_quad( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_, auto &&node_wc_, auto &&node_wq_ ) const {
+        auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
+                                    tree.node_box, node_wa_, node_wb_, node_wc_, node_wq_,
+                                    tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
+        return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
+                                         tree_, sorted_positions, sorted_weights_, memo_nbrs, memo_counts, nb_memo };
+    }
+    /// ... the memory too
+    HD auto with_weights_quad( auto &&sorted_weights_, auto &&node_wa_, auto &&node_wb_, auto &&node_wc_, auto &&node_wq_, auto &&memo_nbrs_, auto &&memo_counts_ ) const {
+        auto tree_ = ::sdot::AaBsp{ tree.seed_indices, tree.node_left, tree.node_right, tree.node_begin, tree.node_end,
+                                    tree.node_box, node_wa_, node_wb_, node_wc_, node_wq_,
+                                    tree.nb_bsp_seeds, tree.nb_bsp_nodes, tree.nb_lohi, tree.nb_dims };
         return ::sdot::PowerDiagram_Bsp{ box_min, box_max, bnd_directions, bnd_offsets, start_vertices, start_topo, periodic_shifts, periodic_linear, sink_weight, radial_eps, nb_starts, nb_topo, nb_images, nb_points, nb_boundaries, nb_dims, group_rep, group_next, group_parent, group_vweights, group_dirs, group_agg_parent, group_agg_center, group_agg_scale, group_agg_outer, group_agg_vweights, nb_aggs,
                                          tree_, sorted_positions, sorted_weights_, memo_nbrs_, memo_counts_, nb_memo };
     }

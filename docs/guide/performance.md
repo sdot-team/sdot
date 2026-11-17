@@ -1,94 +1,135 @@
-# Performance
+# Performance: Semi-discrete OT
 
-In short, on a 128-core CPU node and on two GPUs ( a GeForce RTX 2080 Ti and an H100 ):
+Whole Newton solves, from a cold start to `max |mass - target| / target <= 1e-6`: against geogram on clouds, over the
+threads, the number of diracs and the dimension, then [diracs on a regular grid](#diracs-on-a-regular-grid). A summary,
+the machines and the protocol are in the [appendix](./performance-setup).
 
-| | CPU | H100 | 2080 Ti |
-|---|---|---|---|
-| OT solve, 1e5 diracs, 2D | 0.52 s | 67 ms | 0.11 s |
-| OT solve, 1e5 diracs, 3D | 0.75 s | 0.11 s | 0.36 s |
-| OT solve, 1e7 diracs, 2D | 183 s | 2.4 s | does not fit |
-| OT solve, 1e7 diracs, 3D | 89 s | 16 s | does not fit |
-| one power diagram, 1e6 diracs, 2D / 3D, per dirac | 29 / 110 ns | 6 / 90 ns | 57 / 590 ns |
+Geogram ( Bruno Lévy's [exploragram](https://github.com/BrunoLevy/exploragram), `OptimalTransportMap2d / 3d` ) solves the
+same problem with the damped Newton method of Kitagawa, Mérigot and Thibert ( KMT ). sdot is a damped Newton method too,
+but not KMT. In short:
 
-Solves start cold and stop at `max |mass - target| / target <= 1e-6`. The CPU column takes its best thread count ( 64
-for the 1e5 solves, 128 otherwise ). The diagrams are prepared ones, in double ( see [Power Diagrams](./performance-diagram) ).
+* a log phase: the first iterations write the Newton system and the merit of the step on `log( mass / target )`, so a
+  nearly empty cell asks for a fraction of its gap only ( half the diagrams on the hard 2D cases ); once
+  `max |mass - target| / target <= 2`, the solver switches to the plain difference, the true Newton, which converges
+  quadratically;
+* the step is not halved from 1 at each iteration: the trials restart from the last accepted step, and the step
+  comes from the limits at which the cells along the direction would be crushed;
+* continuation: when cells start empty, the target density is first smoothed, then sharpened stage by stage
+  ( `continuation` ); the Lebesgue cases below do not need it;
+* seeds too close for the weights to separate are merged, then split again.
 
-* **Against geogram** ( the same Newton problem, the same cores ): 1e7 diracs in 3D take 1674 s with geogram, 89 s with
-  sdot. On clustered clouds geogram stalls before the tolerance; sdot does not.
-* **Against CGAL**: its 2D triangulation is sequential, and its 3D one stops gaining past 64 threads. A 3D sdot diagram
-  gains 86× on 128 cores.
-* **Linear in `n`**: the number of Newton iterations barely depends on `n`, each one costs a diagram and a linear solve,
-  both close to linear.
-* **Up to 6D**: the solver does not mind the dimension, the cells do. 4D is comfortable up to a few 10⁵ diracs, 6D up to
-  about 10⁴.
+Here it gets the same clouds, the same box, the same stopping criterion and the same cores:
 
-The benchmarks are on four pages:
+<BenchChart chart="ot_geogram" />
 
-* [Semi-discrete OT](./performance-ot): the general case, diracs anywhere in any dimension, against geogram; over the
-  threads, the number of diracs and the dimension;
-* [1D Transport](./performance-1d) and [Diracs on a Grid](./performance-grid): structures with paths of their own, much
-  faster ( below );
-* [Power Diagrams](./performance-diagram): the diagram alone and its exact dual, against CGAL and geogram.
+On all the cores, sdot solves 1e5 uniform diracs in 0.85 s in 2D and 0.98 s in 3D; its best times are on one socket, 64
+threads: 0.54 s and 0.77 s ( see below ). On the clustered 2D cloud, geogram does not reach the tolerance ( see below ). An H100 solves the 2D case in 67 ms, a
+2080 Ti in 0.11 s; the 3D case in 0.11 s and 0.36 s. The image and gaussian targets of the [tables](#newton) include a width continuation ( 16 to 22
+smoothing stages ), which explains why they cost more than the Lebesgue cases.
 
-The special structures:
+How geogram was run:
 
-* **1D**: no Newton loop, an exact sort ( diracs ) or the merge of two images ( pixels of degree 0 or 1 ). In single
-  precision, 256 transports of 1e6 diracs take 0.91 s on 128 cores, 0.39 s on a 2080 Ti; against POT on two images
-  discretized for it, sdot reaches 1e-7 on $W_2$ 2 to 5 times faster than POT on as many cores
-  ( [1D Transport](./performance-1d) ).
-* **Diracs on a regular grid**: the cells known in advance up to the weights, a fixed stencil instead of a tree. A
-  4096 × 4096 grid against an image of affine pixels is solved 17 times faster than the same diracs given as a cloud
-  ( 3.2 s on 128 cores ), a 2048 × 2048 one in 0.35 s on a 2080 Ti and 0.072 s on an H100
-  ( [Diracs on a Grid](./performance-grid) ).
+* geogram's own Newton loop ( `optimize_full_Newton` ) was kept as it is, with one change: it stops on sdot's
+  `max |mass - target| / target <= 1e-6` instead of its own criterion, a relative RMS error of 1 %. Its default use, a
+  multilevel L-BFGS to 1 %, solves an easier problem and is not timed here.
+* Its linear solver is the default one: a conjugate gradient with a Jacobi preconditioner, tolerance 1e-3, at most 1000
+  iterations. It reaches the cap at every step: in 2D the linear solves take most of the time, in 3D the diagrams do.
+  A tighter tolerance does not change the time or the number of steps.
+* The box is integrated as a mesh of simplices. Its cells match sdot's to 1e-10.
+* On the 2D clustered cloud, geogram's step control stalls: it reaches the tolerance in 2 runs of 9 ( one per thread
+  count ), and after 100 steps the residual of the others is between 4e-6 and 5e-3.
+  Lévy's multilevel scheme, run with a Newton solver, stops after the first level: interpolating the weights to the next
+  level leaves cells empty, and exploragram's Newton stops on an empty cell. The `equal` clouds have coincident seeds,
+  which geogram does not merge.
 
-Every chart is read from the result files of
-[`bench/page.py`](https://github.com/sdot-team/sdot/tree/main/bench/page.py), one per machine. The machines, the
-protocol and how to read the charts over the threads ( in CYCLES ) are in the [appendix](#appendix-setup-and-protocol),
-each page ends with the tables behind its charts, and [Reproducing](#reproducing) says how to add a machine.
+## Scaling with the threads
 
-## Reproducing
+A Newton solve alternates diagrams and linear solves. In 3D the diagrams take most of the time on one thread, and the
+solve gains 15× on 64 threads ( 25× on the clustered cloud ); what is left is in the linear solves and the tree. In 2D the
+cells are cheap and the linear solves take a larger share: on several threads they go through a multigrid, which is
+limited by the memory bandwidth, and the solve gains about 6× ( on one thread, a sparse Cholesky is used instead ). Past
+64 threads the second socket adds memory traffic between the sockets and the solve gets slower again; on this node the
+time of the linear solves also varies by about 2× from one run to the next, whatever the number of threads. geogram gains
+about 2.4× in 3D and nothing in 2D.
 
-The benchmarks run through errand, on any machine it has an environment for.
-`bench/page.py` runs the suite of this page in the environments it is given ( the CPU jobs where there is no card, the
-GPU jobs where the driver runs on one ) and writes `docs/guide/bench/<machine>.json`, which these charts and tables read:
+## Scaling with the number of diracs
 
-```bash
-cd ~/Projects                                             # the errand root
-python sdot-ffi/bench/page.py lmo-numpy lmo-jax           # CPU, then GPU: docs/guide/bench/lmo.json
-python sdot-ffi/bench/page.py n22-jax --name n22          # another machine: one more column group
-python sdot-ffi/bench/page.py lmo-numpy --quick           # a smoke run ( lmo-quick.json, not shown )
-python sdot-ffi/bench/page.py xyz-numpy --threads=1,8,24     # explicit thread counts ( default 1,-1: all the cores )
-```
+<BenchChart chart="n_newton" />
 
-The charts and tables take their CPU runs from one machine and their GPU runs from every card listed: `SOURCES`, in
-`docs/.vitepress/theme/benchTables.js`, names their files.
+The number of Newton iterations barely depends on `n`. The total cost therefore follows the cost of one diagram plus one
+linear solve, which are both close to linear in `n`. On the CPU, 1e7 diracs take 205 s in 2D and 97 s in 3D on 128 cores;
+in 2D the linear solves are two thirds of it ( a uniform cloud of 1e7 seeds has close pairs, solved as groups,
+`Iterative( duplicates = "split" )` ). A solve of 1e7 diracs takes 2.4 s in 2D and 16 s in 3D on an H100 ( an eager
+call, timed by its kernels: its wall time also counts python's loop ). It does not fit on a 2080 Ti ( 11 GB ).
 
-`--full` adds the long rows ( 6D, 1e7 on the card ), `--only diagram,cgal` reruns some jobs ( the others keep their last
-run ). The CGAL and geogram runs use programs built on the machine: `page.py` first builds what is missing or out of date
-( `bench/build_baselines.py`: CGAL's and geogram's sources cloned into `~/.cache/sdot`, the libraries in a micromamba
-environment of their own; Linux ). A new machine needs only its errand environments; the docstring of `page.py` lists the
-steps. Each bench can also be run alone, with every
-option: see [`bench/README.md`](https://github.com/sdot-team/sdot/tree/main/bench/README.md).
+geogram solves 1e7 diracs in 3D in 1674 s ( 6 steps ). In 2D its number of steps grows with `n` ( 7 at 1e5, 26 at 1e6 ),
+as its conjugate gradient stops at the cap before solving the system; the 1e7 solve was stopped after 5 hours without
+having converged, so the chart has no point there.
 
-## Appendix: setup and protocol
+At 1e7 diracs in 3D, the float kernel can no longer resolve the cells ( each cell is about 4.6e-3 wide in a unit box ), so
+the solve switches to the double kernel. On cards with slow FP64 this switch costs half of the total time. GPU memory is
+about 900 bytes per dirac in 2D and 1300 in 3D at 1e6. A solve that does not fit raises a `MemoryError` before it starts.
 
-The CPU curves come from a server node, two AMD EPYC 7763 with 64 cores each ( 128 cores, no SMT ), which lets the thread
-counts go well beyond a workstation's. The GPU points put two cards side by side: a consumer one, a GeForce RTX 2080 Ti,
-and a datacenter one, an H100.
+## Scaling with the dimension
 
-<BenchTable table="setup" />
+<BenchChart chart="dims" />
 
-Protocol:
+Newton is not affected by the dimension: the iteration count and the cost of the linear solves stay the same up to 6D
+( the [table](#dimension) ). The whole cost is in the cells. A Laguerre cell of a uniform cloud has a number of vertices
+that grows very fast with `d` ( about 6 in 2D, 25 in 3D, 120 in 4D, 670 in 5D, 3300 in 6D ), and the cell is cut, measured
+and triangulated vertex by vertex. At 1e4 diracs, a diagram costs about 6 times more in 3D than in 2D, then each added
+dimension multiplies it by 12 ( 4D ), 25 ( 5D ) and 45 ( 6D ).
 
-* Times are the minimum over a few runs ( one for the long solves ). CPU threads are pinned, one per physical core, and the
-  CPU kernels are compiled for the machine ( the wheels serve a precompiled level, at most a few percent slower ).
-* A Newton solve starts cold, from the Voronoi diagram ( zero weights ), tree build included. It stops when
-  `max |mass - target| / target <= 1e-6`. Steps, linear solvers and continuation are the library's defaults.
-* GPU times are for a **jitted** call ( JAX ). An eager call costs about 0.1 s more.
-* `mixed` ( the GPU default ) runs the float kernel and switches to the double kernel when float precision is no longer
-  enough. The final accuracy is the double one.
+In practice, 4D is comfortable up to a few 10⁵ diracs and 5D up to about 10⁵. 6D is limited to about 10⁴ diracs.
+Beyond that, the cost comes from the geometry of the cells, not from the solver.
 
-The charts over the threads plot CYCLES, the time times the clock measured during the run: a single busy core runs faster
-than 128 busy ones ( turbo ), and a plot of times would count that as a loss of scaling. A straight line of slope -1 is
-perfect scaling. The cards are placed at their number of SMs, which an SM, with its four 32-wide schedulers, makes roughly
-comparable to a core with its vector units: a point below the CPU curves at the same x does more with each unit.
+## Diracs on a regular grid
+
+The diracs of a grid ( a [`SumOfDiracsOnAGrid`](./distributions/grid) ) have a solver of their own: the cells are known
+in advance up to the weights, so a fixed stencil replaces the tree, and a certificate on zones of the grid proves the cells
+exact ( see [Power Diagrams](./performance-diagram#diracs-on-a-regular-grid) for the diagram alone ). It is compared here
+with the same diracs given as a cloud ( a `SumOfDiracs` ), what a solve on positions does: the target is an image of
+affine pixels, which the other programs of these pages do not take.
+
+One problem, at every size: `N x N` diracs of equal masses on the unit square, against an image of 512 x 512 affine pixels
+( `Image( degree = 1 )` ), a field of sines with an offset, `1 + 0.5 sin( 6 pi x ) sin( 4 pi y )`.
+
+<BenchChart chart="grid" />
+
+The gap grows with `N`. On the CPU: 4× at 512 x 512, 8× at 2048 x 2048, 16× at 4096 x 4096 ( 2.8 s against 46 s on the
+128 cores ). On the 2080 Ti: 5× at 512 x 512, 12× at 2048 x 2048 ( 0.35 s against 4.0 s ); on the H100, 30× at 2048 x 2048
+( 0.072 s against 2.1 s ). Past a million diracs, a dirac costs the dedicated solver 170 to 270 ns on the CPU, 83 ns on the
+2080 Ti and 17 ns on the H100; the generic one more than 2 µs on the CPU, 0.5 to 1 µs on the cards. Below 256 x 256, fixed
+costs dominate ( 0.03 to 0.15 s ).
+
+<BenchChart chart="grid_threads" />
+
+At 1024 x 1024, the dedicated solver gains 15× up to 32 threads ( 7.7 s to 0.51 s ), then stays near 0.5 s; the generic
+one gains 8× ( 27 s to 3.2 s on 64 threads ). The 2080 Ti solves it in 0.12 s, the H100 in 0.041 s.
+
+The dedicated solver computes in doubles, on the CPU and on the card. The generic one computes in doubles on the CPU, and
+on the card in floats first, then in doubles ( `precision = "auto"` ). Floats alone do not reach the tolerance: at 512 x
+512 the generic solve stalls near 1e-3, the cells too small for the digits of a float.
+
+## The tables
+
+### Newton
+
+<BenchTable table="newton" />
+
+<BenchTable table="scaling" />
+
+### sdot and geogram
+
+<BenchTable table="ot_geogram" />
+
+### Dimension
+
+<BenchTable table="dims" />
+
+### Diracs on a grid
+
+<BenchTable table="grid" />
+
+
+The machines and the protocol ( cold starts, repetitions, clocks ) are in the [appendix](./performance-setup#setup-and-protocol).

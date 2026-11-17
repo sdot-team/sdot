@@ -10,10 +10,10 @@ echo "== $(hostname): $(grep -m1 'model name' /proc/cpuinfo)"
 for T in $THREADS; do
     for N in 100000 1000000; do
         echo "== T=$T uniform 2D n=$N"
-        python -m errand run -k bench --out "$OUT/T$T-u$N-{params}" "$B/bench_newton.py::*" --case=uniform --dim=2 --n=$N \
+        python -m errand run -x --out "$OUT/T$T-u$N-{params}" "$B/bench_newton.py::*" --case=uniform --dim=2 --n=$N \
             --linear_solver=$LIN --threads=$T --kernels=compile --device=cpu --reps=1 2>&1
     done
     echo "== T=$T lines"
-    python -m errand run -k bench --out "$OUT/T$T-lines-{params}" "$B/bench_newton.py::*" --case=lines_voronoi \
+    python -m errand run -x --out "$OUT/T$T-lines-{params}" "$B/bench_newton.py::*" --case=lines_voronoi \
         --linear_solver=$LIN --threads=$T --kernels=compile --device=cpu --reps=1 2>&1
 done

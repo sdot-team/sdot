@@ -31,7 +31,7 @@ directory of `geogram_ot` ( empty: `geogram/`, `~/.cache/sdot/geogram-bench`, th
 from errand import Param, bench
 
 
-CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal" ]
+CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal", "grid_voronoi", "grid_sines", "grid_sharp" ]
 
 if p := bench( "geogram",
                case       = Param( "uniform", choices = CASE_CHOICES, help = "the case ( see cases.py ); `uniform` uses --dim" ),

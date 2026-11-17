@@ -63,7 +63,29 @@ const sdotCols = ( m, gm ) => [
   { group: 'sdot', kind: 'gpu', m: { job: 'gpu_one_d', ...( gm ?? m ) }, v: wall, f: sec },
 ]
 
+// ONE DIAGRAM OF DIRACS ON A GRID ( jobs `grid_*` of `page.py` ): the centres of an N x N grid, three sets of weights
+const GRID_CASES = [
+  { label: 'Voronoi ( weights 0 )', m: { case: 'grid_voronoi' } },
+  { label: 'mild ( transport to the sines )', m: { case: 'grid_sines' } },
+  { label: 'sharp ( a ring of mass over 1e-3 )', m: { case: 'grid_sharp' } },
+]
+const GRID_N = 1048576
+
 export const TABLES = {
+  grid_diagram: {
+    note: 'ns per dirac, 1024 x 1024 diracs at fixed weights: the area of every cell, double ( the dedicated geometry also gives the weights of the hessian; on the card, wall time of the call ). dedicated: the grid\'s own geometry, zones = the zone certificate ( exact for any weights ), former = the local certificates and the exact clipping with the radius of security of max psi. sdot: the same seeds as a cloud ( the tree ). CGAL: its 2D regular triangulation ( sequential ), then the cells rebuilt and clipped. geogram: triangulation of the lifted seeds, then the cells restricted to a mesh of the box. Shaded: the fastest on the CPU, and on the GPU.',
+    rows: GRID_CASES.map( r => ( { ...r, m: { ...r.m, n: GRID_N } } ) ),
+    cols: [
+      ...threadCols( 'dedicated, zones', { job: 'grid_dedicated', method: 'zones' }, nsSeed, ns ),
+      { group: 'dedicated, zones', kind: 'gpu', m: { job: 'gpu_grid_dedicated', method: 'zones' }, v: nsSeed, f: ns, best: true },
+      { group: 'dedicated, former', label: '1', kind: 'cpu', m: { job: 'grid_dedicated', method: 'cert', threads: 1 }, v: nsSeed, f: ns, best: true },
+      { group: 'dedicated, former', kind: 'gpu', m: { job: 'gpu_grid_dedicated', method: 'cert' }, v: nsSeed, f: ns, best: true },
+      ...threadCols( 'sdot, as a cloud', { job: 'grid_sdot' }, nsSeed, ns ),
+      { group: 'sdot, as a cloud', kind: 'gpu', m: { job: 'gpu_grid_diagram', kernel: 'double' }, v: nsKernel, f: ns, best: true },
+      { group: 'CGAL', label: '1', kind: 'cpu', m: { job: 'grid_cgal', output: 'measures', threads: 1 }, v: nsSeed, f: ns, best: true },
+      ...threadCols( 'geogram', { job: 'grid_geogram' }, nsSeed, ns ),
+    ],
+  },
   diagram: {
     note: 'ns per dirac, the measure of every cell, double ( GPU: kernel time ). CGAL: triangulation ( in parallel in 3D only ), then each cell rebuilt and clipped ( over the threads ). geogram: triangulation of the lifted seeds, then the cells restricted to a mesh of the box. Shaded: the fastest on the CPU, and on the GPU.',
     rows: CLOUDS,
@@ -214,6 +236,29 @@ const nsSolve = r => r.results.t_total_wall * 1e9
 const nsSolveGpu = r => tGpu( r ) * 1e9
 const gridNs = r => r.status === 'PASS' && r.results.converged ? r.results.t_total_wall * 1e9 : null
 export const CHARTS = {
+  // one diagram of diracs on a grid, over N x N, ONE thread ( CGAL's 2D triangulation is sequential ); the cards: kernel time
+  grid_diagram: {
+    x: 'n', xLabel: 'diracs ( N x N )', cores: 'one thread', unit: 'per dirac, one diagram at fixed weights, one thread',
+    rows: GRID_CASES,
+    series: [
+      { label: 'dedicated, zones', m: { job: 'grid_dedicated', method: 'zones', threads: 1 }, v: nsSeed, gpu: { m: { job: 'gpu_grid_dedicated', method: 'zones' }, v: nsSeed } },
+      { label: 'dedicated, former', color: 0, dash: true, m: { job: 'grid_dedicated', method: 'cert', threads: 1 }, v: nsSeed, gpu: { m: { job: 'gpu_grid_dedicated', method: 'cert' }, v: nsSeed } },
+      { label: 'sdot, as a cloud', color: 3, m: { job: 'grid_sdot', threads: 1 }, v: nsSeed, gpu: { m: { job: 'gpu_grid_diagram', kernel: 'double' }, v: nsKernel } },
+      { label: 'CGAL', color: 1, m: { job: 'grid_cgal', output: 'measures', threads: 1 }, v: nsSeed },
+      { label: 'geogram', color: 2, m: { job: 'grid_geogram', threads: 1 }, v: nsSeed },
+    ],
+  },
+  // the same diagram over the threads, 1024 x 1024 diracs; the cards: the cloud path, kernel time
+  grid_diagram_threads: {
+    unit: 'per dirac, 1024 x 1024 diracs at fixed weights',
+    rows: GRID_CASES.map( r => ( { ...r, m: { ...r.m, n: GRID_N } } ) ),
+    series: [
+      { label: 'dedicated, zones', m: { job: 'grid_dedicated', method: 'zones' }, v: nsSeed, gpu: { m: { job: 'gpu_grid_dedicated', method: 'zones' }, v: nsSeed } },
+      { label: 'sdot, as a cloud', color: 3, m: { job: 'grid_sdot' }, v: nsSeed, gpu: { m: { job: 'gpu_grid_diagram', kernel: 'double' }, v: nsKernel } },
+      { label: 'CGAL', color: 1, m: { job: 'grid_cgal', output: 'measures' }, v: nsSeed, flat: true },    // ( its 2D triangulation is sequential )
+      { label: 'geogram', color: 2, m: { job: 'grid_geogram' }, v: nsSeed },
+    ],
+  },
   diagram: {
     unit: 'per dirac',
     rows: CLOUDS,
@@ -302,6 +347,15 @@ export const CHARTS = {
     series: [
       { label: 'dedicated', m: { job: 'grid', solver: 'dedicated', threads: 'cores' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'dedicated' }, v: gridNs } },
       { label: 'generic', color: 1, m: { job: 'grid', solver: 'generic', threads: 'cores' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'generic' }, v: gridNs } },
+    ],
+  },
+  // a solve of 1024 x 1024 diracs over the threads; the cards at their SMs
+  grid_threads: {
+    unit: 'per solve, 1024 x 1024 diracs against an image of 512 x 512 affine pixels',
+    rows: [ { label: '1024 x 1024 diracs', m: { side: 1024 } } ],
+    series: [
+      { label: 'dedicated', m: { job: 'grid', solver: 'dedicated' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'dedicated' }, v: gridNs } },
+      { label: 'generic', color: 1, m: { job: 'grid', solver: 'generic' }, v: gridNs, gpu: { m: { job: 'gpu_grid', solver: 'generic' }, v: gridNs } },
     ],
   },
   // POT against sdot: the time over the relative error on W2 ( `x: 'error'` ), in double; sdot, exact, is a level ( `exact` ),

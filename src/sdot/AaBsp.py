@@ -48,7 +48,9 @@ class AaBsp( SpatialAccelerator ):
     The other reason, less obvious and decisive: degree 1 costs NOTHING more to test. The
     minimum of `|p - y|² - wa . y` over a box is SEPARABLE per axis, its free minimum is at
     `y = p + wa / 2`, and a per-axis `clamp` gives the exact answer. The constant bound does the
-    same work with `wa = 0`. A degree-2 majorant would break this separability.
+    same work with `wa = 0`. A DIAGONAL degree-2 term keeps this separability ( `node_wc / node_wq`, below ): the minimum
+    per axis is still a clamp, as long as the curvature stays below one -- and a transport potential curves, which is
+    what makes the affine majorant of a large node loose. A cross term would break it.
 
     The majorant is chosen AT CONSTRUCTION, node by node, between the least-squares
     fitted affine and the constant: the affine is only kept if it clearly tightens the SPREAD of the
@@ -58,11 +60,12 @@ class AaBsp( SpatialAccelerator ):
 
     = The walk
 
-    A depth-first descent, the nearest child first (see `AaBsp.cxx`). The first node
-    reached is therefore the leaf of the seed itself: the cell shrinks right away on
-    its immediate neighbors, and everything that follows is pruned against an already small cell. That is
-    what makes the stack SUFFICIENT where a priority queue would otherwise be needed: at each level
-    we pop one node and push two, so the stack never exceeds the DEPTH of
+    BOTTOM-UP ( `cell/Providers.h::ProviderBsp` ): it starts at the leaf of the seed itself, then walks the subtree of the
+    sibling of each ancestor, the deepest first, each one depth-first and the nearest child first. The cell shrinks right
+    away on its immediate neighbors, and everything that follows is pruned against an already small cell -- the far
+    subtrees with one box test each, where a descent from the root paid the boxes of the path to the leaf. That is
+    what makes the stack SUFFICIENT where a priority queue would otherwise be needed: one entry per ancestor, then
+    at each level we pop one node and push two, so the stack never exceeds twice the DEPTH of
     the tree -- a capacity known at construction (`max_depth`), and not a capacity to
     guess and then double.
 
@@ -137,6 +140,15 @@ class AaBsp( SpatialAccelerator ):
     node_wa      : RealTensor[ "num_bsp_node", "dim" ]
     node_wb      : RealTensor[ "num_bsp_node" ]
 
+    # THE QUADRATIC MAJORANT, on top of the affine one: `w( y ) <= wa . y + wb - wq + sum_d wc_d ( y_d - m_d )^2`, `m` the
+    # centre of the node's box ( `bsp_build_level.h::bsp_quad_majorant` ). Still separable per axis, hence the same box test
+    # ( `cell/Pruning.h` ), and much tighter on large nodes: an optimal transport potential CURVES ( `|y|^2 - w` is convex ),
+    # and on grids of Diracs the walk opens half the boxes ( 2 to 3 us per cell instead of 3 to 6 ). OPTIONAL and read by the
+    # CPU walk only ( `ProviderBsp`, `PowerDiagram_Bsp::has_quad` ): the affine pair stays a majorant on its own, so whoever
+    # redoes `node_wa / node_wb` without it DROPS it ( `drop_quad_majorants` ) and loses nothing but the tightening.
+    node_wc      : RealTensor[ "num_bsp_node", "dim" ]
+    node_wq      : RealTensor[ "num_bsp_node" ]
+
     num_bsp_seed : Axis[ "nb_bsp_seeds" ]
     num_bsp_node : Axis[ "nb_bsp_nodes" ]
     num_lohi     : Axis[ "nb_lohi" ]
@@ -146,6 +158,14 @@ class AaBsp( SpatialAccelerator ):
     nb_bsp_nodes : ShapeVar
     nb_lohi      : CtShapeVar
     nb_dims      : CtShapeVar
+
+    # ( internal: `False` keeps the affine majorant alone -- to measure what the quadratic one brings )
+    use_quad_majorants = True
+    # the quadratic majorant is KEPT only if it tightens at least this fraction of the nodes of 64 seeds or more
+    # ( `bsp_quad_majorant` zeroes it where it does not ): the curvature terms of the test cost every box, and measured, the
+    # potentials of grids of Diracs pass 70 to 80 % of their nodes, those of random or clustered clouds 0 to 30 % -- where the
+    # walk was 5 to 11 % slower with it
+    quad_min_fraction = 0.5
 
 
     def __init__( self, positions, weights = None, max_seeds_per_leaf = 10 ):
@@ -220,6 +240,10 @@ class AaBsp( SpatialAccelerator ):
         self.__base_init__( nb_dims = int( pos.shape[ 1 ] ), nb_lohi = 2, **kwargs )
 
         self._majorant_weights = weights
+        if w is not None and not traced_w:
+            order = tree[ "seed_indices" ]
+            sp = tree[ "sorted_positions" ] if tree[ "sorted_positions" ] is not None else take_rows( getattr( pos, "raw", pos ), order )
+            self.refresh_quad_majorants( sp, take_rows( getattr( w, "raw", w ), order ) )
         # the positions it was built on, in its order ( once: see `take_sorted_positions` )
         self._sorted_for = ( pos, tree[ "sorted_positions" ] ) if tree[ "sorted_positions" ] is not None else None
         if traced_w:
@@ -274,6 +298,59 @@ class AaBsp( SpatialAccelerator ):
         the majorants of ZERO weights ( a cold start ): zero, without a call -- on the card, and traced under a `jit`"""
         self.node_wa = RealTensor[ self.num_bsp_node, self.dim ].zeros()
         self.node_wb = RealTensor[ self.num_bsp_node ].zeros()
+        self.drop_quad_majorants()
+
+    def drop_quad_majorants( self ):
+        """= Internals
+
+        the quadratic majorant UNBOUND ( `node_wc / node_wq` ): what whoever redoes the affine one without it must call -- the
+        stored one would describe other weights, and the affine pair alone is still a majorant"""
+        self.node_wc.set_raw( None )
+        self.node_wq.set_raw( None )
+
+    def refresh_quad_majorants( self, sorted_positions, sorted_weights ):
+        """= Internals
+
+        THE QUADRATIC MAJORANT of each node ( `node_wc / node_wq`, `bsp_build_level.h::bsp_quad_majorant` ), on top of the
+        affine one ( `node_wa / node_wb`, which must describe the same weights ). One kernel, one work-item per node. On the
+        CPU and on concrete values only: on the card, or under a trace, the quadratic majorant is dropped instead."""
+        if not AaBsp.use_quad_majorants or builds_on_card( self.node_box ) or loom.is_traced( sorted_weights ) or loom.is_traced( self.node_wb ):
+            self.drop_quad_majorants()
+            return
+        nb_nodes = int( self.nb_bsp_nodes.value )
+        d = int( self.nb_dims.value )
+        num_node = new_batch_axis( nb_nodes, prefix = "bspquad" )
+        quad = _NodeQuad( nb_dims = d, batch_axes = [ num_node ] )
+        cloud = _BspCloud( nb_dims = d,
+                           positions = loom.ops().stop_gradient( getattr( sorted_positions, "raw", sorted_positions ) ),
+                           weights = loom.ops().stop_gradient( getattr( sorted_weights, "raw", sorted_weights ) ) )
+        loom.ffi_call(
+            "bsp_quad_majorants",
+            FfiCode.per_item( includes = [ "sdot/bsp_build_level.h" ],
+                code = "bsp_quad_majorant( inputs.cloud, inputs.node_begin( batch_index ), inputs.node_end( batch_index ), "
+                           "inputs.node_box( batch_index ), inputs.node_wa( batch_index ), inputs.node_wb( batch_index ), "
+                           "outputs.quad.wc( batch_index ), outputs.quad.wq( batch_index ) );" ),
+            cloud = cloud,
+            quad = loom.out( quad ),
+            node_begin = IntTensor[ num_node ]( np.asarray( self.node_begin ).reshape( -1 ) ),
+            node_end   = IntTensor[ num_node ]( np.asarray( self.node_end ).reshape( -1 ) ),
+            node_box   = RealTensor[ num_node, 2, d ]( np.asarray( self.node_box, dtype = float ).reshape( nb_nodes, 2, d ) ),
+            node_wa    = RealTensor[ num_node, d ]( np.asarray( self.node_wa, dtype = float ).reshape( nb_nodes, d ) ),
+            node_wb    = RealTensor[ num_node ]( np.asarray( self.node_wb, dtype = float ).reshape( -1 ) ),
+            has_dynamic_capacity = False,
+        )
+        self.node_wc = quad.wc.raw
+        self.node_wq = quad.wq.raw
+        self._keep_quad_if_worth_it()
+
+    def _keep_quad_if_worth_it( self ):
+        """drops the quadratic majorant when it tightens too few large nodes ( `quad_min_fraction` )"""
+        sz = np.asarray( self.node_end ).reshape( -1 ) - np.asarray( self.node_begin ).reshape( -1 )
+        big = sz >= 64
+        if big.any() and ( np.asarray( self.node_wq ).reshape( -1 )[ big ] > 0 ).mean() >= AaBsp.quad_min_fraction:
+            return
+        self.drop_quad_majorants()
+        self._quad_skips = 4
 
     @property
     def nb_leaves( self ):
@@ -360,6 +437,7 @@ class AaBsp( SpatialAccelerator ):
         """
         nb_nodes = int( self.nb_bsp_nodes.value )
         self._majorant_weights = None
+        self._quad_skips = getattr( self, "_quad_skips", 0 )
         if builds_on_card( self.node_box ):
             # ON THE CARD: `Majorant2D.cuh`'s ( 3D: `Majorant3D.cuh`'s ) launches over the seeds and the levels ( the per-node kernel below gives the
             # root's million seeds to one thread ); the tree's tensors are read where they are, traced or not
@@ -385,9 +463,15 @@ class AaBsp( SpatialAccelerator ):
             )
             self.node_wa = wa                            # ( the tensors: their buffers stay on the card )
             self.node_wb = wb
+            self.drop_quad_majorants()
             return
         num_node = new_batch_axis( nb_nodes, prefix = "bspnode" )
-        majorant = _NodeMajorant( nb_dims = int( self.nb_dims.value ), batch_axes = [ num_node ] )
+        d = int( self.nb_dims.value )
+        # ( after a quadratic majorant DROPPED, the next refreshes skip it: on a cloud whose potential does not curve, the fit
+        # would cost ~100 ns per seed at every step for nothing; it is tried again every fifth refresh )
+        quad = AaBsp.use_quad_majorants and not loom.is_traced( sorted_weights ) and self._quad_skips == 0
+        self._quad_skips = max( self._quad_skips - 1, 0 )
+        majorant = ( _NodeMajorantQuad if quad else _NodeMajorant )( nb_dims = d, batch_axes = [ num_node ] )
 
         # the gradient is cut AT THE INPUT: a kernel without an adjoint under `loom.grad` is an
         # error, and this one has nothing to propagate ( see above )
@@ -398,19 +482,31 @@ class AaBsp( SpatialAccelerator ):
         # the tree is NOT an argument: its current majorants are what we replace, and under
         # a trace they may be tracers of a closed trace ( see `SdotPlanNd` ). Only the
         # slices go in.
+        # ( with the quadratic majorant: in the same work-item, `bsp_refresh_majorant_quad` -- one call, the slice read while hot )
+        extra = dict( node_box = RealTensor[ num_node, 2, d ]( np.asarray( self.node_box, dtype = float ).reshape( nb_nodes, 2, d ) ) ) if quad else {}
         loom.ffi_call(
-            "bsp_refresh_majorants",
+            "bsp_refresh_majorants_quad" if quad else "bsp_refresh_majorants",
             FfiCode.per_item( includes = [ "sdot/bsp_build_level.h" ],
-                code = "bsp_refresh_majorant( inputs.cloud, inputs.node_begin( batch_index ), inputs.node_end( batch_index ), "
-                           "outputs.majorant.wa( batch_index ), outputs.majorant.wb( batch_index ) );" ),
+                code = ( "bsp_refresh_majorant_quad( inputs.cloud, inputs.node_begin( batch_index ), inputs.node_end( batch_index ), "
+                         "inputs.node_box( batch_index ), outputs.majorant.wa( batch_index ), outputs.majorant.wb( batch_index ), "
+                         "outputs.majorant.wc( batch_index ), outputs.majorant.wq( batch_index ) );" ) if quad else
+                       ( "bsp_refresh_majorant( inputs.cloud, inputs.node_begin( batch_index ), inputs.node_end( batch_index ), "
+                         "outputs.majorant.wa( batch_index ), outputs.majorant.wb( batch_index ) );" ) ),
             cloud = cloud,
             majorant = loom.out( majorant ),
             node_begin = IntTensor[ num_node ]( np.asarray( self.node_begin ).reshape( -1 ) ),
             node_end   = IntTensor[ num_node ]( np.asarray( self.node_end ).reshape( -1 ) ),
             has_dynamic_capacity = False,
+            **extra,
         )
         self.node_wa = majorant.wa.raw
         self.node_wb = majorant.wb.raw
+        if quad:
+            self.node_wc = majorant.wc.raw
+            self.node_wq = majorant.wq.raw
+            self._keep_quad_if_worth_it()
+        else:
+            self.drop_quad_majorants()
 
 
 def _weight_majorant( pos, w ):
@@ -517,6 +613,28 @@ class _NodeMajorant( Aggregate ):
 
     wa    : RealTensor[ "dim" ]
     wb    : RealTensor
+
+    dim      : Axis[ "nb_dims" ]
+    nb_dims  : CtShapeVar
+
+
+class _NodeMajorantQuad( Aggregate ):
+    """the affine majorant of ONE node and its quadratic part ( `AaBsp.refresh_weight_majorants` with `node_wc / node_wq` )"""
+
+    wa    : RealTensor[ "dim" ]
+    wb    : RealTensor
+    wc    : RealTensor[ "dim" ]
+    wq    : RealTensor
+
+    dim      : Axis[ "nb_dims" ]
+    nb_dims  : CtShapeVar
+
+
+class _NodeQuad( Aggregate ):
+    """the quadratic part of the majorant of ONE node ( `AaBsp.node_wc / node_wq` ) -- batched over the nodes"""
+
+    wc    : RealTensor[ "dim" ]
+    wq    : RealTensor
 
     dim      : Axis[ "nb_dims" ]
     nb_dims  : CtShapeVar

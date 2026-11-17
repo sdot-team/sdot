@@ -44,6 +44,19 @@ def _dome_coeffs( k ):
     return c, [ c * comb( k, j ) * ( -1 ) ** j / ( 2 * j + 1 ) for j in range( k + 1 ) ]
 
 
+def window_cells( max_halfwidth, h, M, rounded = True ):
+    """the cells an object of half-width up to `max_halfwidth` may cover, `ceil( 2 w / h ) + 1`, ROUNDED UP to 4 steps per octave
+    ( ..., 8, 10, 12, 14, 16, 20, 24, ...: at most 1.25 times more ), and at most the `M` cells of the grid: the shape of
+    the windows of the JAX path, static, and a width that changes from a problem to the next would otherwise trace it
+    again at each new value ( the kernels take a window of runtime size: one for every width ). The cells past the support receive nothing.
+    `rounded = False`: the exact count ( a width that does not change: the extra cells cost 5 to 25 % )."""
+    L = int( np.ceil( 2 * max_halfwidth / h - 1e-9 ) ) + 1
+    if L <= 5 or not rounded:
+        return L
+    q = ( 1 << ( ( L - 1 ).bit_length() - 1 ) ) // 4                                  # a quarter of the power of two under L
+    return min( M, -( -L // q ) * q )
+
+
 def profile( shape, k = 1 ):
     """( f, G ): the normalized profile f( t ) on [ -1, 1 ] ( integral 1 ) and its primitive G, G( -1 ) = 0,
     G( 1 ) = 1 -- functions of jax arrays, defined everywhere ( 0 / 1 outside )."""
@@ -158,7 +171,8 @@ class ProjectedLoss1d:
         else:
             self.max_halfwidth = 4 * self.h if max_radius is None else float( max_radius )
         # cells one object may cover: its support [ s - w, s + w ] starts in cell j0 and ends at most ceil( 2w/h ) further
-        self.L = int( np.ceil( 2 * self.max_halfwidth / self.h - 1e-9 ) ) + 1
+        # ( rounded up when the width is given: it may change from a problem to the next; the default one is fixed )
+        self.L = window_cells( self.max_halfwidth, self.h, self.M, rounded = shape != "tent" and max_radius is not None )
         self.f, self.G = profile( shape, k )
         if backend not in ( "kernel", "jax" ):
             raise ValueError( f"unknown backend { backend!r} ( kernel, jax )" )
@@ -327,7 +341,7 @@ class ProjectedLoss1d:
         A = normals.shape[ 0 ]
         bits = dict( size = 8 * jnp.dtype( self.dtype ).itemsize )
         params = self.params.at[ 3 ].set( 1 / n )
-        tpl = f"{ 0 if self.shape == 'tent' else 1 },{ self.k if self.shape == 'dome' else 0 },{ self.L }"
+        tpl = f"{ 0 if self.shape == 'tent' else 1 },{ self.k if self.shape == 'dome' else 0 }"
         common = "queue, args.inputs.points, args.inputs.radii, args.inputs.normals, args.inputs.params"
         num_k = Axis( ShapeVar( K ), name = "num_problem" )
         num_a, num_p = Axis( ShapeVar( A ), name = "num_angle" ), Axis( ShapeVar( n ), name = "num_point" )

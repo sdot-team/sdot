@@ -17,6 +17,14 @@ import it, and so can any script.
   planes_voronoi   3    100 000                4 planes, sigma = 0.02, weights 0
   planes_equal     3    100 000                the same cloud, weights = equal volumes ( made by the old bench itself )
   uniform4d..6d    4-6  1e5 ( Newton )         uniform in [ 0.001, 0.999 ]^d, weights 0 ( not of the campaign: the dimension scan )
+  grid_voronoi     2    1024^2                 the centres of an N x N grid ( n = N^2 ), weights 0: every vertex shared by four cells
+  grid_sines       2    1024^2                 the same seeds, the weights of the transport of equal masses to the sines image of
+                                               `bench_grid.py` ( a mild density, ratio 3 )
+  grid_sharp       2    1024^2                 the same seeds, the weights of the transport of sharp masses ( a ring 0.02 wide over a
+                                               floor of 1e-3 ) to a gaussian of width 0.2: cells from a hundredth of a pixel to tens
+
+The weights of `grid_sines` / `grid_sharp` come from the grid's dedicated solver ( to 1e-9 ), cached in the cases directory
+( `grid_<kind>_N<N>.npy` ): the first call at a size solves.
 
 The domain of all of them is the unit square / cube ( / hypercube ).
 
@@ -48,7 +56,7 @@ import numpy
 EPS = 1e-4          # the seeds of the hard clouds STRICTLY inside the domain ( as in the generators )
 
 CASE_NAMES = ( "uniform2d", "lines_voronoi", "lines_equal", "uniform3d", "planes_voronoi", "planes_equal",
-               "uniform4d", "uniform5d", "uniform6d" )
+               "uniform4d", "uniform5d", "uniform6d", "grid_voronoi", "grid_sines", "grid_sharp" )
 
 #: name -> ( dimension, file, number of seeds of the file )
 FILES = {
@@ -59,7 +67,8 @@ FILES = {
 }
 
 #: the size of the case in the old campaign when `n = None` and there is no file
-DEFAULT_N = { "uniform2d": 1_000_000, "uniform3d": 1_000_000, "uniform4d": 100_000, "uniform5d": 100_000, "uniform6d": 100_000 }
+DEFAULT_N = { "uniform2d": 1_000_000, "uniform3d": 1_000_000, "uniform4d": 100_000, "uniform5d": 100_000, "uniform6d": 100_000,
+              "grid_voronoi": 1024 ** 2, "grid_sines": 1024 ** 2, "grid_sharp": 1024 ** 2 }
 
 
 def cases_dirs():
@@ -78,6 +87,8 @@ def cases_dir():
 
 
 def dimension( name ):
+    if name.startswith( "grid_" ):
+        return 2
     if name.startswith( "uniform" ):
         return int( name[ len( "uniform" ) ] )
     return 3 if name in ( "planes_voronoi", "planes_equal" ) else 2
@@ -249,6 +260,49 @@ def density_target( name, sigma = 0.02, size = 512 ):
 
 # -- the entry point -------------------------------------------------------------------------------
 
+def grid_cloud( kind, n ):
+    """`( positions [ N^2, 2 ], weights [ N^2 ] )` of a grid case ( see the module docstring ): the centres of the cells of an
+    N x N grid of the unit square, `i = a N + b` the seed at `( ( a + 1/2 ) / N, ( b + 1/2 ) / N )`"""
+    N = 2 ** max( int( round( numpy.log2( max( n, 1 ) ) / 2 ) ), 5 )   # ( the nearest N^2, N a power of two from 32: the dedicated solver's grids )
+    n = N * N
+    u = ( numpy.arange( N ) + 0.5 ) / N
+    pos = numpy.ascontiguousarray( numpy.stack( numpy.meshgrid( u, u, indexing = "ij" ), -1 ).reshape( -1, 2 ) )
+    if kind == "voronoi":
+        return pos, numpy.zeros( n )
+    path = os.path.join( cases_dir(), f"grid_{ kind }_N{ N }.npy" )
+    if os.path.exists( path ):
+        return pos, numpy.load( path )
+    w = grid_weights( kind, N )
+    os.makedirs( os.path.dirname( path ), exist_ok = True )
+    numpy.save( path, w )
+    return pos, w
+
+
+def grid_weights( kind, N ):
+    """the weights of the transport of the grid's diracs ( the dedicated solver, to 1e-9 ): `sines`, equal masses to the image
+    of `bench_grid.py`; `sharp`, a ring of mass over a floor to a gaussian"""
+    from sdot import Image, Iterative, OtProblem, Tuning
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.distributions.SumOfGaussians import SumOfGaussians
+    from loom.tensor.host import to_host
+    if kind == "sines":
+        P = 512
+        u = numpy.arange( P + 1 ) / P
+        v = 1 + 0.5 * numpy.sin( 6 * numpy.pi * u[ :, None ] ) * numpy.sin( 4 * numpy.pi * u[ None, : ] )
+        target = Image( values = numpy.stack( [ v[ :-1, :-1 ], v[ :-1, 1: ], v[ 1:, :-1 ], v[ 1:, 1: ] ], axis = -1 ), degree = 1 )
+        source = SumOfDiracsOnAGrid( ( N, N ) )
+    elif kind == "sharp":
+        u = ( numpy.arange( N ) + 0.5 ) / N
+        r = numpy.hypot( u[ :, None ] - 0.5, u[ None, : ] - 0.5 )
+        m = numpy.exp( -( ( r - 0.3 ) / 0.02 ) ** 2 ) + 1e-3
+        target = SumOfGaussians( numpy.array( [ [ 0.5, 0.5 ] ] ), numpy.array( [ 0.2 ] ), support_box = ( [ 0.0, 0.0 ], [ 1.0, 1.0 ] ) )
+        source = SumOfDiracsOnAGrid( ( N, N ), weights = ( m / m.sum() ).ravel() )
+    else:
+        raise ValueError( f"unknown grid case { kind !r }" )
+    sol = OtProblem( source, target ).solve( Iterative( tol = 1e-9, on_failure = "ignore", tuning = Tuning( grid_solver = "dedicated" ) ) )
+    return numpy.asarray( to_host( getattr( sol.weights, "raw", sol.weights ) ), dtype = float ).ravel()
+
+
 def case( name, n = None, seed = 0, wscale = 0.0 ):
     """`( positions [ n, dim ], weights [ n ], dim )` of the benchmark case `name` ( see the module
     docstring ). `wscale` only concerns the uniform cases. Raises a `FileNotFoundError` that says where
@@ -260,6 +314,8 @@ def case( name, n = None, seed = 0, wscale = 0.0 ):
 
     if name.startswith( "uniform" ):
         return ( *uniform( DEFAULT_N[ name ] if n is None else int( n ), dim, seed, wscale ), dim )
+    if name.startswith( "grid_" ):
+        return ( *grid_cloud( name[ 5: ], DEFAULT_N[ name ] if n is None else int( n ) ), dim )
 
     d, fname, n_file = FILES[ name ]
     path = os.path.join( cases_dir(), fname )

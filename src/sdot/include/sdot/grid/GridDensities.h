@@ -290,7 +290,7 @@ struct Gauss {
             #pragma omp simd
             for( int x = 0; x < B; ++x ) {
                 const double dx = vx[ k ][ x ] - mx[ x ], dy = vy[ k ][ x ] - my[ x ];
-                R2[ x ] = std::fmax( R2[ x ], dx * dx + dy * dy );
+                { const double r2 = dx * dx + dy * dy; R2[ x ] = r2 > R2[ x ] ? r2 : R2[ x ]; }   // ( not std::fmax: a libm call with gcc )
             }
         }
         // spread of log rho over the cell: R |grad log rho( m )| + R^2 / ( 2 s^2 ); lanes whose
@@ -527,7 +527,7 @@ struct GaussCells {
         for( int x = 0; x < B; ++x ) ls[ x ] = lr[ 0 ][ x ];
         for( int i = 1; i < nk; ++i ) {
             #pragma omp simd
-            for( int x = 0; x < B; ++x ) ls[ x ] = std::fmax( ls[ x ], lr[ i ][ x ] );
+            for( int x = 0; x < B; ++x ) ls[ x ] = lr[ i ][ x ] > ls[ x ] ? lr[ i ][ x ] : ls[ x ];
         }
         for( int i = 0; i < nk; ++i ) {
             #pragma omp simd

@@ -52,4 +52,4 @@ All three give the same plan, to the tolerance of the solve.
 
 ## Performance
 
-The timings of the three paths are on [Performance: Diracs on a Grid](../performance-grid).
+The timings are on [Performance: Semi-discrete OT](../performance#diracs-on-a-regular-grid) ( whole solves ) and [Power Diagrams](../performance-diagram#diracs-on-a-regular-grid) ( one diagram ).

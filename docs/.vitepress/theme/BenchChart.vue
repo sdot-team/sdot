@@ -149,7 +149,7 @@ const view = computed( () => {
   const cpuLabel = `${ cpuName( hwOf( cpu, 'cpu' ) ) }, ${ cpuThreads } cores`
   const entries = !byN || byDim ? null : c.series.flatMap( ( s, i ) => {
     const runs = panels.map( p => p.series[ i ] )
-    const out = runs.some( r => r.line.length || r.level > 0 ) ? [ { label: c.cores !== false ? `${ s.label }, ${ cpuLabel }` : s.label, i: s.color ?? i, dash: s.dash } ] : []
+    const out = runs.some( r => r.line.length || r.level > 0 ) ? [ { label: typeof c.cores === 'string' ? `${ s.label }, ${ cpuName( hwOf( cpu, 'cpu' ) ) }, ${ c.cores }` : c.cores !== false ? `${ s.label }, ${ cpuLabel }` : s.label, i: s.color ?? i, dash: s.dash } ] : []   // ( `cores`: a string names the threads, `false` none )
     for ( const k of usedCards )
       if ( runs.some( r => r.cardLines.some( l => l[ 0 ].card === k ) ) )
         out.push( { label: `${ s.label }, ${ k.name }`, i: s.color ?? i, dash: s.dash, card: k } )

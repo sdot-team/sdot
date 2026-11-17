@@ -37,12 +37,15 @@ template<class TK,int D>
 struct Box {
     TK lo[ D ], hi[ D ];
     TK a[ D ], b;                                        ///< `w( q ) <= a . q + b`
+    /// QUAD ( `AaBsp.node_wc` ): `w( q ) <= a . q + b + sum_d c_d ( q_d - m_d )^2`, `b` then the LOWERED constant. Per axis the
+    /// minimum of `( q - x )^2 - a q - c ( q - m )^2` is at `q = ( x + a / 2 - c m ) / ( 1 - c )`: `cm = c m`, `inv = 1 / ( 1 - c )`
+    TK c[ D ], m[ D ], cm[ D ], inv[ D ];
 };
 
 /// the test, for a state in MEMORY ( `nb` vertices, `D` arrays ): eight vertices per step, in
 /// registers, and out as soon as ONE block holds a vertex that can be cut. The tail is loaded
 /// PARTIALLY and its dead lanes are masked ( a stale `s` would otherwise give up a legitimate pruning ).
-template<bool WEIGHTED,class TK,int D>
+template<bool WEIGHTED,class TK,int D,bool QUAD = false>
 HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, const Box<TK,D> &B ) {
 #ifdef __CUDACC__
     const TK cb = WEIGHTED ? w0 - B.b : TK( 0 );         // the GPU has no register kernel: the plain loop
@@ -51,10 +54,12 @@ HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, con
         for ( int d = 0; d < D; ++d ) {
             const TK x = v[ d ][ i ];
             TK y = x + ( WEIGHTED ? B.a[ d ] / 2 : TK( 0 ) );
+            if constexpr ( QUAD ) y = ( y - B.cm[ d ] ) * B.inv[ d ];
             y = y < B.lo[ d ] ? B.lo[ d ] : ( y > B.hi[ d ] ? B.hi[ d ] : y );
             const TK u = y - x, f = x - p0[ d ];
             s += u * u - f * f;
             if constexpr ( WEIGHTED ) s -= B.a[ d ] * y;
+            if constexpr ( QUAD ) { const TK g = y - B.m[ d ]; s -= B.c[ d ] * g * g; }
         }
         if ( s <= 0 )
             return true;
@@ -62,14 +67,19 @@ HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, con
     return false;
 #else
     using V = asimd::SimdVec<TK,8>;
-    V lo[ D ], hi[ D ], a[ D ], half[ D ], c[ D ];
+    V lo[ D ], hi[ D ], a[ D ], half[ D ], c[ D ], qc[ D ], qm[ D ], qinv[ D ];
     for ( int d = 0; d < D; ++d ) {
         lo[ d ] = V( B.lo[ d ] );
         hi[ d ] = V( B.hi[ d ] );
         c [ d ] = V( p0[ d ] );
         if constexpr ( WEIGHTED ) {
             a   [ d ] = V( B.a[ d ] );
-            half[ d ] = V( B.a[ d ] / 2 );
+            half[ d ] = V( QUAD ? B.a[ d ] / 2 - B.cm[ d ] : B.a[ d ] / 2 );
+        }
+        if constexpr ( QUAD ) {
+            qc  [ d ] = V( B.c[ d ] );
+            qm  [ d ] = V( B.m[ d ] );
+            qinv[ d ] = V( B.inv[ d ] );
         }
     }
     const V cb( WEIGHTED ? w0 - B.b : TK( 0 ) ), zero( TK( 0 ) );
@@ -81,10 +91,12 @@ HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, con
             const V x = load( d );
             V y = x;
             if constexpr ( WEIGHTED ) y = y + half[ d ];
+            if constexpr ( QUAD ) y = y * qinv[ d ];
             y = asimd::min( asimd::max( y, lo[ d ] ), hi[ d ] );
             const V u = y - x, f = x - c[ d ];
             s = asimd::fma( u, u, s ) - f * f;
             if constexpr ( WEIGHTED ) s = s - a[ d ] * y;
+            if constexpr ( QUAD ) { const V g = y - qm[ d ]; s = s - qc[ d ] * g * g; }
         }
         return s;
     };
@@ -103,14 +115,18 @@ HD inline bool can_cut_box( int nb, const TK *const *v, const TK *p0, TK w0, con
 }
 
 /// the same test, on the eight lanes of an `StateReg` ( 2D, registers )
-template<bool WEIGHTED,class TK,class State>
+template<bool WEIGHTED,class TK,bool QUAD = false,class State>
 inline bool can_cut_box_reg( const State &e, const TK *p0, TK w0, const Box<TK,2> &B ) {
     using V = asimd::SimdVec<TK,8>;
     // the point of the box closest to the vertex, SHIFTED by half a slope
     V y0 = e.vx, y1 = e.vy;
     if constexpr ( WEIGHTED ) {
-        y0 = y0 + V( B.a[ 0 ] / 2 );
-        y1 = y1 + V( B.a[ 1 ] / 2 );
+        y0 = y0 + V( QUAD ? B.a[ 0 ] / 2 - B.cm[ 0 ] : B.a[ 0 ] / 2 );
+        y1 = y1 + V( QUAD ? B.a[ 1 ] / 2 - B.cm[ 1 ] : B.a[ 1 ] / 2 );
+    }
+    if constexpr ( QUAD ) {
+        y0 = y0 * V( B.inv[ 0 ] );
+        y1 = y1 * V( B.inv[ 1 ] );
     }
     y0 = asimd::min( asimd::max( y0, V( B.lo[ 0 ] ) ), V( B.hi[ 0 ] ) );
     y1 = asimd::min( asimd::max( y1, V( B.lo[ 1 ] ) ), V( B.hi[ 1 ] ) );
@@ -120,12 +136,16 @@ inline bool can_cut_box_reg( const State &e, const TK *p0, TK w0, const Box<TK,2
     V s = asimd::fma( g0, g0, g1 * g1 ) - asimd::fma( f0, f0, f1 * f1 );
     if constexpr ( WEIGHTED )
         s = s + V( w0 - B.b ) - asimd::fma( V( B.a[ 0 ] ), y0, V( B.a[ 1 ] ) * y1 );
+    if constexpr ( QUAD ) {
+        const V h0 = y0 - V( B.m[ 0 ] ), h1 = y1 - V( B.m[ 1 ] );
+        s = s - asimd::fma( V( B.c[ 0 ] ) * h0, h0, V( B.c[ 1 ] ) * h1 * h1 );
+    }
     const unsigned m = unsigned( asimd::to_bits( asimd::ge( V( TK( 0 ) ), s ) ) );
     return ( m & ( ( 1u << State::nb ) - 1 ) ) != 0;
 }
 
 /// THE SINGLE GATE : whatever the state, the same question.
-template<bool WEIGHTED,class TK,int D,class State>
+template<bool WEIGHTED,class TK,int D,bool QUAD = false,class State>
 HD inline bool can_cut( const State &e, const TK *p0, TK w0, const Box<TK,D> &B ) {
     // an UNBOUNDED cell is a replacement simplex whose corners are made up : nothing
     // to prune against, and the honest answer is "maybe". The accelerator then degenerates into
@@ -135,12 +155,12 @@ HD inline bool can_cut( const State &e, const TK *p0, TK w0, const Box<TK,D> &B 
             return true;
     if constexpr ( requires { e.vx + e.vx; } ) {
         static_assert( D == 2 );
-        return can_cut_box_reg<WEIGHTED,TK>( e, p0, w0, B );
+        return can_cut_box_reg<WEIGHTED,TK,QUAD>( e, p0, w0, B );
     } else if constexpr ( requires { e.vy; } ) {
         const TK *v[ 2 ] = { e.vx, e.vy };
-        return can_cut_box<WEIGHTED,TK,2>( e.nb, v, p0, w0, B );
+        return can_cut_box<WEIGHTED,TK,2,QUAD>( e.nb, v, p0, w0, B );
     } else {
-        return can_cut_box<WEIGHTED,TK,D>( e.nb, e.v, p0, w0, B );
+        return can_cut_box<WEIGHTED,TK,D,QUAD>( e.nb, e.v, p0, w0, B );
     }
 }
 

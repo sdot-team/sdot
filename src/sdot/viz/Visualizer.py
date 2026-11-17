@@ -244,6 +244,7 @@ class Visualizer:
         self._poly_v, self._poly_len, self._poly_c = [], [], []   # polygons (free length)
         self._edge_v, self._edge_c                 = [], []
         self._pnt_v,  self._pnt_c,  self._pnt_r    = [], [], []
+        self._pnt_m                                = []           # a matrix [ 4 ] per point: an ELLIPSE ( 0: a disc )
         self._hpolys                               = []           # polytopes in H-representation
         self._curves                               = []           # see `add_curve`
 
@@ -256,6 +257,11 @@ class Visualizer:
         # is duplicated, and a frame has no structure of its own to carry.
         self._nb_edges  = 0
         self._nb_points = 0
+        # SHARED primitives ( `shared = True` ) are drawn in every frame and stored once: at the HEAD of the lists, the
+        # frames' ranges after them ( the marks count the frames' primitives only, the output shifts them )
+        self._shared    = dict( poly = 0, edge = 0, pnt = 0 )     # how many primitives
+        self._sh_chunks = dict( poly = 0, edge = 0, pnt = 0 )     # how many chunks in the lists of arrays
+        self._sh_poly_v = 0                                       # how many indices at the head of `_poly_v`
         self._frames    = [ self._frame_mark( frame_value ) ]       # ( `frame_value`: the abscissa of the first frame )
 
     # ---- colors -------------------------------------------------------------------------------
@@ -381,7 +387,7 @@ class Visualizer:
 
     def _frame_mark( self, value ):
         return { "values": self._frame_values( value ),
-                 "poly": len( self._poly_len ), "edge": self._nb_edges,
+                 "poly": len( self._poly_len ) - self._shared[ "poly" ], "edge": self._nb_edges,
                  "pnt": self._nb_points, "hpoly": len( self._hpolys ) }
 
     def new_frame( self, value = None ):
@@ -412,10 +418,24 @@ class Visualizer:
         return len( self._frames )
 
     def _frame_ranges( self, key ):
-        """The bounds of the frames over one of the primitive lists: `nb_frames + 1` integers."""
-        total = { "poly": len( self._poly_len ), "edge": self._nb_edges,
+        """The bounds of the frames over one of the primitive lists: `nb_frames + 1` integers ( after the shared
+        primitives, which come first )."""
+        total = { "poly": len( self._poly_len ) - self._shared[ "poly" ], "edge": self._nb_edges,
                   "pnt": self._nb_points, "hpoly": len( self._hpolys ) }[ key ]
-        return np.array( [ f[ key ] for f in self._frames ] + [ total ], dtype = np.int32 )
+        return np.array( [ f[ key ] for f in self._frames ] + [ total ], dtype = np.int32 ) + self._shared.get( key, 0 )
+
+    def _store( self, key, lists, items, nb, shared ):
+        """Appends one chunk ( `items`, one per list of `lists` ) of `nb` primitives to the frame being built, or, `shared`,
+        to the shared ones."""
+        if shared:
+            i = self._sh_chunks[ key ]
+            for l, x in zip( lists, items ):
+                l.insert( i, x )
+            self._sh_chunks[ key ] += 1
+            self._shared[ key ] += nb
+        else:
+            for l, x in zip( lists, items ):
+                l.append( x )
 
     # ---- primitives ---------------------------------------------------------------------------
 
@@ -458,28 +478,37 @@ class Visualizer:
                                    log = bool( log_y ), color = [ list( _rgb( c ) ) for c in pair ] ) )
         return self
 
-    def add_points( self, positions, radius = 0.0, color = None, opacity = 1.0, frames = True ):
+    def add_points( self, positions, radius = 0.0, color = None, opacity = 1.0, frames = True, matrices = None, shared = False ):
         """`positions`: `[n, d]`. `radius`: the WORLD radius of the points (a scalar, or one radius
         per point). `0` (default) = the point has no size of its own (a Dirac): it is the page's
         slider that sets its display radius -- same convention as `points_html`.
+
+        `matrices`: `[n, 2, 2]`, ELLIPSES ( 2D scenes ): `M` maps the unit disc onto the ellipse, in the plane of the first two
+        viewed axes -- one quad per ellipse, deformed on the card, instead of an outline of vertices. Their radius
+        ( for the aim, and the slider, which scales them all ) is their largest half-axis unless `radius` is given.
+
+        `shared`: drawn in EVERY frame, stored once ( an outline of the object under a descent, a sample of the truth ).
         """
         base = self._pool( positions, frames )
         n = self._pool_len( base )
         if n == 0:
             return self
+        mat = np.zeros( ( n, 4 ), np.float32 ) if matrices is None else _np( matrices ).reshape( n, 4 )
+        if matrices is not None and np.isscalar( radius ) and radius == 0:
+            radius = np.linalg.norm( mat.reshape( n, 2, 2 ), ord = 2, axis = ( 1, 2 ) )     # the largest half-axis
         rad = np.full( n, float( radius ), dtype = np.float32 ) \
             if np.isscalar( radius ) else _np( radius ).reshape( -1 )
         if len( rad ) != n:
             raise ValueError( f"radius: { len( rad ) } radii for { n } points" )
         ci = self._color_id( color, opacity )
-        self._pnt_v.append( np.arange( base, base + n, dtype = np.int32 ) )
-        self._pnt_r.append( rad )
-        self._pnt_c.append( np.full( n, ci, dtype = np.uint16 ) )
-        self._nb_points += n
+        self._store( "pnt", ( self._pnt_v, self._pnt_r, self._pnt_c, self._pnt_m ),
+                     ( np.arange( base, base + n, dtype = np.int32 ), rad, np.full( n, ci, dtype = np.uint16 ), mat ), n, shared )
+        if not shared:
+            self._nb_points += n
         return self
 
     def add_edges( self, positions, edges = None, color = None, opacity = 1.0, closed = False,
-                   dashed = False, nb_dashes = 7, frames = True ):
+                   dashed = False, nb_dashes = 7, frames = True, shared = False ):
         """`positions`: `[n, d]`. `edges`: `[m, 2]` of indices, or `None` to connect
         consecutive points (`closed` then closes the loop -- the case of a polygon given in
         cyclic order, which is what a 2D cell yields).
@@ -491,6 +520,8 @@ class Visualizer:
         only thing BOTH outputs know how to display identically. The price is that the length of a
         dash is in WORLD units, not in pixels: it is a fixed number of dashes per edge, so
         the density does not change with zoom.
+
+        `shared`: drawn in EVERY frame, stored once.
         """
         base = self._pool( positions, frames )
         n = self._pool_len( base )
@@ -505,14 +536,14 @@ class Visualizer:
         if len( idx ) == 0:
             return self
         if dashed:
-            return self._add_dashes( positions, idx, color, opacity, nb_dashes, frames )
+            return self._add_dashes( positions, idx, color, opacity, nb_dashes, frames, shared )
         ci = self._color_id( color, opacity )
-        self._edge_v.append( idx.astype( np.int32 ) + base )
-        self._edge_c.append( np.full( len( idx ), ci, dtype = np.uint16 ) )
-        self._nb_edges += len( idx )
+        self._store( "edge", ( self._edge_v, self._edge_c ), ( idx.astype( np.int32 ) + base, np.full( len( idx ), ci, dtype = np.uint16 ) ), len( idx ), shared )
+        if not shared:
+            self._nb_edges += len( idx )
         return self
 
-    def _add_dashes( self, positions, idx, color, opacity, nb_dashes, frames = True ):
+    def _add_dashes( self, positions, idx, color, opacity, nb_dashes, frames = True, shared = False ):
         """The `idx` segments of `positions`, dotted: a SEPARATE vertex pool, holding the
         ends of the dashes, and ordinary edges on it (see `add_edges( dashed = True )`).
         """
@@ -531,23 +562,32 @@ class Visualizer:
                  + np.arange( 0, k, 2 )[ None, : ] )
         seg = np.stack( [ starts, starts + 1 ], axis = -1 ).reshape( -1, 2 )
         return self.add_edges( pts.reshape( -1, p.shape[ 1 ] ), seg, color = color,
-                               opacity = opacity, frames = frames )
+                               opacity = opacity, frames = frames, shared = shared )
 
-    def add_faces( self, positions, faces, color = None, opacity = 1.0, frames = True ):
+    def add_faces( self, positions, faces, color = None, opacity = 1.0, frames = True, shared = False ):
         """`positions`: `[n, d]`. `faces`: a sequence of POLYGONS (lists of indices, free lengths).
         They are kept AS IS -- it is the output that decides whether to triangulate them.
+        `shared`: drawn in EVERY frame, stored once.
         """
         base = self._pool( positions, frames )
         ci = self._color_id( color, opacity )
-        nb = 0
+        verts, lens = [], []
         for f in faces:
             f = [ int( i ) + base for i in f ]
             if len( f ) < 3:
                 continue
-            self._poly_v += f
-            self._poly_len.append( len( f ) )
-            nb += 1
-        self._poly_c.append( np.full( nb, ci, dtype = np.uint16 ) )
+            verts += f
+            lens.append( len( f ) )
+        if shared:
+            self._poly_v[ self._sh_poly_v : self._sh_poly_v ] = verts
+            self._poly_len[ self._shared[ "poly" ] : self._shared[ "poly" ] ] = lens
+            self._sh_poly_v += len( verts )
+        else:
+            self._poly_v += verts
+            self._poly_len += lens
+        self._store( "poly", ( self._poly_c, ), ( np.full( len( lens ), ci, dtype = np.uint16 ), ), 0, shared )
+        if shared:
+            self._shared[ "poly" ] += len( lens )
         return self
 
     def add_polytope( self, cut_directions, cut_offsets, color = None, opacity = 1.0,
@@ -623,6 +663,11 @@ class Visualizer:
         return _cat( self._pnt_r, np.float32 )
 
     @property
+    def point_matrices( self ):
+        """The matrix of each point, `[k, 4]` ( `M` row by row, mapping the unit disc onto its ellipse; 0: a disc )."""
+        return _cat( self._pnt_m, np.float32 ).reshape( -1, 4 )
+
+    @property
     def colors( self ):
         """The table of distinct colors, as `(r, g, b, a)` -- the primitives refer to it."""
         return list( self._colors )
@@ -647,8 +692,8 @@ class Visualizer:
         knowing anything about the internal slicing.
 
         Returns a dict: `value` ( a float, a tuple with several frame axes ), `polygons`, `polygon_colors`, `edges`, `edge_colors`, `points`,
-        `point_colors`, `point_radii`, `polytopes`. The indices refer to the `positions` pool,
-        common to ALL frames.
+        `point_colors`, `point_radii`, `point_matrices`, `polytopes`. The indices refer to the `positions` pool,
+        common to ALL frames. The shared primitives come first.
         """
         def rng( key ):
             r = self._frame_ranges( key )
@@ -658,15 +703,18 @@ class Visualizer:
         e0, e1 = rng( "edge" )
         v0, v1 = rng( "pnt" )
         h0, h1 = rng( "hpoly" )
+        sp, se, sv = self._shared[ "poly" ], self._shared[ "edge" ], self._shared[ "pnt" ]
+        both = lambda a, s, i0, i1: np.concatenate( [ a[ : s ], a[ i0 : i1 ] ] )
         return {
             "value"         : self._frames[ i ][ "values" ] if len( self.frame_axes ) > 1 else self._frames[ i ][ "values" ][ 0 ],
-            "polygons"      : self.polygons[ p0 : p1 ],
-            "polygon_colors": self.polygon_colors[ p0 : p1 ],
-            "edges"         : self.edges[ e0 : e1 ],
-            "edge_colors"   : self.edge_colors[ e0 : e1 ],
-            "points"        : self.points[ v0 : v1 ],
-            "point_colors"  : self.point_colors[ v0 : v1 ],
-            "point_radii"   : self.point_radii[ v0 : v1 ],
+            "polygons"      : self.polygons[ : sp ] + self.polygons[ p0 : p1 ],
+            "polygon_colors": both( self.polygon_colors, sp, p0, p1 ),
+            "edges"         : both( self.edges, se, e0, e1 ),
+            "edge_colors"   : both( self.edge_colors, se, e0, e1 ),
+            "points"        : both( self.points, sv, v0, v1 ),
+            "point_colors"  : both( self.point_colors, sv, v0, v1 ),
+            "point_radii"   : both( self.point_radii, sv, v0, v1 ),
+            "point_matrices": both( self.point_matrices, sv, v0, v1 ),
             "polytopes"     : self.polytopes[ h0 : h1 ],
         }
 
@@ -767,6 +815,8 @@ class Visualizer:
             "__PNT_V__"   : _b64( self.points ),
             "__PNT_C__"   : _b64( self.point_colors ),
             "__PNT_R__"   : _b64( self.point_radii ),
+            "__PNT_M__"   : _b64( self.point_matrices.reshape( -1 ) ),
+            "__SHARED__"  : json.dumps( self._shared ),
             "__HPOLY__"   : json.dumps( self._hpolys ),
             "__CURVES__"  : json.dumps( self._curves ),
             "__FR_VAL__"  : _b64( np.array( [ f[ "values" ] for f in self._frames ], np.float32 ) ),
@@ -1014,6 +1064,9 @@ let PAL = COLORS;                      // the table of the CURRENT theme        
 const POLY_V = decI32("__POLY_V__"), POLY_OFF = decI32("__POLY_OFF__"), POLY_C = decU16("__POLY_C__");
 const EDG_V  = decI32("__EDG_V__"),  EDG_C    = decU16("__EDG_C__");
 const PNT_V  = decI32("__PNT_V__"),  PNT_C    = decU16("__PNT_C__"), PNT_R = decF32("__PNT_R__");
+const PNT_M  = decF32("__PNT_M__");    // a matrix per point, row by row: an ELLIPSE ( all 0: a disc )
+// SHARED primitives: the first SHARED.poly / .edge / .pnt of their lists, drawn in every frame ( the frames' ranges follow )
+const SHARED = __SHARED__;
 
 const CURVES = __CURVES__;             // { name, x, y, log, color: [ light, dark ] }, see `add_curve`
 const HPOLY  = __HPOLY__.map(h => ({                                     // polytopes in H-rep
@@ -1185,7 +1238,7 @@ function polygon2D(A, b) {
 // ============================================================================================
 let TRI = { pos: null, nrm: null, col: null, n: 0 };
 let LIN = { a: null, b: null, col: null, n: 0 };
-let PNT = { pos: null, col: null, rad: null, n: 0 };
+let PNT = { pos: null, col: null, rad: null, mat: null, n: 0 };
 
 // The pool is projected ONCE per choice of viewed dimensions, not at each frame: it is the
 // only array that carries the whole scene, whereas the rest of a rebuild only costs the
@@ -1206,6 +1259,8 @@ function buildScene() {
   const e0 = FR_EDG[frameIdx],  e1 = FR_EDG[frameIdx + 1];
   const v0 = FR_PNT[frameIdx],  v1 = FR_PNT[frameIdx + 1];
   const h0 = FR_HP[frameIdx],   h1 = FR_HP[frameIdx + 1];
+  // the frame's primitives, then the shared ones ( the points of the frame first: the morph moves those )
+  const polys = [[p0, p1], [0, SHARED.poly]], edgs = [[e0, e1], [0, SHARED.edge]], pnts = [[v0, v1], [0, SHARED.pnt]];
 
   // 2. polytopes: slice -> enumeration -> triangles (fan) + edges (deduplicated)
   const hp = [], hpc = [], hl = [], hlc = [];
@@ -1248,7 +1303,7 @@ function buildScene() {
   //    space) -> flat shading, hence one vertex per triangle corner: it is a display buffer,
   //    not a storage format, the expense stays in GPU memory.
   let nTri = hp.length / 9;
-  for (let p = p0; p < p1; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
+  for (const [a, b] of polys) for (let p = a; p < b; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
   TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9),
           col: new Float32Array(nTri * 12), n: nTri };
   let t = 0;
@@ -1269,7 +1324,7 @@ function buildScene() {
     t++;
   }
   const at = i => [PR[3 * i], PR[3 * i + 1], PR[3 * i + 2]];
-  for (let p = p0; p < p1; p++) {
+  for (const [a, b] of polys) for (let p = a; p < b; p++) {
     const o0 = POLY_OFF[p], o1 = POLY_OFF[p + 1], col = PAL[POLY_C[p]];
     for (let k = o0 + 1; k + 1 < o1; k++)                 // fan from the first vertex
       putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col);
@@ -1279,7 +1334,7 @@ function buildScene() {
 
   // 4. edges: one INSTANCE per edge (two ends), widened into a quadrilateral in the
   //    shader -- gl.lineWidth is capped at 1 pixel on most drivers.
-  const nLin = (e1 - e0) + hl.length / 6;
+  const nLin = (e1 - e0) + SHARED.edge + hl.length / 6;
   LIN = { a: new Float32Array(nLin * 3), b: new Float32Array(nLin * 3),
           col: new Float32Array(nLin * 4), n: nLin };
   let e = 0;
@@ -1289,19 +1344,21 @@ function buildScene() {
     for (let q = 0; q < 4; q++) LIN.col[e * 4 + q] = col[q];
     e++;
   }
-  for (let i = e0; i < e1; i++)
+  for (const [a, b] of edgs) for (let i = a; i < b; i++)
     putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), PAL[EDG_C[i]]);
   for (let i = 0; i + 5 < hl.length; i += 6)
     putLin(hl.slice(i, i + 3), hl.slice(i + 3, i + 6), hlc[i / 6]);
 
   // 5. points
-  const nPnt = v1 - v0;
+  const nPnt = (v1 - v0) + SHARED.pnt;
   PNT = { pos: new Float32Array(nPnt * 3), col: new Float32Array(nPnt * 4),
-          rad: PNT_R.subarray(v0, v1), n: nPnt };
-  for (let i = 0; i < nPnt; i++) {
-    const v = PNT_V[v0 + i], col = PAL[PNT_C[v0 + i]];
+          rad: new Float32Array(nPnt), mat: new Float32Array(nPnt * 4), n: nPnt };
+  let i = 0;
+  for (const [a, b] of pnts) for (let j = a; j < b; j++, i++) {
+    const v = PNT_V[j], col = PAL[PNT_C[j]];
     PNT.pos[i * 3] = PR[3 * v]; PNT.pos[i * 3 + 1] = PR[3 * v + 1]; PNT.pos[i * 3 + 2] = PR[3 * v + 2];
-    for (let q = 0; q < 4; q++) PNT.col[i * 4 + q] = col[q];
+    for (let q = 0; q < 4; q++) { PNT.col[i * 4 + q] = col[q]; PNT.mat[i * 4 + q] = PNT_M[j * 4 + q]; }
+    PNT.rad[i] = PNT_R[j];
   }
 
   upload();
@@ -1657,7 +1714,7 @@ in vec4 vCol; out vec4 oCol; uniform float uAlpha;
 void main() { oCol = vec4(vCol.rgb, vCol.a * uAlpha); }`);
 
 const pPoint = prog(`#version 300 es
-in vec3 aPos; in vec4 aCol; in float aRad;
+in vec3 aPos; in vec4 aCol; in float aRad; in vec4 aMat;
 uniform mat4 uMVP; uniform mat4 uMV; uniform float uSizeK; uniform float uOrtho; uniform float uR; uniform float uRScale;
 uniform float uDepthCol; uniform vec2 uDepthRange; uniform vec2 uHalfVP;
 out vec4 vCol; out vec3 vC; out float vR; out vec2 vD;
@@ -1677,7 +1734,11 @@ void main() {
   float zv = -(uMV * vec4(aPos, 1.0)).z;
   float px = max(uSizeK * r / (uOrtho > 0.5 ? 1.0 : max(zv, 1e-4)), 0.5);      // its radius on screen: half a pixel at least
   vD = CORNER[gl_VertexID];
-  c.xy += vD * px / uHalfVP * max(c.w, 1e-5);
+  if (aMat != vec4(0.0)) {                             // an ELLIPSE: the quad deformed by its matrix, in the world
+    vec2 o = vec2(aMat.x * vD.x + aMat.y * vD.y, aMat.z * vD.x + aMat.w * vD.y) * uRScale;
+    c = uMVP * vec4(aPos + vec3(o, 0.0), 1.0);
+  } else
+    c.xy += vD * px / uHalfVP * max(c.w, 1e-5);
   gl_Position = c;
   vC = (uMV * vec4(aPos, 1.0)).xyz; vR = r;
   vCol = uDepthCol > 0.5 ? vec4(depthRamp(clamp((zv - uDepthRange.x) / (uDepthRange.y - uDepthRange.x), 0.0, 1.0)), aCol.a) : aCol;
@@ -1783,7 +1844,7 @@ function edlStrength() { return 20 * Math.pow(100, parseFloat(ui.edlK.value)); }
 function aoRadius() { return parseFloat(ui.aoR.value) * pointRadius(); }
 
 const buf = {};
-["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad"]
+["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad", "pntMat"]
   .forEach(k => buf[k] = gl.createBuffer());
 
 gl.bindBuffer(gl.ARRAY_BUFFER, buf.linCorner);
@@ -1806,13 +1867,14 @@ attr(pLine, "aCorner", buf.linCorner, 2);
 attr(pLine, "aA", buf.linA, 3, 1); attr(pLine, "aB", buf.linB, 3, 1); attr(pLine, "aCol", buf.linCol, 4, 1);
 gl.bindVertexArray(vaoPoint);
 attr(pPoint, "aPos", buf.pntPos, 3, 1); attr(pPoint, "aCol", buf.pntCol, 4, 1); attr(pPoint, "aRad", buf.pntRad, 1, 1);
+attr(pPoint, "aMat", buf.pntMat, 4, 1);
 gl.bindVertexArray(null);
 
 function up(b, data) { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
 function upload() {
   up(buf.triPos, TRI.pos); up(buf.triNrm, TRI.nrm); up(buf.triCol, TRI.col);
   up(buf.linA, LIN.a); up(buf.linB, LIN.b); up(buf.linCol, LIN.col);
-  up(buf.pntPos, PNT.pos); up(buf.pntCol, PNT.col); up(buf.pntRad, PNT.rad);
+  up(buf.pntPos, PNT.pos); up(buf.pntCol, PNT.col); up(buf.pntRad, PNT.rad); up(buf.pntMat, PNT.mat);
 }
 
 // ============================================================================================
@@ -2377,7 +2439,7 @@ function step() {
     if (sub === 0) { morphA = PNT.pos.slice(); morphB = pointPositions(next); }
     if (++sub < MORPH) {
       const t = 0.5 - 0.5 * Math.cos(Math.PI * sub / MORPH);
-      for (let k = 0; k < morphA.length; k++) PNT.pos[k] = morphA[k] + t * (morphB[k] - morphA[k]);
+      for (let k = 0; k < morphB.length; k++) PNT.pos[k] = morphA[k] + t * (morphB[k] - morphA[k]);
       up(buf.pntPos, PNT.pos);
       draw();
       return;

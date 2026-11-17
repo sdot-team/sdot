@@ -79,15 +79,21 @@ def provoke():
 
 
 # What the documentation shows ( docs/snippets ): a user starts with these, so their kernels are in the catalogue -- whatever
-# settings they use by default. `scripts/validate_wheel.py` runs the same files on the installed wheel with
-# `LOOM_KERNELS=catalogue`, so a kernel missing here fails the release instead of compiling on a user's machine.
-DOCUMENTED = [ "hello_numpy.py", "hello_jax.py", "hello_torch.py", "hello_cupy.py", "plan.py", "ot_solve.py", "ot_problem.py",
-               "distributions.py", "distributions_1d.py", "duplicates_plan.py" ]
-SNIPPETS = Path( __file__ ).resolve().parents[ 2 ] / "docs" / "snippets"
+# settings they use by default. The list is the `checks` of `[tool.loom.release]` in pyproject.toml: `python -m loom.release`
+# runs the same files on the installed wheel with `LOOM_KERNELS=catalogue`, so a kernel missing here fails the release instead of
+# compiling on a user's machine.
+ROOT = Path( __file__ ).resolve().parents[ 2 ]
+SNIPPETS = ROOT / "docs" / "snippets"
+
+
+def _documented():
+    import tomllib
+    checks = tomllib.loads( ( ROOT / "pyproject.toml" ).read_text() )[ "tool" ][ "loom" ][ "release" ][ "checks" ]
+    return [ Path( c ).name for c in checks if ( ROOT / c ).parent == SNIPPETS ]
 
 
 def documented():
-    """Run the snippets of `DOCUMENTED`, as a user would ( their numpy inputs go to the framework in force ), in a scratch
+    """Run the snippets of the release checks ( `_documented` ), as a user would ( their numpy inputs go to the framework in force ), in a scratch
     directory ( one writes a page ). A snippet of a framework that is not installed, or that does not run on this device ( the
     numpy driver on a card ), is skipped; the `hello_<framework>` of each framework runs only under that framework."""
     import contextlib, io, runpy, tempfile, os
@@ -100,7 +106,7 @@ def documented():
     with tempfile.TemporaryDirectory() as scratch:
         os.chdir( scratch )
         try:
-            for name in DOCUMENTED:
+            for name in _documented():
                 if name.startswith( "hello_" ) and name != f"hello_{ mine }.py":
                     continue                            # a framework's own hello: a user of that framework runs it
                 try:

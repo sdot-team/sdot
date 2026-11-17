@@ -4,7 +4,7 @@
 #   errand run --env n20-numpy --no-queue --pull runs/scaling-probe bash sdot-ffi/bench/experiments/scaling_probe.sh
 OUT=runs/scaling-probe
 B=sdot-ffi/bench
-run() { python -m errand run -k bench --out "$OUT/$1-{params}" "$B/$2::*" "${@:3}"; }
+run() { python -m errand run -x --out "$OUT/$1-{params}" "$B/$2::*" "${@:3}"; }
 
 # the mean clock of the allowed CPUs, sampled every 0.2 s while a command runs ( in the background, to `$1.mhz` )
 CPUS=$(taskset -cp $$ | cut -d: -f2 | tr -d ' ')

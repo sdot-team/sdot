@@ -81,4 +81,4 @@ and slower beyond ( 1.6 s for 2.6e-11 ); with 1e6 diracs per image, the 256 pair
 
 The numbers come from [`bench/bench_1d.py`](https://github.com/sdot-team/sdot/tree/main/bench/bench_1d.py), jobs
 `one_d*` of [`bench/page.py`](https://github.com/sdot-team/sdot/tree/main/bench/page.py). The machines and the protocol
-are on the [overview](./performance#appendix-setup-and-protocol).
+are on the [appendix](./performance-setup#setup-and-protocol).

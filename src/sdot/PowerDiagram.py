@@ -661,9 +661,14 @@ class PowerDiagram( Aggregate, Displayable ):
                 return not getattr( ca, "runtime_strides", False ) and ca.layout.is_identity
             tree = m[ "tree" ].attributes
             contig = all( dense( c ) for c in ( positions, m.get( "sorted_weights" ), tree[ "node_begin" ], tree[ "node_end" ],
-                                                tree[ "node_box" ], tree.get( "node_wa" ), tree.get( "node_wb" ) ) )
+                                                tree[ "node_box" ], tree.get( "node_wa" ), tree.get( "node_wb" ), tree.get( "node_wc" ), tree.get( "node_wq" ) ) )
+            # the quadratic majorant ( `AaBsp.node_wc / node_wq` ): `PowerDiagram_Bsp::has_quad`, the same test
+            def tbound( name ):
+                ca = tree.get( name )
+                return ca is not None and getattr( ca, "io_category", None ) is not None and ca.io_category.is_bound
+            quad = int( weights and tbound( "node_wc" ) and tbound( "node_wq" ) )
             seeds = ( f"BspSeeds<{ tr },{ ti },{ self.dim_count },bool( { weights } ),bool( { int( bound( 'memo_counts' ) ) } ),"
-                      f"bool( { int( contig ) } )>" )
+                      f"bool( { int( contig ) } ),bool( { quad } )>" )
         else:
             seeds = f"PlainSeeds<{ tr },{ self.dim_count },bool( { weights } )>"
         return [ _engine_unit( self.dim_count, seeds ) ]

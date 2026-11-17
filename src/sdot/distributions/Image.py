@@ -489,6 +489,8 @@ def _pixel_frame( frame, shape ):
     """the frame of ONE pixel, from that of the whole image ( `None`: the longest side is 1, the proportions kept ). In the
     framework of `frame`, which stays differentiable"""
     d = len( shape )
+    # ( a numpy array given through the boundary arrives as a loom tensor: its array, in the framework it was given in )
+    frame = getattr( frame, "raw", frame )
     if frame is None:
         return numpy.eye( d ) / max( shape )
     if isinstance( frame, ( list, tuple, float, int, numpy.ndarray ) ):

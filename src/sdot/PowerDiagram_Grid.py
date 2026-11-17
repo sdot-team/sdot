@@ -95,7 +95,7 @@ class PowerDiagram_Grid( PowerDiagram ):
 
     # ---- what the `SdotPlanNd` solver writes ( see `PowerDiagram_Bsp` ) ----------------------------
 
-    def _solver_weights_call( self ):
+    def _solver_weights_call( self, quad = False ):
         w = RealTensor[ self.num_point ]()
         wa = RealTensor[ self.num_gnode, self.dim ]()
         wb = RealTensor[ self.num_gnode ]()

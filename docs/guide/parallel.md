@@ -64,10 +64,14 @@ rank and talks to the others through a few operations:
 
 ## For now
 
-- 2D, with a domain ( `boundaries` ), and `measures` only: no gradient yet, and the other arguments of `PowerDiagram` ( a
-  `distribution`, a periodicity... ) are refused.
-- The number of seeds must split evenly between the ranks, and the ranks should be a power of two.
+- 2D, with a domain ( `boundaries` ), and `measures` only: the other arguments of `PowerDiagram` ( a `distribution`, a
+  periodicity... ) are refused.
+- The measures are differentiable ( JAX, PyTorch ) with respect to the positions and the weights when they are given whole
+  ( `nb_boxes = K` ); split between ranks, they give the measures only.
+- Each rank takes the same number of boxes ( `nb_boxes` a multiple of the number of ranks ). Boxes of different sizes work,
+  except on JAX devices.
+- `max_resident = M` keeps at most `M` boxes in memory at once ( out of core ), on one rank only for now.
 - The boxes are still made on the host, from the whole cloud ( gathered from the processes when they each hold a block ).
-- At most 52 ranks or boxes.
+- At most 52 boxes.
 
 The steps that remain are on the [roadmap](./roadmap).

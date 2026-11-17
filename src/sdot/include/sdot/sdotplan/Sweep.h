@@ -361,9 +361,14 @@ struct Sweep {
             queue.run_threads( nt, [&]( int t ) {
                 SI b, e;
                 thread_range( nb_nodes, t, nt, b, e );
-                for ( SI m = b; m < e; ++m )
-                    bsp_refresh_majorant( pd.sorted_cloud(), pd.tree.node_begin( m ), pd.tree.node_end( m ),
-                                          pd.tree.node_wa( m ), pd.tree.node_wb( m ) );
+                for ( SI m = b; m < e; ++m ) {
+                    if constexpr ( requires { PD::has_quad; } && PD::has_quad )   // ( and the quadratic majorant, `AaBsp.node_wc` )
+                        bsp_refresh_majorant_quad( pd.sorted_cloud(), pd.tree.node_begin( m ), pd.tree.node_end( m ), pd.tree.node_box( m ),
+                                                   pd.tree.node_wa( m ), pd.tree.node_wb( m ), pd.tree.node_wc( m ), pd.tree.node_wq( m ) );
+                    else
+                        bsp_refresh_majorant( pd.sorted_cloud(), pd.tree.node_begin( m ), pd.tree.node_end( m ),
+                                              pd.tree.node_wa( m ), pd.tree.node_wb( m ) );
+                }
             } );
         } else {
             queue.run_threads( nt, [&]( int t ) {

@@ -1,5 +1,5 @@
 """DIRACS ON A GRID: a whole semi-discrete solve whose diracs are the centres of an N x N grid ( `SumOfDiracsOnAGrid` ),
-by the paths the library has for them -- the page `docs/guide/performance-grid.md`.
+by the paths the library has for them -- the grid section of `docs/guide/performance.md`.
 
     errand run --env lmo-numpy 'sdot-ffi/bench/bench_grid.py::*' --side=256,512,1024 --solver=dedicated,generic
 

@@ -36,9 +36,14 @@ docs/.vitepress/cache/
 docs/.vitepress/dist/
 .pytest_cache/
 
-# the wheels `make wheels` builds
+# the wheels `make wheels` ( loom.release ) builds
 /dist/
 
 # what only this machine knows ( hosts, paths ): see errand-envs.py
 errand-vars.py
 *.sif
+
+# what loom.release writes for the build environments ( their recipes, the images built from them )
+/.loom/
+# where loom builds the wheels: names this machine's hosts
+/loom-builders.py

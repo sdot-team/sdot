@@ -211,6 +211,11 @@ struct ProviderBsp {
     }
     static constexpr bool with_linear_part = [] { if constexpr ( requires { PD::periodic_linear_part; } ) return bool( PD::periodic_linear_part ); else return false; }();
 
+    /// THE QUADRATIC MAJORANT ( `AaBsp.node_wc / node_wq`, `bsp_quad_majorant` ), when the tree carries one: the same box test with
+    /// a curvature per axis and a lower constant. Not through a linear part ( a rotation does not keep it diagonal ): the
+    /// affine majorant alone is still one
+    static constexpr bool QUAD = [] { if constexpr ( requires { PD::has_quad; } ) return WEIGHTED && bool( PD::has_quad ) && ! with_linear_part; else return false; }();
+
     /// the box of node `n` for image `t`: the box of the image of the node's box ( translated, or rotated then boxed again )
     HD void image_box( SI n, SI t, TF *lo, TF *hi ) const {
         if constexpr ( with_linear_part ) {
@@ -262,6 +267,16 @@ struct ProviderBsp {
                 B.a[ r ] = TK( ar );
                 b -= ar * shift( t, r );
             }
+            if constexpr ( QUAD ) {
+                b -= TF( pd.tree.node_wq( n ) );
+                for ( int d = 0; d < D; ++d ) {
+                    const TF c = TF( pd.tree.node_wc( n, d ) ), m = ( lo[ d ] + hi[ d ] ) / 2;
+                    B.c[ d ] = TK( c );
+                    B.m[ d ] = TK( m );
+                    B.cm[ d ] = TK( c * m );
+                    B.inv[ d ] = TK( 1 / ( 1 - c ) );
+                }
+            }
             B.b = TK( b );
         }
         return B;
@@ -284,10 +299,37 @@ struct ProviderBsp {
         return res;
     }
 
+    /// a leaf opened: its ranks, as identifiers of image `img`
+    HD void open_leaf( Local &l, SI beg, SI end ) const {
+        l.k = beg + this->n * l.img;
+        l.stop = end + this->n * l.img;
+        if constexpr ( MEMO ) {                          // the skip cursor: the first memory >= the first identifier
+            int lo = 0, hi = npre;
+            while ( lo < hi ) { const int m = ( lo + hi ) / 2; if ( remembered( m ) < l.k ) lo = m + 1; else hi = m; }
+            l.iskip = lo;
+        }
+    }
+
     template<class State>
     HD bool next( const State &e, Local &l, Plane<TK,D> &p ) {
-        if ( ! l.started ) {                              // the root: index 0, height `depth`
-            l.stack[ l.top++ ] = depth;
+        if ( ! l.started ) {
+            // BOTTOM-UP: the walk starts at the leaf of `k0`, and the stack holds the SIBLING of each node on the way down,
+            // the deepest on top -- the subtrees nearest first, the far ones tested once, against an almost final cell.
+            // The same partition of the tree as a descent from the root, without the `2 depth` boxes of the path to the
+            // leaf ( measured: 12 to 16 pops less per cell, and the upper levels are the ones the pruning rarely refuses ).
+            // ( in the image `0`: the other images are walked from their root, see below )
+            SI nd = 0, h = depth;
+            for ( ; h > 1; --h ) {
+                const SI lc = nd + 1, rc = nd + ( SI( 1 ) << ( h - 1 ) );
+                if ( k0 < SI( pd.tree.node_end( lc ) ) ) {
+                    l.stack[ l.top++ ] = ( rc << 6 ) | ( h - 1 );
+                    nd = lc;
+                } else {
+                    l.stack[ l.top++ ] = ( lc << 6 ) | ( h - 1 );
+                    nd = rc;
+                }
+            }
+            open_leaf( l, SI( pd.tree.node_begin( nd ) ), SI( pd.tree.node_end( nd ) ) );
             l.started = true;
         }
 
@@ -350,17 +392,11 @@ struct ProviderBsp {
 
             // the whole point of the tree: a subtree that can no longer reach the cell is
             // not descended. Tested at POP time, hence against the cell as it is now.
-            if ( ! can_cut<WEIGHTED,TK,D>( e, q0, v0, box( n, l.img ) ) )
+            if ( ! can_cut<WEIGHTED,TK,D,QUAD>( e, q0, v0, box( n, l.img ) ) )
                 continue;
 
             if ( h <= 1 ) {                              // a leaf: its ranks, as identifiers of the current image
-                l.k = beg + this->n * l.img;
-                l.stop = end + this->n * l.img;
-                if constexpr ( MEMO ) {                  // the skip cursor: the first memory >= the first identifier
-                    int lo = 0, hi = npre;
-                    while ( lo < hi ) { const int m = ( lo + hi ) / 2; if ( remembered( m ) < l.k ) lo = m + 1; else hi = m; }
-                    l.iskip = lo;
-                }
+                open_leaf( l, beg, end );
                 continue;
             }
 

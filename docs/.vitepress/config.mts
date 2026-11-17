@@ -59,10 +59,9 @@ export default defineConfig({
           items: [
             { text: 'Getting Started',          link: '/guide/getting-started' },
             { text: 'Performance',              link: '/guide/performance', collapsed: true, items: [
-              { text: 'Semi-discrete OT',       link: '/guide/performance-ot' },
-              { text: 'Diracs on a Grid',       link: '/guide/performance-grid' },
               { text: 'Power Diagrams',         link: '/guide/performance-diagram' },
               { text: '1D Transport',           link: '/guide/performance-1d' },
+              { text: 'Summary and Protocol',   link: '/guide/performance-setup' },
             ] },
             { text: 'Background',               link: '/guide/background' },
           ]
@@ -95,6 +94,7 @@ export default defineConfig({
           text: 'Going Further',
           items: [
             { text: 'Duplicates and Close Seeds', link: '/guide/duplicates' },
+            { text: 'Coming from pysdot',       link: '/guide/pysdot' },
             { text: 'Roadmap',                  link: '/guide/roadmap' },
           ]
         }

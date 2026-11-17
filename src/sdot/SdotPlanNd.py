@@ -974,7 +974,7 @@ class SdotPlanNd( Displayable ):
 
         dom = pd._domain_cell()
         dist_expr, _, dist_kwargs = pd._dist_for()
-        pd_expr, pd_kwargs, pd_produced = pd._solver_weights_call()
+        pd_expr, pd_kwargs, pd_produced = pd._solver_weights_call( quad = True )   # ( the CPU sweep redoes the quadratic majorant too )
         groups_produced = None
         if pd.group_rep.is_defined:                      # the virtual weights of the tree are written by the solver too
             groups_produced = ( RealTensor[ pd.num_point ](), RealTensor[ pd.num_agg ]() )

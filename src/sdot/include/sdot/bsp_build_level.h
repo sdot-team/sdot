@@ -224,6 +224,96 @@ HD void bsp_refresh_majorant( const auto &src, const auto &beg, const auto &end,
     bsp_weight_majorant<ct_dim>( src.positions, src.weights, b, e, wa_out, wb_out );
 }
 
+/// the affine majorant of ONE node and its quadratic one in the same work-item ( `AaBsp.refresh_weight_majorants` ): one call
+HD void bsp_refresh_majorant_quad( const auto &src, const auto &beg, const auto &end, const auto &box, auto &&wa_out, auto &&wb_out,
+                                   auto &&wc_out, auto &&wq_out );
+
+/// THE QUADRATIC MAJORANT of ONE node, on top of its affine one ( `AaBsp.refresh_quad_majorants` ):
+///
+///     w( y ) <= wa . y + wb - wq + sum_d wc_d ( y_d - m_d )^2,      m the centre of the node's box
+///
+/// The residual of the affine majorant `r = w - wa . y` is fitted by least squares on `( 1, u_d^2 )`, `u = y - m`, its
+/// curvatures capped at `0.9` -- the pruning test minimizes `|x - y|^2 - wa . y - wc . u^2` over the box, which stays
+/// convex, hence a clamp per axis --, then the constant LOWERED as much as the seeds allow ( `wq >= 0` ): the affine
+/// majorant alone stays a majorant, for whoever does not read the quadratic one. A potential of optimal transport curves
+/// ( `|y|^2 - w` is convex ), and the curvature is what makes the affine majorant of a large node loose: measured on
+/// grids of Diracs, the mean slack of a 16 x 16 block drops from 74 to 42, and the boxes the walk opens by a half.
+/// `wc = 0, wq = 0` -- the affine majorant -- when the fit does not tighten.
+HD void bsp_quad_majorant( const auto &src, const auto &beg, const auto &end, const auto &box, const auto &wa, const auto &wb,
+                           auto &&wc_out, auto &&wq_out ) {
+    constexpr int ct_dim = CT_VALUE( src.nb_dims );
+    using TF = typename DECAYED_TYPE_OF( src.positions )::TF;
+    const SI b = SI( beg ), e = SI( end ), m = e - b;
+    for ( int d = 0; d < ct_dim; ++d )
+        wc_out( d ) = 0;
+    wq_out = 0;
+    if ( m < 2 * ( ct_dim + 1 ) )
+        return;
+
+    TF mid[ ct_dim ], a[ ct_dim ];
+    for ( int d = 0; d < ct_dim; ++d ) {
+        mid[ d ] = ( TF( box( 0, d ) ) + TF( box( 1, d ) ) ) / 2;
+        a[ d ] = TF( wa( d ) );
+    }
+    auto residual = [&]( SI k ) { TF r = TF( src.weights( k ) ); for ( int d = 0; d < ct_dim; ++d ) r -= a[ d ] * TF( src.positions( k, d ) ); return r; };
+
+    // the normal equations on ( 1, u_0^2, ..., u_{D-1}^2 ), the residuals SHIFTED by the first one ( conditioning, without a pass )
+    constexpr int P = ct_dim + 1;
+    const TF rm = residual( b );
+    TF A[ P ][ P + 1 ];
+    for ( int i = 0; i < P; ++i ) for ( int j = 0; j <= P; ++j ) A[ i ][ j ] = 0;
+    for ( SI k = b; k < e; ++k ) {
+        TF f[ P ];
+        f[ 0 ] = 1;
+        for ( int d = 0; d < ct_dim; ++d ) { const TF u = TF( src.positions( k, d ) ) - mid[ d ]; f[ d + 1 ] = u * u; }
+        const TF r = residual( k ) - rm;
+        for ( int i = 0; i < P; ++i ) { for ( int j = 0; j < P; ++j ) A[ i ][ j ] += f[ i ] * f[ j ]; A[ i ][ P ] += f[ i ] * r; }
+    }
+    for ( int i = 0; i < P; ++i ) A[ i ][ i ] += TF( 1e-12 ) * ( A[ i ][ i ] + TF( 1e-300 ) );   // ( an axis with one coordinate only: no curvature )
+    for ( int c = 0; c < P; ++c ) {
+        int p = c;
+        for ( int i = c + 1; i < P; ++i ) if ( sdot::fabs( A[ i ][ c ] ) > sdot::fabs( A[ p ][ c ] ) ) p = i;
+        if ( ! ( sdot::fabs( A[ p ][ c ] ) > 0 ) ) return;
+        if ( p != c ) for ( int j = c; j <= P; ++j ) { const TF t = A[ c ][ j ]; A[ c ][ j ] = A[ p ][ j ]; A[ p ][ j ] = t; }
+        for ( int i = c + 1; i < P; ++i ) { const TF f = A[ i ][ c ] / A[ c ][ c ]; for ( int j = c; j <= P; ++j ) A[ i ][ j ] -= f * A[ c ][ j ]; }
+    }
+    TF x[ P ];
+    for ( int i = P - 1; i >= 0; --i ) { TF s = A[ i ][ P ]; for ( int j = i + 1; j < P; ++j ) s -= A[ i ][ j ] * x[ j ]; x[ i ] = s / A[ i ][ i ]; }
+    TF c[ ct_dim ];
+    for ( int d = 0; d < ct_dim; ++d ) {
+        c[ d ] = x[ d + 1 ];
+        if ( ! ( c[ d ] == c[ d ] ) || sdot::fabs( c[ d ] ) > TF( 1e30 ) ) return;   // ( a NaN or a blow-up: the affine one )
+        c[ d ] = c[ d ] < TF( 0.9 ) ? c[ d ] : TF( 0.9 );
+    }
+
+    // the constant of the quadratic majorant, and the margin of `bsp_weight_majorant` on it
+    TF bq = 0, big = 0, rmin = 0, rmax = 0;
+    for ( SI k = b; k < e; ++k ) {
+        TF q = 0;
+        for ( int d = 0; d < ct_dim; ++d ) { const TF u = TF( src.positions( k, d ) ) - mid[ d ]; q += c[ d ] * u * u; }
+        const TF r = residual( k ), v = r - q;
+        bq = k == b || v > bq ? v : bq;
+        rmin = k == b || r < rmin ? r : rmin;
+        rmax = k == b || r > rmax ? r : rmax;
+        big = sdot::fabs( r ) + sdot::fabs( q ) > big ? sdot::fabs( r ) + sdot::fabs( q ) : big;
+    }
+    bq += TF( 1e-6 ) * ( sdot::fabs( bq ) + big );
+    const TF drop = TF( wb ) - bq;
+    // kept only if it lowers the constant by a QUARTER of the spread of the affine residuals at least: a slight tightening
+    // does not pay for the curvature terms of the test ( measured: noisy potentials of random clouds )
+    if ( ! ( drop > TF( 0.25 ) * ( rmax - rmin ) ) )
+        return;
+    for ( int d = 0; d < ct_dim; ++d )
+        wc_out( d ) = c[ d ];
+    wq_out = drop;
+}
+
+HD void bsp_refresh_majorant_quad( const auto &src, const auto &beg, const auto &end, const auto &box, auto &&wa_out, auto &&wb_out,
+                                   auto &&wc_out, auto &&wq_out ) {
+    bsp_refresh_majorant( src, beg, end, wa_out, wb_out );
+    bsp_quad_majorant( src, beg, end, box, wa_out, wb_out, wc_out, wq_out );
+}
+
 
 // The body of the level, for the node whose slice is `[ beg_in, end_in )`.
 //

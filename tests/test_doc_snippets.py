@@ -108,3 +108,6 @@ if test( "parallel_torch" ):
 
 if test( "parallel_mpi" ):
     _run_launched( "parallel_mpi.py", "mpiexec", "mpi4py" )
+
+if test( "pysdot_compat" ):
+    _run( "pysdot_compat.py" )

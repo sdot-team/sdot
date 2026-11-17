@@ -102,11 +102,12 @@ struct __attribute__(( visibility( "default" ) )) PlainSeeds {
 };
 
 /// the seeds in the order of the tree, and the tree ( `PowerDiagram_Bsp` )
-template<class TR,class TI,int D,bool WEIGHTED,bool MEMO,bool CONTIG = false>
+template<class TR,class TI,int D,bool WEIGHTED,bool MEMO,bool CONTIG = false,bool QUAD = false>
 struct __attribute__(( visibility( "default" ) )) BspSeeds {
     static constexpr int  ct_dim      = D;
     static constexpr bool on_cpu      = true;
     static constexpr bool has_weights = WEIGHTED;
+    static constexpr bool has_quad    = QUAD;        ///< the tree carries a quadratic majorant ( `node_wc / node_wq` )
     using TF = TR;
 
     struct Tree {
@@ -114,6 +115,8 @@ struct __attribute__(( visibility( "default" ) )) BspSeeds {
         A3<TR,2,D,CONTIG> node_box;
         A2<TR,D,CONTIG>   node_wa;
         A1<TR,CONTIG>     node_wb;
+        A2<TR,D,CONTIG>   node_wc;
+        A1<TR,CONTIG>     node_wq;
     };
     A2<TR,D,CONTIG> positions;
     A1<TR,CONTIG>   weights;

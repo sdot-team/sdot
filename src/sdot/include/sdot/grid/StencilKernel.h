@@ -109,7 +109,7 @@ struct StencilKernel {
                 const T lam = T( Tb::pair_lam[ p ] ), mu = T( Tb::pair_mu[ p ] );
                 #pragma omp simd
                 for( int x = 0; x < B; ++x )
-                    ht[ k ][ x ] = std::fmin( ht[ k ][ x ], lam * h[ j ][ x ] + mu * h[ l ][ x ] );
+                    { const T c = lam * h[ j ][ x ] + mu * h[ l ][ x ]; ht[ k ][ x ] = c < ht[ k ][ x ] ? c : ht[ k ][ x ]; }   // ( not std::fmin: gcc calls libm, no SIMD )
             }
         }
 
@@ -138,7 +138,7 @@ struct StencilKernel {
                 // |k_owner| = m |n|, weight = L / ( 2 |k_owner| )
                 int o = own[ k ][ x ];
                 T m = o >= 0 ? T( Tb::off_m[ o < 0 ? 0 : o ] ) : T( 1 );
-                T w = std::fmax( L, T( 0 ) ) * inv * T( 0.5 ) / m;
+                T w = ( L > T( 0 ) ? L : T( 0 ) ) * inv * T( 0.5 ) / m;
                 hess[ ( b0 + x ) * D + k ] = o >= 0 ? w : T( 0 );
             }
         }
@@ -215,7 +215,7 @@ struct StencilKernel {
                 const T lam = T( Tb::pair_lam[ p ] ), mu = T( Tb::pair_mu[ p ] );
                 #pragma omp simd
                 for( int x = 0; x < B; ++x )
-                    ht[ k ][ x ] = std::fmin( ht[ k ][ x ], lam * h[ j ][ x ] + mu * h[ l ][ x ] );
+                    { const T c = lam * h[ j ][ x ] + mu * h[ l ][ x ]; ht[ k ][ x ] = c < ht[ k ][ x ] ? c : ht[ k ][ x ]; }   // ( not std::fmin: gcc calls libm, no SIMD )
             }
         }
 
@@ -244,7 +244,7 @@ struct StencilKernel {
                 // |k_owner| = m |n|, weight = L / ( 2 |k_owner| )
                 int o = own[ k ][ x ];
                 T m = o >= 0 ? T( Tb::off_m[ o < 0 ? 0 : o ] ) : T( 1 );
-                T w = std::fmax( L, T( 0 ) ) * inv * T( 0.5 ) / m;
+                T w = ( L > T( 0 ) ? L : T( 0 ) ) * inv * T( 0.5 ) / m;
                 hw[ k ][ x ] = o >= 0 ? w : T( 0 );
             }
         }
