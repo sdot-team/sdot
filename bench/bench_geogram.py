@@ -28,7 +28,7 @@ more cut ). The driver and geogram are not built here: `geogram/build.sh` ( COMP
 directory of `geogram_ot` ( empty: `geogram/`, `~/.cache/sdot/geogram-bench`, then `/data/geogram-bench` ).
 """
 
-from errand import Param, bench
+from errand import Param, bench, require
 
 
 CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal", "grid_voronoi", "grid_sines", "grid_sharp" ]
@@ -49,6 +49,7 @@ if p := bench( "geogram",
                seed       = Param( 0, help = "seed of the uniform draw" ),
                check      = Param( "yes", choices = [ "yes", "no" ], help = "compare with sdot ( see above )" ),
                bin        = Param( "", help = "the directory of `geogram_ot` ( empty: see above )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     import os
     import re
     import subprocess

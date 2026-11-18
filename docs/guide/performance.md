@@ -96,16 +96,18 @@ One problem, at every size: `N x N` diracs of equal masses on the unit square, a
 
 <BenchChart chart="grid" />
 
-The gap grows with `N`. On the CPU: 4× at 512 x 512, 8× at 2048 x 2048, 16× at 4096 x 4096 ( 2.8 s against 46 s on the
-128 cores ). On the 2080 Ti: 5× at 512 x 512, 12× at 2048 x 2048 ( 0.35 s against 4.0 s ); on the H100, 30× at 2048 x 2048
-( 0.072 s against 2.1 s ). Past a million diracs, a dirac costs the dedicated solver 170 to 270 ns on the CPU, 83 ns on the
-2080 Ti and 17 ns on the H100; the generic one more than 2 µs on the CPU, 0.5 to 1 µs on the cards. Below 256 x 256, fixed
-costs dominate ( 0.03 to 0.15 s ).
+The gap grows with `N`. On the CPU: 4× at 512 x 512, 9× at 1024 x 1024, 14× at 4096 x 4096 ( 4.0 s against 55 s on the
+128 cores ). On the H100: 6× at 512 x 512, 26× at 2048 x 2048 ( 0.084 s against 2.1 s ); on the 2080 Ti ( measured with the
+former certificates ), 12× at 2048 x 2048 ( 0.35 s against 4.0 s ). Past a million diracs, a dirac costs the dedicated solver
+240 to 510 ns on the CPU and 20 to 40 ns on the H100; the generic one more than 4 µs on the CPU, 0.5 to 1 µs on the cards.
+Below 256 x 256, fixed costs dominate ( 0.03 to 0.1 s ). The dedicated solver's diagrams are those of
+[Power Diagrams](./performance-diagram#diracs-on-a-regular-grid): exact whatever the weights, by zones.
 
 <BenchChart chart="grid_threads" />
 
-At 1024 x 1024, the dedicated solver gains 15× up to 32 threads ( 7.7 s to 0.51 s ), then stays near 0.5 s; the generic
-one gains 8× ( 27 s to 3.2 s on 64 threads ). The 2080 Ti solves it in 0.12 s, the H100 in 0.041 s.
+At 1024 x 1024, the dedicated solver gains 16× up to 32 threads ( 7.7 s to 0.49 s ), then stays near 0.5 s; the generic
+one gains 8× ( 27 s to 3.3 s ). The H100 solves it in 0.042 s. On this node the times past 64 threads vary by up to 2× from
+one run to the next ( the linear solves, see above ).
 
 The dedicated solver computes in doubles, on the CPU and on the card. The generic one computes in doubles on the CPU, and
 on the card in floats first, then in doubles ( `precision = "auto"` ). Floats alone do not reach the tolerance: at 512 x

@@ -43,7 +43,7 @@ run's -- the CPU's plan against the card's.
 """
 
 import numpy
-from errand import Param, bench
+from errand import Param, bench, require
 
 import benchlib
 import cases
@@ -106,6 +106,7 @@ if p := bench( "newton",
                all_slots     = Param( "no", choices = [ "no", "yes" ], help = "ON THE CARD: print every timed kernel slot ( index, ms, launches, registers )" ),
                save_weights  = Param( "", help = "save the final weights ( .npy )" ),
                compare       = Param( "", help = "compare the final weights with a saved .npy ( max |w - w_ref| after the gauge, relative to 1 / n )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     benchlib.set_device( p.device )                # BEFORE importing loom: the device is decided once
     benchlib.set_kernels( p.kernels )                 # BEFORE importing loom
     benchlib.set_threads( p.threads, p.pin )          # BEFORE the first kernel: the pool reads them once

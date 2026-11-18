@@ -38,7 +38,7 @@ The reference numbers are those of `reference_lmo.py` ( CPU ) and `reference_lmo
 `new / old` is > 1 where we are slower.
 """
 
-from errand import Param, bench
+from errand import Param, bench, require
 
 
 CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal", "grid_voronoi", "grid_sines", "grid_sharp" ]
@@ -74,6 +74,7 @@ if p := bench( "diagram",
                                          "CPU and GPU: `adjacency`: the neighbours of every cell and their facets ( `hessian_rows`, what CGAL's "
                                          "triangulation + adjacency gives ); `complex`: the whole cell complex ( `cell_complex()` ); `dual`: the exact dual, the restricted regular "
                                          "triangulation ( `dual()`, what CGAL's triangulation gives )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     import numpy
     import benchlib
     import cases

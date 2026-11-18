@@ -1,5 +1,5 @@
 
-from errand import Param, bench, experiment, test
+from errand import Param, bench, experiment, require, test
 
 
 def _host( x, dtype = None ):
@@ -1607,6 +1607,7 @@ if p := bench( "pd accelerated",
     # (`loom.tensor.batch`), so two identical calls produce the same C++ source and the second
     # hits the compilation cache. The first call of each variant still compiles -- hence
     # the warm-up round outside the timer.
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     import numpy
     import loom
     from loom.testing import need

@@ -8,9 +8,9 @@ In short, on a 128-core CPU node and on two GPUs ( a GeForce RTX 2080 Ti and an 
 | OT solve, 1e5 diracs, 3D | 0.77 s | 0.11 s | 0.36 s |
 | OT solve, 1e7 diracs, 2D | 205 s | 2.4 s | does not fit |
 | OT solve, 1e7 diracs, 3D | 97 s | 16 s | does not fit |
-| OT solve, 2048 × 2048 diracs on a grid, to an image | 1.1 s | 0.072 s | 0.35 s |
+| OT solve, 2048 × 2048 diracs on a grid, to an image | 1.6 s | 0.084 s | 0.35 s |
 | one power diagram, 1e6 diracs, 2D / 3D, per dirac | 29 / 108 ns | 6 / 90 ns | 57 / 590 ns |
-| one power diagram, 1024 × 1024 diracs on a grid, per dirac | 15 ns | | 35 ns ( as a cloud ) |
+| one power diagram, 1024 × 1024 diracs on a grid ( sines weights ), per dirac | 10 ns | 0.8 ns | 39 ns ( as a cloud ) |
 
 Solves start cold and stop at `max |mass - target| / target <= 1e-6`. The CPU column takes its best thread count ( 64
 for the 1e5 solves, 128 otherwise ). The diagrams are prepared ones, in double ( see [Power Diagrams](./performance-diagram) ).
@@ -23,8 +23,8 @@ for the 1e5 solves, 128 otherwise ). The diagrams are prepared ones, in double (
   both close to linear.
 * **Up to 6D**: the solver does not mind the dimension, the cells do. 4D is comfortable up to a few 10⁵ diracs, 6D up to
   about 10⁴.
-* **Special structures**: diracs on a regular grid have a solver of their own, a fixed stencil instead of a tree, 8 to 16
-  times faster than the same diracs as a cloud ( [Semi-discrete OT](./performance#diracs-on-a-regular-grid) ); 1D plans
+* **Special structures**: diracs on a regular grid have a solver of their own, a fixed stencil instead of a tree, 9 to 14
+  times faster than the same diracs as a cloud on the CPU, 12 to 26 times on an H100 ( [Semi-discrete OT](./performance#diracs-on-a-regular-grid) ); 1D plans
   need no Newton loop at all ( [1D Transport](./performance-1d) ).
 
 The benchmarks are on three pages:

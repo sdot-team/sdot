@@ -554,7 +554,7 @@ struct ZoneTable {
 /// cell in one zone only, when `defer`, gives its piece back ( `z0`, `pc0`, `tz0` ) instead of adding it
 template<class V>
 __device__ __forceinline__ void cell_pieces( int N, SI i, const V &vert, int n, const ZoneTable &zt, float *bx, bool defer,
-                                             SI &z0, double &pc0, double &tz0 ) {
+                                             SI &z0, double &pc0, double &tz0, double psi_abs ) {
     const int a = int( i ) / N, b = int( i ) - a * N;   // ( 32-bit: a 64-bit division is emulated on the card )
     double bb0 = 1e300, bb1 = -1e300, bb2 = 1e300, bb3 = -1e300, ar = 0, x0, y0;
     vert( 0, x0, y0 );
@@ -584,7 +584,9 @@ __device__ __forceinline__ void cell_pieces( int N, SI i, const V &vert, int n, 
             const bool one = u0 == u1 && v0 == v1;
             const double pc = one ? ar : rect_area( vert, n, r0 - a, r1 - a, r2 - b, r3 - b );
             const double cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
-            const double reach = fmax( fmax( fabs( bb0 - cx ), fabs( bb1 - cx ) ), fmax( fabs( bb2 - cy ), fabs( bb3 - cy ) ) );
+            // ( the rounding: of the pieces, ~ eps reach s; of the planes, whose offsets ( |k|^2 + psi_i - psi_j ) / 2 move the edges by
+            // ~ eps |psi|: two exact neighbours overlap that much along their face )
+            const double reach = fmax( fmax( fabs( bb0 - cx ), fabs( bb1 - cx ) ), fmax( fabs( bb2 - cy ), fabs( bb3 - cy ) ) ) + psi_abs;
             const SI z = SI( u ) * zt.nzs + v;
             if ( defer && one ) { z0 = z; pc0 = pc; tz0 = ( reach + s ) * s; continue; }
             atomicAdd( &zt.E[ 2 * z ], pc );
@@ -1065,7 +1067,8 @@ __device__ __forceinline__ void integrate_poly( int N, const Dn &dens, int i, co
 /// RING 1 ON EVERY CELL, in registers: the stencil, the mass and the weights ( `integrate1_kernel` ), the pieces of the first table
 /// ( 8 cells of a row in one zone: one atomic ), the box; an inverted cell is empty ( mass 0, an inverted box )
 template<class Dn>
-__global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const double *psi, ZoneTable zt, float *bx, double *mass, double *W ) {
+__global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const double *psi, ZoneTable zt, float *bx, double *mass, double *W,
+                                                          int *pred, Counts *cnt ) {
     const SI nn = SI( N ) * N, i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
     const unsigned lane = threadIdx.x & 31;
     double pc0 = 0, tz0 = 0;
@@ -1088,7 +1091,25 @@ __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const 
             const int f = ( e + 1 ) & 7;
             inv |= -c_tab1.dir_y[ e ] * ( poly.px[ f ] - poly.px[ e ] ) + c_tab1.dir_x[ e ] * ( poly.py[ f ] - poly.py[ e ] ) < -1e-9 * sc;
         }
-        if ( inv ) {
+        // ( THE PREDICTION: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) = max_v k . v its support -- then
+        // it goes to level 2 at once, `zones_rebuild_kernel` on `pred`, into this table )
+        bool cut2 = false;
+        if ( ! inv && pred ) {
+            const double pi = psi[ i ];
+            for ( int o = 0; o < 24 && ! cut2; ++o ) {
+                const int dx = c_tab2.off_x[ o ], dy = c_tab2.off_y[ o ];
+                if ( ( dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 ) || a + dx < 0 || a + dx >= N || b + dy < 0 || b + dy >= N )
+                    continue;
+                double h = -1e300;
+#pragma unroll
+                for ( int e = 0; e < 8; ++e ) h = fmax( h, dx * poly.px[ e ] + dy * poly.py[ e ] );
+                cut2 = 2 * h > dx * dx + dy * dy + pi - psi[ SI( a + dx ) * N + b + dy ];
+            }
+        }
+        if ( cut2 ) {
+            pred[ atomicAdd( &cnt->n1, 1u ) ] = int( i );
+            bx[ 4 * i ] = 1.f; bx[ 4 * i + 1 ] = 0.f;
+        } else if ( inv ) {
             mass[ i ] = 0;
 #pragma unroll
             for ( int k = 0; k < 8; ++k ) W[ k * nn + i ] = 0;
@@ -1100,7 +1121,7 @@ __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const 
             mass[ i ] = r.m;
 #pragma unroll
             for ( int k = 0; k < 8; ++k ) W[ k * nn + i ] = poly.ow[ k ] >= 0 ? w[ k ] * 0.5 * T.dir_inv_norm[ k ] : 0.0;
-            cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = poly.px[ e ]; y = poly.py[ e ]; }, 8, zt, bx, true, z0, pc0, tz0 );
+            cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = poly.px[ e ]; y = poly.py[ e ]; }, 8, zt, bx, true, z0, pc0, tz0, fabs( psi[ i ] ) );
         }
     }
     // ( every lane of the warp is here: the grid of the launch covers whole warps )
@@ -1134,7 +1155,7 @@ __global__ void __launch_bounds__( BLOCK ) zones_rebuild_kernel( int N, Dn dens,
     lvl[ i ] = ( unsigned char ) nl;
     integrate_poly( N, dens, i, px, py, nbr, n, nl, mass, W, ex, cnt );
     SI z0; double pc0, tz0;
-    if ( n >= 3 ) cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = px[ e ]; y = py[ e ]; }, n, zt, bx, false, z0, pc0, tz0 );
+    if ( n >= 3 ) cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = px[ e ]; y = py[ e ]; }, n, zt, bx, false, z0, pc0, tz0, fabs( psi[ i ] ) );
     else empty_box( bx, i );
 }
 
@@ -1788,6 +1809,7 @@ struct Solver {
     ExactPolys ep;
     // the zone certificate ( `zones`, the default; false: the former certificates and the exact path with psi_max )
     bool zones = true;
+    bool zone_predict = true;                            ///< ring 2 at once on the cells a seed of ring 2 cuts ( their support, `zones1_kernel` )
     unsigned char *lvl, *zbadA, *zbadB;                  ///< the level of each cell ( 0, 1: ring 1 ); the bad zones of the last two tables
     float *zbx;                                          ///< the boxes of the cells ( floats rounded outward )
     double *zE;                                          ///< the sums of a table ( 2 per zone, side 1 at most )
@@ -2137,14 +2159,30 @@ struct Solver {
         const ZoneTable zt0{ double( s ), nzs, nullptr, 0, 1, zE };
         with_density( [&]( const auto &dens ) {
             using Dn = std::decay_t<decltype( dens )>;
-            launch_kernel( queue, &zones1_kernel<Dn>, blocks_for( nn ), BLOCK, 0, n, dens, ps, zt0, zbx, mass, W );
+            launch_kernel( queue, &zones1_kernel<Dn>, blocks_for( nn ), BLOCK, 0, n, dens, ps, zt0, zbx, mass, W, zone_predict ? check : nullptr, cnt );
         } );
         lap( "ring 1" );
+        down( &hc, cnt, 1 );
+        bool pm = false;
+        if ( hc.n1 ) {                                   // ( the predicted cells: level 2 at once, into the first table )
+            const SI np = hc.n1;
+            if ( SI( 64 ) * np > xs.cap ) {
+                if ( ! grow_extras( std::max( 128 * np, 2 * xs.cap ) ) && ! grow_extras( 64 * np ) ) { exhausted = true; return true; }
+                return run_zones( n, ps );
+            }
+            red( nn, MaxOfFn{ ps }, mx ); launch_kernel( queue, &copy_max, 1, 1, 0, ( const MaxV * ) mx, pmax ); pm = true;
+            with_density( [&]( const auto &dens ) {
+                using Dn = std::decay_t<decltype( dens )>;
+                launch_kernel( queue, &zones_rebuild_kernel<Dn>, blocks_for( np ), BLOCK, 0, n, dens, ps, ( const double * ) pmax, ( const int * ) check, np,
+                               eo, rb, lvl, zt0, zbx, mass, W, xs, cnt );
+            } );
+            lap( "predicted" );
+        }
+        n1 = hc.n1;
         unsigned char *bad = zbadA, *prev = zbadB;
         launch_kernel( queue, &zone_bad_kernel, blocks_for( SI( nzs ) * nzs ), BLOCK, 0, n, zt0, bad, cnt );
         down( &hc, cnt, 1 );
         lap( "bad 0" );
-        bool pm = false;
         zrounds = 0;
         while ( hc.nzbad && zrounds < 64 ) {
             zero( &cnt->nrl ); zero( &cnt->nlive ); zero( &cnt->nzbad );

@@ -1109,7 +1109,9 @@ struct Evaluator {
         }
         const bool last = lv == 255;
         const int nm = last ? -1 : ek.nb_within( std::sqrt( T( 2 ) ) * T( 1 << std::min( lv - 1, 20 ) ) );
-        if( ! ek.clip( N, pe.data(), last ? pmax : std::numeric_limits<T>::infinity(), a, b, px, py, pl, n, nm ) ) exh = true;
+        // ( from the ring-1 cell: its 8 cuts are the first 8 offsets of `ek` too, both sorted by distance the same way )
+        ek1.clip( N, p1.data(), std::numeric_limits<T>::infinity(), a, b, px, py, pl, n, 8 );
+        if( ! ek.clip_range( N, pe.data(), last ? pmax : std::numeric_limits<T>::infinity(), a, b, px, py, pl, n, 8, nm ) ) exh = true;
         for( int e = 0; e < n; ++e ) nbr[ e ] = pl[ e ] < 0 ? -1 : i + ek.ox[ pl[ e ] ] * N + ek.oy[ pl[ e ] ];
         return n;
     }
@@ -1129,6 +1131,7 @@ struct Evaluator {
         constexpr int C = ExactKernel<T>::C;
         const T inf = std::numeric_limits<T>::infinity(), lo = T( -0.5 ), hi = T( N ) - T( 0.5 );
         pad( 1, psi, p1 );
+        if( zone_predict ) pad( 2, psi, p2 );
         lvl.assign( nn, 0 );
         fused_last = true;
         zbx.resize( 4 * size_t( nn ) );
@@ -1147,6 +1150,7 @@ struct Evaluator {
         auto empty_box = [&]( int i ) { zbx[ 4 * size_t( i ) ] = 1; zbx[ 4 * size_t( i ) + 1 ] = 0; };
         // the pieces of a polygon cell ( absolute box bb ) in the zones of side s that `in( u, v )` counts
         auto pieces = [&]( int i, const T *px, const T *py, int n, T ar, const T *bb, T s, int nzs, auto &&in, std::vector<T> &E ) {
+            const T pa = std::abs( psi[ i ] );           // ( the planes' rounding: edges moved by ~ eps |psi|, see the card's `cell_pieces` )
             auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
             const int a = i / N, b = i % N;
             const int u0 = zof( bb[ 0 ] + sn ), u1 = zof( bb[ 1 ] - sn ), v0 = zof( bb[ 2 ] + sn ), v1 = zof( bb[ 3 ] - sn );
@@ -1157,7 +1161,7 @@ struct Evaluator {
                     const size_t z = size_t( u ) * nzs + v;
                     E[ 2 * z ] += u0 == u1 && v0 == v1 ? ar : rect_area( px, py, n, r0 - a, r1 - a, r2 - b, r3 - b );
                     const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
-                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + s ) * s;
+                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + pa + s ) * s;
                 }
         };
         // a polygon cell integrated ( its faces out of ring 1 tagged with its level ) and added to a table
@@ -1186,16 +1190,66 @@ struct Evaluator {
             bb[ 0 ] += i / N; bb[ 1 ] += i / N; bb[ 2 ] += i % N; bb[ 3 ] += i % N;
         };
 
+        // the predicted cells, B at a time: ring 2 in SIMD ( `K2::cells_verts`, nothing stored ), integrated in SIMD, into a table
+        auto ring2_block = [&]( int t, const int *cl, int n, T s, int nzs, std::vector<T> &E ) {
+            constexpr int D2 = K2::D;
+            alignas( 64 ) T vx[ D2 ][ B ], vy[ D2 ][ B ], face[ D2 ][ B ], ms[ B ], ar[ B ], sa[ B ], sb[ B ];
+            alignas( 64 ) signed char own[ D2 ][ B ];
+            alignas( 64 ) unsigned char bad[ B ] = {};
+            K2::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            for( int x = 0; x < B; ++x ) { const int i = cl[ x < n ? x : n - 1 ]; sa[ x ] = i / N; sb[ x ] = i % N; }
+            if constexpr ( Integ::has_simd ) integ[ t ].template cells<D2,B>( vx, vy, sa, sb, ms, face, bad );
+            else for( int x = 0; x < B; ++x ) bad[ x ] = 1;
+            auto all = []( int, int ) { return true; };
+            for( int x = 0; x < n; ++x ) {
+                const int i = cl[ x ];
+                lvl[ i ] = 2;
+                // the polygon ( vertex e = vertex e - 1 of the kernel, edge e toward the offset own[ e ] ), inverted: empty
+                T px[ D2 ], py[ D2 ], sc = 1; int nbr[ D2 ];
+                for( int e = 0; e < D2; ++e ) {
+                    px[ e ] = vx[ ( e + D2 - 1 ) % D2 ][ x ]; py[ e ] = vy[ ( e + D2 - 1 ) % D2 ][ x ];
+                    sc = std::max( sc, std::abs( px[ e ] ) + std::abs( py[ e ] ) );
+                    const int o = own[ e ][ x ];
+                    nbr[ e ] = o < 0 ? -1 : i + T2::off_x[ o ] * N + T2::off_y[ o ];
+                }
+                bool inv = false;
+                for( int e = 0; e < D2; ++e ) { const int f = e + 1 == D2 ? 0 : e + 1; inv |= -T( T2::dir_y[ e ] ) * ( px[ f ] - px[ e ] ) + T( T2::dir_x[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc; }
+                if( inv ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                if( bad[ x ] ) integrate_poly( t, i, px, py, nbr, D2, 2 );
+                else {
+                    mass[ i ] = ms[ x ];
+                    clear_faces( i );
+                    for( int e = 0; e < D2; ++e ) {
+                        const int o = own[ e ][ x ];
+                        if( o < 0 || face[ e ][ x ] == 0 ) continue;
+                        const T w = face[ e ][ x ] * T( 0.5 ) * T( T2::dir_inv_norm[ e ] ) / T( T2::off_m[ o ] );
+                        const int k = dir1( T2::off_x[ o ], T2::off_y[ o ] );
+                        if( k >= 0 ) W[ k * P1 * P1 + ( i / N + 1 ) * P1 + i % N + 1 ] = w;
+                        else ex_th[ t ].push_back( { i, nbr[ e ], w, ( unsigned char ) 2 } );
+                    }
+                }
+                T bb[ 4 ], a2;
+                box_of( i, px, py, D2, bb, a2 );
+                put_box( i, bb );
+                pieces( i, px, py, D2, ar[ x ], bb, s, nzs, all, E );
+            }
+        };
+
         // ---- ring 1, every cell: built, integrated, into the first table
         T s = T( zone0 );
         int nzs = int( std::ceil( T( N ) / s ) );
         std::vector<std::vector<T>> Et( par.nt );
         std::vector<std::vector<int>> fine_l( par.nt );
+        std::vector<int> n_pred( par.nt, 0 );
+
         par.slices( N, nn * 64, [&]( int a0, int a1, int t ) {
             auto &E = Et[ t ];
             E.assign( 2 * size_t( nzs ) * nzs, T( 0 ) );
             auto &fl = fine_l[ t ];
             fl.clear();
+            alignas( 64 ) int pr[ B ];                   // ( the predicted cells waiting for a block of ring 2 )
+            int npr = 0;
+            n_pred[ t ] = 0;
             typename K1::Planes rp( N, true, false );    // ( the rows of this thread only, in a ring )
             rp.fill( 0, rp.slots );
             const int PP = rp.plane();
@@ -1216,6 +1270,24 @@ struct Evaluator {
                     for( int x = 0; x < B; ++x ) { sa[ x ] = a; sb[ x ] = b0 + x; }
                     if constexpr ( Integ::has_simd ) integ[ t ].template cells<8,B>( vx, vy, sa, sb, ms, face, bad );
                     else for( int x = 0; x < B; ++x ) bad[ x ] = 1;
+                    // THE PREDICTION, in SIMD over the block: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) =
+                    // max_v k . v its support ( `p2`: psi padded by -inf, a seed out of the grid cuts nothing ); level 2 at once ( below )
+                    alignas( 64 ) unsigned char cut2[ B ] = {};
+                    if( zone_predict ) {
+                        const int P2 = N + 4;
+                        const T *pi = p2.data() + size_t( a + 2 ) * P2 + b0 + 2;
+                        for( int dx = -2; dx <= 2; ++dx )
+                            for( int dy = -2; dy <= 2; ++dy ) {
+                                if( dx > -2 && dx < 2 && dy > -2 && dy < 2 ) continue;
+                                const T *pj = pi + dx * P2 + dy, k2 = T( dx * dx + dy * dy );
+                                #pragma omp simd
+                                for( int x = 0; x < B; ++x ) {
+                                    T h = dx * vx[ 0 ][ x ] + dy * vy[ 0 ][ x ];
+                                    for( int k = 1; k < 8; ++k ) { const T v = dx * vx[ k ][ x ] + dy * vy[ k ][ x ]; h = v > h ? v : h; }   // ( not fmax: gcc )
+                                    cut2[ x ] |= 2 * h > k2 + pi[ x ] - pj[ x ];
+                                }
+                            }
+                    }
                     for( int x = 0; x < n; ++x ) {
                         const int i = a * N + b0 + x;
                         // the polygon ( vertex e = plane vertex e - 1 ), inverted: empty
@@ -1223,6 +1295,13 @@ struct Evaluator {
                         for( int e = 0; e < 8; ++e ) { px[ e ] = vx[ ( e + 7 ) & 7 ][ x ]; py[ e ] = vy[ ( e + 7 ) & 7 ][ x ]; sc = std::max( sc, std::abs( px[ e ] ) + std::abs( py[ e ] ) ); }
                         bool inv = false;
                         for( int e = 0; e < 8; ++e ) { const int f = ( e + 1 ) & 7; inv |= -T( T1::dir_y[ e ] ) * ( px[ f ] - px[ e ] ) + T( T1::dir_x[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc; }
+                        // THE PREDICTION: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) = max_v k . v ( its
+                        // support ): level 2 at once, into this table ( below )
+                        if( ! inv && cut2[ x ] ) {
+                            pr[ npr++ ] = i; ++n_pred[ t ];
+                            if( npr == B ) { ring2_block( t, pr, B, s, nzs, E ); npr = 0; }
+                            continue;
+                        }
                         if( inv ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
                         if( bad[ x ] ) fl.push_back( i );
                         else {
@@ -1237,8 +1316,12 @@ struct Evaluator {
                         pieces( i, px, py, 8, area[ b0 + x ], bb, s, nzs, all, E );
                     }
                 }
+            if( npr ) ring2_block( t, pr, npr, s, nzs, E );
         } );
-        // ( the cells the SIMD rules could not take: the scalar rule on their ring-1 polygon )
+        // ( the cells the SIMD rules could not take: the scalar rule on their ring-1 polygon; psi padded for the exact kernel once
+        // there are cells past ring 1, which `level_polygon` rebuilds later on )
+        bool padded = false;
+        for( int c : n_pred ) if( c && ! padded ) { pad( ek.RB, psi, pe ); pmax = *std::max_element( psi.begin(), psi.end() ); padded = true; }
         par.slices( par.nt, nn, [&]( int t0_, int t1_, int ) {
             for( int t = t0_; t < t1_; ++t )
                 for( int i : fine_l[ t ] ) {
@@ -1268,7 +1351,6 @@ struct Evaluator {
         lap( 0 );
 
         // ---- the rounds
-        bool padded = false;
         std::vector<std::vector<int>> rl_th( par.nt );
         for( int k = 1; nbad && k < 64; ++k ) {
             // the cells whose box meets a bad zone

@@ -782,7 +782,8 @@ class Visualizer:
 
         path.parent.mkdir( parents = True, exist_ok = True )
         path.write_text( html )
-        print( f"OUTPUT: file://{ path.absolute() }" )
+        from .announce import announce
+        announce( path )
         return path
 
     def to_html( self, wheel = True, touch = True ):

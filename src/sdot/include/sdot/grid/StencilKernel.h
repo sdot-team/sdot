@@ -166,10 +166,44 @@ struct StencilKernel {
     // same as row_block for an arbitrary list of cells ( flat indices a * N + b, 1 <= n <= B ): psi is
     // gathered, outputs are scattered ( area[ i ], hess[ i * D + k ], owner[ i * D + k ] -- each may be null --, planes )
     static void cells_block( int N, const T *psi_pad, const int *cells, int n, T *area, T *hess, signed char *owner, Planes *pl ) {
+        alignas( 64 ) T vx[ D ][ B ], vy[ D ][ B ], ar[ B ];
+        alignas( 64 ) signed char own[ D ][ B ];
+        cells_verts( N, psi_pad, cells, n, vx, vy, own, ar );
+        alignas( 64 ) T hw[ D ][ B ];
+        for( int k = 0; k < D; ++k ) {
+            const int km = ( k + D - 1 ) % D;
+            // edge k from vertex k - 1 to vertex k, tangent = ( -n_y, n_x ) / |n|
+            const T tx = -T( Tb::dir_y[ k ] ), ty = T( Tb::dir_x[ k ] ), inv = T( Tb::dir_inv_norm[ k ] );
+            #pragma omp simd
+            for( int x = 0; x < B; ++x ) {
+                T L = ( tx * ( vx[ k ][ x ] - vx[ km ][ x ] ) + ty * ( vy[ k ][ x ] - vy[ km ][ x ] ) ) * inv;
+                // |k_owner| = m |n|, weight = L / ( 2 |k_owner| )
+                int o = own[ k ][ x ];
+                T m = o >= 0 ? T( Tb::off_m[ o < 0 ? 0 : o ] ) : T( 1 );
+                T w = ( L > T( 0 ) ? L : T( 0 ) ) * inv * T( 0.5 ) / m;
+                hw[ k ][ x ] = o >= 0 ? w : T( 0 );
+            }
+        }
+        for( int x = 0; x < n; ++x ) {
+            const int i = cells[ x ], j = pl->row( i / N ) + i % N + R, PP = pl->plane();
+            if( area ) area[ i ] = ar[ x ];
+            for( int k = 0; k < D; ++k ) {
+                if( hess ) hess[ i * D + k ] = hw[ k ][ x ];
+                if( owner ) owner[ i * D + k ] = own[ k ][ x ];
+                pl->vx[ k * PP + j ] = vx[ k ][ x ];
+                pl->vy[ k * PP + j ] = vy[ k ][ x ];
+                pl->ow[ k * PP + j ] = own[ k ][ x ];
+            }
+        }
+    }
+
+    // THE CELLS OF A LIST in registers ( flat indices a * N + b, 1 <= n <= B; lanes past n repeat the last cell ): vertex k between
+    // the directions k and k + 1, relative to the seed ( repeated where a direction does not cut ), `own[ k ]` the offset of edge k
+    // ( vertex k - 1 to k; -1: the box ), `ar` the area. Nothing written outside.
+    static void cells_verts( int N, const T *psi_pad, const int *cells, int n, T ( &vx )[ D ][ B ], T ( &vy )[ D ][ B ], signed char ( &own )[ D ][ B ], T *ar ) {
         const int P = N + 2 * R;
         const T inf = std::numeric_limits<T>::infinity();
         alignas( 64 ) T h[ D ][ B ], ht[ D ][ B ];
-        alignas( 64 ) signed char own[ D ][ B ];
         alignas( 64 ) int base[ B ];
         alignas( 64 ) T ca[ B ], cb[ B ];
         for( int x = 0; x < B; ++x ) {
@@ -219,8 +253,7 @@ struct StencilKernel {
             }
         }
 
-        // vertices, area, edge lengths
-        alignas( 64 ) T vx[ D ][ B ], vy[ D ][ B ];
+        // vertices, area
         for( int k = 0; k < D; ++k ) {
             const int k1 = ( k + 1 ) % D;
             const double *M = Tb::vinv + 4 * k;
@@ -230,35 +263,15 @@ struct StencilKernel {
                 vy[ k ][ x ] = T( M[ 2 ] ) * ht[ k ][ x ] + T( M[ 3 ] ) * ht[ k1 ][ x ];
             }
         }
-        alignas( 64 ) T ar[ B ], hw[ D ][ B ];
         #pragma omp simd
         for( int x = 0; x < B; ++x ) ar[ x ] = 0;
         for( int k = 0; k < D; ++k ) {
             const int km = ( k + D - 1 ) % D;
-            // edge k from vertex k - 1 to vertex k, tangent = ( -n_y, n_x ) / |n|
-            const T tx = -T( Tb::dir_y[ k ] ), ty = T( Tb::dir_x[ k ] ), inv = T( Tb::dir_inv_norm[ k ] );
             #pragma omp simd
-            for( int x = 0; x < B; ++x ) {
-                ar[ x ] += vx[ km ][ x ] * vy[ k ][ x ] - vy[ km ][ x ] * vx[ k ][ x ];
-                T L = ( tx * ( vx[ k ][ x ] - vx[ km ][ x ] ) + ty * ( vy[ k ][ x ] - vy[ km ][ x ] ) ) * inv;
-                // |k_owner| = m |n|, weight = L / ( 2 |k_owner| )
-                int o = own[ k ][ x ];
-                T m = o >= 0 ? T( Tb::off_m[ o < 0 ? 0 : o ] ) : T( 1 );
-                T w = ( L > T( 0 ) ? L : T( 0 ) ) * inv * T( 0.5 ) / m;
-                hw[ k ][ x ] = o >= 0 ? w : T( 0 );
-            }
+            for( int x = 0; x < B; ++x ) ar[ x ] += vx[ km ][ x ] * vy[ k ][ x ] - vy[ km ][ x ] * vx[ k ][ x ];
         }
-        for( int x = 0; x < n; ++x ) {
-            const int i = cells[ x ], j = pl->row( i / N ) + i % N + R, PP = pl->plane();
-            if( area ) area[ i ] = T( 0.5 ) * ar[ x ];
-            for( int k = 0; k < D; ++k ) {
-                if( hess ) hess[ i * D + k ] = hw[ k ][ x ];
-                if( owner ) owner[ i * D + k ] = own[ k ][ x ];
-                pl->vx[ k * PP + j ] = vx[ k ][ x ];
-                pl->vy[ k * PP + j ] = vy[ k ][ x ];
-                pl->ow[ k * PP + j ] = own[ k ][ x ];
-            }
-        }
+        #pragma omp simd
+        for( int x = 0; x < B; ++x ) ar[ x ] *= T( 0.5 );
     }
 
     // all cells ( N % B == 0 ); area[ N * N ], hess[ N * N * D ], owner[ N * N * D ], verts[ N * N * D * 2 ] or null

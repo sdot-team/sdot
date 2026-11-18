@@ -139,5 +139,6 @@ def write_convergence_html( series, out_path, title = "convergence", xlabel = "i
     path = Path( out_path )
     path.parent.mkdir( parents = True, exist_ok = True )
     path.write_text( html )
-    print( f"OUTPUT: file://{ path.absolute() }" )
+    from .announce import announce
+    announce( path )
     return path

@@ -15,7 +15,7 @@ The time is that of `Evaluator::run` ( geometry, areas, faces ), the smallest of
 that of the geometry alone. The sum of the areas is checked against the domain.
 """
 
-from errand import Param, bench
+from errand import Param, bench, require
 
 import benchlib
 
@@ -31,6 +31,7 @@ if p := bench( "grid_diagram",
                kernels = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`compile`: compiled for this machine" ),
                trace   = Param( 0, help = "1: the phases of one diagram on stdout ( the card )" ),
                device  = Param( "cpu", choices = [ "cpu", "default" ], help = "`default`: the card's port ( `gpu/GridNewton2D.cuh::diagram_call` )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     benchlib.set_device( p.device )                # BEFORE importing loom
     benchlib.set_kernels( p.kernels )
     benchlib.set_threads( p.threads, p.pin )

@@ -15,7 +15,7 @@ sequential one in 2D. The binaries are built by `build_baselines.py` ( `cgal/bui
 `/data/cgal-bench`. A missing binary makes the run fail with the places it looked in.
 """
 
-from errand import Param, bench
+from errand import Param, bench, require
 
 
 CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal", "grid_voronoi", "grid_sines", "grid_sharp" ]
@@ -30,6 +30,7 @@ if p := bench( "cgal",
                reps   = Param( 3, help = "timed repetitions, we keep the minimum" ),
                seed   = Param( 0, help = "seed of the uniform draw" ),
                bin    = Param( "", help = "the directory of `power_2d` / `power_3d` ( empty: see above )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     import os
     import re
     import subprocess

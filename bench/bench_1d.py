@@ -24,7 +24,7 @@ relative difference of the W2 with sdot's in double ( computed apart, not timed 
 """
 
 import numpy
-from errand import Param, bench
+from errand import Param, bench, require
 
 import benchlib
 
@@ -73,6 +73,7 @@ if p := bench( "one_d",
                seed    = Param( 0, help = "the draw" ),
                device  = Param( "cpu", choices = [ "cpu", "default" ], help = "cpu: the host, even with a card; default: the card if any" ),
                kernels = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`compile`: compiled for this machine" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     benchlib.set_device( p.device )                # BEFORE importing loom
     benchlib.set_kernels( p.kernels )
     benchlib.set_threads( p.threads, p.pin )

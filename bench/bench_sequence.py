@@ -11,7 +11,7 @@ from scratch. `--dump=FILE` writes the cloud with the weights `W` in the format 
 triangulation for every weight vector: its cost per diagram is its whole chain on that file ).
 """
 
-from errand import Param, bench
+from errand import Param, bench, require
 
 
 CASE_CHOICES = [ "uniform", "lines_voronoi", "lines_equal", "planes_voronoi", "planes_equal" ]
@@ -31,6 +31,7 @@ if p := bench( "sequence",
                device    = Param( "auto", choices = [ "auto", "cpu" ], help = "`cpu`: the CPU even where there is a card ( `LOOM_DEVICE=cpu`, `JAX_PLATFORMS=cpu` ); `auto`: loom's choice" ),
                kernels   = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`catalogue`: what loom serves; `compile`: compiled for this machine ( `LOOM_KERNELS=compile` )" ),
                dump      = Param( "", help = "write the cloud with the final weights to this file ( the `cases/` format )" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     import numpy
     import benchlib
     import cases

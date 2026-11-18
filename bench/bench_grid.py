@@ -19,7 +19,7 @@ warm-up on a 64 x 64 grid ( the first call compiles ), the smallest wall time of
 """
 
 import numpy
-from errand import Param, bench
+from errand import Param, bench, require
 
 import benchlib
 
@@ -43,6 +43,7 @@ if p := bench( "grid",
                reps      = Param( 3, help = "repetitions ( the smallest wall time is kept )" ),
                device    = Param( "cpu", choices = [ "cpu", "default" ], help = "cpu: the host, even with a card" ),
                kernels   = Param( "catalogue", choices = [ "catalogue", "compile" ], help = "`compile`: compiled for this machine" ) ):
+    require( exclusive = True )      # a timing: the machine to itself ( ADR 0014 )
     benchlib.set_device( p.device )                # BEFORE importing loom
     benchlib.set_kernels( p.kernels )
     benchlib.set_threads( p.threads, p.pin )

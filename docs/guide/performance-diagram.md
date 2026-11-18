@@ -53,31 +53,35 @@ those of a transport to a smooth density ( `sines` ), and those of a transport o
 gaussian ( `sharp`: long, thin cells across the ring ). The weights come from a solve to 1e-9; the diagram is then
 computed once, at fixed weights.
 
-The grid's own geometry ( `dedicated` ) builds every cell from its 3 x 3 neighbours in SIMD, then checks them by zones: on
-a zone of the grid, the cells built from fewer seeds contain the true ones, so the sum of their areas inside the zone
-exceeds the zone's area unless all of them are exact. The cells of the zones that fail are rebuilt with more seeds, and
-the zones halved, until none fails: the result is exact whatever the weights. `former` is the previous dedicated path:
-local certificates on each cell, then an exact clipping out to a radius of security set by the largest weight. sdot,
-CGAL and geogram get the same seeds as a cloud.
+The grid's own geometry ( `dedicated` ) builds every cell from its 3 x 3 neighbours, integrates it and adds it to a table of
+zones of the grid in one pass: on a zone, the cells built from fewer seeds contain the true ones, so the sum of their areas in
+the zone exceeds the zone's area unless all of them are exact. The cells that touch a zone that fails are built again with
+the seeds within twice their radius, and fill a table of the halves of the bad zones, until none fails: the result is exact
+whatever the weights. A cell that a seed of ring 2 cuts ( a test on its support, `2 h( k ) > |k|^2 + psi_i - psi_j` ) goes
+to ring 2 at once. What a cell keeps between the passes is a level and a box, nothing of its geometry. `former` is the
+previous dedicated path: local certificates on each cell, then an exact clipping out to a radius of security set by the
+largest weight. sdot, CGAL and geogram get the same seeds as a cloud.
 
 <BenchChart chart="grid_diagram" />
 
-On one thread, at 1024 x 1024, the dedicated geometry costs 145 ns per dirac with the Voronoi and the sines weights and
-240 ns with the sharp ones: 5 to 18 times less than sdot on the cloud ( 760, 1 460 and 4 230 ns ), 6 to 10 times less than
-CGAL ( 1 090 to 1 450 ns ). The former dedicated path is twice as fast on the easy weights ( 76 ns, no zones to check ), but
-on the sharp ones its radius of security follows the largest weight: 16.6 µs per dirac at 1024 x 1024, and it grows with
-`N`. geogram's measures are wrong on these grids: its triangulation of the lifted seeds leaves cells empty where four seeds
-are cocircular, and the measures sum to between 0.12 and 0.86 of the box on most runs; its times are shown, not its
-results. The 2080 Ti computes the cloud path in 35 to 89 ns per dirac in double ( 6 to 15 ns in float, kernel time ); the
-dedicated geometry is timed on the CPU only.
+On one thread, at 1024 x 1024, the dedicated geometry costs 125 ns per dirac with the Voronoi weights, 159 ns with the sines
+and 226 ns with the sharp ones, the areas and the weights of the hessian included: 6 to 19 times less than sdot on the cloud
+( 760, 1 460 and 4 230 ns ), 5 to 12 times less than CGAL ( 1 090 to 1 450 ns ). The former dedicated path is faster on the
+easy weights ( 76 ns, no zones to check ), but on the sharp ones its radius of security follows the largest weight: 16.6 µs
+per dirac at 1024 x 1024, and it grows with `N`. geogram's measures are wrong on these grids: its triangulation of the lifted
+seeds leaves cells empty where four seeds are cocircular, and the measures sum to between 0.12 and 0.86 of the box on most
+runs; its times are shown, not its results.
+
+On an H100 the dedicated geometry takes 0.2 to 0.8 ns per dirac on the easy weights and 25 ns on the sharp ones ( the
+former path: 390 ns ), the wall time of the call; sdot's cloud path, kernel time, 3 to 9 ns. On the 2080 Ti the cloud path
+takes 35 to 89 ns in double.
 
 <BenchChart chart="grid_diagram_threads" />
 
-The dedicated geometry gains 9.5× up to 32 threads with the Voronoi weights ( 15 ns per dirac ), 7× with the sines and
-6× with the sharp ones, then slows down once the threads span both sockets: the zone tables are summed and scanned by one
-thread, and a cell of the 3 x 3 stencil is little work for its memory traffic. sdot's walk on the cloud, prepared, gains
-43 to 85× on the 128 cores and passes it there with the Voronoi and the sines weights ( 18 against 29 and 31 ns ); with the
-sharp ones they are even ( 50 against 55 ns ). geogram gains at most 1.5×; CGAL's 2D triangulation is sequential.
+The dedicated geometry gains 20× up to 32 threads with the Voronoi weights ( 6.4 ns per dirac ), 17× with the sines and 9×
+with the sharp ones ( 26 ns on 128 threads ): one pass over the cells, little memory traffic. sdot's walk on the cloud,
+prepared, gains 43 to 85× on the 128 cores and stays behind ( 18, 19 and 50 ns ). geogram gains at most 1.5×; CGAL's 2D
+triangulation is sequential.
 
 ## Exact connectivity
 
