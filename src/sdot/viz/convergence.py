@@ -135,10 +135,5 @@ def write_convergence_html( series, out_path, title = "convergence", xlabel = "i
            f'<body style="margin:0;display:flex;justify-content:center;padding:24px 0;">'
            + "".join( svg ) + "</body></html>" )
 
-    from pathlib import Path
-    path = Path( out_path )
-    path.parent.mkdir( parents = True, exist_ok = True )
-    path.write_text( html )
-    from .announce import announce
-    announce( path )
-    return path
+    from .announce import write_page
+    return write_page( out_path, html )

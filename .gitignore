@@ -5,7 +5,9 @@ __pycache__/
 *.egg-info/
 .venv/
 
+
 # build outputs
+prototypes/
 build/
 *.o
 *.a
@@ -16,9 +18,10 @@ compile_commands.json
 catalogue_record
 grill/
 
-# THE PRECOMPILED KERNELS: `<tag>/<key>.so` per architecture, produced by `make catalogue`. Only the README is tracked.
-src/sdot/precompiled-kernels/*
-!src/sdot/precompiled-kernels/README.md
+# THE PRECOMPILED KERNELS: `<tag>/<key>.so` per architecture, produced by `make catalogue` ( tagged CACHEDIR.TAG by loom )
+src/sdot/kernel-catalogue/
+# the name they had before 2026-11-19
+src/sdot/precompiled-kernels/
 
 # the runner ( errand )
 errand-outputs/

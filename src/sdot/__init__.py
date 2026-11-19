@@ -6,7 +6,7 @@ import loom.compilation as _compilation
 _here = _Path( __file__ ).resolve().parent
 _compilation.register_include_root( _here / "include" )
 
-# the precompiled kernels (`precompiled-kernels/<tag>/<key>.so`, see `loom/compilation/catalogue.py`): always there, empty
+# the precompiled kernels (`kernel-catalogue/<tag>/<key>.so`, see `loom/compilation/catalogue.py`): always there, empty
 # in a checkout, filled in a wheel. Read-only as far as we are concerned -- the user may well not be allowed to write
 # in the installation. For a checkout, `SDOT_CATALOGUE_DIR` can name another one EXPLICITLY (a checkout's headers move, so
 # a catalogue registered by default would silently serve stale binaries)
@@ -19,7 +19,7 @@ _compilation.register_external( "eigen", "3.4.0", "https://gitlab.com/libeigen/e
                                 defines = { "win32": { "EIGEN_DONT_VECTORIZE": None } } )
 
 from loom.compilation import catalogue as _catalogue
-_catalogue.register_catalogue( _os.environ[ "SDOT_CATALOGUE_DIR" ] if "SDOT_CATALOGUE_DIR" in _os.environ else _here / "precompiled-kernels" )
+_catalogue.register_catalogue( _os.environ[ "SDOT_CATALOGUE_DIR" ] if "SDOT_CATALOGUE_DIR" in _os.environ else _here / _catalogue.DIRECTORY )
 
 # what was measured about which architecture each kernel runs as (see `loom/choices.py`); tracked in git, never written at run time
 import loom as _loom

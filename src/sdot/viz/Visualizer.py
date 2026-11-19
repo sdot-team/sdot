@@ -78,6 +78,14 @@ autonomy (data in base64 in the HTML, no side file, no server -- opens as `file:
   pulse, so that one finds it without opening the menu;
 - the point RADIUS slider: the display radius of bare points (Diracs), and a factor on the points that carry their own
   radius ( 1 at the start );
+- FIELDS ( `add_points( fields = { name: values } )` ): the points coloured by one of them, chosen in the menu, its
+  range over the displayed frame, over all of them, or typed ( robust: the 1st and 99th percentiles ); a sequential
+  map, or a diverging one when the field takes both signs ( its automatic range then symmetric: white at 0 ); the
+  colours always go from the start of the map at min to its end at max. In the TOP ROW, after the frame bar: the field, the
+  scale with its two ends ( typed: the range stays ), a button for the range of this frame / of all of them;
+- LAYERS ( `layer = name` on points, edges and images, `add_layer( name, visible )` ): the eye of the top row shows or
+  hides each, and the points;
+- IMAGES ( `add_image` ): grey levels under everything, in the plane of the first two axes;
 - solid faces (adjustable opacity) lit on both sides;
 - HIDDEN EDGES: a PURE depth pass (faces written into the z-buffer without touching the color)
   precedes the edge drawing, which gives hidden-part removal EVEN when the faces are not
@@ -109,6 +117,7 @@ import base64
 import colorsys
 import json
 import re
+import zlib
 from pathlib import Path
 
 import numpy as np
@@ -175,8 +184,39 @@ def _cat( blocks, dtype ):
     return np.concatenate( [ np.asarray( b ).reshape( -1 ) for b in blocks ] ).astype( dtype )
 
 
+#: while a page is written ( `to_html` ): the compressed BLOBS, which `_b64` fills and refers to as "@index"
+_BLOBS = None
+
+
 def _b64( arr ):
-    return base64.b64encode( np.ascontiguousarray( arr ).tobytes() ).decode( "ascii" )
+    """an array for the page: its bytes in base64; while `to_html` runs, a reference "@i" to a compressed blob instead"""
+    a = np.ascontiguousarray( arr )
+    if _BLOBS is None:
+        return base64.b64encode( a.tobytes() ).decode( "ascii" )
+    _BLOBS.append( _pack( a ) )
+    return f"@{ len( _BLOBS ) - 1 }"
+
+
+def _quantized( a, axis = None ):
+    """`( codes uint16, lo, step )`: `a` on 16 bits between its min and max ( per column with `axis = 0` ), NaN as 65535"""
+    a = np.asarray( a, dtype = np.float64 )
+    ok = np.isfinite( a )
+    if not ok.any():
+        return np.full( a.shape, 65535, np.uint16 ), 0.0, 1.0
+    lo = np.nanmin( np.where( ok, a, np.nan ), axis = axis )
+    hi = np.nanmax( np.where( ok, a, np.nan ), axis = axis )
+    step = np.where( hi > lo, ( hi - lo ) / 65534, 1.0 )
+    q = np.where( ok, np.round( ( np.where( ok, a, lo ) - lo ) / step ), 65535 ).astype( np.uint16 )
+    return q, lo, step
+
+
+def _pack( a ):
+    """`{ z, k }`: the bytes of `a` SHUFFLED ( the first byte of every item, then the second, ...: the bytes of floats
+    that change little come together ) and deflated ( zlib ), in base64; `k` the size of an item. The page inflates them
+    with the `DecompressionStream` of the browser"""
+    k = a.dtype.itemsize
+    b = a.view( np.uint8 ).reshape( -1, k ).T.tobytes() if k > 1 and a.size else a.tobytes()
+    return dict( z = base64.b64encode( zlib.compress( b, 6 ) ).decode( "ascii" ), k = k )
 
 
 class Visualizer:
@@ -205,13 +245,20 @@ class Visualizer:
     `add_curve` puts CURVES beside the scene ( a loss, a metric along a descent ): a panel at the bottom of the page, one
     small chart per curve, with a cursor at the abscissa of the displayed frame; a click in a chart goes to the nearest frame.
 
+    `store = path`: the STORE mode ( see `store.py` ): each frame is written to a file of the directory `path` when the next
+    one opens ( `new_frame` ), then forgotten -- the frames of a long run never stay in memory, and a viewer reads them while
+    the run goes on. `close()` writes the last one. The shared primitives and the images go to a base written once ( again
+    when they change ); the curves are given again whole as they grow ( `clear_curves`, then `add_curve` ). `on_frame`: called
+    after each write of the manifest ( a run says there that its view changed ).
+
     `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
     density drawn under diracs.
     """
 
     def __init__( self, title = "sdot", background = None, frame_axis = "time",
                   playable = True, fps = 5.0, frame_value = 0.0, depth_colors = False, morph = 0, loop = False,
-                  autoplay = False, face_opacity = 1.0, flat_points = False ):
+                  autoplay = False, face_opacity = 1.0, flat_points = False , field = None, compact = False,
+                  store = None, on_frame = None ):
         self.title      = title
         self.face_opacity = float( face_opacity )
         self.flat_points = flat_points
@@ -245,6 +292,12 @@ class Visualizer:
         self._edge_v, self._edge_c                 = [], []
         self._pnt_v,  self._pnt_c,  self._pnt_r    = [], [], []
         self._pnt_m                                = []           # a matrix [ 4 ] per point: an ELLIPSE ( 0: a disc )
+        self._pnt_f                                = []           # per chunk of points: `( n, { field name: [ n ] } )`
+        self._pnt_l, self._edge_l                  = [], []       # the LAYER of each point / edge ( 0: none )
+        self._layers                               = []           # `[ name, visible ]`, layer i + 1
+        self._images                               = []           # see `add_image`
+        self.field                                 = field        # the field the points are coloured by at the start
+        self.compact                               = compact      # positions and fields on 16 bits in the page
         self._hpolys                               = []           # polytopes in H-representation
         self._curves                               = []           # see `add_curve`
 
@@ -263,6 +316,20 @@ class Visualizer:
         self._sh_chunks = dict( poly = 0, edge = 0, pnt = 0 )     # how many chunks in the lists of arrays
         self._sh_poly_v = 0                                       # how many indices at the head of `_poly_v`
         self._frames    = [ self._frame_mark( frame_value ) ]       # ( `frame_value`: the abscissa of the first frame )
+
+        # STORE mode ( `store = path`, see `store.py` ): the frames are written as files as they are made, and forgotten.
+        # Only the frame being built stays in the lists above; the shared primitives go to a second scene, the BASE,
+        # which shares the tables of colours, layers and images with this one.
+        self._writer = None
+        if store is not None:
+            from .store import StoreWriter
+            self._writer = StoreWriter( store, on_frame = on_frame )
+            b = self._base_viz = Visualizer( title = title, compact = compact )
+            b._colors, b._colors_dark, b._col_ids, b._layers, b._images = self._colors, self._colors_dark, self._col_ids, self._layers, self._images
+            self._base_dirty = False
+            self._closed = False
+            ( Path( store ) / "index.html" ).write_text( store_page( title ) )     # ( read through a server: no file:// )
+            self._writer.write_manifest( self, force = True )
 
     # ---- colors -------------------------------------------------------------------------------
 
@@ -409,13 +476,68 @@ class Visualizer:
         """
         self._next_color = 0
         if value is None:
-            value = { self.frame_axes[ 0 ]: len( self._frames ) } if len( self.frame_axes ) > 1 else len( self._frames )
+            value = { self.frame_axes[ 0 ]: self.nb_frames } if len( self.frame_axes ) > 1 else self.nb_frames
+        if self._writer is not None:
+            values = self._frame_values( value )                # ( a dict reads the frame being flushed )
+            self._flush()
+            self._frames = [ self._frame_mark( values ) ]
+            return self
         self._frames.append( self._frame_mark( value ) )
         return self
 
     @property
     def nb_frames( self ):
+        if self._writer is not None:
+            return len( self._writer.frames ) + ( 0 if self._closed else 1 )
         return len( self._frames )
+
+    # ---- store mode ---------------------------------------------------------------------------
+
+    def _flush( self ):
+        """STORE mode: the frame being built written as a chunk, the base if it changed, the manifest; then the frame
+        forgotten ( its pools and primitives ), the colours, layers, images and curves kept."""
+        if self._base_dirty:
+            self._writer.write_base( self._base_viz )
+            self._base_dirty = False
+        if self.nb_dims is not None:
+            self._writer.write_frame( self, self._frames[ 0 ][ "values" ] )
+        self._pools, self._bb_pts, self._keep, self._base, self._size, self._nb_verts = [ ], [ ], [ ], { }, { }, 0
+        self._poly_v, self._poly_len, self._poly_c = [ ], [ ], [ ]
+        self._edge_v, self._edge_c, self._edge_l = [ ], [ ], [ ]
+        self._pnt_v, self._pnt_c, self._pnt_r, self._pnt_m, self._pnt_f, self._pnt_l = [ ], [ ], [ ], [ ], [ ], [ ]
+        self._hpolys = [ ]
+        self._nb_edges = self._nb_points = 0
+        self._writer.write_manifest( self )
+
+    def _to_base( self, method, *args, **kwargs ):
+        """STORE mode: a shared primitive goes to the base scene ( drawn in every frame, written when it changes )"""
+        kwargs[ "shared" ] = False
+        if kwargs.get( "color" ) is None:
+            kwargs[ "color" ] = self.take_color()             # ( the numbering of THIS frame, as without a store )
+        getattr( self._base_viz, method )( *args, **kwargs )
+        if self._base_viz.nb_dims is not None:
+            self._note_dims( self._base_viz.nb_dims )
+        self._base_dirty = True
+        return self
+
+    def close( self ):
+        """STORE mode: the last frame written, the manifest marked `complete`. Nothing to do otherwise."""
+        if self._writer is None or self._closed:
+            return self
+        if self._base_dirty:
+            self._writer.write_base( self._base_viz )
+            self._base_dirty = False
+        if self.nb_dims is not None:
+            self._writer.write_frame( self, self._frames[ 0 ][ "values" ] )
+        self._closed = True
+        self._writer.write_manifest( self, complete = True )
+        return self
+
+    def clear_curves( self ):
+        """Removes every curve: in STORE mode, the curves are given again, whole, as they grow ( the manifest carries
+        them, rewritten after each frame )."""
+        self._curves = [ ]
+        return self
 
     def _frame_ranges( self, key ):
         """The bounds of the frames over one of the primitive lists: `nb_frames + 1` integers ( after the shared
@@ -459,13 +581,15 @@ class Visualizer:
         self._pool( positions )
         return self
 
-    def add_curve( self, name, y, x = None, log_y = False, color = None ):
+    def add_curve( self, name, y, x = None, log_y = False, color = None, visible = True ):
         """A curve drawn beside the scene, in the panel of the curves. `y`: its values; `x`: their abscissas ON THE FIRST
         FRAME AXIS ( an iteration, a time: the unit of `new_frame( value )` ), `0, 1, 2, ...` by default. A curve may have
         more samples than there are frames ( every iteration of a descent that keeps one frame out of ten ). The cursor of
         the chart follows the displayed frame, and shows the value of the nearest sample. `log_y`: a log scale ( the
         values `<= 0` are then left out ). Several curves with the same `name` share a chart ( `color` tells them
-        apart: one per theme as a pair, the scale of the scene by default )."""
+        apart: one per theme as a pair, the scale of the scene by default ). Each chart is a window over the scene, that
+        one moves by its title and resizes by its corner; the eye of the top row shows or hides it. `visible`: at the
+        start ( a chart is shown when one of its curves is )."""
         y = np.asarray( y, dtype = float ).reshape( -1 )
         x = np.arange( len( y ), dtype = float ) if x is None else np.asarray( x, dtype = float ).reshape( -1 )
         if len( x ) != len( y ):
@@ -475,10 +599,11 @@ class Visualizer:
         col = scale_color( nb ) if color is None else color
         pair = col if _is_pair( col ) else ( col, col )
         self._curves.append( dict( name = str( name ), x = [ float( v ) for v in x[ ok ] ], y = [ float( v ) for v in y[ ok ] ],
-                                   log = bool( log_y ), color = [ list( _rgb( c ) ) for c in pair ] ) )
+                                   log = bool( log_y ), color = [ list( _rgb( c ) ) for c in pair ], visible = bool( visible ) ) )
         return self
 
-    def add_points( self, positions, radius = 0.0, color = None, opacity = 1.0, frames = True, matrices = None, shared = False ):
+    def add_points( self, positions, radius = 0.0, color = None, opacity = 1.0, frames = True, matrices = None, shared = False,
+                    fields = None, layer = None ):
         """`positions`: `[n, d]`. `radius`: the WORLD radius of the points (a scalar, or one radius
         per point). `0` (default) = the point has no size of its own (a Dirac): it is the page's
         slider that sets its display radius -- same convention as `points_html`.
@@ -488,7 +613,14 @@ class Visualizer:
         ( for the aim, and the slider, which scales them all ) is their largest half-axis unless `radius` is given.
 
         `shared`: drawn in EVERY frame, stored once ( an outline of the object under a descent, a sample of the truth ).
+
+        `fields`: `{ name: [n] }`, VALUES per point. The page offers to colour the points by one of them ( a colour map,
+        its range over all the frames, over the displayed one, or typed ); a point without the chosen field keeps its
+        color. `layer`: see `add_layer`.
         """
+        if shared and self._writer is not None:
+            return self._to_base( "add_points", positions, radius = radius, color = color, opacity = opacity, frames = frames,
+                                  matrices = matrices, fields = fields, layer = layer )
         base = self._pool( positions, frames )
         n = self._pool_len( base )
         if n == 0:
@@ -501,14 +633,19 @@ class Visualizer:
         if len( rad ) != n:
             raise ValueError( f"radius: { len( rad ) } radii for { n } points" )
         ci = self._color_id( color, opacity )
-        self._store( "pnt", ( self._pnt_v, self._pnt_r, self._pnt_c, self._pnt_m ),
-                     ( np.arange( base, base + n, dtype = np.int32 ), rad, np.full( n, ci, dtype = np.uint16 ), mat ), n, shared )
+        flds = { str( k ): _np( v ).reshape( -1 ) for k, v in ( fields or { } ).items() }
+        for k, v in flds.items():
+            if len( v ) != n:
+                raise ValueError( f"fields: { len( v ) } values of { k } for { n } points" )
+        self._store( "pnt", ( self._pnt_v, self._pnt_r, self._pnt_c, self._pnt_m, self._pnt_f, self._pnt_l ),
+                     ( np.arange( base, base + n, dtype = np.int32 ), rad, np.full( n, ci, dtype = np.uint16 ), mat, ( n, flds ),
+                       np.full( n, self._layer_id( layer ), dtype = np.uint8 ) ), n, shared )
         if not shared:
             self._nb_points += n
         return self
 
     def add_edges( self, positions, edges = None, color = None, opacity = 1.0, closed = False,
-                   dashed = False, nb_dashes = 7, frames = True, shared = False ):
+                   dashed = False, nb_dashes = 7, frames = True, shared = False, layer = None ):
         """`positions`: `[n, d]`. `edges`: `[m, 2]` of indices, or `None` to connect
         consecutive points (`closed` then closes the loop -- the case of a polygon given in
         cyclic order, which is what a 2D cell yields).
@@ -521,8 +658,11 @@ class Visualizer:
         dash is in WORLD units, not in pixels: it is a fixed number of dashes per edge, so
         the density does not change with zoom.
 
-        `shared`: drawn in EVERY frame, stored once.
+        `shared`: drawn in EVERY frame, stored once. `layer`: see `add_layer`.
         """
+        if shared and self._writer is not None:
+            return self._to_base( "add_edges", positions, edges, color = color, opacity = opacity, closed = closed, dashed = dashed,
+                                  nb_dashes = nb_dashes, frames = frames, layer = layer )
         base = self._pool( positions, frames )
         n = self._pool_len( base )
         if edges is None:
@@ -536,14 +676,15 @@ class Visualizer:
         if len( idx ) == 0:
             return self
         if dashed:
-            return self._add_dashes( positions, idx, color, opacity, nb_dashes, frames, shared )
+            return self._add_dashes( positions, idx, color, opacity, nb_dashes, frames, shared, layer )
         ci = self._color_id( color, opacity )
-        self._store( "edge", ( self._edge_v, self._edge_c ), ( idx.astype( np.int32 ) + base, np.full( len( idx ), ci, dtype = np.uint16 ) ), len( idx ), shared )
+        self._store( "edge", ( self._edge_v, self._edge_c, self._edge_l ), ( idx.astype( np.int32 ) + base, np.full( len( idx ), ci, dtype = np.uint16 ),
+                                                                            np.full( len( idx ), self._layer_id( layer ), dtype = np.uint8 ) ), len( idx ), shared )
         if not shared:
             self._nb_edges += len( idx )
         return self
 
-    def _add_dashes( self, positions, idx, color, opacity, nb_dashes, frames = True, shared = False ):
+    def _add_dashes( self, positions, idx, color, opacity, nb_dashes, frames = True, shared = False, layer = None ):
         """The `idx` segments of `positions`, dotted: a SEPARATE vertex pool, holding the
         ends of the dashes, and ordinary edges on it (see `add_edges( dashed = True )`).
         """
@@ -562,13 +703,66 @@ class Visualizer:
                  + np.arange( 0, k, 2 )[ None, : ] )
         seg = np.stack( [ starts, starts + 1 ], axis = -1 ).reshape( -1, 2 )
         return self.add_edges( pts.reshape( -1, p.shape[ 1 ] ), seg, color = color,
-                               opacity = opacity, frames = frames, shared = shared )
+                               opacity = opacity, frames = frames, shared = shared, layer = layer )
+
+    def add_layer( self, name, visible = True ):
+        """A LAYER: what is added with `layer = name` ( points, edges, images ) is shown or hidden at once, from a box of
+        the page's menu. `visible`: at the start. A layer named in an addition without this call is visible."""
+        self._layer_id( name )
+        self._layers[ self._layer_id( name ) - 1 ][ 1 ] = bool( visible )
+        return self
+
+    def _layer_id( self, name ):
+        if name is None:
+            return 0
+        for i, ( n, _ ) in enumerate( self._layers ):
+            if n == name:
+                return i + 1
+        if len( self._layers ) >= 255:
+            raise ValueError( "Visualizer: 255 layers at most" )
+        self._layers.append( [ str( name ), True ] )
+        return len( self._layers )
+
+    def add_image( self, values, lo, hi, layer = None, opacity = 1.0, vmin = None, vmax = None ):
+        """An IMAGE in the plane of the first two viewed axes ( 2D scenes ), under everything else and in every frame:
+        `values [ nx, ny ]` ( `values[ i, j ]` at the i-th column along x, the j-th row along y ) over the rectangle from
+        `lo` to `hi`, in grey from `vmin` ( black ) to `vmax` ( white ) -- by default the 0.5 and 99.5 percentiles. Stored
+        on 8 bits. `layer`: see `add_layer`."""
+        v = np.asarray( values, dtype = np.float64 )
+        if v.ndim != 2:
+            raise ValueError( "add_image: values [ nx, ny ]" )
+        a = np.percentile( v, 0.5 ) if vmin is None else float( vmin )
+        b = np.percentile( v, 99.5 ) if vmax is None else float( vmax )
+        g = np.clip( ( v - a ) / ( b - a if b > a else 1.0 ), 0, 1 )
+        self._images.append( dict( nx = v.shape[ 0 ], ny = v.shape[ 1 ], lo = [ float( x ) for x in lo[ :2 ] ], hi = [ float( x ) for x in hi[ :2 ] ],
+                                   layer = self._layer_id( layer ), opacity = float( opacity ), vmin = float( a ), vmax = float( b ),
+                                   data = _b64( np.ascontiguousarray( np.round( 255 * g ).astype( np.uint8 ).T ) ) ) )
+        if self._writer is not None:
+            self._base_dirty = True                            # ( an image is in the base: drawn in every frame )
+        return self
+
+    def _point_fields( self ):
+        """`[ { name, data } ]`: each field over all the points ( NaN where a chunk does not have it )"""
+        names = [ ]
+        for _, f in self._pnt_f:
+            names += [ k for k in f if k not in names ]
+        out = [ ]
+        for k in names:
+            v = np.concatenate( [ f[ k ] if k in f else np.full( n, np.nan, np.float32 ) for n, f in self._pnt_f ] or [ np.zeros( 0, np.float32 ) ] )
+            if self.compact:                                   # ( 16 bits: what a colour needs )
+                q, lo, step = _quantized( v )
+                out.append( dict( name = k, data = _b64( q ), lo = float( lo ), step = float( step ) ) )
+            else:
+                out.append( dict( name = k, data = _b64( v.astype( np.float32 ) ) ) )
+        return out
 
     def add_faces( self, positions, faces, color = None, opacity = 1.0, frames = True, shared = False ):
         """`positions`: `[n, d]`. `faces`: a sequence of POLYGONS (lists of indices, free lengths).
         They are kept AS IS -- it is the output that decides whether to triangulate them.
         `shared`: drawn in EVERY frame, stored once.
         """
+        if shared and self._writer is not None:
+            return self._to_base( "add_faces", positions, faces, color = color, opacity = opacity, frames = frames )
         base = self._pool( positions, frames )
         ci = self._color_id( color, opacity )
         verts, lens = [], []
@@ -780,18 +974,33 @@ class Visualizer:
         path = Path( filename )
         html = self.to_html()
 
-        path.parent.mkdir( parents = True, exist_ok = True )
-        path.write_text( html )
-        from .announce import announce
-        announce( path )
-        return path
+        from .announce import write_page
+        return write_page( path, html )
 
     def to_html( self, wheel = True, touch = True ):
         """The self-contained HTML page, as a string. `wheel` / `touch` say whether the wheel and
         the touch gestures drive the view by default (`?wheel=0` / `?touch=0` in the URL still
         win) -- off when the page is embedded in a host page that must keep scrolling."""
+        global _BLOBS
+        if self._writer is not None:
+            raise ValueError( "Visualizer: a store ( `store =` ) is not a page: its frames are files, read by `sviz open`" )
         if self.nb_dims is None:
             raise ValueError( "Visualizer: nothing to display (no primitive added)" )
+        _BLOBS = [ ]
+        try:
+            return self._to_html( wheel, touch )
+        finally:
+            _BLOBS = None
+
+    def _positions_b64( self ):
+        """the pool: float32, or with `compact`, 16 bits per coordinate over the box of the scene ( "@i|lo,..|step,.." )"""
+        pos = self.positions
+        if not self.compact or not pos.size:
+            return _b64( pos.astype( np.float32 ) )
+        q, lo, step = _quantized( pos, axis = 0 )
+        return _b64( q ) + "|" + ",".join( map( repr, np.atleast_1d( lo ).tolist() ) ) + "|" + ",".join( map( repr, np.atleast_1d( step ).tolist() ) )
+
+    def _to_html( self, wheel, touch ):
 
         d       = self.nb_dims
         bounds  = self.bounds()
@@ -805,7 +1014,7 @@ class Visualizer:
             "__D__"       : str( d ),
             "__BOUNDS__"  : json.dumps( bounds ),
             "__TIGHT__"   : json.dumps( self.bounds( pad_ratio = 0.0 ) ),
-            "__POS__"     : _b64( self.positions.astype( np.float32 ) ),
+            "__POS__"     : self._positions_b64(),
             "__COLORS__"  : json.dumps( [ list( c ) for c in self._colors ] ),
             "__COLORS_DARK__": json.dumps( [ list( c ) for c in self._colors_dark ] ),
             "__POLY_V__"  : _b64( np.asarray( self._poly_v, dtype = np.int32 ) ),
@@ -817,6 +1026,12 @@ class Visualizer:
             "__PNT_C__"   : _b64( self.point_colors ),
             "__PNT_R__"   : _b64( self.point_radii ),
             "__PNT_M__"   : _b64( self.point_matrices.reshape( -1 ) ),
+            "__PNT_L__"   : _b64( _cat( self._pnt_l, np.uint8 ) ),
+            "__EDG_L__"   : _b64( _cat( self._edge_l, np.uint8 ) ),
+            "__LAYERS__"  : json.dumps( self._layers ),
+            "__FIELDS__"  : json.dumps( self._point_fields() ),
+            "__IMAGES__"  : json.dumps( self._images ),
+            "__FIELD0__"  : json.dumps( self.field ),
             "__SHARED__"  : json.dumps( self._shared ),
             "__HPOLY__"   : json.dumps( self._hpolys ),
             "__CURVES__"  : json.dumps( self._curves ),
@@ -842,8 +1057,29 @@ class Visualizer:
             "__LOOP__"    : "true" if self.loop else "false",
             "__FLATPTS__" : "1.0" if self.flat_points else "0.0",
             "__AUTOPLAY__": "true" if self.autoplay else "false",
+            "__STORE_MODE__": "false",
+            "__STORE_FILES__": "null",
         }
+        subs[ "__BLOBS__" ] = json.dumps( _BLOBS )                     # ( last: the substitutions above fill it )
         return re.sub( r"__[A-Z0-9_]+__", lambda m: subs.get( m.group( 0 ), m.group( 0 ) ), _HTML )
+
+
+def store_page( title = "sdot", files = None ):
+    """The page of a STORE ( `index.html` in its directory, see `store.py` ): the page of `to_html`, with no data in it. Its
+    loader reads the manifest and the chunks beside it, and fills `STORE` with what the self-contained page has inlined:
+    each placeholder of the template becomes a member of `STORE` ( `STORE.POS` for the pool... ).
+
+    `files`: `{ name: text }`, the files of the store INLINED ( the manifest as it is, the chunks in base64 ): a page that reads
+    them there instead of fetching them -- the self-contained export of a store ( `sviz export --html` )."""
+    import html
+
+    inlined = "null" if files is None else json.dumps( files, separators = ( ",", ":" ) ).replace( "</", "<\\/" )
+
+    def sub( m ):
+        name = m.group( 1 ) or m.group( 2 )
+        return { "TITLE": html.escape( title ), "BLOBS": "[]", "STORE_MODE": "true", "STORE_FILES": inlined }.get( name, "STORE." + name )
+
+    return re.sub( r'"__([A-Z0-9_]+)__"|__([A-Z0-9_]+)__', sub, _HTML )
 
 
 _HTML = r"""<!DOCTYPE html>
@@ -902,28 +1138,54 @@ _HTML = r"""<!DOCTYPE html>
   body.dark #anim .play { background: #8ab4f8; color: #172033; }
   body.dark #anim .play.on { background: #ddd; }
   body.dark #anim .cnt { color: #999; }
-  /* the curves ( `add_curve` ): a strip at the bottom, one chart per name */
-  #curves {
-    display: none; position: fixed; left: 10px; right: 10px; bottom: 10px; z-index: 1; gap: 8px;
-    overflow-x: auto; pointer-events: none; font-family: sans-serif; font-size: 11px;
-  }
+  /* the curves ( `add_curve` ): one WINDOW per chart over the scene, moved by its title, resized by its corner */
+  #curves { position: fixed; inset: 0; z-index: 1; pointer-events: none; font-family: sans-serif; font-size: 11px; }
   #curves .chart {
-    flex: 1 1 220px; min-width: 200px; max-width: 420px; pointer-events: auto; cursor: crosshair;
-    background: rgba(255,255,255,0.88); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); padding: 4px 8px 2px;
+    position: absolute; display: flex; flex-direction: column; box-sizing: border-box; min-width: 160px; min-height: 80px;
+    pointer-events: auto; resize: both; overflow: hidden;
+    background: rgba(255,255,255,0.72); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); padding: 2px 8px 2px;
   }
-  #curves .chart .ttl { display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
-  #curves .chart .ttl span:first-child { overflow: hidden; text-overflow: ellipsis; }
-  #curves .chart .ttl .v { font-variant-numeric: tabular-nums; color: #666; }
-  #curves svg { display: block; width: 100%; height: 84px; overflow: visible; }
-  #curves .plot { position: relative; }
+  #curves .chart .bar { cursor: move; user-select: none; touch-action: none; }
+  #curves .chart .x { cursor: pointer; color: #888; padding: 0 2px; }
+  #curves .chart .ttl > span + span { margin-left: 8px; flex: none; }
+  #curves .chart .ttl .x { margin-left: 4px; }
+  #curves svg { display: block; width: 100%; height: 100%; overflow: visible; cursor: crosshair; }
+  #curves .plot { position: relative; flex: 1 1 auto; min-height: 30px; }
   #curves .plot .dec { position: absolute; right: 2px; font-size: 9px; color: #888; }
   #curves svg text { fill: #888; font-size: 9px; }
   #curves svg .axis { stroke: #bbb; stroke-width: 1; }
   #curves svg .cur { stroke: #333; stroke-width: 1; stroke-dasharray: 3 2; }
   body.dark #curves svg .cur { stroke: #eee; }
-  body.dark #curves .chart { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #curves .chart { background: rgba(30,30,30,0.72); color: #ddd; }
   body.dark #curves .chart .ttl .v { color: #aaa; }
   body.dark #curves svg .axis { stroke: #555; }
+  /* the TOOLS: in plain sight, in the top row after the frame bar -- what is shown ( layers ), the colour by a field and its range */
+  #tools {
+    display: none; position: fixed; top: 10px; left: 48px; z-index: 2; height: 30px; box-sizing: border-box; padding: 0 6px;
+    align-items: center; gap: 6px; background: rgba(255,255,255,0.88); border-radius: 6px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-family: sans-serif; font-size: 12px; white-space: nowrap;
+  }
+  #tools select, #tools input, #tools button { font-size: 12px; }
+  #tools .tbtn {
+    display: flex; align-items: center; justify-content: center; height: 22px; min-width: 22px; padding: 0 4px; cursor: pointer;
+    border: 1px solid #bbb; border-radius: 4px; background: transparent; color: inherit;
+  }
+  #tools .tbtn svg { width: 16px; height: 16px; }
+  #tools .sep { width: 1px; height: 18px; background: #ccc; }
+  #tools input.num { width: 64px; font-variant-numeric: tabular-nums; }
+  #showPop .head { margin: 6px 0 2px; color: #888; font-size: 11px; }
+  #tools canvas { width: 72px; height: 10px; border-radius: 2px; }
+  #fieldRange { display: none; align-items: center; gap: 4px; }
+  #showPop {
+    display: none; position: absolute; top: 32px; left: 0; padding: 6px 10px; border-radius: 6px;
+    background: rgba(255,255,255,0.95); box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  #showPop.open { display: block; }
+  #showPop label { display: block; margin: 3px 0; cursor: pointer; }
+  body.dark #tools { background: rgba(30,30,30,0.92); color: #ddd; }
+  body.dark #tools .tbtn { border-color: #666; }
+  body.dark #tools .sep { background: #555; }
+  body.dark #showPop { background: rgba(30,30,30,0.95); color: #ddd; }
   #slices .row { display: flex; align-items: center; gap: 6px; }
   #slices .row span { flex: none; width: 62px; }
   #axes select { width: 58px; }
@@ -995,7 +1257,6 @@ _HTML = r"""<!DOCTYPE html>
   </div>
   <div id="slices"></div>
   <div class="sec">
-    <label id="curvesLbl" style="display:none"><input type="checkbox" id="cbCurves" checked> curves</label>
     <label><input type="checkbox" id="cbWheel"> wheel moves/zooms the view</label>
     <label><input type="checkbox" id="cbTouch"> touch drives the view</label>
     <a id="openFull" href="#" target="_blank" style="display:none">open in a separate page &#8599;</a>
@@ -1008,6 +1269,20 @@ _HTML = r"""<!DOCTYPE html>
 </div>
 <div id="anim"></div>
 <div id="curves"></div>
+<div id="tools">
+  <button class="tbtn" id="showBtn" title="what is shown">
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.5 6-8.5 6-8.5-6-8.5-6z"/><circle cx="10" cy="10" r="2.6"/></svg></button>
+  <div id="showPop"></div>
+  <span class="sep" id="fieldSep"></span>
+  <select id="field" title="colour of the points"><option value="-1">plain colours</option></select>
+  <span id="fieldRange">
+    <input type="text" inputmode="decimal" class="num" id="fieldMin" title="the value at the start of the scale ( typed: the scale stays )">
+    <canvas id="legendBar" width="72" height="10"></canvas>
+    <input type="text" inputmode="decimal" class="num" id="fieldMax" title="the value at the end of the scale">
+    <button class="tbtn" id="scaleBtn"></button>
+  </span>
+</div>
 <button id="nav" title="navigation: wheel, pinch and touch move / zoom the view">
   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
     <path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg>
@@ -1036,18 +1311,37 @@ _HTML = r"""<!DOCTYPE html>
   </table>
 </div>
 <canvas id="c"></canvas>
-<script>
+<script id="main" type="text/plain">
 // ============================================================================================
-// data -- everything is encoded in base64 in the page (self-contained file, openable as file://)
+// data -- everything is encoded in base64 in the page (self-contained file, openable as file://); the big arrays are
+// BLOBS, compressed, that the loader at the end of the page inflates before it runs this script ( "@i": blob i )
 // ============================================================================================
 function b64bytes(s) {
+  if (typeof s !== "string") return s;                // ( a store: the arrays come decoded )
+  if (s[0] === "@") return BLOBS[parseInt(s.slice(1))];
   const raw = atob(s), b = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) b[i] = raw.charCodeAt(i);
   return b;
 }
-function decF32(s) { const b = b64bytes(s); return new Float32Array(b.buffer, 0, b.length / 4); }
-function decI32(s) { const b = b64bytes(s); return new Int32Array(b.buffer, 0, b.length / 4); }
-function decU16(s) { const b = b64bytes(s); return new Uint16Array(b.buffer, 0, b.length / 2); }
+function decF32(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Float32Array(b.buffer, 0, b.length / 4); }
+function decI32(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Int32Array(b.buffer, 0, b.length / 4); }
+function decU16(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Uint16Array(b.buffer, 0, b.length / 2); }
+// the pool of positions: float32, or 16 bits per coordinate ( "codes|lo per dim|step per dim", `compact` )
+function decPos(s) {
+  if (typeof s !== "string") return s;
+  const p = s.split("|");
+  if (p.length === 1) return decF32(s);
+  const q = decU16(p[0]), lo = p[1].split(",").map(Number), st = p[2].split(",").map(Number), d = lo.length, out = new Float32Array(q.length);
+  for (let i = 0; i < q.length; i++) out[i] = lo[i % d] + st[i % d] * q[i];
+  return out;
+}
+// a field: float32, or 16 bits between lo and lo + 65534 step ( 65535: none )
+function decField(f) {
+  if (f.step === undefined) return decF32(f.data);
+  const q = decU16(f.data), out = new Float32Array(q.length);
+  for (let i = 0; i < q.length; i++) out[i] = q[i] === 65535 ? NaN : f.lo + f.step * q[i];
+  return out;
+}
 
 const D      = __D__;                  // dimension of the WORLD (size of the position vectors)
 const BOUNDS = __BOUNDS__;             // [lo, hi] per dimension
@@ -1056,35 +1350,64 @@ const BOUNDS = __BOUNDS__;             // [lo, hi] per dimension
 // INDICES, and its color is only an index into COLORS. This is what keeps the weight of the
 // file down: a cube vertex serves 6 triangles and 3 edges, it is stored only once, and
 // a color costs only 2 bytes per primitive instead of 4 per vertex.
-const POS    = decF32("__POS__");
+let POS      = decPos("__POS__");
 const COLORS = __COLORS__, COLORS_DARK = __COLORS_DARK__;
 let PAL = COLORS;                      // the table of the CURRENT theme             // table of distinct colors, as [r, g, b, a]
 
 // polygons of FREE length: POLY_OFF slices POLY_V (POLY_OFF[p] .. POLY_OFF[p+1]). They are only
 // triangulated here, at display time -- the file itself keeps the faces as they are.
-const POLY_V = decI32("__POLY_V__"), POLY_OFF = decI32("__POLY_OFF__"), POLY_C = decU16("__POLY_C__");
-const EDG_V  = decI32("__EDG_V__"),  EDG_C    = decU16("__EDG_C__");
-const PNT_V  = decI32("__PNT_V__"),  PNT_C    = decU16("__PNT_C__"), PNT_R = decF32("__PNT_R__");
-const PNT_M  = decF32("__PNT_M__");    // a matrix per point, row by row: an ELLIPSE ( all 0: a disc )
+let POLY_V = decI32("__POLY_V__"), POLY_OFF = decI32("__POLY_OFF__"), POLY_C = decU16("__POLY_C__");
+let EDG_V  = decI32("__EDG_V__"),  EDG_C    = decU16("__EDG_C__");
+let PNT_V  = decI32("__PNT_V__"),  PNT_C    = decU16("__PNT_C__"), PNT_R = decF32("__PNT_R__");
+let PNT_M  = decF32("__PNT_M__");    // a matrix per point, row by row: an ELLIPSE ( all 0: a disc )
+// LAYERS ( `add_layer` ): the layer of each point and edge, 0 for none; `LAYERS[ l - 1 ] = [ name, visible ]`
+let PNT_L = new Uint8Array(b64bytes("__PNT_L__")), EDG_L = new Uint8Array(b64bytes("__EDG_L__"));
+const LAYERS = __LAYERS__, layerOn = [true].concat(LAYERS.map(l => l[1]));
+// FIELDS ( `add_points( fields = )` ): values per point, NaN where a point does not have the field
+const FIELD0 = __FIELD0__;            // the field shown at the start ( null: none )
+const FIELDS = __FIELDS__.map(f => ({ name: f.name, data: decField(f), all: f.all || null }));
+// IMAGES ( `add_image` ): grey levels on 8 bits, row by row from the lowest y
+const IMAGES = __IMAGES__.map(m => Object.assign(m, { bytes: b64bytes(m.data) }));
 // SHARED primitives: the first SHARED.poly / .edge / .pnt of their lists, drawn in every frame ( the frames' ranges follow )
-const SHARED = __SHARED__;
+let SHARED = __SHARED__;
 
-const CURVES = __CURVES__;             // { name, x, y, log, color: [ light, dark ] }, see `add_curve`
-const HPOLY  = __HPOLY__.map(h => ({                                     // polytopes in H-rep
+let CURVES = __CURVES__;             // { name, x, y, log, color: [ light, dark ] }, see `add_curve`
+let HPOLY  = __HPOLY__.map(h => ({                                     // polytopes in H-rep
   nb: h.nb, dirs: decF32(h.dirs), offs: decF32(h.offs), fcol: h.fcol, ecol: h.ecol, edg: h.edg,
 }));
 // FRAMES: each one is only a RANGE in the lists above (they share nothing else than
 // the vertex pool) -- FR_* gives the bounds, FR_VAL the abscissae on the axes ( NB_AXES per frame ).
 const AXES = __AXES__, PLAYABLE = __PLAYABLE__, FPS = __FPS__, NB_AXES = AXES.length;
-const FR_VAL = decF32("__FR_VAL__");
-const FR_POLY = decI32("__FR_POLY__"), FR_EDG = decI32("__FR_EDG__");
-const FR_PNT = decI32("__FR_PNT__"), FR_HP = decI32("__FR_HP__");
-const NB_FRAMES = FR_VAL.length / NB_AXES;
+let FR_VAL = decF32("__FR_VAL__");
+let FR_POLY = decI32("__FR_POLY__"), FR_EDG = decI32("__FR_EDG__");
+let FR_PNT = decI32("__FR_PNT__"), FR_HP = decI32("__FR_HP__");
+let NB_FRAMES = FR_VAL.length / NB_AXES;
 
 const RMIN = __RMIN__, RMAX = __RMAX__, R0 = __R0__;
 const BG = __BG__;                      // [ light, dark ], `null`: the theme's
 
-const NB_V = POS.length / D, NB_POLY = POLY_OFF.length - 1, NB_EDG = EDG_V.length / 2;
+let NB_V = POS.length / D, NB_POLY = POLY_OFF.length - 1, NB_EDG = EDG_V.length / 2;
+
+// the STORE mode ( `Visualizer( store = )`, `index.html` in the directory of a store ): the arrays above are those of the
+// frame shown, with the base ( the shared primitives ) first -- swapped when another frame comes ( `useScene` ). The frames'
+// ranges then say, for the frame shown, "the shared ones, then all the rest".
+const STORED = !!window.STORE;
+let curScene = null;
+function useScene(sc) {
+  if (sc === curScene) return;
+  curScene = sc;
+  ({ POS, POLY_V, POLY_OFF, POLY_C, EDG_V, EDG_C, EDG_L, PNT_V, PNT_C, PNT_R, PNT_M, PNT_L, SHARED, HPOLY } = sc);
+  for (const f of FIELDS) f.data = sc.fields[f.name];
+  const fr = (a, b) => { const r = new Int32Array(NB_FRAMES + 1); r.fill(a, 0, frameIdx + 1); r.fill(b, frameIdx + 1); return r; };
+  FR_POLY = fr(SHARED.poly, POLY_OFF.length - 1); FR_EDG = fr(SHARED.edge, EDG_V.length / 2);
+  FR_PNT = fr(SHARED.pnt, PNT_V.length); FR_HP = fr(0, HPOLY.length);
+  NB_V = POS.length / D; NB_POLY = POLY_OFF.length - 1; NB_EDG = EDG_V.length / 2;
+  projectPool();
+}
+// the number of points of frame `f` ( the morph matches two frames that have as many )
+function framePoints(f) {
+  return STORED ? ((STORE.m.frames[f].n || {}).pnt || 0) : FR_PNT[f + 1] - FR_PNT[f];
+}
 
 // ============================================================================================
 // projection world -> 3D: which dimensions we look at, and where we cut the others
@@ -1346,21 +1669,28 @@ function buildScene() {
     e++;
   }
   for (const [a, b] of edgs) for (let i = a; i < b; i++)
-    putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), PAL[EDG_C[i]]);
+    if (layerOn[EDG_L[i]]) putLin(at(EDG_V[2 * i]), at(EDG_V[2 * i + 1]), PAL[EDG_C[i]]);
   for (let i = 0; i + 5 < hl.length; i += 6)
     putLin(hl.slice(i, i + 3), hl.slice(i + 3, i + 6), hlc[i / 6]);
+  LIN.n = e;
 
   // 5. points
   const nPnt = (v1 - v0) + SHARED.pnt;
   PNT = { pos: new Float32Array(nPnt * 3), col: new Float32Array(nPnt * 4),
           rad: new Float32Array(nPnt), mat: new Float32Array(nPnt * 4), n: nPnt };
   let i = 0;
-  for (const [a, b] of pnts) for (let j = a; j < b; j++, i++) {
-    const v = PNT_V[j], col = PAL[PNT_C[j]];
+  const fld = fieldIdx >= 0 ? FIELDS[fieldIdx].data : null, rng = fld ? fieldRange(pnts) : null;
+  for (const [a, b] of pnts) for (let j = a; j < b; j++) {
+    if (!layerOn[PNT_L[j]]) continue;
+    const v = PNT_V[j], val = fld ? fld[j] : NaN;
+    const col = val === val ? fieldColor(val, rng, PAL[PNT_C[j]][3]) : PAL[PNT_C[j]];
     PNT.pos[i * 3] = PR[3 * v]; PNT.pos[i * 3 + 1] = PR[3 * v + 1]; PNT.pos[i * 3 + 2] = PR[3 * v + 2];
     for (let q = 0; q < 4; q++) { PNT.col[i * 4 + q] = col[q]; PNT.mat[i * 4 + q] = PNT_M[j * 4 + q]; }
     PNT.rad[i] = PNT_R[j];
+    i++;
   }
+  PNT.n = i;
+  showLegend(rng);
 
   upload();
   pivotDirty = true;                                    // the scene changed: nothing aimed at anymore
@@ -1369,6 +1699,130 @@ function buildScene() {
     PNT.n + " points · " + LIN.n + " edges · " + TRI.n + " triangles";
   sceneBuilt = true;
 }
+
+// ============================================================================================
+// FIELDS: the points coloured by their values. The range is robust ( the 1st and 99th percentiles ), over all the
+// frames, over the displayed one, or typed; a range across 0 takes a DIVERGING map ( white at 0 ), else a sequential one.
+// ============================================================================================
+let fieldIdx = -1;
+// the scale: over the displayed frame, over all the frames, or typed ( the inputs ); the button goes from the first to
+// the second, and back to the first from a typed one
+let scaleMode = "frame";
+const fieldUi = { sel: document.getElementById("field"), range: document.getElementById("fieldRange"),
+                  btn: document.getElementById("scaleBtn"), lo: document.getElementById("fieldMin"),
+                  hi: document.getElementById("fieldMax") };
+const SCALE_ICON = {
+  frame : ['<rect x="5" y="4" width="10" height="12" rx="1"/>', "range over this frame ( click: over all the frames )"],
+  all   : ['<rect x="3" y="6" width="9" height="11" rx="1"/><path d="M6 3.5h9.5a1 1 0 0 1 1 1V14"/>', "range over all the frames ( click: over this frame )"],
+  manual: ['<path d="M4 16l1-4 8-8 3 3-8 8-4 1z"/><path d="M11.5 5.5l3 3"/>', "range typed ( click: over this frame )"],
+};
+function syncScaleBtn() {
+  const [path, title] = SCALE_ICON[scaleMode];
+  fieldUi.btn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">' + path + "</svg>";
+  fieldUi.btn.title = title;
+}
+function quantiles(vals) {                             // [ q01, q99 ] of the finite values
+  const v = Float64Array.from(vals.filter(x => x === x)).sort();
+  if (!v.length) return [0, 1];
+  const q = t => v[Math.min(v.length - 1, Math.floor(t * (v.length - 1) + 0.5))];
+  let lo = q(0.01), hi = q(0.99);
+  if (!(hi > lo)) { lo = v[0]; hi = v[v.length - 1] > lo ? v[v.length - 1] : lo + 1; }
+  return [lo, hi];
+}
+function fieldRange(pnts) {
+  const f = FIELDS[fieldIdx], mode = scaleMode;
+  let r;
+  const num = inp => parseFloat(inp.value.replace(",", "."));              // ( a comma as a decimal point too )
+  if (mode === "manual") r = [num(fieldUi.lo), num(fieldUi.hi)];
+  else if (mode === "all") r = f.all || (f.all = quantiles(f.data));
+  else {
+    const vals = [];
+    for (const [a, b] of pnts) for (let j = a; j < b; j++) vals.push(f.data[j]);
+    r = quantiles(vals);
+  }
+  if (mode !== "manual" && isDiverging(f)) { const a = Math.max(Math.abs(r[0]), Math.abs(r[1])); r = [-a, a]; }  // ( white at 0 )
+  if (!(r[1] > r[0])) r = [r[0], r[0] + 1];
+  if (mode !== "manual") { fieldUi.lo.value = +r[0].toPrecision(3); fieldUi.hi.value = +r[1].toPrecision(3); }
+  return r;
+}
+function ramp(stops, t) {
+  t = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+  const k = Math.min(stops.length - 2, Math.floor(t)), u = t - k;
+  return stops[k].map((c, q) => c + u * (stops[k + 1][q] - c));
+}
+const SEQ = [[0.267, 0.005, 0.329], [0.230, 0.322, 0.546], [0.128, 0.567, 0.551], [0.369, 0.789, 0.383], [0.993, 0.906, 0.144]];
+const DIV = [[0.230, 0.299, 0.754], [0.552, 0.690, 0.996], [0.865, 0.865, 0.865], [0.958, 0.604, 0.482], [0.706, 0.016, 0.150]];
+// the MAP of a field is chosen once, from its values over all the frames: diverging when they take both signs, else
+// sequential. Whatever the range ( typed or not ), its colours go from the start of the map at `min` to its end at `max`
+function isDiverging(f) {
+  if (f.div === undefined) { const q = f.all || (f.all = quantiles(f.data)); f.div = q[0] < 0 && q[1] > 0; }
+  return f.div;
+}
+function fieldColor(v, r, alpha) {
+  const c = ramp(isDiverging(FIELDS[fieldIdx]) ? DIV : SEQ, (v - r[0]) / (r[1] - r[0]));
+  return [c[0], c[1], c[2], alpha];
+}
+function showLegend(r) {
+  const was = fieldUi.range.style.display;
+  fieldUi.range.style.display = r ? "flex" : "none";
+  if (was !== fieldUi.range.style.display && typeof placeTools === "function") placeTools();   // ( wider or narrower )
+  if (!r) return;
+  const cv = document.getElementById("legendBar"), ctx = cv.getContext("2d"), div = isDiverging(FIELDS[fieldIdx]);
+  for (let x = 0; x < cv.width; x++) {
+    const c = ramp(div ? DIV : SEQ, x / (cv.width - 1));
+    ctx.fillStyle = "rgb(" + c.map(q => Math.round(255 * q)).join(",") + ")";
+    ctx.fillRect(x, 0, 1, cv.height);
+  }
+  cv.title = div ? "diverging: white in the middle of the range" : "";
+}
+// the TOOLS, top row: what is shown ( the points, each layer ), and the colour by a field
+const tools = document.getElementById("tools"), showPop = document.getElementById("showPop");
+// an entry of the eye's panel: `get()` its state, `set( on )` when clicked; `mirror`: a box elsewhere it follows
+function addShowItem(name, get, set, mirror, head) {
+  if (head) { const h = document.createElement("div"); h.className = "head"; h.textContent = head; showPop.appendChild(h); }
+  const lab = document.createElement("label"), cb = document.createElement("input");
+  cb.type = "checkbox"; cb.checked = get();
+  cb.addEventListener("change", () => set(cb.checked));
+  lab.appendChild(cb); lab.appendChild(document.createTextNode(" " + name));
+  showPop.appendChild(lab);
+  if (mirror) mirror.addEventListener("change", () => { cb.checked = mirror.checked; });
+  return cb;
+}
+// the bar is shown when it has something: the eye with more than the points, or fields
+function syncTools() {
+  const showSome = showPop.querySelectorAll("label").length > (PNT_V.length ? 1 : 0);
+  document.getElementById("showBtn").style.display = showSome ? "" : "none";
+  tools.style.display = showSome || FIELDS.length ? "flex" : "none";
+  if (typeof placeTools === "function") placeTools();
+}
+function initTools() {                                 // ( called once `ui` exists )
+if (PNT_V.length) addShowItem("points", () => ui.points.checked, on => { ui.points.checked = on; draw(); }, ui.points);
+LAYERS.forEach((l, k) => addShowItem(l[0], () => layerOn[k + 1], on => { layerOn[k + 1] = on; buildScene(); draw(); }));
+document.getElementById("showBtn").addEventListener("click", e => { showPop.classList.toggle("open"); e.stopPropagation(); });
+document.addEventListener("click", e => { if (!showPop.contains(e.target)) showPop.classList.remove("open"); });
+if (!FIELDS.length) { fieldUi.sel.style.display = "none"; document.getElementById("fieldSep").style.display = "none"; }
+syncTools();
+if (FIELDS.length) {
+  FIELDS.forEach((f, k) => { const o = document.createElement("option"); o.value = k; o.textContent = f.name; fieldUi.sel.appendChild(o); });
+  fieldIdx = FIELDS.findIndex(f => f.name === FIELD0);                 // ( -1: plain colours )
+  fieldUi.sel.value = String(fieldIdx);
+  const rebuild = () => { buildScene(); draw(); };
+  syncScaleBtn();
+  fieldUi.sel.addEventListener("change", () => { fieldIdx = parseInt(fieldUi.sel.value); rebuild(); });
+  fieldUi.btn.addEventListener("click", () => { scaleMode = scaleMode === "frame" ? "all" : "frame"; syncScaleBtn(); rebuild(); });
+  for (const inp of [fieldUi.lo, fieldUi.hi])
+    inp.addEventListener("change", () => { scaleMode = "manual"; syncScaleBtn(); rebuild(); });
+}
+}
+// in the top row after the frame bar when there is room, else under it
+function placeTools() {
+  const a = document.getElementById("anim"), shown = getComputedStyle(a).display !== "none";
+  const r = shown ? a.getBoundingClientRect() : { right: 40, bottom: 40 };
+  const fits = r.right + 8 + tools.offsetWidth <= window.innerWidth - 48;
+  tools.style.left = (fits ? r.right + 8 : 48) + "px";
+  tools.style.top = (fits || !shown ? 10 : r.bottom + 6) + "px";
+}
+window.addEventListener("resize", placeTools);
 
 // ============================================================================================
 // linear algebra (just what the camera needs)
@@ -1748,7 +2202,7 @@ void main() {
 precision highp float;
 in vec4 vCol; in vec3 vC; in float vR; in vec2 vD; out vec4 oCol;
 uniform mat4 uP; uniform float uSphere;
-const float FLATPTS = __FLATPTS__;
+const float FLATPTS = ${__FLATPTS__ ? "1.0" : "0.0"};
 // a light from the upper left, in front ( view space )
 const vec3 L = vec3(-0.45, 0.55, 0.70);
 void main() {
@@ -1844,6 +2298,28 @@ function edlTargets(w, h) {                            // (re)allocated when the
 function edlStrength() { return 20 * Math.pow(100, parseFloat(ui.edlK.value)); }
 function aoRadius() { return parseFloat(ui.aoR.value) * pointRadius(); }
 
+// IMAGES ( `add_image` ): a textured rectangle in the plane z = 0, grey levels on one channel
+const pImage = prog(`#version 300 es
+uniform mat4 uMVP; uniform vec2 uLo; uniform vec2 uHi;
+out vec2 vUv;
+const vec2 C[6] = vec2[6](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0));
+void main() { vUv = C[gl_VertexID]; gl_Position = uMVP * vec4(uLo + vUv * (uHi - uLo), 0.0, 1.0); }`,
+`#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 oCol; uniform sampler2D uTex; uniform float uAlpha;
+void main() { float g = texture(uTex, vUv).r; oCol = vec4(g, g, g, uAlpha); }`);
+for (const m of IMAGES) {
+  m.tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, m.tex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, m.nx, m.ny, 0, gl.RED, gl.UNSIGNED_BYTE, m.bytes);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+const vaoImage = gl.createVertexArray();
+
 const buf = {};
 ["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad", "pntMat"]
   .forEach(k => buf[k] = gl.createBuffer());
@@ -1923,6 +2399,23 @@ function draw() {
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // (0) the images, under everything: no depth
+  if (IMAGES.some(m => layerOn[m.layer])) {
+    gl.useProgram(pImage); gl.bindVertexArray(vaoImage);
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+    gl.uniformMatrix4fv(gl.getUniformLocation(pImage, "uMVP"), false, MVP);
+    gl.uniform1i(gl.getUniformLocation(pImage, "uTex"), 0);
+    gl.activeTexture(gl.TEXTURE0);
+    for (const m of IMAGES) if (layerOn[m.layer]) {
+      gl.bindTexture(gl.TEXTURE_2D, m.tex);
+      gl.uniform2f(gl.getUniformLocation(pImage, "uLo"), m.lo[0], m.lo[1]);
+      gl.uniform2f(gl.getUniformLocation(pImage, "uHi"), m.hi[0], m.hi[1]);
+      gl.uniform1f(gl.getUniformLocation(pImage, "uAlpha"), m.opacity);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  }
 
   // (1) PURE DEPTH pass on the faces: this is what makes hidden-edge removal possible,
   // including when the faces are not displayed or are transparent.
@@ -2023,8 +2516,7 @@ function draw() {
 function resize() {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(window.innerWidth * dpr);
-  // ( the panel of the curves, when shown, takes the bottom of the page: the view keeps what is above it )
-  const h = Math.max(50, window.innerHeight - (curveBox.style.display === "flex" ? curveBox.offsetHeight + 14 : 0));
+  const h = Math.max(50, window.innerHeight);           // ( the curves float over the view )
   canvas.height = Math.round(h * dpr);
   canvas.style.width = window.innerWidth + "px";
   canvas.style.height = h + "px";
@@ -2251,16 +2743,20 @@ window.addEventListener("keydown", e => {
 // The frames form a grid over the axes: on each axis, the RANK of a frame among the distinct values. With one axis the
 // rank is the frame's own index ( frames in the order given, equal values allowed ). A combination that no frame
 // has shows the NEAREST frame, the axis just moved weighing the most -- the bars then snap to what is shown.
-const AX_VALS = [], FR_RANK = new Int32Array(NB_FRAMES * NB_AXES);
-for (let a = 0; a < NB_AXES; a++) {
-  const col = Array.from({ length: NB_FRAMES }, (_, f) => FR_VAL[f * NB_AXES + a]);
-  if (NB_AXES === 1) { AX_VALS.push(col); col.forEach((_, f) => { FR_RANK[f] = f; }); continue; }
-  const vals = Array.from(new Set(col)).sort((x, y) => x - y);
-  AX_VALS.push(vals);
-  col.forEach((v, f) => { FR_RANK[f * NB_AXES + a] = vals.indexOf(v); });
+let AX_VALS = [], FR_RANK = null, FRAME_AT = new Map();
+function frameGrid() {                                 // ( again when frames come: the store mode )
+  AX_VALS = []; FR_RANK = new Int32Array(NB_FRAMES * NB_AXES);
+  for (let a = 0; a < NB_AXES; a++) {
+    const col = Array.from({ length: NB_FRAMES }, (_, f) => FR_VAL[f * NB_AXES + a]);
+    if (NB_AXES === 1) { AX_VALS.push(col); col.forEach((_, f) => { FR_RANK[f] = f; }); continue; }
+    const vals = Array.from(new Set(col)).sort((x, y) => x - y);
+    AX_VALS.push(vals);
+    col.forEach((v, f) => { FR_RANK[f * NB_AXES + a] = vals.indexOf(v); });
+  }
+  FRAME_AT = new Map();
+  for (let f = NB_FRAMES - 1; f >= 0; f--) FRAME_AT.set(Array.from(FR_RANK.subarray(f * NB_AXES, (f + 1) * NB_AXES)).join(","), f);
 }
-const FRAME_AT = new Map();
-for (let f = NB_FRAMES - 1; f >= 0; f--) FRAME_AT.set(Array.from(FR_RANK.subarray(f * NB_AXES, (f + 1) * NB_AXES)).join(","), f);
+frameGrid();
 function frameFor(ranks, moved) {
   const exact = FRAME_AT.get(ranks.join(","));
   if (exact !== undefined) return exact;
@@ -2276,49 +2772,68 @@ const fmtVal = v => Number.isInteger(v) ? String(v) : String(parseFloat(v.toPrec
 
 // the bar: one row per axis that takes more than one value -- [ play ] [ slider ] name = value  k/n
 // ( no play button anywhere: no column for it either )
-const animBox = document.getElementById("anim"), axRows = [];
-const anyPlay = PLAYABLE.some((p, a) => p && AX_VALS[a].length > 1);
-if (!anyPlay) animBox.style.gridTemplateColumns = "minmax(40px, 1fr) auto";
-for (let a = 0; a < NB_AXES; a++) {
-  if (AX_VALS[a].length < 2) { axRows.push(null); continue; }
-  const row = document.createElement("div"); row.className = "row";
-  const btn = document.createElement(PLAYABLE[a] ? "button" : "span");
-  btn.className = PLAYABLE[a] ? "play" : "gap";
-  if (!anyPlay) btn.style.display = "none";
-  if (PLAYABLE[a]) { btn.innerHTML = "&#9654;"; btn.title = "play / pause " + AXES[a] + " (Space)"; }
-  const inp = document.createElement("input");
-  inp.type = "range"; inp.min = 0; inp.max = AX_VALS[a].length - 1; inp.step = 1; inp.title = AXES[a];
-  const lab = document.createElement("span"); lab.className = "lab";
-  row.append(btn, inp, lab);
-  animBox.appendChild(row);
-  inp.addEventListener("input", () => {
-    stopPlaying();
-    const r = curRanks(); r[a] = parseInt(inp.value, 10);
-    setFrame(frameFor(r, a));
-  });
-  inp.addEventListener("focus", () => { focusAxis = a; });
-  if (PLAYABLE[a]) btn.addEventListener("click", () => togglePlay(a));
-  axRows.push({ btn, inp, lab });
+const animBox = document.getElementById("anim");
+let axRows = [], shownAxes = [], playableAxes = [], focusAxis = -1, barKey = null;
+// the rows are made again only when the set of the shown axes changes; frames that come only stretch the bars
+function buildBar() {
+  const key = AX_VALS.map(v => v.length > 1 ? 1 : 0).join("");
+  if (key === barKey) { for (const a of shownAxes) axRows[a].inp.max = AX_VALS[a].length - 1; return; }
+  const again = barKey !== null;
+  barKey = key; animBox.innerHTML = ""; axRows = [];
+  const anyPlay = PLAYABLE.some((p, a) => p && AX_VALS[a].length > 1);
+  animBox.style.gridTemplateColumns = anyPlay ? "" : "minmax(40px, 1fr) auto";
+  for (let a = 0; a < NB_AXES; a++) {
+    if (AX_VALS[a].length < 2) { axRows.push(null); continue; }
+    const row = document.createElement("div"); row.className = "row";
+    const btn = document.createElement(PLAYABLE[a] ? "button" : "span");
+    btn.className = PLAYABLE[a] ? "play" : "gap";
+    if (!anyPlay) btn.style.display = "none";
+    if (PLAYABLE[a]) { btn.innerHTML = "&#9654;"; btn.title = "play / pause " + AXES[a] + " (Space)"; }
+    const inp = document.createElement("input");
+    inp.type = "range"; inp.min = 0; inp.max = AX_VALS[a].length - 1; inp.step = 1; inp.title = AXES[a];
+    const lab = document.createElement("span"); lab.className = "lab";
+    row.append(btn, inp, lab);
+    animBox.appendChild(row);
+    inp.addEventListener("input", () => {
+      stopPlaying();
+      const r = curRanks(); r[a] = parseInt(inp.value, 10);
+      setFrame(frameFor(r, a));
+    });
+    inp.addEventListener("focus", () => { focusAxis = a; });
+    if (PLAYABLE[a]) btn.addEventListener("click", () => togglePlay(a));
+    axRows.push({ btn, inp, lab });
+  }
+  shownAxes = axRows.map((r, a) => r ? a : -1).filter(a => a >= 0);
+  playableAxes = shownAxes.filter(a => PLAYABLE[a]);
+  if (!axRows[focusAxis]) focusAxis = playableAxes.length ? playableAxes[0] : (shownAxes.length ? shownAxes[0] : -1);
+  animBox.style.display = shownAxes.length ? "grid" : "none";
+  if (again) placeTools();
 }
-const shownAxes = axRows.map((r, a) => r ? a : -1).filter(a => a >= 0);
-const playableAxes = shownAxes.filter(a => PLAYABLE[a]);
-let focusAxis = playableAxes.length ? playableAxes[0] : (shownAxes.length ? shownAxes[0] : -1);
-if (shownAxes.length) animBox.style.display = "grid";
+buildBar();
+initTools();
+placeTools();
 
 let playing = -1, playTimer = null;          // `playing`: the axis being played, -1 when paused
 const curRanks = () => Array.from(FR_RANK.subarray(frameIdx * NB_AXES, (frameIdx + 1) * NB_AXES));
 
-function setFrame(i) {
-  frameIdx = Math.max(0, Math.min(NB_FRAMES - 1, i));
+function syncBar() {
   for (const a of shownAxes) {
     const r = FR_RANK[frameIdx * NB_AXES + a], row = axRows[a];
     row.inp.value = r;
     row.lab.innerHTML = AXES[a] + " = " + fmtVal(FR_VAL[frameIdx * NB_AXES + a]) +
       '<span class="cnt">' + (r + 1) + "/" + AX_VALS[a].length + "</span>";
   }
+}
+function setFrame(i) {
+  frameIdx = Math.max(0, Math.min(NB_FRAMES - 1, i));
+  syncBar();
+  curveCursors();
+  if (STORED) {                                       // its chunk: at once from the cache, else drawn when it arrives
+    STORE.want(frameIdx, f => { if (f !== frameIdx) return; useScene(STORE.get(f)); buildScene(); draw(); });
+    return;
+  }
   buildScene();                                       // only the displayed frame is rebuilt
   draw();
-  curveCursors();
 }
 
 // ============================================================================================
@@ -2327,10 +2842,13 @@ function setFrame(i) {
 const curveBox = document.getElementById("curves"), charts = [];
 const CW = 300, CH = 84, CL = 4, CR = 4, CT = 4, CB = 12;
 const fmtY = v => v === 0 ? "0" : (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3 ? v.toExponential(2) : String(parseFloat(v.toPrecision(4))));
-function buildCurves() {
-  const NS = "http://www.w3.org/2000/svg", names = [];
+function curveNames() {
+  const names = [];
   for (const c of CURVES) if (c.x.length && !names.includes(c.name)) names.push(c.name);
-  for (const name of names) {
+  return names;
+}
+function makeChart(name) {
+    const NS = "http://www.w3.org/2000/svg";
     const cs = CURVES.filter(c => c.name === name && c.x.length), log = cs.some(c => c.log);
     const ty = v => log ? Math.log10(v) : v;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -2341,10 +2859,12 @@ function buildCurves() {
     if (y1 <= y0) { const m = Math.abs(y0) * 0.05 || 1; y0 -= m; y1 += m; }
     const sx = x => CL + (x - x0) / (x1 - x0) * (CW - CL - CR), sy = y => CH - CB - (ty(y) - y0) / (y1 - y0) * (CH - CT - CB);
     const div = document.createElement("div"); div.className = "chart";
-    const ttl = document.createElement("div"); ttl.className = "ttl";
+    const ttl = document.createElement("div"); ttl.className = "ttl bar";
     const nm = document.createElement("span"); nm.textContent = name + (log ? " ( log )" : ""); nm.title = name;
     const val = document.createElement("span"); val.className = "v";
-    ttl.append(nm, val);
+    const close = document.createElement("span"); close.className = "x"; close.innerHTML = "&times;"; close.title = "hide";
+    const right = document.createElement("span"); right.append(val, close);
+    ttl.append(nm, right);
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 " + CW + " " + CH); svg.setAttribute("preserveAspectRatio", "none");
     const mk = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); svg.appendChild(e); return e; };
@@ -2359,7 +2879,7 @@ function buildCurves() {
     if (log) for (let k = Math.ceil(y0 - 1e-9); k <= Math.floor(y1 + 1e-9); k++) {
       const y = CH - CB - (k - y0) / (y1 - y0) * (CH - CT - CB);
       mk("line", { class: "axis", x1: CL, x2: CW - CR, y1: y, y2: y, "stroke-dasharray": "2 3", "vector-effect": "non-scaling-stroke" });
-      const t = document.createElement("span"); t.className = "dec"; t.style.top = Math.max(0, y - 10) + "px"; t.textContent = "1e" + k;
+      const t = document.createElement("span"); t.className = "dec"; t.style.top = "calc(" + (100 * y / CH) + "% - 10px)"; t.textContent = "1e" + k;
       plot.appendChild(t);
     }
     div.append(ttl, plot);
@@ -2379,16 +2899,61 @@ function buildCurves() {
     };
     svg.addEventListener("pointerdown", e => { svg.setPointerCapture(e.pointerId); go(e); });
     svg.addEventListener("pointermove", e => { if (e.buttons & 1) go(e); });
-    charts.push({ cs, paths, cur, val, sx });
+    // a window: moved by its title bar, resized by its corner ( css ), hidden by its cross or from the eye's panel
+    div.style.display = cs.some(c => c.visible !== false) ? "flex" : "none";
+    ttl.addEventListener("pointerdown", e => {
+      if (e.target === close) return;
+      const r = div.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+      ttl.setPointerCapture(e.pointerId);
+      const mv = ev => {
+        div.style.left = Math.max(0, Math.min(window.innerWidth - 40, ev.clientX - dx)) + "px";
+        div.style.top = Math.max(0, Math.min(window.innerHeight - 20, ev.clientY - dy)) + "px";
+        div.style.bottom = "auto";
+      };
+      const up = () => { ttl.removeEventListener("pointermove", mv); ttl.removeEventListener("pointerup", up); };
+      ttl.addEventListener("pointermove", mv); ttl.addEventListener("pointerup", up);
+    });
+    return { cs, paths, cur, val, sx, div, name, close };
+}
+// its line in the eye's panel, and its cross
+function chartItem(ch, head) {
+  ch.cb = addShowItem(ch.name, () => ch.div.style.display !== "none", on => {
+    ch.div.style.display = on ? "flex" : "none";
+    if (on) { const r = ch.div.getBoundingClientRect(); if (r.right < 20 || r.top > window.innerHeight - 10) { ch.div.style.left = "10px"; ch.div.style.top = "auto"; ch.div.style.bottom = "10px"; } }
+  }, null, head ? "curves" : null);
+  ch.close.addEventListener("click", () => { ch.div.style.display = "none"; ch.cb.checked = false; });
+}
+// the store mode: the curves given again ( longer ); each chart is made again where the user left it
+function refreshCurves() {
+  for (const name of curveNames()) {
+    const ch = charts.find(c => c.name === name), n = makeChart(name);
+    if (!ch) {
+      n.div.style.width = "300px"; n.div.style.height = "130px"; n.div.style.bottom = "10px"; n.div.style.left = "10px";
+      charts.push(n); chartItem(n, charts.length === 1); syncTools();
+      continue;
+    }
+    for (const k of ["left", "top", "bottom", "width", "height", "display"]) n.div.style[k] = ch.div.style[k];
+    ch.div.replaceWith(n.div);
+    n.close.addEventListener("click", () => { n.div.style.display = "none"; ch.cb.checked = false; });
+    Object.assign(ch, n, { cb: ch.cb });
   }
+  curveCursors();
+}
+function buildCurves() {
+  for (const name of curveNames()) charts.push(makeChart(name));
+  // the start: the shown windows side by side along the bottom
+  let left = 10;
+  for (const ch of charts) {
+    ch.div.style.width = "300px"; ch.div.style.height = "130px"; ch.div.style.bottom = "10px";
+    if (ch.div.style.display === "none") { ch.div.style.left = "10px"; continue; }
+    ch.div.style.left = left + "px"; left += 308;
+  }
+  charts.forEach((ch, k) => chartItem(ch, !k));
   if (charts.length) {
-    curveBox.style.display = "flex";
-    document.getElementById("curvesLbl").style.display = "block";
-    const cb = document.getElementById("cbCurves");
-    cb.addEventListener("change", () => { curveBox.style.display = cb.checked ? "flex" : "none"; resize(); });
-    document.addEventListener("keydown", e => {
+    syncTools();
+    document.addEventListener("keydown", e => {                        // [g]: all the curves out of the way, or back
       if ((e.key === "g" || e.key === "G") && e.target.tagName !== "SELECT" && !(e.target.tagName === "INPUT" && e.target.type !== "range"))
-        { cb.checked = !cb.checked; cb.dispatchEvent(new Event("change")); }
+        curveBox.style.visibility = curveBox.style.visibility === "hidden" ? "" : "hidden";
     });
   }
 }
@@ -2423,10 +2988,12 @@ function nextFrame() {
 // positions move, the rest of the scene is the frame's. A hold of a moment on each frame.
 const MORPH = __MORPH__, LOOP = __LOOP__, HOLD = MORPH > 0 ? Math.round(0.8 * FPS) : 0;
 function pointPositions(f) {                           // the projected positions of the points of frame `f`
-  const v0 = FR_PNT[f], v1 = FR_PNT[f + 1], out = new Float32Array((v1 - v0) * 3);
+  let src = POS, V = PNT_V, v0 = FR_PNT[f], v1 = FR_PNT[f + 1];
+  if (STORED) { const sc = STORE.get(f); src = sc.POS; V = sc.PNT_V; v0 = sc.SHARED.pnt; v1 = V.length; }
+  const out = new Float32Array((v1 - v0) * 3);
   for (let i = 0; i < v1 - v0; i++) {
-    const v = PNT_V[v0 + i];
-    out[3 * i] = PR[3 * v]; out[3 * i + 1] = PR[3 * v + 1]; out[3 * i + 2] = PR[3 * v + 2];
+    const v = V[v0 + i];
+    out[3 * i] = px(src, v); out[3 * i + 1] = py(src, v); out[3 * i + 2] = pz(src, v);
   }
   return out;
 }
@@ -2435,7 +3002,8 @@ function step() {
   if (hold > 0) { hold--; return; }
   const next = nextFrame();
   if (next < 0) { stopPlaying(); return; }
-  const n0 = FR_PNT[frameIdx + 1] - FR_PNT[frameIdx], n1 = FR_PNT[next + 1] - FR_PNT[next];
+  if (STORED && !STORE.has(next)) { STORE.want(next, () => {}); return; }   // ( its chunk is on its way: this tick waits )
+  const n0 = framePoints(frameIdx), n1 = framePoints(next);
   if (MORPH > 0 && n0 === n1 && n0 > 0) {
     if (sub === 0) { morphA = PNT.pos.slice(); morphB = pointPositions(next); }
     if (++sub < MORPH) {
@@ -2506,14 +3074,14 @@ async function exportGif() {
   const g2 = c2.getContext("2d", { willReadFrequently: true });
   g2.imageSmoothingQuality = "high";
   const pause = () => new Promise(r => setTimeout(r, 0));
-  const grab = f => { setFrame(f); g2.drawImage(canvas, 0, 0, W, H); return g2.getImageData(0, 0, W, H).data; };
+  const grab = async f => { if (STORED) await STORE.load(f); setFrame(f); g2.drawImage(canvas, 0, 0, W, H); return g2.getImageData(0, 0, W, H).data; };
   gifBtn.disabled = true;
   try {
     // (1) the palette: the 256 most frequent colors ( 5 bits per channel ), each the mean of its bucket
     const cnt = new Float64Array(32768), sum = new Float64Array(3 * 32768);
     for (let k = 0; k < n; k++) {
       gifBtn.textContent = "colors " + (k + 1) + "/" + n; await pause();
-      const px = grab(frames[k]);
+      const px = await grab(frames[k]);
       for (let i = 0; i < px.length; i += 4) {
         const key = ((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3);
         cnt[key]++; sum[3 * key] += px[i]; sum[3 * key + 1] += px[i + 1]; sum[3 * key + 2] += px[i + 2];
@@ -2537,7 +3105,7 @@ async function exportGif() {
     let prev = null;
     for (let k = 0; k < n; k++) {
       gifBtn.textContent = "GIF " + (k + 1) + "/" + n; await pause();
-      const px = grab(frames[k]), idx = new Uint8Array(W * H);
+      const px = await grab(frames[k]), idx = new Uint8Array(W * H);
       for (let i = 0, j = 0; j < idx.length; i += 4, j++) idx[j] = lut[((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3)];
       let x0 = 0, y0 = 0, x1 = W - 1, y1 = H - 1;     // the box that changed since the previous frame
       if (prev) {
@@ -2684,6 +3252,25 @@ window.addEventListener("resize", resize);
 projectPool();
 buildCurves();
 setFrame(NB_FRAMES - 1);          // the final state first -- it is what we want to see first
+// a store whose run goes on: its manifest asked again every second; new frames stretch the bar ( the view follows them
+// when it shows the last one and does not play ), a new base or new curves are taken as they come
+if (STORED && !STORE.m.complete) (function follow() {
+  STORE.poll().then(ch => {
+    if (ch.frames) {
+      const last = frameIdx === NB_FRAMES - 1 && playing < 0;
+      FR_VAL = STORE.FR_VAL; NB_FRAMES = FR_VAL.length / NB_AXES;
+      for (const f of FIELDS) { f.all = STORE.fieldAll(f.name); f.div = undefined; }
+      frameGrid(); buildBar();
+      if (playing >= 0 && axRows[playing]) { axRows[playing].btn.innerHTML = "&#10074;&#10074;"; axRows[playing].btn.classList.add("on"); }
+      if (last) setFrame(NB_FRAMES - 1); else syncBar();
+    }
+    if (ch.base) { curScene = null; setFrame(frameIdx); }
+    if (ch.curves) { CURVES = STORE.m.curves; refreshCurves(); }
+    if (!STORE.m.complete) setTimeout(follow, 1000);
+  }, () => setTimeout(follow, 2000));
+})();
+// a store served: the page says it is open ( a server that stops when nobody asks, `sviz serve --idle`, keeps going )
+if (STORED && !STORE_FILES) setInterval(() => fetch("manifest.json", { method: "HEAD", cache: "no-store" }).catch(() => {}), 60000);
 syncLabels();
 resize();                         // BEFORE framing: the latter depends on the window's aspect ratio
 resetView();
@@ -2691,6 +3278,178 @@ resetView();
 // without taking anything away from the camera -- a click on the view gives the arrows back to the orbit.
 if (focusAxis >= 0) axRows[focusAxis].inp.focus({ preventScroll: true });
 if (shownAxes.length && URL_OPTS.get("gif") === "1") setTimeout(exportGif, 400);
+</script>
+<script>
+// the LOADER. A self-contained page: its blobs inflated ( the browser's DecompressionStream; their bytes shuffled back,
+// see `_pack` ), then the main script run. A STORE page ( `index.html` in the directory of a store, see `store.py` ): the
+// manifest, the base and the last frame read first, into `STORE` ( see `storeOpen` ), then the main script run.
+async function inflate(bytes, k) {
+  const out = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"))).arrayBuffer());
+  if (k <= 1) return out;
+  const n = out.length / k, u = new Uint8Array(out.length);
+  for (let j = 0; j < k; j++) for (let i = 0, o = j * n; i < n; i++) u[i * k + j] = out[o + i];
+  return u;
+}
+// a CHUNK: u32 length | JSON header | blobs ( see `store.py` ); the 16-bit codes back to float32
+const DTYPES = { f4: Float32Array, f8: Float64Array, i4: Int32Array, u4: Uint32Array, i2: Int16Array, u2: Uint16Array, i1: Int8Array, u1: Uint8Array };
+async function readChunk(buf) {
+  const n = new DataView(buf).getUint32(0, true);
+  const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n))), arrays = {};
+  await Promise.all(head.arrays.map(async e => {
+    const raw = await inflate(new Uint8Array(buf, 4 + n + e.at, e.len), e.k);
+    let a = new DTYPES[e.dtype](raw.buffer, 0, raw.length / e.k);
+    if (e.lo) {
+      const c = e.shape.length === 2 ? e.shape[1] : 1, f = new Float32Array(a.length);
+      for (let i = 0; i < a.length; i++) f[i] = a[i] === 65535 ? NaN : e.lo[i % c] + e.step[i % c] * a[i];
+      a = f;
+    }
+    arrays[e.name] = a;
+  }));
+  return { arrays, meta: head.meta };
+}
+// the STORE: the manifest, the base, and a cache of frames ( 256 MB, the least recently shown dropped first ), each frame
+// joined to the base as one scene in the arrays of the self-contained page ( `combine` )
+const STORE_FILES = __STORE_FILES__;                  // ( the files inlined: `sviz export --html` )
+const bytes = s => { const r = atob(s), b = new Uint8Array(r.length); for (let i = 0; i < r.length; i++) b[i] = r.charCodeAt(i); return b; };
+async function storeOpen() {
+  const get = async (path, json) => {
+    if (STORE_FILES) {
+      if (!(path in STORE_FILES)) throw new Error(path + ": not in the page");
+      return json ? JSON.parse(STORE_FILES[path]) : bytes(STORE_FILES[path]).buffer;
+    }
+    if (location.protocol === "file:") {
+      document.body.innerHTML = '<p style="font:14px sans-serif;margin:2em">This page reads the files beside it: open the directory with <code>sviz open</code>.</p>';
+      throw new Error("a store read as file://");
+    }
+    const r = await fetch(path, { cache: "no-store" });
+    if (!r.ok) throw new Error(path + ": HTTP " + r.status);
+    return json ? r.json() : r.arrayBuffer();
+  };
+  let m = await get("manifest.json", true);
+  if (!m.frames.length || !m.dim) {                    // a run that has not written its first frame yet
+    const note = document.createElement("div");
+    note.style.cssText = "position:fixed;inset:0;display:flex;align-items:center;justify-content:center;font:14px sans-serif;color:#888";
+    note.textContent = "waiting for the first frame of " + (m.title || "the run") + " ...";
+    document.body.appendChild(note);
+    while (!m.frames.length || !m.dim) { await new Promise(r => setTimeout(r, 1000)); m = await get("manifest.json", true); }
+    note.remove();
+  }
+  const D = m.dim, S = { m, cache: new Map(), loading: new Map(), bytes: 0, budget: 256 * 2 ** 20, base: null, baseName: null };
+  const fieldNames = () => {
+    const out = [];
+    for (const f of S.m.frames) for (const k in f.fields || {}) if (!out.includes(k)) out.push(k);
+    return out;
+  };
+  S.fieldAll = name => {                               // the range of a field over all the frames
+    let lo = Infinity, hi = -Infinity;
+    for (const f of S.m.frames) { const r = (f.fields || {})[name]; if (r) { lo = Math.min(lo, r[0]); hi = Math.max(hi, r[1]); } }
+    return lo <= hi ? [lo, hi] : null;
+  };
+  const cat = (T, x, y) => {
+    const o = new T((x ? x.length : 0) + (y ? y.length : 0));
+    if (x) o.set(x); if (y) o.set(y, x ? x.length : 0);
+    return o;
+  };
+  const shift = (x, d) => { if (!x || !d) return x; const o = new Int32Array(x.length); for (let i = 0; i < x.length; i++) o[i] = x[i] + d; return o; };
+  const nans = n => new Float32Array(n).fill(NaN);
+  function combine(b, fr) {                            // the base first ( the shared primitives ), then the frame
+    const A = b.arrays, F = fr.arrays, nv = A.pos ? A.pos.length / D : 0;
+    const nb = { poly: A.poly_c ? A.poly_c.length : 0, edge: A.edge_c ? A.edge_c.length : 0, pnt: A.pnt_c ? A.pnt_c.length : 0 };
+    const nf = F.pnt_c ? F.pnt_c.length : 0, offB = A.poly_off ? A.poly_off[A.poly_off.length - 1] : 0;
+    const sc = {
+      POS: cat(Float32Array, A.pos, F.pos),
+      POLY_V: cat(Int32Array, A.poly_v, shift(F.poly_v, nv)),
+      POLY_OFF: cat(Int32Array, A.poly_off || new Int32Array(1), F.poly_off ? shift(F.poly_off.subarray(1), offB) : null),
+      POLY_C: cat(Uint16Array, A.poly_c, F.poly_c),
+      EDG_V: cat(Int32Array, A.edge_v, shift(F.edge_v, nv)), EDG_C: cat(Uint16Array, A.edge_c, F.edge_c), EDG_L: cat(Uint8Array, A.edge_l, F.edge_l),
+      PNT_V: cat(Int32Array, A.pnt_v, shift(F.pnt_v, nv)), PNT_C: cat(Uint16Array, A.pnt_c, F.pnt_c),
+      PNT_R: cat(Float32Array, A.pnt_r, F.pnt_r), PNT_M: cat(Float32Array, A.pnt_m, F.pnt_m), PNT_L: cat(Uint8Array, A.pnt_l, F.pnt_l),
+      SHARED: nb, HPOLY: [], fields: {},
+    };
+    for (const name of fieldNames()) sc.fields[name] = cat(Float32Array, nans(nb.pnt), F["field:" + name] || nans(nf));
+    let at = 0;
+    for (const h of fr.meta.hpolys || []) {
+      sc.HPOLY.push({ nb: h.nb, dirs: F.hp_dirs.subarray(at * D, (at + h.nb) * D), offs: F.hp_offs.subarray(at, at + h.nb),
+                      fcol: h.fcol, ecol: h.ecol, edg: h.edg });
+      at += h.nb;
+    }
+    sc.bytes = 0;
+    for (const k in sc) if (sc[k] && sc[k].byteLength) sc.bytes += sc[k].byteLength;
+    for (const k in sc.fields) sc.bytes += sc.fields[k].byteLength;
+    return sc;
+  }
+  S.setBase = async name => {
+    S.base = name ? await readChunk(await get(name)) : { arrays: {}, meta: {} };
+    S.baseName = name; S.cache.clear(); S.bytes = 0;
+  };
+  S.has = f => S.cache.has(f);
+  S.get = f => {                                       // ( the most recently shown last: the order of the drops )
+    const sc = S.cache.get(f);
+    if (sc) { S.cache.delete(f); S.cache.set(f, sc); }
+    return sc;
+  };
+  S.load = f => {
+    if (S.cache.has(f)) return Promise.resolve(S.cache.get(f));
+    if (S.loading.has(f)) return S.loading.get(f);
+    const base = S.base;
+    const p = get(S.m.frames[f].file).then(readChunk).then(fr => {
+      S.loading.delete(f);
+      if (base !== S.base) return S.load(f);           // the base changed meanwhile
+      const sc = combine(base, fr);
+      S.cache.set(f, sc); S.bytes += sc.bytes;
+      for (const [k, v] of S.cache) {
+        if (S.bytes <= S.budget || S.cache.size <= 2) break;
+        if (k !== f) { S.cache.delete(k); S.bytes -= v.bytes; }
+      }
+      return sc;
+    }, e => { S.loading.delete(f); throw e; });
+    S.loading.set(f, p);
+    return p;
+  };
+  // `cb( f )` once frame `f` is there, and the next ones asked ahead
+  S.want = (f, cb) => {
+    if (S.cache.has(f)) cb(f); else S.load(f).then(() => cb(f), e => console.error(e));
+    for (const g of [f + 1, f + 2, f + 3, f - 1])
+      if (g >= 0 && g < S.m.frames.length && !S.cache.has(g)) S.load(g).catch(() => {});
+  };
+  const values = () => new Float32Array(S.m.frames.flatMap(f => f.v));
+  // the manifest again: what changed ( frames, base, curves )
+  S.poll = async () => {
+    const m = await get("manifest.json", true);
+    const ch = { frames: m.frames.length !== S.m.frames.length, curves: JSON.stringify(m.curves) !== JSON.stringify(S.m.curves) };
+    if (m.base !== S.baseName) { await S.setBase(m.base); ch.base = true; }
+    S.m = m; S.FR_VAL = values();
+    return ch;
+  };
+
+  // what the main script reads where the self-contained page has its data inlined ( see `store_page` )
+  await S.setBase(m.base);
+  const last = m.frames.length - 1, sc = await S.load(last), o = m.options || {};
+  const tight = m.bounds || Array.from({ length: D }, () => [-1, 1]);
+  const span = Math.max(...tight.map(([a, b]) => Math.max(b - a, 1e-9))), pad = 0.05 * span;
+  const bounds = tight.map(([a, b]) => [a - pad, b + pad]), r0 = (span + 2 * pad) / 300;
+  const fr = (a, b) => { const r = new Int32Array(m.frames.length + 1); r.fill(a, 0, last + 1); r.fill(b, last + 1); return r; };
+  const images = (S.base.meta.images || []).map((im, i) => Object.assign({}, im, { data: S.base.arrays["image:" + i] }));
+  Object.assign(S, sc, {
+    D, BOUNDS: bounds, TIGHT: tight, COLORS: m.colors, COLORS_DARK: m.colors_dark, LAYERS: m.layers, FIELD0: m.field,
+    FIELDS: fieldNames().map(name => ({ name, data: sc.fields[name], all: S.fieldAll(name) })), IMAGES: images,
+    CURVES: m.curves, AXES: m.axes, PLAYABLE: m.playable, FPS: o.fps || 10, FR_VAL: values(),
+    FR_POLY: fr(sc.SHARED.poly, sc.POLY_OFF.length - 1), FR_EDG: fr(sc.SHARED.edge, sc.EDG_V.length / 2),
+    FR_PNT: fr(sc.SHARED.pnt, sc.PNT_V.length), FR_HP: fr(0, sc.HPOLY.length),
+    R0: r0, RMIN: r0 / 30, RMAX: r0 * 60, BG: o.bg || [null, null], WHEEL: true, TOUCH: true,
+    DEPTHCOL: !!o.depth_colors, FACE_OP: o.face_opacity === undefined ? 1 : o.face_opacity, MORPH: o.morph || 0,
+    LOOP: !!o.loop, FLATPTS: !!o.flat_points, AUTOPLAY: !!o.autoplay,
+  });
+  return S;
+}
+(async () => {
+  const RAW = __BLOBS__;
+  if (__STORE_MODE__) window.STORE = await storeOpen();
+  else window.BLOBS = await Promise.all(RAW.map(e => inflate(bytes(e.z), e.k)));
+  const main = document.createElement("script");
+  main.textContent = document.getElementById("main").textContent;
+  document.body.appendChild(main);
+})();
 </script>
 </body>
 </html>

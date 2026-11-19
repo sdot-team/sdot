@@ -22,6 +22,9 @@
 //   threads    those of the CPU queue ( `Par` ): contiguous slices of rows or of cells, the sums combined in thread order
 
 #include "StencilKernel.h"
+#include "Ring1Reg.h"
+#include "Ring2Clip.h"
+#include "Ring2Reg.h"
 #include "ExactKernel.h"
 #include "GridDensities.h"
 #include "../cell/Engine2Reg.h"
@@ -44,6 +47,12 @@ using T = double;
 constexpr int B = 32;
 using K1 = StencilKernel<1, B, T>;
 using K2 = StencilKernel<2, B, T>;
+using C2 = Ring2Clip<B, T>;
+using R2 = Ring2Reg<B, T, false, 304>;                // ( the pairs of span <= 4 + the convexity certificate, the 21 pairs when it fails )
+using R2s5 = Ring2Reg<B, T, false, 305>;
+using R2s6 = Ring2Reg<B, T, false, 306>;
+using R2f = Ring2Reg<B, T>;                             // ( the 21 pairs of each direction )
+using R1 = Ring1Reg<B, T, false>;                       // ( the unaligned loads: faster than rolling the psi through `ext_lanes` on Zen 3 )
 using T1 = StencilTables<1>;
 using T2 = StencilTables<2>;
 
@@ -154,6 +163,14 @@ struct Evaluator {
     int zone0 = 8;                                       // side of the zones of the ring-1 table, in pixels
     T zone_min = T( 1 );                                 // the zones of the next tables halve down to this side
     bool zone_predict = true;                            // ring 2 before the first table on the cells the local certificate flags
+    bool zone_all2 = false;                              // ( fused, experiment ) every cell built with ring 2 at once: no ring 1, no prediction
+    bool k2_reg = true;                                  // ( fused ) ring 2 by `Ring2Reg` ( unrolled, asimd ); false: `StencilKernel<2>::cells_verts`
+    int k2_span = 0;                                     // ( with `k2_reg` ) the tightening on the pairs of span <= k2_span ( 4, 5, 6 ), certified; 0: the 21 pairs ( sharp needs span 6 on 98 % of its ring-2 cells: no gain )
+    bool k2_simd = true;                                 // ( fused ) the scatter of the ring-2 blocks in asimd ( `ring2_scatter` )
+    bool k2_clip = false;                                // ( fused, with `k1_reg` ) the predicted cells: ring 2 by clipping their ring-1 polygon ( `Ring2Clip` )
+    bool k1_reg = true;                                  // ( fused ) ring 1 by `Ring1Reg` ( unrolled, asimd ); false: `StencilKernel<1>::row_block`
+    bool kern_timing = false;                           // ( fused, diagnostic, ONE thread ) the time of each kernel in `t_kern`
+    double t_kern[ 8 ] = {};                             // ( ms: K1 build, K1 integ, prediction, K1 scatter, K2 build, K2 integ, K2 scatter )
     bool use_reg = true;                                 // the rounds past ring 2 in the register kernel of the cells
     bool use_tree = false;                               // past ring 2: the exact cell at once, by a mipmap of affine majorants
                                                          // ( measured 1.6 - 3.3x slower than doubling the radius: 110 - 270 blocks per cell )
@@ -1131,9 +1148,10 @@ struct Evaluator {
         constexpr int C = ExactKernel<T>::C;
         const T inf = std::numeric_limits<T>::infinity(), lo = T( -0.5 ), hi = T( N ) - T( 0.5 );
         pad( 1, psi, p1 );
-        if( zone_predict ) pad( 2, psi, p2 );
+        if( zone_predict || zone_all2 || k1_reg ) pad( 2, psi, p2 );
         lvl.assign( nn, 0 );
         fused_last = true;
+        auto tk = [&]( int k, double &tc ) { if( kern_timing ) { const double t = now_ms(); t_kern[ k ] += t - tc; tc = t; } };
         zbx.resize( 4 * size_t( nn ) );
         n_flag1 = n_exact = n_rounds = 0;
         round_cells.clear(); round_bad.clear();
@@ -1143,9 +1161,11 @@ struct Evaluator {
         const T sn = T( 1e-13 );                         // ( a cell past a zone line by rounding only is in one zone, see the card's )
         auto ztol = [&]( T az, T sr ) { return T( 1e-14 ) * ( az + sr ); };
         auto put_box = [&]( int i, const T *bb ) {
+            // ( rounded outward by more than one float ulp, no libm call; the same in the SIMD scatter of ring 1 )
             float *z = &zbx[ 4 * size_t( i ) ];
-            z[ 0 ] = std::nextafter( float( bb[ 0 ] + sn ), -INFINITY ); z[ 1 ] = std::nextafter( float( bb[ 1 ] - sn ), INFINITY );
-            z[ 2 ] = std::nextafter( float( bb[ 2 ] + sn ), -INFINITY ); z[ 3 ] = std::nextafter( float( bb[ 3 ] - sn ), INFINITY );
+            const T c0 = bb[ 0 ] + sn, c1 = bb[ 1 ] - sn, c2 = bb[ 2 ] + sn, c3 = bb[ 3 ] - sn;
+            z[ 0 ] = float( c0 - std::abs( c0 ) * T( 0x1p-22 ) - T( 1e-30 ) ); z[ 1 ] = float( c1 + std::abs( c1 ) * T( 0x1p-22 ) + T( 1e-30 ) );
+            z[ 2 ] = float( c2 - std::abs( c2 ) * T( 0x1p-22 ) - T( 1e-30 ) ); z[ 3 ] = float( c3 + std::abs( c3 ) * T( 0x1p-22 ) + T( 1e-30 ) );
         };
         auto empty_box = [&]( int i ) { zbx[ 4 * size_t( i ) ] = 1; zbx[ 4 * size_t( i ) + 1 ] = 0; };
         // the pieces of a polygon cell ( absolute box bb ) in the zones of side s that `in( u, v )` counts
@@ -1190,17 +1210,113 @@ struct Evaluator {
             bb[ 0 ] += i / N; bb[ 1 ] += i / N; bb[ 2 ] += i % N; bb[ 3 ] += i % N;
         };
 
+        // THE SCATTER OF A RING-2 BLOCK ( cells anywhere in the grid, B at a time ), in asimd per vector of W cells: the inverted
+        // cells, the box, the faces that are not 0 ( bit masks ); then one by one, without the polygon: the mass, the faces ( ring-1
+        // neighbours into W, the others into the extras ), the float box, the sums into the table when the box is in one zone ( the
+        // polygon only for the bad cells and the boxes over several zones )
+        auto ring2_scatter = [&]( int t, const int *cl, int n, T s, int nzs, std::vector<T> &E, const T ( &vx )[ K2::D ][ B ], const T ( &vy )[ K2::D ][ B ],
+                                  const signed char ( &own )[ K2::D ][ B ], const T ( &face )[ K2::D ][ B ], const T *ms, const T *ar, const unsigned char *bad,
+                                  const T *sa, const T *sb, unsigned long long emp ) {
+            constexpr int D2 = K2::D;
+            using V = typename R1::V;
+            using U = unsigned long long;
+            constexpr int VW = R1::W;
+            // per offset of ring 2: its ring-1 direction ( -1: none ), 1 / its multiple; per edge: 0.5 / | n_e |
+            static constexpr auto k1o = [] { std::array<int,T2::nb_offsets> r{}; for( int o = 0; o < T2::nb_offsets; ++o ) { r[ o ] = -1; for( int k = 0; k < 8; ++k ) if( T1::off_x[ k ] == T2::off_x[ o ] && T1::off_y[ k ] == T2::off_y[ o ] ) r[ o ] = k; } return r; }();
+            alignas( 64 ) T bx[ 4 ][ B ];
+            unsigned short fm[ B ] = {};
+            U inv = 0;
+            const V zero( T( 0 ) ), one( T( 1 ) );
+            auto vabs = [&]( const V &x ) { return asimd::max( x, zero - x ); };
+            for( int j = 0; j < B / VW; ++j ) {
+                const int o = j * VW;
+                V px = V::load_aligned( vx[ D2 - 1 ] + o ), py = V::load_aligned( vy[ D2 - 1 ] + o );
+                V x0 = px, x1 = px, y0 = py, y1 = py, sc = asimd::max( one, vabs( px ) + vabs( py ) ), mn( std::numeric_limits<T>::infinity() );
+                [&]<int... e>( std::integer_sequence<int,e...> ) {
+                    ( ( [&] {
+                        const V cx = V::load_aligned( vx[ e ] + o ), cy = V::load_aligned( vy[ e ] + o );
+                        // edge e ( direction e ) from vertex e - 1 to vertex e: negative length, inverted
+                        mn = asimd::min( mn, R2f::template mulc<-T2::dir_y[ e ]>( cx - px ) + R2f::template mulc<T2::dir_x[ e ]>( cy - py ) );
+                        sc = asimd::max( sc, vabs( cx ) + vabs( cy ) );
+                        x0 = asimd::min( x0, cx ); x1 = asimd::max( x1, cx ); y0 = asimd::min( y0, cy ); y1 = asimd::max( y1, cy );
+                        px = cx; py = cy;
+                        const U fb = U( asimd::to_bits( V::load_aligned( face[ e ] + o ) > zero ) );
+                        for( int x = 0; x < VW; ++x ) fm[ o + x ] |= ( ( fb >> x ) & 1 ) << e;
+                    }() ), ... );
+                }( std::make_integer_sequence<int,D2>() );
+                inv |= U( asimd::to_bits( V( T( -1e-9 ) ) * sc > mn ) ) << o;
+                const V a = V::load_aligned( sa + o ), b = V::load_aligned( sb + o );
+                ( x0 + a ).store_aligned( bx[ 0 ] + o ); ( x1 + a ).store_aligned( bx[ 1 ] + o );
+                ( y0 + b ).store_aligned( bx[ 2 ] + o ); ( y1 + b ).store_aligned( bx[ 3 ] + o );
+            }
+            auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
+            for( int x = 0; x < n; ++x ) {
+                const int i = cl[ x ];
+                lvl[ i ] = 2;
+                if( ( ( inv | emp ) >> x ) & 1 ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                // the polygon ( vertex e = vertex e - 1 of the kernel, edge e toward the offset own[ e ] ), when it is needed
+                T px[ D2 ], py[ D2 ];
+                auto poly = [&] { for( int e = 0; e < D2; ++e ) { px[ e ] = vx[ ( e + D2 - 1 ) % D2 ][ x ]; py[ e ] = vy[ ( e + D2 - 1 ) % D2 ][ x ]; } };
+                if( bad[ x ] ) {
+                    int nbr[ D2 ];
+                    poly();
+                    for( int e = 0; e < D2; ++e ) { const int o = own[ e ][ x ]; nbr[ e ] = o < 0 ? -1 : i + T2::off_x[ o ] * N + T2::off_y[ o ]; }
+                    integrate_poly( t, i, px, py, nbr, D2, 2 );
+                } else {
+                    mass[ i ] = ms[ x ];
+                    T *wi = W.data() + ( i / N + 1 ) * P1 + i % N + 1;
+                    for( int k = 0; k < 8; ++k ) wi[ k * P1 * P1 ] = 0;
+                    for( unsigned m = fm[ x ]; m; m &= m - 1 ) {
+                        const int e = std::countr_zero( m ), o = own[ e ][ x ];
+                        if( o < 0 ) continue;
+                        const T w = face[ e ][ x ] * T( 0.5 ) * T( T2::dir_inv_norm[ e ] ) / T( T2::off_m[ o ] );
+                        if( k1o[ o ] >= 0 ) wi[ k1o[ o ] * P1 * P1 ] = w;
+                        else ex_th[ t ].push_back( { i, i + T2::off_x[ o ] * N + T2::off_y[ o ], w, ( unsigned char ) 2 } );
+                    }
+                }
+                const T bb[ 4 ] = { bx[ 0 ][ x ], bx[ 1 ][ x ], bx[ 2 ][ x ], bx[ 3 ][ x ] };
+                put_box( i, bb );
+                // the table: one zone at once ( as `pieces` ), else the pieces
+                const int u0 = zof( bb[ 0 ] + sn ), u1 = zof( bb[ 1 ] - sn ), v0 = zof( bb[ 2 ] + sn ), v1 = zof( bb[ 3 ] - sn );
+                if( u0 == u1 && v0 == v1 ) {
+                    const T r0 = lo + u0 * s, r1 = std::min( hi, lo + ( u0 + 1 ) * s ), r2 = lo + v0 * s, r3 = std::min( hi, lo + ( v0 + 1 ) * s );
+                    const size_t z = size_t( u0 ) * nzs + v0;
+                    const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
+                    E[ 2 * z ] += ar[ x ];
+                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + std::abs( psi[ i ] ) + s ) * s;
+                } else {
+                    poly();
+                    pieces( i, px, py, D2, ar[ x ], bb, s, nzs, []( int, int ) { return true; }, E );
+                }
+            }
+        };
+
         // the predicted cells, B at a time: ring 2 in SIMD ( `K2::cells_verts`, nothing stored ), integrated in SIMD, into a table
-        auto ring2_block = [&]( int t, const int *cl, int n, T s, int nzs, std::vector<T> &E ) {
+        // ( `pd`: the cells with their ring-1 polygon, ring 2 by clipping, `Ring2Clip` )
+        auto ring2_block = [&]( int t, const int *cl, int n, T s, int nzs, std::vector<T> &E, const typename C2::Pending *pd = nullptr ) {
             constexpr int D2 = K2::D;
             alignas( 64 ) T vx[ D2 ][ B ], vy[ D2 ][ B ], face[ D2 ][ B ], ms[ B ], ar[ B ], sa[ B ], sb[ B ];
             alignas( 64 ) signed char own[ D2 ][ B ];
             alignas( 64 ) unsigned char bad[ B ] = {};
-            K2::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            double tc = kern_timing ? now_ms() : 0;
+            unsigned long long emp = 0;
+            if( pd ) { cl = pd->cl; n = pd->n; C2::cells_verts( N, p2.data(), *pd, vx, vy, own, ar, emp ); }
+            else if( k2_reg && k2_span == 4 ) R2::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            else if( k2_reg && k2_span == 5 ) R2s5::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            else if( k2_reg && k2_span == 6 ) R2s6::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            else if( k2_reg ) R2f::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            else K2::cells_verts( N, p2.data(), cl, n, vx, vy, own, ar );
+            tk( 4, tc );
             for( int x = 0; x < B; ++x ) { const int i = cl[ x < n ? x : n - 1 ]; sa[ x ] = i / N; sb[ x ] = i % N; }
             if constexpr ( Integ::has_simd ) integ[ t ].template cells<D2,B>( vx, vy, sa, sb, ms, face, bad );
             else for( int x = 0; x < B; ++x ) bad[ x ] = 1;
+            tk( 5, tc );
             auto all = []( int, int ) { return true; };
+            if( k2_simd ) {
+                ring2_scatter( t, cl, n, s, nzs, E, vx, vy, own, face, ms, ar, bad, sa, sb, emp );
+                tk( 6, tc );
+                return;
+            }
             for( int x = 0; x < n; ++x ) {
                 const int i = cl[ x ];
                 lvl[ i ] = 2;
@@ -1214,7 +1330,7 @@ struct Evaluator {
                 }
                 bool inv = false;
                 for( int e = 0; e < D2; ++e ) { const int f = e + 1 == D2 ? 0 : e + 1; inv |= -T( T2::dir_y[ e ] ) * ( px[ f ] - px[ e ] ) + T( T2::dir_x[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc; }
-                if( inv ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                if( inv || ( ( emp >> x ) & 1 ) ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
                 if( bad[ x ] ) integrate_poly( t, i, px, py, nbr, D2, 2 );
                 else {
                     mass[ i ] = ms[ x ];
@@ -1233,6 +1349,105 @@ struct Evaluator {
                 put_box( i, bb );
                 pieces( i, px, py, D2, ar[ x ], bb, s, nzs, all, E );
             }
+            tk( 6, tc );
+        };
+
+        std::vector<int> n_pred( par.nt, 0 );
+        // THE SCATTER OF A FULL RING-1 BLOCK, in asimd ( `Ring1Reg` gave the box, the inverted cells and the predicted ones ): per
+        // vector of W cells, all in the zone of their seeds ( zone0 a multiple of W ), the test "the box in the zone of the seed", the
+        // bound of the table, the sums into it, the float boxes, the mass and the faces ( written for every lane: the cells that
+        // are thrown, predicted or bad overwrite them later ); one by one: the inverted, predicted and bad cells, the boxes over
+        // several zones
+        auto scatter_reg = [&]( int t, int a, int b0, const typename R1::Ext &rex, const T ( &vx )[ 8 ][ B ], const T ( &vy )[ 8 ][ B ],
+                                const unsigned long long ( &fok )[ 8 ], const T *ra, const T *ms, const T ( &face )[ 8 ][ B ], const unsigned char *bad,
+                                T s, int nzs, std::vector<T> &E, std::vector<int> &fl, int *pr, int &npr, typename C2::Pending &pd ) {
+            using V = typename R1::V;
+            using U = unsigned long long;
+            constexpr int VW = R1::W;
+            constexpr U lanes = VW == 64 ? ~0ull : ( 1ull << VW ) - 1;
+            const V zero( T( 0 ) ), vs( s ), vsn( sn );
+            auto vabs = [&]( const V &x ) { return asimd::max( x, zero - x ); };
+            // the zone of the row: [ xlo, xhi ) for the box, its centre cx ( `pieces`' bound )
+            const int u = a / zone0;
+            const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s );
+            const V xlo( u > 0 ? r0 - sn : -inf ), xhi( u + 1 < nzs ? lo + ( u + 1 ) * s + sn : inf ), cx( ( r0 + r1 ) / 2 );
+            const T *ps = psi.data() + size_t( a ) * N + b0;
+            T *wr = W.data() + ( a + 1 ) * P1 + b0 + 1;
+            T *mr = mass.data() + size_t( a ) * N + b0;
+            float *zr = zbx.data() + 4 * ( size_t( a ) * N + b0 );
+            const U thrown = rex.inv | rex.cut2;
+            U one = 0;
+            alignas( 64 ) T ze[ B ];
+            for( int j = 0; j < B / VW; ++j ) {
+                const int o = j * VW, v = ( b0 + o ) / zone0;
+                const T q0 = lo + v * s, q1 = std::min( hi, lo + ( v + 1 ) * s );
+                const V ylo( v > 0 ? q0 - sn : -inf ), yhi( v + 1 < nzs ? lo + ( v + 1 ) * s + sn : inf ), cy( ( q0 + q1 ) / 2 );
+                const V z0 = V::load_aligned( rex.zb[ 0 ] + o ), z1 = V::load_aligned( rex.zb[ 1 ] + o );
+                const V z2 = V::load_aligned( rex.zb[ 2 ] + o ), z3 = V::load_aligned( rex.zb[ 3 ] + o );
+                // in the zone of the seed ( `pieces`: floor( ( lo_box + sn - lo ) / s ) == u, ... )
+                const U on = ~( U( asimd::to_bits( z0 < xlo ) ) | U( asimd::to_bits( z2 < ylo ) ) ) & U( asimd::to_bits( z1 < xhi ) ) & U( asimd::to_bits( z3 < yhi ) ) & lanes;
+                one |= on << o;
+                // the bound, the sums into the table ( the lanes thrown or over several zones: one by one below )
+                const V dm = asimd::max( asimd::max( vabs( z0 - cx ), vabs( z1 - cx ) ), asimd::max( vabs( z2 - cy ), vabs( z3 - cy ) ) );
+                const V zv = ( dm + vabs( V::load_unaligned( ps + o ) ) + vs ) * vs;
+                const V rv = V::load_aligned( ra + o );
+                const U g = on & ~( thrown >> o ) & lanes;
+                const size_t zz = size_t( u ) * nzs + v;
+                if( g == lanes ) { E[ 2 * zz ] += rv.sum(); E[ 2 * zz + 1 ] += zv.sum(); }
+                else if( g ) {
+                    zv.store_aligned( ze + o );
+                    for( U m = g; m; m &= m - 1 ) { const int x = o + std::countr_zero( m ); E[ 2 * zz ] += ra[ x ]; E[ 2 * zz + 1 ] += ze[ x ]; }
+                }
+                // the box in floats, rounded outward by more than one float ulp ( as `put_box` )
+                alignas( 64 ) T cc[ 4 ][ VW ];
+                const V ulp( T( 0x1p-22 ) ), tiny( T( 1e-30 ) );
+                { const V c = z0 + vsn; ( c - vabs( c ) * ulp - tiny ).store_aligned( cc[ 0 ] ); }
+                { const V c = z1 - vsn; ( c + vabs( c ) * ulp + tiny ).store_aligned( cc[ 1 ] ); }
+                { const V c = z2 + vsn; ( c - vabs( c ) * ulp - tiny ).store_aligned( cc[ 2 ] ); }
+                { const V c = z3 - vsn; ( c + vabs( c ) * ulp + tiny ).store_aligned( cc[ 3 ] ); }
+                for( int x = 0; x < VW; ++x ) for( int k = 0; k < 4; ++k ) zr[ 4 * ( o + x ) + k ] = float( cc[ k ][ x ] );
+                // the mass and the faces
+                V::load_aligned( ms + o ).store_unaligned( mr + o );
+                [&]<int... k>( std::integer_sequence<int,k...> ) {
+                    ( ( [&] {
+                        const U fk = ( fok[ k ] >> o ) & lanes;
+                        constexpr T c = T( 0.5 ) * T( T1::dir_inv_norm[ k ] );
+                        if( fk == lanes ) ( V::load_aligned( face[ k ] + o ) * V( c ) ).store_unaligned( wr + k * P1 * P1 + o );
+                        else for( int x = 0; x < VW; ++x ) wr[ k * P1 * P1 + o + x ] = ( fk >> x ) & 1 ? face[ k ][ o + x ] * c : T( 0 );
+                    }() ), ... );
+                }( std::make_integer_sequence<int,8>() );
+            }
+            // one by one: the predicted cells ( ring 2 at once ), the inverted ones, the bad ones, the boxes over several zones
+            U badb = 0;
+            for( int x = 0; x < B; ++x ) badb |= U( bad[ x ] != 0 ) << x;
+            auto all = []( int, int ) { return true; };
+            constexpr U blk = B == 64 ? ~0ull : ( 1ull << B ) - 1;
+            for( U m = ( thrown | badb | ~one ) & blk; m; m &= m - 1 ) {
+                const int x = std::countr_zero( m ), i = a * N + b0 + x;
+                const U bx = 1ull << x;
+                if( ( rex.cut2 & bx ) && ! ( rex.inv & bx ) ) {
+                    ++n_pred[ t ];
+                    if( k2_clip ) {                      // ( with its ring-1 polygon and the seeds that cut it )
+                        const int q = pd.n++;
+                        pd.cl[ q ] = i; pd.cut[ q ] = rex.cuts( x );
+                        unsigned char ok = 0;
+                        for( int k = 0; k < 8; ++k ) { pd.vx[ k ][ q ] = vx[ k ][ x ]; pd.vy[ k ][ q ] = vy[ k ][ x ]; ok |= ( ( fok[ k ] >> x ) & 1 ) << k; }
+                        pd.ok[ q ] = ok;
+                        if( pd.n == B ) { ring2_block( t, nullptr, 0, s, nzs, E, &pd ); pd.n = 0; }
+                    } else {
+                        pr[ npr++ ] = i;
+                        if( npr == B ) { ring2_block( t, pr, B, s, nzs, E ); npr = 0; }
+                    }
+                    continue;
+                }
+                if( rex.inv & bx ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                if( badb & bx ) fl.push_back( i );
+                if( one & bx ) continue;
+                T px[ 8 ], py[ 8 ];
+                for( int e = 0; e < 8; ++e ) { px[ e ] = vx[ ( e + 7 ) & 7 ][ x ]; py[ e ] = vy[ ( e + 7 ) & 7 ][ x ]; }
+                const T bb[ 4 ] = { rex.zb[ 0 ][ x ], rex.zb[ 1 ][ x ], rex.zb[ 2 ][ x ], rex.zb[ 3 ][ x ] };
+                pieces( i, px, py, 8, ra[ x ], bb, s, nzs, all, E );
+            }
         };
 
         // ---- ring 1, every cell: built, integrated, into the first table
@@ -1240,7 +1455,6 @@ struct Evaluator {
         int nzs = int( std::ceil( T( N ) / s ) );
         std::vector<std::vector<T>> Et( par.nt );
         std::vector<std::vector<int>> fine_l( par.nt );
-        std::vector<int> n_pred( par.nt, 0 );
 
         par.slices( N, nn * 64, [&]( int a0, int a1, int t ) {
             auto &E = Et[ t ];
@@ -1249,6 +1463,7 @@ struct Evaluator {
             fl.clear();
             alignas( 64 ) int pr[ B ];                   // ( the predicted cells waiting for a block of ring 2 )
             int npr = 0;
+            typename C2::Pending pd;                     // ( the same, with their ring-1 polygon: ring 2 by clipping )
             n_pred[ t ] = 0;
             typename K1::Planes rp( N, true, false );    // ( the rows of this thread only, in a ring )
             rp.fill( 0, rp.slots );
@@ -1258,18 +1473,54 @@ struct Evaluator {
             T *area = rb.data(), *hess = area + N;
             signed char *own = reinterpret_cast<signed char *>( hess + N * K1::D );
             auto all = []( int, int ) { return true; };
+            if( zone_all2 ) {                            // ( every cell through ring 2, B of a row at a time )
+                for( int a = a0; a < a1; ++a )
+                    for( int b0 = 0; b0 < N; b0 += B ) {
+                        const int n = std::min( B, N - b0 );
+                        for( int x = 0; x < n; ++x ) pr[ x ] = a * N + b0 + x;
+                        n_pred[ t ] += n;
+                        ring2_block( t, pr, n, s, nzs, E );
+                    }
+                return;
+            }
             for( int a = a0; a < a1; ++a )
                 for( int b0 = 0; b0 < N; b0 += B ) {
                     const int n = std::min( B, N - b0 );
-                    K1::row_block( N, p1.data(), a, b0, B, area, hess, own, nullptr, &rp );
-                    const int i0 = rp.row( a ) + b0 + 1;
+                    double tc = kern_timing ? now_ms() : 0;
                     alignas( 64 ) T vx[ 8 ][ B ], vy[ 8 ][ B ], face[ 8 ][ B ], ms[ B ], sa[ B ], sb[ B ];
                     alignas( 64 ) unsigned char bad[ B ] = {};
-                    for( int k = 0; k < 8; ++k )
-                        for( int x = 0; x < B; ++x ) { vx[ k ][ x ] = rp.vx[ k * PP + i0 + x ]; vy[ k ][ x ] = rp.vy[ k * PP + i0 + x ]; }
+                    alignas( 64 ) T ra[ B ];                     // ( the areas of the ring-1 cells )
+                    unsigned long long fok[ 8 ];                 // ( bit x of fok[ k ]: edge k of cell b0 + x has a seed )
+                    // ( a full block in registers: the box, the inversion test and the prediction there too, the scatter in asimd below )
+                    const bool reg = k1_reg && n == B && zone0 % R1::W == 0;
+                    typename R1::Ext rex;
+                    if( reg ) { rex.p2 = p2.data(); R1::block( N, p1.data(), a, b0, vx, vy, fok, ra, &rex ); }
+                    else if( k1_reg ) {                          // ring 1 in registers ( `Ring1Reg` ), straight into vx, vy
+                        if( n == B ) R1::block( N, p1.data(), a, b0, vx, vy, fok, ra );
+                        else R1::block_tail( N, p1.data(), a, b0, n, vx, vy, fok, ra );
+                    } else {
+                        K1::row_block( N, p1.data(), a, b0, B, area, hess, own, nullptr, &rp );
+                        const int i0 = rp.row( a ) + b0 + 1;
+                        for( int x = 0; x < n; ++x ) ra[ x ] = area[ b0 + x ];
+                        for( int k = 0; k < 8; ++k ) {
+                            fok[ k ] = 0;
+                            for( int x = 0; x < B; ++x ) { vx[ k ][ x ] = rp.vx[ k * PP + i0 + x ]; vy[ k ][ x ] = rp.vy[ k * PP + i0 + x ]; fok[ k ] |= ( unsigned long long )( rp.ow[ k * PP + i0 + x ] >= 0 ) << x; }
+                        }
+                    }
                     for( int x = 0; x < B; ++x ) { sa[ x ] = a; sb[ x ] = b0 + x; }
+                    tk( 0, tc );
                     if constexpr ( Integ::has_simd ) integ[ t ].template cells<8,B>( vx, vy, sa, sb, ms, face, bad );
                     else for( int x = 0; x < B; ++x ) bad[ x ] = 1;
+                    tk( 1, tc );
+                    if( reg ) {
+                        if( ! zone_predict ) rex.cut2 = 0;
+                        tk( 2, tc );
+                        const double k2t = t_kern[ 4 ] + t_kern[ 5 ] + t_kern[ 6 ];
+                        scatter_reg( t, a, b0, rex, vx, vy, fok, ra, ms, face, bad, s, nzs, E, fl, pr, npr, pd );
+                        tk( 3, tc );
+                        if( kern_timing ) t_kern[ 3 ] -= t_kern[ 4 ] + t_kern[ 5 ] + t_kern[ 6 ] - k2t;   // ( ring 2 on its own lines )
+                        continue;
+                    }
                     // THE PREDICTION, in SIMD over the block: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) =
                     // max_v k . v its support ( `p2`: psi padded by -inf, a seed out of the grid cuts nothing ); level 2 at once ( below )
                     alignas( 64 ) unsigned char cut2[ B ] = {};
@@ -1288,35 +1539,89 @@ struct Evaluator {
                                 }
                             }
                     }
+                    tk( 2, tc );
+                    // THE SCATTER, in SIMD over the block: the inversion test ( edge e from vertex e - 1 to vertex e of the kernel ), the
+                    // box, its zone and the bound of the table, the faces into W, the mass; one by one below: the predicted cells, the
+                    // inverted ones, the cells over several zones and the sums into the table
+                    alignas( 64 ) T zb[ 4 ][ B ], ze[ B ];
+                    alignas( 64 ) int zz[ B ];
+                    alignas( 64 ) unsigned char inv[ B ], one[ B ];
+                    {
+                        const T *ps = psi.data() + size_t( a ) * N + b0;
+                        T *wr = W.data() + ( a + 1 ) * P1 + b0 + 1;
+                        T *mr = mass.data() + size_t( a ) * N + b0;
+                        #pragma omp simd
+                        for( int x = 0; x < B; ++x ) {
+                            T sc = 1, x0 = vx[ 0 ][ x ], x1 = x0, y0 = vy[ 0 ][ x ], y1 = y0;
+                            for( int k = 0; k < 8; ++k ) {
+                                const T X = vx[ k ][ x ], Y = vy[ k ][ x ], m = ( X < 0 ? -X : X ) + ( Y < 0 ? -Y : Y );
+                                sc = m > sc ? m : sc;
+                                x0 = X < x0 ? X : x0; x1 = X > x1 ? X : x1; y0 = Y < y0 ? Y : y0; y1 = Y > y1 ? Y : y1;
+                            }
+                            T mg = 0;
+                            for( int e = 0; e < 8; ++e ) {
+                                const int m = ( e + 7 ) & 7;
+                                const T g = -T( T1::dir_y[ e ] ) * ( vx[ e ][ x ] - vx[ m ][ x ] ) + T( T1::dir_x[ e ] ) * ( vy[ e ][ x ] - vy[ m ][ x ] );
+                                mg = g < mg ? g : mg;
+                            }
+                            const bool iv = mg < -T( 1e-9 ) * sc;
+                            inv[ x ] = iv;
+                            const T b = T( b0 + x ), aa = T( a );
+                            zb[ 0 ][ x ] = x0 + aa; zb[ 1 ][ x ] = x1 + aa; zb[ 2 ][ x ] = y0 + b; zb[ 3 ][ x ] = y1 + b;
+                            int u0 = int( std::floor( ( zb[ 0 ][ x ] + sn - lo ) / s ) ), u1 = int( std::floor( ( zb[ 1 ][ x ] - sn - lo ) / s ) );
+                            int v0 = int( std::floor( ( zb[ 2 ][ x ] + sn - lo ) / s ) ), v1 = int( std::floor( ( zb[ 3 ][ x ] - sn - lo ) / s ) );
+                            u0 = u0 < 0 ? 0 : ( u0 > nzs - 1 ? nzs - 1 : u0 ); u1 = u1 < 0 ? 0 : ( u1 > nzs - 1 ? nzs - 1 : u1 );
+                            v0 = v0 < 0 ? 0 : ( v0 > nzs - 1 ? nzs - 1 : v0 ); v1 = v1 < 0 ? 0 : ( v1 > nzs - 1 ? nzs - 1 : v1 );
+                            one[ x ] = u0 == u1 && v0 == v1;
+                            zz[ x ] = u0 * nzs + v0;
+                            // ( the bound of the single zone, as `pieces` )
+                            const T r0 = lo + u0 * s, r1u = lo + ( u0 + 1 ) * s, r1 = r1u < hi ? r1u : hi;
+                            const T r2 = lo + v0 * s, r3v = lo + ( v0 + 1 ) * s, r3 = r3v < hi ? r3v : hi;
+                            const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
+                            T d0 = zb[ 0 ][ x ] - cx, d1 = zb[ 1 ][ x ] - cx, d2 = zb[ 2 ][ x ] - cy, d3 = zb[ 3 ][ x ] - cy;
+                            d0 = d0 < 0 ? -d0 : d0; d1 = d1 < 0 ? -d1 : d1; d2 = d2 < 0 ? -d2 : d2; d3 = d3 < 0 ? -d3 : d3;
+                            const T dm = std::max( std::max( d0, d1 ), std::max( d2, d3 ) ), pa = ps[ x ] < 0 ? -ps[ x ] : ps[ x ];
+                            ze[ x ] = ( dm + pa + s ) * s;
+                            // the box in floats, rounded outward by more than one float ulp ( `put_box` steps one; an inverted cell
+                            // gets its empty box below, a predicted one its ring-2 box )
+                            if( x < n ) {
+                                float *zf = zbx.data() + 4 * ( size_t( a ) * N + b0 + x );
+                                const T c0 = zb[ 0 ][ x ] + sn, c1 = zb[ 1 ][ x ] - sn, c2 = zb[ 2 ][ x ] + sn, c3 = zb[ 3 ][ x ] - sn;
+                                zf[ 0 ] = float( c0 - ( c0 < 0 ? -c0 : c0 ) * T( 0x1p-22 ) - T( 1e-30 ) );
+                                zf[ 1 ] = float( c1 + ( c1 < 0 ? -c1 : c1 ) * T( 0x1p-22 ) + T( 1e-30 ) );
+                                zf[ 2 ] = float( c2 - ( c2 < 0 ? -c2 : c2 ) * T( 0x1p-22 ) - T( 1e-30 ) );
+                                zf[ 3 ] = float( c3 + ( c3 < 0 ? -c3 : c3 ) * T( 0x1p-22 ) + T( 1e-30 ) );
+                            }
+                            // the faces and the mass of the cells the SIMD rules took
+                            if( x < n && ! iv && ! cut2[ x ] && ! bad[ x ] ) {
+                                mr[ x ] = ms[ x ];
+                                for( int k = 0; k < 8; ++k )
+                                    wr[ k * P1 * P1 + x ] = ( fok[ k ] >> x ) & 1 ? face[ k ][ x ] * T( 0.5 ) * T( T1::dir_inv_norm[ k ] ) : T( 0 );
+                            }
+                        }
+                    }
                     for( int x = 0; x < n; ++x ) {
                         const int i = a * N + b0 + x;
-                        // the polygon ( vertex e = plane vertex e - 1 ), inverted: empty
-                        T px[ 8 ], py[ 8 ], sc = 1;
-                        for( int e = 0; e < 8; ++e ) { px[ e ] = vx[ ( e + 7 ) & 7 ][ x ]; py[ e ] = vy[ ( e + 7 ) & 7 ][ x ]; sc = std::max( sc, std::abs( px[ e ] ) + std::abs( py[ e ] ) ); }
-                        bool inv = false;
-                        for( int e = 0; e < 8; ++e ) { const int f = ( e + 1 ) & 7; inv |= -T( T1::dir_y[ e ] ) * ( px[ f ] - px[ e ] ) + T( T1::dir_x[ e ] ) * ( py[ f ] - py[ e ] ) < -T( 1e-9 ) * sc; }
                         // THE PREDICTION: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) = max_v k . v ( its
                         // support ): level 2 at once, into this table ( below )
-                        if( ! inv && cut2[ x ] ) {
+                        if( ! inv[ x ] && cut2[ x ] ) {
                             pr[ npr++ ] = i; ++n_pred[ t ];
-                            if( npr == B ) { ring2_block( t, pr, B, s, nzs, E ); npr = 0; }
+                            if( npr == B ) { tk( 3, tc ); ring2_block( t, pr, B, s, nzs, E ); npr = 0; if( kern_timing ) tc = now_ms(); }
                             continue;
                         }
-                        if( inv ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
+                        if( inv[ x ] ) { mass[ i ] = 0; clear_faces( i ); empty_box( i ); continue; }
                         if( bad[ x ] ) fl.push_back( i );
-                        else {
-                            mass[ i ] = ms[ x ];
-                            const signed char *ow = rp.ow.data() + i0 + x;
-                            for( int k = 0; k < 8; ++k )
-                                W[ k * P1 * P1 + ( a + 1 ) * P1 + b0 + x + 1 ] = ow[ k * PP ] >= 0 ? face[ k ][ x ] * T( 0.5 ) * T( T1::dir_inv_norm[ k ] ) : T( 0 );
-                        }
-                        T bb[ 4 ], ar;
-                        box_of( i, px, py, 8, bb, ar );
-                        put_box( i, bb );
-                        pieces( i, px, py, 8, area[ b0 + x ], bb, s, nzs, all, E );
+                        const T bb[ 4 ] = { zb[ 0 ][ x ], zb[ 1 ][ x ], zb[ 2 ][ x ], zb[ 3 ][ x ] };
+                        if( one[ x ] ) { E[ 2 * size_t( zz[ x ] ) ] += ra[ x ]; E[ 2 * size_t( zz[ x ] ) + 1 ] += ze[ x ]; continue; }
+                        // the polygon ( vertex e = plane vertex e - 1 ) over several zones
+                        T px[ 8 ], py[ 8 ];
+                        for( int e = 0; e < 8; ++e ) { px[ e ] = vx[ ( e + 7 ) & 7 ][ x ]; py[ e ] = vy[ ( e + 7 ) & 7 ][ x ]; }
+                        pieces( i, px, py, 8, ra[ x ], bb, s, nzs, all, E );
                     }
+                    tk( 3, tc );
                 }
             if( npr ) ring2_block( t, pr, npr, s, nzs, E );
+            if( pd.n ) ring2_block( t, nullptr, 0, s, nzs, E, &pd );
         } );
         // ( the cells the SIMD rules could not take: the scalar rule on their ring-1 polygon; psi padded for the exact kernel once
         // there are cells past ring 1, which `level_polygon` rebuilds later on )

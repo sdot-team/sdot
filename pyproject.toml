@@ -13,6 +13,9 @@ dependencies = [
     "scipy",
 ]
 
+[project.scripts]
+sviz = "sdot.viz.sviz:main"      # the viewer of scene stores ( xyz.sviz, see sdot/viz/store.py )
+
 # releasing: `python -m loom.release` ( make version | bump_version | kernels | wheels | wheels_all | check_wheels | publish ) ( see loom's `loom/release` )
 [tool.loom.release]
 frameworks = ["jax", "numpy", "torch", "cupy"]     # those installed on each build machine
@@ -32,7 +35,7 @@ platforms  = ["macos-arm64", "linux-x86_64", "windows-x86_64"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/sdot"]
 # the precompiled kernels are build products, ignored by git: say that the wheel ships them anyway
-artifacts = ["src/sdot/precompiled-kernels/**"]
+artifacts = ["src/sdot/kernel-catalogue/**"]
 
 [tool.hatch.build.targets.sdist]
 only-include = [
