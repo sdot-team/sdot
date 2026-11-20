@@ -1,0 +1,17 @@
+square 32x32 = 1024 seeds, hexagonal 30x34 = 1020 seeds
+case           lattice its | final ring hist              | worst iterate: frac > r1 / > r2 / max ring
+sines  c=2     square    5 | [0, 1024, 0, 0]              |  0.000 /  0.000 / 1   (0 s)
+sines  c=2     hex       5 | [0, 1020, 0, 0]              |  0.004 /  0.000 / 2   (0 s)
+sines  c=10    square    6 | [0, 1024, 0, 0]              |  0.000 /  0.000 / 1   (1 s)
+sines  c=10    hex       6 | [0, 1002, 18, 0]             |  0.018 /  0.000 / 2   (1 s)
+sines  c=100   square    7 | [0, 1024, 0, 0]              |  0.000 /  0.000 / 1   (1 s)
+sines  c=100   hex       7 | [0, 952, 68, 0]              |  0.067 /  0.000 / 2   (1 s)
+sines  c=1000  square    7 | [0, 1024, 0, 0]              |  0.000 /  0.000 / 1   (1 s)
+sines  c=1000  hex       7 | [0, 940, 80, 0]              |  0.082 /  0.000 / 2   (1 s)
+bands  c=2     square    5 | [0, 1024, 0, 0]              |  0.000 /  0.000 / 1   (1 s)
+bands  c=2     hex       5 | [0, 1014, 6, 0]              |  0.010 /  0.000 / 2   (1 s)
+bands  c=10    square    7 | [0, 866, 158, 0]             |  0.158 /  0.000 / 2   (3 s)
+bands  c=10    hex       7 | [0, 538, 482, 0]             |  0.475 /  0.000 / 2   (3 s)
+bands  c=100   square   60 | [0, 469, 183, 273, 82, 17]   |  0.548 /  0.373 / 5   (1334 s)
+bands  c=100   hex      60 | [0, 411, 167, 278, 95, 57, 4, 8] |  0.604 /  0.433 / 7   (1343 s)
+Interrupted system call ; error code 4

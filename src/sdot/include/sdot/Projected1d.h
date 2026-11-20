@@ -6,8 +6,9 @@
 //   * DEPOSIT: hist( a, j ) += the exact mass, divided by N, that object i projected on angle a puts in the fine cell j;
 //   * GATHER:  ( dL/dpoints, dL/dradii ) from g( a, j ) = dL/dhist( a, j ).
 //
-// The projection s = p.n_a is recomputed in both passes ( never an [ angles, N ] array ). Same formulas, same rounding
-// order as the pure jax version: an object covers the cells j0 .. j0 + L - 1, j0 = floor( ( s - w - s_min ) / h ) clamped to
+// The projection s = p.n_a is recomputed in both passes ( never an [ angles, N ] array ). The same formulas as the pure
+// jax version ( not the same rounding: no division per object and angle, 1 / h and 1 / w computed once; G not evaluated
+// on the two edges that close a window, where it is 0 and 1 ): an object covers the cells j0 .. j0 + L - 1, j0 = floor( ( s - w - s_min ) / h ) clamped to
 // [ 0, M - L ], and the grid's two extreme edges are sent to -inf / +inf ( the mass of an object that leaves the grid stays
 // in its border cells ). Balls and ellipses: the window is of RUNTIME size, the cells each object's support meets ( one
 // kernel for every width; the values of G are streamed, no array ); polygons: a static L.
@@ -80,11 +81,14 @@ constexpr int MAX_K = 8;
 template<class TF>
 struct Params {
     TF  s_min, h, max_w, inv_n, c, a[ MAX_K + 1 ];
+    TF  ih;                                                   ///< 1 / h: no division per object and angle
     SI  M, A, N;
 
     template<int SHAPE,int K>
     SDOT_P1D_HD TF G( TF t ) const {
-        const TF u = t < TF( -1 ) ? TF( -1 ) : ( t > TF( 1 ) ? TF( 1 ) : t );
+        if ( t <= TF( -1 ) ) return TF( 0 );                   // ( the two edges that close a window: known, exact )
+        if ( t >= TF( 1 ) ) return TF( 1 );
+        const TF u = t;
         if constexpr ( SHAPE == 0 ) {
             return TF( 0.5 ) + u - u * ( u < 0 ? -u : u ) / 2;
         } else if constexpr ( K == 0 ) {
@@ -128,8 +132,9 @@ struct Params {
     /// the WINDOW of an object at s of half-width w: its first cell j0 and the number of cells, those its support
     /// [ s - w, s + w ] meets ( clamped to the grid: what leaves it stays in the border cells )
     SDOT_P1D_HD SI cells( TF s, TF w, SI &j0 ) const {
-        SI j1 = SI( floor( ( s + w - s_min ) / h ) );
-        j0 = SI( floor( ( s - w - s_min ) / h ) );
+        const TF u = ( s - s_min ) * ih, wc = w * ih;          // ( a product, not a division: a window one cell wider
+        SI j1 = SI( floor( u + wc ) );                         // at worst, where the support touches an edge -- an empty cell )
+        j0 = SI( floor( u - wc ) );
         j0 = j0 < 0 ? 0 : ( j0 > M - 1 ? M - 1 : j0 );
         j1 = j1 < j0 ? j0 : ( j1 > M - 1 ? M - 1 : j1 );
         return j1 - j0 + 1;
@@ -148,17 +153,53 @@ SDOT_P1D_HD Params<TF> read_params( const VP &params, SI M, SI A, SI N, int K ) 
     pr.c = TF( params( 4 ) );
     for ( int j = 0; j <= MAX_K; ++j )
         pr.a[ j ] = j <= K ? TF( params( 5 + j ) ) : TF( 0 );
+    pr.ih = TF( 1 ) / pr.h;
     pr.M = M; pr.A = A; pr.N = N;
     return pr;
+}
+
+// ── PRECISION ─────────────────────────────────────────────────────────────────
+//
+// Balls and ellipses take a template parameter P, what is computed in FLOAT ( on a card of the GeForce kind, double is
+// 1/32 of float: it is what the passes cost ). The tensors stay in their float ( double ); the cells add up in it.
+//   0  nothing: everything in the float of the tensors;
+//   1  the PROFILE: the parameters t of the edges ( from the offset of the first edge, in double, by steps of h / w ) and
+//      G, f of them; the projection s, the window and every sum in double;
+//   2  the SUMS too: along a window ( the gradient: the differences of g, taken in double, then in float ) and over the
+//      angles; the projection s and the window in double;
+//   3  the projection s, the half-width and the window too: everything but the cells.
+
+template<int P,class TF>
+struct Prec {
+    using S = std::conditional_t<( P >= 3 ),float,TF>;       ///< the projection, the half-width, the window
+    using T = std::conditional_t<( P >= 1 ),float,TF>;       ///< the profile
+    using A = std::conditional_t<( P >= 2 ),float,TF>;       ///< the sums
+};
+
+/// the parameters in the float of the tensors and in float
+template<class TF>
+struct Params2 {
+    Params<TF>    d;
+    Params<float> f;
+
+    template<class U>
+    SDOT_P1D_HD const Params<U> &get() const {
+        if constexpr ( std::is_same_v<U,TF> ) return d;
+        else return f;
+    }
+};
+
+template<class TF,class VP>
+SDOT_P1D_HD Params2<TF> read_params2( const VP &params, SI M, SI A, SI N, int K ) {
+    return { read_params<TF>( params, M, A, N, K ), read_params<float>( params, M, A, N, K ) };
 }
 
 // ── one object, one angle ─────────────────────────────────────────────────────
 
 template<int SHAPE,int K,class TF,class Hist>
-SDOT_P1D_HD void deposit_one( const Params<TF> &pr, const Hist &hist, SI a, TF s, TF w, TF mass, bool atomic ) {
+SDOT_P1D_HD void deposit_one( const Params<TF> &pr, const Hist &hist, SI a, TF s, TF w, TF iw, TF mass, bool atomic ) {
     SI j0;
     const SI n = pr.cells( s, w, j0 );
-    const TF iw = TF( 1 ) / w;
     TF G_prev = pr.template G<SHAPE,K>( pr.edge_t( j0, s, iw ) );
     SDOT_P1D_UNROLL
     for ( SI l = 0; l < n; ++l ) {
@@ -179,10 +220,9 @@ SDOT_P1D_HD void deposit_one( const Params<TF> &pr, const Hist &hist, SI a, TF s
 /// a potential, large against its differences, which are what the gradient is made of ). Summing by parts,
 /// sum_l g_l ( f_l - f_l+1 ) = sum_e f( t_e ) dg_e over the window's edges ( f vanishes on its two end edges ).
 template<int SHAPE,int K,class TF,class DG>
-SDOT_P1D_HD void gather_one( const Params<TF> &pr, const DG &dg, SI a, TF s, TF w, TF &ds, TF &dw ) {
+SDOT_P1D_HD void gather_one( const Params<TF> &pr, const DG &dg, SI a, TF s, TF w, TF iw, TF &ds, TF &dw ) {
     SI j0;
     const SI n = pr.cells( s, w, j0 );
-    const TF iw = TF( 1 ) / w;
     TF a_s = 0, a_w = 0;
     SDOT_P1D_UNROLL
     for ( SI l = 0; l <= n; ++l ) {
@@ -195,6 +235,64 @@ SDOT_P1D_HD void gather_one( const Params<TF> &pr, const DG &dg, SI a, TF s, TF 
     }
     ds = a_s;
     dw = a_w;
+}
+
+/// `deposit_one` at the precision P ( s, w, iw in `Prec::S` )
+template<int SHAPE,int K,int P,class TF,class Hist,class S>
+SDOT_P1D_HD void deposit_one_p( const Params2<TF> &pp, const Hist &hist, SI a, S s, S w, S iw, TF mass, bool atomic ) {
+    using T = typename Prec<P,TF>::T;
+    using A = typename Prec<P,TF>::A;
+    if constexpr ( P == 0 ) {
+        deposit_one<SHAPE,K>( pp.d, hist, a, s, w, iw, mass, atomic );
+    } else {
+        const Params<S> &ps = pp.template get<S>();
+        const Params<T> &pt = pp.template get<T>();
+        SI j0;
+        const SI n = ps.cells( s, w, j0 );
+        const T t0 = T( ( ps.s_min + S( j0 ) * ps.h - s ) * iw ), dt = T( ps.h * iw );   // ( the edges of the window )
+        const A am = A( mass );
+        T G_prev = j0 == 0 ? T( 0 ) : pt.template G<SHAPE,K>( t0 );
+        SDOT_P1D_UNROLL
+        for ( SI l = 0; l < n; ++l ) {
+            const T G_next = j0 + l + 1 == pt.M ? T( 1 ) : pt.template G<SHAPE,K>( t0 + T( l + 1 ) * dt );
+            const TF m = TF( A( G_next - G_prev ) * am );
+            G_prev = G_next;
+            if ( m != TF( 0 ) ) {
+#if defined( __CUDA_ARCH__ )
+                if ( atomic ) { atomicAdd( &hist( a, j0 + l ), m ); continue; }
+#endif
+                hist( a, j0 + l ) += m;
+            }
+        }
+    }
+}
+
+/// `gather_one` at the precision P ( `dg` read in the float of the tensors, then in `Prec::A` )
+template<int SHAPE,int K,int P,class TF,class DG,class S,class A>
+SDOT_P1D_HD void gather_one_p( const Params2<TF> &pp, const DG &dg, SI a, S s, S w, S iw, A &ds, A &dw ) {
+    using T = typename Prec<P,TF>::T;
+    if constexpr ( P == 0 ) {
+        gather_one<SHAPE,K>( pp.d, dg, a, s, w, iw, ds, dw );
+    } else {
+        const Params<S> &ps = pp.template get<S>();
+        const Params<T> &pt = pp.template get<T>();
+        SI j0;
+        const SI n = ps.cells( s, w, j0 );
+        const T t0 = T( ( ps.s_min + S( j0 ) * ps.h - s ) * iw ), dt = T( ps.h * iw );
+        A a_s = 0, a_w = 0;
+        SDOT_P1D_UNROLL
+        for ( SI l = 0; l <= n; ++l ) {
+            const SI e = j0 + l;
+            const T t = e == 0 ? T( -2 ) : ( e == pt.M ? T( 2 ) : t0 + T( l ) * dt );
+            const A d = A( dg( a, e ) );
+            const T fv = pt.template f<SHAPE,K>( t );
+            a_s += d * A( fv );
+            if ( t >= T( -1 ) && t <= T( 1 ) )
+                a_w += d * A( t * fv );
+        }
+        ds = a_s;
+        dw = a_w;
+    }
 }
 
 // ── the grid transport, one ( problem, angle ) row ─────────────────────────────
@@ -316,15 +414,17 @@ void par_ranges( const CpuQueue &queue, SI n, SI min_per_thread, F &&f ) {
 // The tensors carry a BATCH axis in front ( K independent problems of the same geometry, N objects each ):
 // points [ K, N, 2 ], radii [ K, N ], hist and g [ K, A, M ], grad_points [ K, N, 2 ], grad_radii [ K, N ].
 
-template<int SHAPE,int K>
+template<int SHAPE,int K,int PR = 0>
 void deposit( const CpuQueue &queue, const auto &points, const auto &radii, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
+    using S = typename Prec<PR,TF>::S;
     const auto P = view( points );
     const auto R = view( radii );
     const auto Nr = view( normals );
     const auto H = view( hist );
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = hist.shape( 2 );
-    const Params<TF> pr = read_params<TF>( view( params ), M, A, N, K );
+    const Params2<TF> pp = read_params2<TF>( view( params ), M, A, N, K );
+    const Params<S> &ps = pp.template get<S>();
     constexpr SI OBJ_BLOCK = 2048;
     // each thread owns a range of ( problem, angle ) rows: no atomics
     par_ranges( queue, NB * A, 1, [&]( SI r0, SI r1 ) {
@@ -336,10 +436,11 @@ void deposit( const CpuQueue &queue, const auto &points, const auto &radii, cons
             for ( SI i0 = 0; i0 < N; i0 += OBJ_BLOCK ) {
                 const SI i1 = std::min( N, i0 + OBJ_BLOCK );
                 for ( SI a = a0; a < a1; ++a ) {
-                    const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
+                    const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
                     for ( SI i = i0; i < i1; ++i ) {
-                        const TF s = TF( Pb( i, 0 ) ) * nx + TF( Pb( i, 1 ) ) * ny;
-                        deposit_one<SHAPE,K>( pr, Hb, a, s, pr.template half_width<SHAPE>( TF( Rb( i ) ) ), pr.inv_n, false );
+                        const S s = S( Pb( i, 0 ) ) * nx + S( Pb( i, 1 ) ) * ny;
+                        const S w = ps.template half_width<SHAPE>( S( Rb( i ) ) );
+                        deposit_one_p<SHAPE,K,PR>( pp, Hb, a, s, w, S( 1 ) / w, pp.d.inv_n, false );
                     }
                 }
             }
@@ -348,10 +449,12 @@ void deposit( const CpuQueue &queue, const auto &points, const auto &radii, cons
     } );
 }
 
-template<int SHAPE,int K>
+template<int SHAPE,int K,int PR = 0>
 void gather( const CpuQueue &queue, const auto &points, const auto &radii, const auto &normals, const auto &params,
              const auto &g, auto &&grad_points, auto &&grad_radii ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
+    using S = typename Prec<PR,TF>::S;
+    using Acc = typename Prec<PR,TF>::A;
     const auto P = view( points );
     const auto R = view( radii );
     const auto Nr = view( normals );
@@ -359,20 +462,23 @@ void gather( const CpuQueue &queue, const auto &points, const auto &radii, const
     const auto GP = view( grad_points );
     const auto GR = view( grad_radii );
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = g.shape( 2 );
-    const Params<TF> pr = read_params<TF>( view( params ), M, A, N, K );
+    const Params2<TF> pp = read_params2<TF>( view( params ), M, A, N, K );
+    const Params<TF> &pr = pp.d;
     par_ranges( queue, NB * N, 1024, [&]( SI q0, SI q1 ) {
         for ( SI q = q0; q < q1; ++q ) {
             const SI b = q / N, i = q % N;
-            const TF px = TF( P( b, i, 0 ) ), py = TF( P( b, i, 1 ) ), r = TF( R( b, i ) );
-            const TF w = pr.template half_width<SHAPE>( r );
+            const S px = S( P( b, i, 0 ) ), py = S( P( b, i, 1 ) );
+            const TF r = TF( R( b, i ) );
+            const S ws = pp.template get<S>().template half_width<SHAPE>( S( r ) ), iw = S( 1 ) / ws;
+            const TF w = TF( ws );
             const auto Gb = Gr[ b ];
-            TF gx = 0, gy = 0, gw = 0;
+            Acc gx = 0, gy = 0, gw = 0;
             for ( SI a = 0; a < A; ++a ) {
-                const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
-                TF ds, dw;
-                gather_one<SHAPE,K>( pr, Gb, a, px * nx + py * ny, w, ds, dw );
-                gx += ds * nx;
-                gy += ds * ny;
+                const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
+                Acc ds, dw;
+                gather_one_p<SHAPE,K,PR>( pp, Gb, a, px * nx + py * ny, ws, iw, ds, dw );
+                gx += ds * Acc( nx );
+                gy += ds * Acc( ny );
                 gw += dw;
             }
             const TF sc = pr.inv_n / w;
@@ -453,40 +559,112 @@ SDOT_P1D_HD void gather_ellipse_one( const Params<TF> &pr, const VG &g, SI a, TF
     dm = a_m;
 }
 
+/// `gather_ellipse_one` at the precision P. The mass term summed by parts, sum_l g_l ( G_l+1 - G_l ) = g_last G_n -
+/// g_first G_0 - sum_e G_e dg_e over the inner edges: g is a potential, large against its differences, and only these
+/// are summed in `Prec::A`
+template<int K,int P,class TF,class VG,class S,class A>
+SDOT_P1D_HD void gather_ellipse_one_p( const Params2<TF> &pp, const VG &g, SI a, S s, S w, A &ds, A &dw, TF &dm ) {
+    using T = typename Prec<P,TF>::T;
+    const Params<S> &ps = pp.template get<S>();
+    const Params<T> &pt = pp.template get<T>();
+    SI j0;
+    const SI n = ps.cells( s, w, j0 );
+    const S iw = S( 1 ) / w;
+    const T t0 = T( ( ps.s_min + S( j0 ) * ps.h - s ) * iw ), dt = T( ps.h * iw );
+    const SI M = pt.M;
+    A a_s = 0, a_w = 0, a_m = 0;
+    T G0 = 0, Gn = 0;
+    TF g_prev = j0 > 0 ? TF( g( a, j0 - 1 ) ) : TF( 0 ), g_first = 0, g_last = 0;
+    SDOT_P1D_UNROLL
+    for ( SI l = 0; l <= n; ++l ) {
+        const SI e = j0 + l;
+        const T t = e == 0 ? T( -2 ) : ( e == M ? T( 2 ) : t0 + T( l ) * dt );
+        const TF g_e = e < M ? TF( g( a, e ) ) : TF( 0 );
+        const A d = ( e == 0 || e == M ) ? A( 0 ) : A( g_e - g_prev );
+        if ( l == n ) g_last = g_prev;
+        if ( l == 0 ) g_first = g_e;
+        g_prev = g_e;
+        const T fv = pt.template f<1,K>( t );
+        a_s += d * A( fv );
+        if ( t >= T( -1 ) && t <= T( 1 ) )
+            a_w += d * A( t * fv );
+        const T Gl = e == 0 ? T( 0 ) : ( e == M ? T( 1 ) : pt.template G<1,K>( t ) );
+        if ( l == 0 ) G0 = Gl;
+        else if ( l == n ) Gn = Gl;
+        else a_m += A( Gl ) * d;
+    }
+    ds = a_s;
+    dw = a_w;
+    dm = g_last * TF( Gn ) - g_first * TF( G0 ) - TF( a_m );
+}
+
 /// what one object gathers over the angles a0 .. a1: ( dL/dpx, dL/dpy, dL/dc00, dL/dc11, dL/dc01, dL/dmass ) into `out`
-template<int K,class TF,class VN,class VG>
-SDOT_P1D_HD void gather_ellipse( const Params<TF> &pr, const VN &Nr, const VG &g, SI a0, SI a1, TF px, TF py, TF c00, TF c11, TF c01, TF mass, TF *out ) {
-    for ( int c = 0; c < 6; ++c )
-        out[ c ] = 0;
-    for ( SI a = a0; a < a1; ++a ) {
-        const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
-        bool inside;
-        const TF w = ellipse_width( c00, c11, c01, nx, ny, pr.inv_n, pr.max_w, inside );
-        TF ds, dw, dm;
-        gather_ellipse_one<K>( pr, g, a, px * nx + py * ny, w, ds, dw, dm );
-        const TF sc = mass / w;
-        out[ 0 ] += ds * sc * nx;
-        out[ 1 ] += ds * sc * ny;
-        if ( inside ) {                          // dw/dC = n n^T / ( 2 w )
-            const TF k = dw * sc / ( 2 * w );
-            out[ 2 ] += k * nx * nx;
-            out[ 3 ] += k * ny * ny;
-            out[ 4 ] += k * 2 * nx * ny;
+template<int K,int P = 0,class TF,class VN,class VG>
+SDOT_P1D_HD void gather_ellipse( const Params2<TF> &pp, const VN &Nr, const VG &g, SI a0, SI a1, TF px, TF py, TF c00, TF c11, TF c01, TF mass, TF *out ) {
+    using S = typename Prec<P,TF>::S;
+    using A = typename Prec<P,TF>::A;
+    const Params<TF> &pr = pp.d;
+    if constexpr ( P == 0 ) {
+        for ( int c = 0; c < 6; ++c )
+            out[ c ] = 0;
+        for ( SI a = a0; a < a1; ++a ) {
+            const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
+            bool inside;
+            const TF w = ellipse_width( c00, c11, c01, nx, ny, pr.inv_n, pr.max_w, inside );
+            TF ds, dw, dm;
+            gather_ellipse_one<K>( pr, g, a, px * nx + py * ny, w, ds, dw, dm );
+            const TF sc = mass / w;
+            out[ 0 ] += ds * sc * nx;
+            out[ 1 ] += ds * sc * ny;
+            if ( inside ) {                          // dw/dC = n n^T / ( 2 w )
+                const TF k = dw * sc / ( 2 * w );
+                out[ 2 ] += k * nx * nx;
+                out[ 3 ] += k * ny * ny;
+                out[ 4 ] += k * 2 * nx * ny;
+            }
+            out[ 5 ] += dm;
         }
-        out[ 5 ] += dm;
+    } else {
+        const Params<S> &ps = pp.template get<S>();
+        A o[ 5 ] = { 0, 0, 0, 0, 0 };
+        TF om = 0;
+        const S sx = S( px ), sy = S( py ), s00 = S( c00 ), s11 = S( c11 ), s01 = S( c01 );
+        for ( SI a = a0; a < a1; ++a ) {
+            const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
+            bool inside;
+            const S w = ellipse_width( s00, s11, s01, nx, ny, ps.inv_n, ps.max_w, inside );
+            A ds, dw;
+            TF dm;
+            gather_ellipse_one_p<K,P>( pp, g, a, sx * nx + sy * ny, w, ds, dw, dm );
+            const A iw = A( 1 ) / A( w ), anx = A( nx ), any = A( ny );
+            o[ 0 ] += ds * iw * anx;
+            o[ 1 ] += ds * iw * any;
+            if ( inside ) {
+                const A k = dw * iw * iw / 2;
+                o[ 2 ] += k * anx * anx;
+                o[ 3 ] += k * any * any;
+                o[ 4 ] += k * 2 * anx * any;
+            }
+            om += dm;
+        }
+        for ( int c = 0; c < 5; ++c )
+            out[ c ] = mass * TF( o[ c ] );
+        out[ 5 ] = om;
     }
 }
 
-template<int K>
+template<int K,int PR = 0>
 void deposit_ellipses( const CpuQueue &queue, const auto &points, const auto &covs, const auto &masses, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
+    using S = typename Prec<PR,TF>::S;
     const auto P = view( points );
     const auto C = view( covs );
     const auto Ms = view( masses );
     const auto Nr = view( normals );
     const auto H = view( hist );
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = hist.shape( 2 );
-    const Params<TF> pr = read_params<TF>( view( params ), M, A, N, K );
+    const Params2<TF> pp = read_params2<TF>( view( params ), M, A, N, K );
+    const Params<S> &ps = pp.template get<S>();
     constexpr SI OBJ_BLOCK = 2048;
     par_ranges( queue, NB * A, 1, [&]( SI r0, SI r1 ) {
         for ( SI r = r0; r < r1; ) {
@@ -495,11 +673,11 @@ void deposit_ellipses( const CpuQueue &queue, const auto &points, const auto &co
             for ( SI i0 = 0; i0 < N; i0 += OBJ_BLOCK ) {
                 const SI i1 = std::min( N, i0 + OBJ_BLOCK );
                 for ( SI a = a0; a < a1; ++a ) {
-                    const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
+                    const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
                     for ( SI i = i0; i < i1; ++i ) {
                         bool inside;
-                        const TF w = ellipse_width( TF( C( b, i, 0 ) ), TF( C( b, i, 1 ) ), TF( C( b, i, 2 ) ), nx, ny, pr.inv_n, pr.max_w, inside );
-                        deposit_one<1,K>( pr, Hb, a, TF( P( b, i, 0 ) ) * nx + TF( P( b, i, 1 ) ) * ny, w, TF( Ms( b, i ) ), false );
+                        const S w = ellipse_width( S( C( b, i, 0 ) ), S( C( b, i, 1 ) ), S( C( b, i, 2 ) ), nx, ny, ps.inv_n, ps.max_w, inside );
+                        deposit_one_p<1,K,PR>( pp, Hb, a, S( P( b, i, 0 ) ) * nx + S( P( b, i, 1 ) ) * ny, w, S( 1 ) / w, TF( Ms( b, i ) ), false );
                     }
                 }
             }
@@ -508,7 +686,7 @@ void deposit_ellipses( const CpuQueue &queue, const auto &points, const auto &co
     } );
 }
 
-template<int K>
+template<int K,int PR = 0>
 void gather_ellipses( const CpuQueue &queue, const auto &points, const auto &covs, const auto &masses, const auto &normals, const auto &params,
                       const auto &g, auto &&grad_points, auto &&grad_covs, auto &&grad_masses ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
@@ -521,12 +699,12 @@ void gather_ellipses( const CpuQueue &queue, const auto &points, const auto &cov
     const auto GC = view( grad_covs );
     const auto GM = view( grad_masses );
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = g.shape( 2 );
-    const Params<TF> pr = read_params<TF>( view( params ), M, A, N, K );
+    const Params2<TF> pp = read_params2<TF>( view( params ), M, A, N, K );
     par_ranges( queue, NB * N, 1024, [&]( SI q0, SI q1 ) {
         for ( SI q = q0; q < q1; ++q ) {
             const SI b = q / N, i = q % N;
             TF out[ 6 ];
-            gather_ellipse<K>( pr, Nr, Gr[ b ], SI( 0 ), A, TF( P( b, i, 0 ) ), TF( P( b, i, 1 ) ), TF( C( b, i, 0 ) ), TF( C( b, i, 1 ) ), TF( C( b, i, 2 ) ), TF( Ms( b, i ) ), out );
+            gather_ellipse<K,PR>( pp, Nr, Gr[ b ], SI( 0 ), A, TF( P( b, i, 0 ) ), TF( P( b, i, 1 ) ), TF( C( b, i, 0 ) ), TF( C( b, i, 1 ) ), TF( C( b, i, 2 ) ), TF( Ms( b, i ) ), out );
             GP( b, i, 0 ) = out[ 0 ]; GP( b, i, 1 ) = out[ 1 ];
             GC( b, i, 0 ) = out[ 2 ]; GC( b, i, 1 ) = out[ 3 ]; GC( b, i, 2 ) = out[ 4 ];
             GM( b, i ) = out[ 5 ];
@@ -721,42 +899,48 @@ struct BlockPos {
     }
 };
 
-template<int SHAPE,int K,class TF,class VP,class VR,class VN,class VH>
+template<int SHAPE,int K,int PR,class TF,class VP,class VR,class VN,class VH>
 __global__ void __launch_bounds__( BLOCK ) deposit_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VR R, VN Nr, VH H, SI nb_obj_blocks, SI tiles ) {
-    const Params<TF> pr = read_params<TF>( PP, M, A, N, K );
+    using S = typename Prec<PR,TF>::S;
+    const Params2<TF> pp = read_params2<TF>( PP, M, A, N, K );
     const BlockPos bp( nb_obj_blocks, tiles );
     const SI i = bp.ob * BLOCK + threadIdx.x;
-    if ( i >= pr.N )
+    if ( i >= N )
         return;
-    const TF px = TF( P( bp.b, i, 0 ) ), py = TF( P( bp.b, i, 1 ) );
-    const TF w = pr.template half_width<SHAPE>( TF( R( bp.b, i ) ) );
+    const S px = S( P( bp.b, i, 0 ) ), py = S( P( bp.b, i, 1 ) );
+    const S w = pp.template get<S>().template half_width<SHAPE>( S( R( bp.b, i ) ) ), iw = S( 1 ) / w;
     const auto Hb = H[ bp.b ];
-    const SI a0 = pr.A * bp.tile / tiles, a1 = pr.A * ( bp.tile + 1 ) / tiles;
+    const SI a0 = A * bp.tile / tiles, a1 = A * ( bp.tile + 1 ) / tiles;
     for ( SI a = a0; a < a1; ++a ) {
-        const TF s = px * TF( Nr( a, 0 ) ) + py * TF( Nr( a, 1 ) );
-        deposit_one<SHAPE,K>( pr, Hb, a, s, w, pr.inv_n, true );
+        const S s = px * S( Nr( a, 0 ) ) + py * S( Nr( a, 1 ) );
+        deposit_one_p<SHAPE,K,PR>( pp, Hb, a, s, w, iw, pp.d.inv_n, true );
     }
 }
 
-template<int SHAPE,int K,class TF,class VP,class VR,class VN,class VG,class VGP,class VGR>
+template<int SHAPE,int K,int PR,class TF,class VP,class VR,class VN,class VG,class VGP,class VGR>
 __global__ void __launch_bounds__( BLOCK ) gather_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VR R, VN Nr, VG Gr, VGP GP, VGR GR, SI nb_obj_blocks, SI tiles ) {
-    const Params<TF> pr = read_params<TF>( PP, M, A, N, K );
+    using S = typename Prec<PR,TF>::S;
+    using Acc = typename Prec<PR,TF>::A;
+    const Params2<TF> pp = read_params2<TF>( PP, M, A, N, K );
+    const Params<TF> &pr = pp.d;
     const BlockPos bp( nb_obj_blocks, tiles );
     const SI i = bp.ob * BLOCK + threadIdx.x;
-    if ( i >= pr.N )
+    if ( i >= N )
         return;
     const SI b = bp.b;
-    const TF px = TF( P( b, i, 0 ) ), py = TF( P( b, i, 1 ) ), r = TF( R( b, i ) );
-    const TF w = pr.template half_width<SHAPE>( r );
+    const S px = S( P( b, i, 0 ) ), py = S( P( b, i, 1 ) );
+    const TF r = TF( R( b, i ) );
+    const S ws = pp.template get<S>().template half_width<SHAPE>( S( r ) ), iw = S( 1 ) / ws;
+    const TF w = TF( ws );
     const auto Gb = Gr[ b ];
-    const SI a0 = pr.A * bp.tile / tiles, a1 = pr.A * ( bp.tile + 1 ) / tiles;
-    TF gx = 0, gy = 0, gw = 0;
+    const SI a0 = A * bp.tile / tiles, a1 = A * ( bp.tile + 1 ) / tiles;
+    Acc gx = 0, gy = 0, gw = 0;
     for ( SI a = a0; a < a1; ++a ) {
-        const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
-        TF ds, dw;
-        gather_one<SHAPE,K>( pr, Gb, a, px * nx + py * ny, w, ds, dw );
-        gx += ds * nx;
-        gy += ds * ny;
+        const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
+        Acc ds, dw;
+        gather_one_p<SHAPE,K,PR>( pp, Gb, a, px * nx + py * ny, ws, iw, ds, dw );
+        gx += ds * Acc( nx );
+        gy += ds * Acc( ny );
         gw += dw;
     }
     const TF sc = pr.inv_n / w;
@@ -765,14 +949,14 @@ __global__ void __launch_bounds__( BLOCK ) gather_kernel( View<TF,1> PP, SI M, S
         GP( b, i, 1 ) = gy * sc;
         GR( b, i ) = ( SHAPE == 0 || ! ( r < pr.max_w ) ) ? TF( 0 ) : gw * sc;
     } else {
-        atomicAdd( &GP( b, i, 0 ), gx * sc );
-        atomicAdd( &GP( b, i, 1 ), gy * sc );
+        atomicAdd( &GP( b, i, 0 ), TF( gx * sc ) );
+        atomicAdd( &GP( b, i, 1 ), TF( gy * sc ) );
         if ( SHAPE != 0 && r < pr.max_w )
-            atomicAdd( &GR( b, i ), gw * sc );
+            atomicAdd( &GR( b, i ), TF( gw * sc ) );
     }
 }
 
-template<int SHAPE,int K,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int SHAPE,int K,int PR = 0,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void deposit( const Queue &queue, const auto &points, const auto &radii, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = hist.shape( 2 );
@@ -783,11 +967,11 @@ void deposit( const Queue &queue, const auto &points, const auto &radii, const a
     const auto Nr = view( normals );
     const auto H = view( hist );
     const auto PP = view( params );
-    launch_kernel( queue, &deposit_kernel<SHAPE,K,TF,decltype( P ),decltype( R ),decltype( Nr ),decltype( H )>,
+    launch_kernel( queue, &deposit_kernel<SHAPE,K,PR,TF,decltype( P ),decltype( R ),decltype( Nr ),decltype( H )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, R, Nr, H, nb, tiles );
 }
 
-template<int SHAPE,int K,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int SHAPE,int K,int PR = 0,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void gather( const Queue &queue, const auto &points, const auto &radii, const auto &normals, const auto &params,
              const auto &g, auto &&grad_points, auto &&grad_radii ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
@@ -800,7 +984,7 @@ void gather( const Queue &queue, const auto &points, const auto &radii, const au
     const auto GP = view( grad_points );
     const auto GR = view( grad_radii );
     const auto PP = view( params );
-    launch_kernel( queue, &gather_kernel<SHAPE,K,TF,decltype( P ),decltype( R ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GR )>,
+    launch_kernel( queue, &gather_kernel<SHAPE,K,PR,TF,decltype( P ),decltype( R ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GR )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, R, Nr, Gr, GP, GR, nb, tiles );
 }
 
@@ -909,35 +1093,38 @@ void grid( const Queue &queue, const auto &mu, const auto &nu, const auto &Cn, c
 
 // ellipses ( see the CPU section ): the same tiles of angles, atomics wherever several tiles share an object
 
-template<int K,class TF,class VP,class VC,class VM,class VN,class VH>
+template<int K,int PR,class TF,class VP,class VC,class VM,class VN,class VH>
 __global__ void __launch_bounds__( BLOCK ) deposit_ellipses_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VC C, VM Ms, VN Nr, VH H, SI nb_obj_blocks, SI tiles ) {
-    const Params<TF> pr = read_params<TF>( PP, M, A, N, K );
+    using S = typename Prec<PR,TF>::S;
+    const Params2<TF> pp = read_params2<TF>( PP, M, A, N, K );
+    const Params<S> &ps = pp.template get<S>();
     const BlockPos bp( nb_obj_blocks, tiles );
     const SI i = bp.ob * BLOCK + threadIdx.x;
-    if ( i >= pr.N )
+    if ( i >= N )
         return;
-    const TF px = TF( P( bp.b, i, 0 ) ), py = TF( P( bp.b, i, 1 ) ), mass = TF( Ms( bp.b, i ) );
-    const TF c00 = TF( C( bp.b, i, 0 ) ), c11 = TF( C( bp.b, i, 1 ) ), c01 = TF( C( bp.b, i, 2 ) );
+    const S px = S( P( bp.b, i, 0 ) ), py = S( P( bp.b, i, 1 ) );
+    const TF mass = TF( Ms( bp.b, i ) );
+    const S c00 = S( C( bp.b, i, 0 ) ), c11 = S( C( bp.b, i, 1 ) ), c01 = S( C( bp.b, i, 2 ) );
     const auto Hb = H[ bp.b ];
-    const SI a0 = pr.A * bp.tile / tiles, a1 = pr.A * ( bp.tile + 1 ) / tiles;
+    const SI a0 = A * bp.tile / tiles, a1 = A * ( bp.tile + 1 ) / tiles;
     for ( SI a = a0; a < a1; ++a ) {
-        const TF nx = TF( Nr( a, 0 ) ), ny = TF( Nr( a, 1 ) );
+        const S nx = S( Nr( a, 0 ) ), ny = S( Nr( a, 1 ) );
         bool inside;
-        const TF w = ellipse_width( c00, c11, c01, nx, ny, pr.inv_n, pr.max_w, inside );
-        deposit_one<1,K>( pr, Hb, a, px * nx + py * ny, w, mass, true );
+        const S w = ellipse_width( c00, c11, c01, nx, ny, ps.inv_n, ps.max_w, inside );
+        deposit_one_p<1,K,PR>( pp, Hb, a, px * nx + py * ny, w, S( 1 ) / w, mass, true );
     }
 }
 
-template<int K,class TF,class VP,class VC,class VM,class VN,class VG,class VGP,class VGC,class VGM>
+template<int K,int PR,class TF,class VP,class VC,class VM,class VN,class VG,class VGP,class VGC,class VGM>
 __global__ void __launch_bounds__( BLOCK ) gather_ellipses_kernel( View<TF,1> PP, SI M, SI A, SI N, VP P, VC C, VM Ms, VN Nr, VG Gr, VGP GP, VGC GC, VGM GM, SI nb_obj_blocks, SI tiles ) {
-    const Params<TF> pr = read_params<TF>( PP, M, A, N, K );
+    const Params2<TF> pp = read_params2<TF>( PP, M, A, N, K );
     const BlockPos bp( nb_obj_blocks, tiles );
     const SI i = bp.ob * BLOCK + threadIdx.x;
-    if ( i >= pr.N )
+    if ( i >= N )
         return;
     const SI b = bp.b;
     TF out[ 6 ];
-    gather_ellipse<K>( pr, Nr, Gr[ b ], pr.A * bp.tile / tiles, pr.A * ( bp.tile + 1 ) / tiles, TF( P( b, i, 0 ) ), TF( P( b, i, 1 ) ),
+    gather_ellipse<K,PR>( pp, Nr, Gr[ b ], A * bp.tile / tiles, A * ( bp.tile + 1 ) / tiles, TF( P( b, i, 0 ) ), TF( P( b, i, 1 ) ),
                          TF( C( b, i, 0 ) ), TF( C( b, i, 1 ) ), TF( C( b, i, 2 ) ), TF( Ms( b, i ) ), out );
     if ( tiles == 1 ) {
         GP( b, i, 0 ) = out[ 0 ]; GP( b, i, 1 ) = out[ 1 ];
@@ -950,7 +1137,7 @@ __global__ void __launch_bounds__( BLOCK ) gather_ellipses_kernel( View<TF,1> PP
     }
 }
 
-template<int K,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int K,int PR = 0,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void deposit_ellipses( const Queue &queue, const auto &points, const auto &covs, const auto &masses, const auto &normals, const auto &params, auto &&hist ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
     const SI NB = points.shape( 0 ), N = points.shape( 1 ), A = normals.shape( 0 ), M = hist.shape( 2 );
@@ -961,11 +1148,11 @@ void deposit_ellipses( const Queue &queue, const auto &points, const auto &covs,
     const auto Nr = view( normals );
     const auto H = view( hist );
     const auto PP = view( params );
-    launch_kernel( queue, &deposit_ellipses_kernel<K,TF,decltype( P ),decltype( C ),decltype( Ms ),decltype( Nr ),decltype( H )>,
+    launch_kernel( queue, &deposit_ellipses_kernel<K,PR,TF,decltype( P ),decltype( C ),decltype( Ms ),decltype( Nr ),decltype( H )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, C, Ms, Nr, H, nb, tiles );
 }
 
-template<int K,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
+template<int K,int PR = 0,class Queue> requires ( ! std::is_same_v<Queue,CpuQueue> )
 void gather_ellipses( const Queue &queue, const auto &points, const auto &covs, const auto &masses, const auto &normals, const auto &params,
                       const auto &g, auto &&grad_points, auto &&grad_covs, auto &&grad_masses ) {
     using TF = std::remove_const_t<typename std::decay_t<decltype( points )>::TF>;
@@ -980,7 +1167,7 @@ void gather_ellipses( const Queue &queue, const auto &points, const auto &covs, 
     const auto GC = view( grad_covs );
     const auto GM = view( grad_masses );
     const auto PP = view( params );
-    launch_kernel( queue, &gather_ellipses_kernel<K,TF,decltype( P ),decltype( C ),decltype( Ms ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GC ),decltype( GM )>,
+    launch_kernel( queue, &gather_ellipses_kernel<K,PR,TF,decltype( P ),decltype( C ),decltype( Ms ),decltype( Nr ),decltype( Gr ),decltype( GP ),decltype( GC ),decltype( GM )>,
                    int( NB * nb * tiles ), BLOCK, 0, PP, M, A, N, P, C, Ms, Nr, Gr, GP, GC, GM, nb, tiles );
 }
 

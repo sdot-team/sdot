@@ -591,16 +591,26 @@ struct GaussCells {
         return sum;
     }
     void moments( int n, const double *px, const double *py, double sa, double sb, double &m, double &mx, double &my, double &m2 ) const {
+        // ( in a frame centred on the vertex mean ( cx, cy ): relative to the seed, a cell far from it ( |x| ~ 100 pixels for a width
+        // of 1 ) loses ~ eps |x| / width in the areas of the triangles, above the relative test of `tri`, which then halved them down
+        // to its absolute floor -- 10^4 rules per cell on a flat source at 1024; the moments brought back to the seed after )
         double cx = 0, cy = 0;
         for( int e = 0; e < n; ++e ) { cx += px[ e ] / n; cy += py[ e ] / n; }
+        double qx[ 256 ], qy[ 256 ];
+        const int nq = std::min( n, 256 );
+        for( int e = 0; e < nq; ++e ) { qx[ e ] = px[ e ] - cx; qy[ e ] = py[ e ] - cy; }
+        const double ca = sa + cx, cb = sb + cy;
         V4 t{ 0, 0, 0, 0 };
-        for( int e = 0; e < n; ++e ) {
-            const int f = e + 1 == n ? 0 : e + 1;
-            if( ( px[ e ] - cx ) * ( py[ f ] - cy ) - ( py[ e ] - cy ) * ( px[ f ] - cx ) <= 0 ) continue;
-            const V4 r = tri( sa, sb, cx, cy, px[ e ], py[ e ], px[ f ], py[ f ], tri7( sa, sb, cx, cy, px[ e ], py[ e ], px[ f ], py[ f ] ), 0 );
+        for( int e = 0; e < nq; ++e ) {
+            const int f = e + 1 == nq ? 0 : e + 1;
+            if( qx[ e ] * qy[ f ] - qy[ e ] * qx[ f ] <= 0 ) continue;
+            const V4 r = tri( ca, cb, 0.0, 0.0, qx[ e ], qy[ e ], qx[ f ], qy[ f ], tri7( ca, cb, 0.0, 0.0, qx[ e ], qy[ e ], qx[ f ], qy[ f ] ), 0 );
             for( int c = 0; c < 4; ++c ) t[ c ] += r[ c ];
         }
-        m = t[ 0 ]; mx = t[ 1 ]; my = t[ 2 ]; m2 = t[ 3 ];
+        m = t[ 0 ];
+        mx = t[ 1 ] + cx * t[ 0 ];
+        my = t[ 2 ] + cy * t[ 0 ];
+        m2 = t[ 3 ] + 2 * ( cx * t[ 1 ] + cy * t[ 2 ] ) + ( cx * cx + cy * cy ) * t[ 0 ];
     }
 };
 

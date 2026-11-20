@@ -139,7 +139,7 @@ struct Ring2Reg {
             auto hq = [&]<int q>() {
                 V pjq;
                 if constexpr ( GATHER ) pjq = V::gather( psi_pad + Tb::off_x[ q ] * P + Tb::off_y[ q ], ind ); else pjq = V::load_aligned( pj[ q ] + o );
-                return ( V( T( Tb::off_sqn[ q ] ) ) + vpi - pjq ) * V( T( 0.5 / Tb::off_m[ q ] ) );
+                return ( V( T( Tb::off_sqn[ q ] ) ) + ( vpi - pjq ) ) * V( T( 0.5 / Tb::off_m[ q ] ) );
             };
             // each direction once: the min over its seeds
             V h[ D ];

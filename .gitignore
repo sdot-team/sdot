@@ -4,7 +4,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 .venv/
-
+*.npy
 
 # build outputs
 prototypes/

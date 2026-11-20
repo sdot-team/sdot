@@ -25,10 +25,15 @@
 // The host reads back SCALARS where it decides: the counts of the flagged cells ( one read when there is none ), the residual of
 // each diagram, the residual of each CG iteration. The reductions are those of `Reduce.cuh` ( a fixed tree: the same number at
 // every run ); the lists of flagged cells are made by atomics ( their order changes, nothing computed from them does: the faces
-// out of ring 1 are sorted on the host ).
+// out of ring 1 are sorted on the card, by their weight then by ( i, j ), `merge_extras` ).
 // =====================================================================================
 
 #include "Reduce.cuh"
+// ( as `ContinuousOtPlan1d.h`: the pip wheels of CUDA may pair an nvcc with the runtime headers of the next minor version )
+#ifndef CCCL_DISABLE_CTK_COMPATIBILITY_CHECK
+#define CCCL_DISABLE_CTK_COMPATIBILITY_CHECK
+#endif
+#include <cub/cub.cuh>
 #include "../grid/StencilTables.h"
 #include "../sdotplan/Report.h"
 #include "../sdotplan/WarmRepair.h"
@@ -130,7 +135,7 @@ __device__ __forceinline__ void stencil( const Tb &t, int N, const double *psi, 
         if ( na < 0 || na >= N || nb < 0 || nb >= N )
             continue;                                    // ( the CPU's padding: -inf, an offset of +inf )
         const int d = t.off_dir[ o ];
-        const double hk = ( t.off_sqn[ o ] + pi - psi[ SI( na ) * N + nb ] ) * ( 0.5 / t.off_m[ o ] );
+        const double hk = ( t.off_sqn[ o ] + ( pi - psi[ SI( na ) * N + nb ] ) ) * ( 0.5 / t.off_m[ o ] );
         if ( hk < h[ d ] ) { h[ d ] = hk; ow[ d ] = ( signed char ) o; }
     }
     // the box
@@ -185,7 +190,7 @@ __device__ __forceinline__ void stencil1( int N, const double *psi, int a, int b
         const int na = a + dx, nb = b + dy;
         if ( na < 0 || na >= N || nb < 0 || nb >= N )
             return;
-        const double hk = ( c + pi - psi[ SI( na ) * N + nb ] ) * sc;
+        const double hk = ( c + ( pi - psi[ SI( na ) * N + nb ] ) ) * sc;
         if ( hk < h[ d ] ) { h[ d ] = hk; ow[ d ] = ( signed char ) o; }
     } );
     const double hpx = N - 0.5 - a, hmx = a + 0.5, hpy = N - 0.5 - b, hmy = b + 0.5;
@@ -423,7 +428,7 @@ __global__ void __launch_bounds__( BLOCK ) exact_kernel( int N, const double *ps
         if ( na < 0 || na >= N || nb < 0 || nb >= N )
             continue;
         const double kx = eo.ox[ o ], ky = eo.oy[ o ];
-        const double c = ( kx * kx + ky * ky + pi - psi[ SI( na ) * N + nb ] ) / 2;
+        const double c = ( kx * kx + ky * ky + ( pi - psi[ SI( na ) * N + nb ] ) ) / 2;
         bool out = false;
         for ( int e = 0; e < n; ++e ) { s[ e ] = kx * px[ e ] + ky * py[ e ] - c; out |= s[ e ] > 0; }
         if ( ! out )
@@ -532,9 +537,11 @@ struct RectClip {
 
 /// the area of the polygon ( vertex e: `vert( e, x, y )`, n of them ) inside the box [ x0, x1 ] x [ y0, y1 ] ( same frame )
 template<class V>
-__device__ double rect_area( const V &vert, int n, double x0, double x1, double y0, double y1 ) {
+__device__ __forceinline__ double rect_area( const V &vert, auto nv, double x0, double x1, double y0, double y1 ) {
+    const int n = nv;                                    // ( `std::integral_constant`: the loop unrolled, the vertices stay in registers )
     const double cx = ( x0 + x1 ) / 2, cy = ( y0 + y1 ) / 2;
     RectClip rc{ x0 - cx, x1 - cx, y0 - cy, y1 - cy };
+#pragma unroll
     for ( int e = 0; e < n; ++e ) { double x, y; vert( e, x, y ); rc.push<0>( x - cx, y - cy ); }
     return rc.close();
 }
@@ -550,15 +557,61 @@ struct ZoneTable {
     __device__ int zof( double x, int ) const { const int u = int( floor( ( x + 0.5 ) * ( 1 / s ) ) ); return u < 0 ? 0 : u >= nzs ? nzs - 1 : u; }   // ( s: a power of two, its inverse exact )
 };
 
+/// the area of the polygon ( `vert`, `nv` vertices ) in x <= X ( `CX` ) and y <= Y ( `CY` ): one pass, the clipped polygon's shoelace
+/// on the fly, in coordinates centred on ( X, Y ) -- the pieces of a cell over 2 x 2 zones at most by differences ( `cell_pieces` )
+template<bool CX,bool CY,class V>
+__device__ __forceinline__ double quad_area( const V &vert, auto nv, double X, double Y ) {
+    const int n = nv;
+    double fx[ 2 ], fy[ 2 ], qx[ 2 ], qy[ 2 ], gx = 0, gy = 0, px = 0, py = 0, area = 0;
+    bool st[ 3 ] = { false, false, false };
+    auto out = [&]( double x, double y ) {               // ( the last stage: the shoelace )
+        if ( ! st[ 2 ] ) { st[ 2 ] = true; gx = x; gy = y; } else area += px * y - py * x;
+        px = x; py = y;
+    };
+    auto stage1 = [&]( double x, double y ) {            // ( y <= 0 )
+        if constexpr ( ! CY ) { out( x, y ); return; }
+        if ( ! st[ 1 ] ) { st[ 1 ] = true; fx[ 1 ] = qx[ 1 ] = x; fy[ 1 ] = qy[ 1 ] = y; return; }
+        const double ax = qx[ 1 ], ay = qy[ 1 ];
+        qx[ 1 ] = x; qy[ 1 ] = y;
+        if ( ( ay <= 0 ) != ( y <= 0 ) ) { const double u = ay / ( ay - y ); out( ax + u * ( x - ax ), 0.0 ); }
+        if ( y <= 0 ) out( x, y );
+    };
+    auto stage0 = [&]( double x, double y ) {            // ( x <= 0 )
+        if constexpr ( ! CX ) { stage1( x, y ); return; }
+        if ( ! st[ 0 ] ) { st[ 0 ] = true; fx[ 0 ] = qx[ 0 ] = x; fy[ 0 ] = qy[ 0 ] = y; return; }
+        const double ax = qx[ 0 ], ay = qy[ 0 ];
+        qx[ 0 ] = x; qy[ 0 ] = y;
+        if ( ( ax <= 0 ) != ( x <= 0 ) ) { const double u = ax / ( ax - x ); stage1( 0.0, ay + u * ( y - ay ) ); }
+        if ( x <= 0 ) stage1( x, y );
+    };
+#pragma unroll
+    for ( int e = 0; e < n; ++e ) { double x, y; vert( e, x, y ); stage0( x - X, y - Y ); }
+    // ( closing: the first stage's last edge, then the second's, then the shoelace )
+    if constexpr ( CX ) if ( st[ 0 ] ) {
+        const double ax = qx[ 0 ], ay = qy[ 0 ], x = fx[ 0 ], y = fy[ 0 ];
+        if ( ( ax <= 0 ) != ( x <= 0 ) ) { const double u = ax / ( ax - x ); stage1( 0.0, ay + u * ( y - ay ) ); }
+        if ( x <= 0 ) stage1( x, y );
+    }
+    if constexpr ( CY ) if ( st[ 1 ] ) {
+        const double ax = qx[ 1 ], ay = qy[ 1 ], x = fx[ 1 ], y = fy[ 1 ];
+        if ( ( ay <= 0 ) != ( y <= 0 ) ) { const double u = ay / ( ay - y ); out( ax + u * ( x - ax ), 0.0 ); }
+        if ( y <= 0 ) out( x, y );
+    }
+    if ( st[ 2 ] ) area += px * gy - py * gx;
+    return area / 2;
+}
+
 /// the pieces of a cell ( n vertices `vert( e, x, y )`, relative to its seed `i` ) in the zones of `zt` it meets; its box into `bx`. A
 /// cell in one zone only, when `defer`, gives its piece back ( `z0`, `pc0`, `tz0` ) instead of adding it
 template<class V>
-__device__ __forceinline__ void cell_pieces( int N, SI i, const V &vert, int n, const ZoneTable &zt, float *bx, bool defer,
-                                             SI &z0, double &pc0, double &tz0, double psi_abs ) {
+__device__ __forceinline__ void cell_pieces( int N, SI i, const V &vert, auto nv, const ZoneTable &zt, float *bx, bool defer,
+                                             SI &z0, double &pc0, double &tz0, double seed_reach ) {
+    const int n = nv;                                    // ( `std::integral_constant` for ring 1: unrolled, the polygon in registers )
     const int a = int( i ) / N, b = int( i ) - a * N;   // ( 32-bit: a 64-bit division is emulated on the card )
     double bb0 = 1e300, bb1 = -1e300, bb2 = 1e300, bb3 = -1e300, ar = 0, x0, y0;
     vert( 0, x0, y0 );
     double x = x0, y = y0;
+#pragma unroll
     for ( int e = 0; e < n; ++e ) {
         double xn = x0, yn = y0;
         if ( e + 1 < n ) vert( e + 1, xn, yn );
@@ -576,21 +629,40 @@ __device__ __forceinline__ void cell_pieces( int N, SI i, const V &vert, int n, 
     bx[ 4 * i + 2 ] = __double2float_rd( bb2 + sn ); bx[ 4 * i + 3 ] = __double2float_ru( bb3 - sn );
     const double lo = -0.5, hi = N - 0.5, s = zt.s;
     const int u0 = zt.zof( bb0 + sn, N ), u1 = zt.zof( bb1 - sn, N ), v0 = zt.zof( bb2 + sn, N ), v1 = zt.zof( bb3 - sn, N );
+    // ( over 2 x 2 zones at most: the pieces by differences of the parts in x <= X, y <= Y, X and Y the lines between them )
+    const bool small = u1 - u0 <= 1 && v1 - v0 <= 1 && ! ( u0 == u1 && v0 == v1 );
+    double AL = 0, AB = 0, ALB = 0;
+    if ( small ) {
+        const double X = lo + ( u0 + 1 ) * s - a, Y = lo + ( v0 + 1 ) * s - b;
+        if ( u1 > u0 && v1 > v0 ) { AL = quad_area<true,false>( vert, nv, X, Y ); AB = quad_area<false,true>( vert, nv, X, Y ); ALB = quad_area<true,true>( vert, nv, X, Y ); }
+        else if ( u1 > u0 ) AL = quad_area<true,false>( vert, nv, X, Y );
+        else AB = quad_area<false,true>( vert, nv, X, Y );
+    }
     for ( int u = u0; u <= u1; ++u )
         for ( int v = v0; v <= v1; ++v ) {
             if ( ! zt.in( u, v ) )
                 continue;
             const double r0 = lo + u * s, r1 = fmin( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = fmin( hi, lo + ( v + 1 ) * s );
             const bool one = u0 == u1 && v0 == v1;
-            const double pc = one ? ar : rect_area( vert, n, r0 - a, r1 - a, r2 - b, r3 - b );
+            double pc;
+            if ( one ) pc = ar;
+            else if ( small ) {
+                const bool lu = u == u0, lv = v == v0;
+                if ( u1 > u0 && v1 > v0 ) pc = lu ? ( lv ? ALB : AL - ALB ) : ( lv ? AB - ALB : ar - AL - AB + ALB );
+                else if ( u1 > u0 ) pc = lu ? AL : ar - AL;
+                else pc = lv ? AB : ar - AB;
+            } else
+                pc = rect_area( vert, nv, r0 - a, r1 - a, r2 - b, r3 - b );
             const double cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
-            // ( the rounding: of the pieces, ~ eps reach s; of the planes, whose offsets ( |k|^2 + psi_i - psi_j ) / 2 move the edges by
-            // ~ eps |psi|: two exact neighbours overlap that much along their face )
-            const double reach = fmax( fmax( fabs( bb0 - cx ), fabs( bb1 - cx ) ), fmax( fabs( bb2 - cy ), fabs( bb3 - cy ) ) ) + psi_abs;
+            // ( the rounding: the edges move by ~ eps ( reach + seed_reach ), reach the distance to the centre of the zone ( the
+            // clipping by its lines ), seed_reach the distance from the seed ( the vertices are relative to it, from offsets
+            // ( |k|^2 + ( psi_i - psi_j ) ) / 2 ~ k . x ); along the perimeter of the cell, bounded by its box; see `zone_tol_form` on CPU )
+            const double reach = fmax( fmax( fabs( bb0 - cx ), fabs( bb1 - cx ) ), fmax( fabs( bb2 - cy ), fabs( bb3 - cy ) ) ) + seed_reach;
+            const double bound = ( reach + 1 ) * ( ( bb1 - bb0 ) + ( bb3 - bb2 ) + 1 );
             const SI z = SI( u ) * zt.nzs + v;
-            if ( defer && one ) { z0 = z; pc0 = pc; tz0 = ( reach + s ) * s; continue; }
+            if ( defer && one ) { z0 = z; pc0 = pc; tz0 = bound; continue; }
             atomicAdd( &zt.E[ 2 * z ], pc );
-            atomicAdd( &zt.E[ 2 * z + 1 ], ( reach + s ) * s );
+            atomicAdd( &zt.E[ 2 * z + 1 ], bound );
         }
 }
 
@@ -605,7 +677,7 @@ __global__ void __launch_bounds__( BLOCK ) zone_bad_kernel( int N, ZoneTable zt,
         const double lo = -0.5, hi = N - 0.5;
         const double r0 = lo + u * zt.s, r1 = fmin( hi, lo + ( u + 1 ) * zt.s ), r2 = lo + v * zt.s, r3 = fmin( hi, lo + ( v + 1 ) * zt.s );
         const double az = ( r1 - r0 ) * ( r3 - r2 );
-        b = zt.E[ 2 * z ] - az > 1e-14 * ( az + zt.E[ 2 * z + 1 ] );   // ( 1e-12 let a cell 5e-9 too large pass in a zone of long cells )
+        b = zt.E[ 2 * z ] - az > 2e-15 * ( az + zt.E[ 2 * z + 1 ] );   // ( `zone_tol_c` on CPU: 5e-16 flags exact zones on sharp 1024 )
     }
     bad[ z ] = b;
     if ( b )
@@ -671,7 +743,7 @@ __device__ bool build_cell( int N, const double *psi, double pmax, const ExactOf
         if ( na < 0 || na >= N || nb < 0 || nb >= N )
             continue;
         const double kx = eo.ox[ o ], ky = eo.oy[ o ];
-        const double c = ( kx * kx + ky * ky + pi - psi[ SI( na ) * N + nb ] ) / 2;
+        const double c = ( kx * kx + ky * ky + ( pi - psi[ SI( na ) * N + nb ] ) ) / 2;
         bool out = false;
         for ( int e = 0; e < n; ++e ) out |= kx * px[ e ] + ky * py[ e ] - c > 0;
         if ( ! out )
@@ -1068,7 +1140,7 @@ __device__ __forceinline__ void integrate_poly( int N, const Dn &dens, int i, co
 /// ( 8 cells of a row in one zone: one atomic ), the box; an inverted cell is empty ( mass 0, an inverted box )
 template<class Dn>
 __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const double *psi, ZoneTable zt, float *bx, double *mass, double *W,
-                                                          int *pred, Counts *cnt ) {
+                                                          int *pred, Counts *cnt, int f32 ) {
     const SI nn = SI( N ) * N, i = SI( blockIdx.x ) * BLOCK + threadIdx.x;
     const unsigned lane = threadIdx.x & 31;
     double pc0 = 0, tz0 = 0;
@@ -1094,7 +1166,28 @@ __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const 
         // ( THE PREDICTION: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) = max_v k . v its support -- then
         // it goes to level 2 at once, `zones_rebuild_kernel` on `pred`, into this table )
         bool cut2 = false;
-        if ( ! inv && pred ) {
+        if ( ! inv && pred && ( f32 & 1 ) ) {
+            // ( the same test in floats, biased to "cut": a cut it misses is one the double test would miss too, up to the margin
+            // `del`, which bounds the rounding of the floats ( vertices and psi_i - psi_j rounded once to float, h a max of products )
+            // with a factor ~ 3 to spare; a cut of ring 2 it does miss leaves an excess the zone certificate catches )
+            float fx[ 8 ], fy[ 8 ];
+#pragma unroll
+            for ( int e = 0; e < 8; ++e ) { fx[ e ] = float( poly.px[ e ] ); fy[ e ] = float( poly.py[ e ] ); }
+            const float scf = float( sc );
+            const double pi = psi[ i ];
+            for ( int o = 0; o < 24 && ! cut2; ++o ) {
+                const int dx = c_tab2.off_x[ o ], dy = c_tab2.off_y[ o ];
+                if ( ( dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 ) || a + dx < 0 || a + dx >= N || b + dy < 0 || b + dy >= N )
+                    continue;
+                const float fdx = float( dx ), fdy = float( dy );
+                float h = -3e38f;
+#pragma unroll
+                for ( int e = 0; e < 8; ++e ) h = fmaxf( h, fdx * fx[ e ] + fdy * fy[ e ] );
+                const float dp = float( pi - psi[ SI( a + dx ) * N + b + dy ] ), k2 = fdx * fdx + fdy * fdy;
+                const float del = 4e-7f * ( ( fabsf( fdx ) + fabsf( fdy ) ) * scf + k2 + fabsf( dp ) );
+                cut2 = 2 * h > k2 + dp - del;
+            }
+        } else if ( ! inv && pred ) {
             const double pi = psi[ i ];
             for ( int o = 0; o < 24 && ! cut2; ++o ) {
                 const int dx = c_tab2.off_x[ o ], dy = c_tab2.off_y[ o ];
@@ -1103,7 +1196,7 @@ __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const 
                 double h = -1e300;
 #pragma unroll
                 for ( int e = 0; e < 8; ++e ) h = fmax( h, dx * poly.px[ e ] + dy * poly.py[ e ] );
-                cut2 = 2 * h > dx * dx + dy * dy + pi - psi[ SI( a + dx ) * N + b + dy ];
+                cut2 = 2 * h > dx * dx + dy * dy + ( pi - psi[ SI( a + dx ) * N + b + dy ] );
             }
         }
         if ( cut2 ) {
@@ -1117,11 +1210,16 @@ __global__ void __launch_bounds__( BLOCK ) zones1_kernel( int N, Dn dens, const 
         } else {
             constexpr Tab<1> T = make_tab<1>();
             double w[ 8 ];
-            const DensSums r = cell_sums<false>( dens, double( a ), double( b ), poly, [&]( int e, double line ) { w[ e ] = line; } );
-            mass[ i ] = r.m;
+            if ( f32 & 64 ) {                            // ( timing only: no integration, the cell's x as its mass )
+#pragma unroll
+                for ( int e = 0; e < 8; ++e ) w[ e ] = 0;
+                mass[ i ] = poly.px[ 0 ];
+            } else
+                mass[ i ] = cell_sums<false>( dens, double( a ), double( b ), poly, [&]( int e, double line ) { w[ e ] = line; } ).m;
 #pragma unroll
             for ( int k = 0; k < 8; ++k ) W[ k * nn + i ] = poly.ow[ k ] >= 0 ? w[ k ] * 0.5 * T.dir_inv_norm[ k ] : 0.0;
-            cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = poly.px[ e ]; y = poly.py[ e ]; }, 8, zt, bx, true, z0, pc0, tz0, fabs( psi[ i ] ) );
+            if ( ! ( f32 & 32 ) )                        // ( timing only: 32 leaves the table out )
+            cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = poly.px[ e ]; y = poly.py[ e ]; }, std::integral_constant<int,8>(), zt, bx, true, z0, pc0, tz0, sc );   // ( the rounding scale: the distance from the seed to the cell, `sc` bounds it; see `zone_psi_tol` on CPU )
         }
     }
     // ( every lane of the warp is here: the grid of the launch covers whole warps )
@@ -1155,7 +1253,11 @@ __global__ void __launch_bounds__( BLOCK ) zones_rebuild_kernel( int N, Dn dens,
     lvl[ i ] = ( unsigned char ) nl;
     integrate_poly( N, dens, i, px, py, nbr, n, nl, mass, W, ex, cnt );
     SI z0; double pc0, tz0;
-    if ( n >= 3 ) cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = px[ e ]; y = py[ e ]; }, n, zt, bx, false, z0, pc0, tz0, fabs( psi[ i ] ) );
+    if ( n >= 3 ) {
+        double sr = 0;                                   // ( the rounding scale: the distance from the seed to the cell, see `zone_psi_tol` on CPU )
+        for ( int e = 0; e < n; ++e ) sr = fmax( sr, fmax( fabs( px[ e ] ), fabs( py[ e ] ) ) );
+        cell_pieces( N, i, [&]( int e, double &x, double &y ) { x = px[ e ]; y = py[ e ]; }, n, zt, bx, false, z0, pc0, tz0, sr );
+    }
     else empty_box( bx, i );
 }
 
@@ -1363,6 +1465,37 @@ struct ExRows {
     const double *w = nullptr;
     SI            nr = 0;
 };
+
+/// THE FACES OUT OF RING 1 TO ROWS, on the card ( `Solver::merge_extras` ): the live faces ( `i >= 0` ) as keys ( i, j ) and the
+/// bits of their weights ( positive: the bits sort as the weights ), twice when the matrix is symmetrized ( ( i, j, w / 2 ) and
+/// ( j, i, w / 2 ): the rows sum them, as the host's merge of the two sides )
+__global__ void __launch_bounds__( BLOCK ) ex_keys_kernel( SI nx, Extras ex, bool sym, unsigned long long *key, unsigned long long *wb, unsigned *cnt ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= nx || ex.i[ q ] < 0 )
+        return;
+    const unsigned i = unsigned( ex.i[ q ] ), j = unsigned( ex.j[ q ] );
+    const double w = sym ? ex.w[ q ] / 2 : ex.w[ q ];
+    const unsigned k = atomicAdd( cnt, sym ? 2u : 1u );
+    key[ k ] = ( ( unsigned long long ) i << 32 ) | j; wb[ k ] = __double_as_longlong( w );
+    if ( sym ) { key[ k + 1 ] = ( ( unsigned long long ) j << 32 ) | i; wb[ k + 1 ] = __double_as_longlong( w ); }
+}
+
+/// the heads of the rows of sorted keys ( 1 where the row changes )
+__global__ void __launch_bounds__( BLOCK ) ex_heads_kernel( SI ne, const unsigned long long *key, int *head ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q < ne ) head[ q ] = q == 0 || ( key[ q ] >> 32 ) != ( key[ q - 1 ] >> 32 );
+}
+
+/// the rows ( `rows`, `beg` from the scan of the heads ), the columns and the weights
+__global__ void __launch_bounds__( BLOCK ) ex_rows_kernel( SI ne, const unsigned long long *key, const unsigned long long *wb, const int *head,
+                                                           const int *pos, int *rows, int *beg, int *cols, double *w, int *nr ) {
+    const SI q = SI( blockIdx.x ) * BLOCK + threadIdx.x;
+    if ( q >= ne )
+        return;
+    if ( head[ q ] ) { rows[ pos[ q ] ] = int( key[ q ] >> 32 ); beg[ pos[ q ] ] = int( q ); }
+    cols[ q ] = int( key[ q ] & 0xffffffffull ); w[ q ] = __longlong_as_double( wb[ q ] );
+    if ( q == ne - 1 ) { const int r = pos[ q ] + head[ q ]; beg[ r ] = int( ne ); *nr = r; }
+}
 
 __global__ void __launch_bounds__( BLOCK ) ex_conductances_kernel( int N, ExRows ex, double *d0, double *Da, double *Db ) {
     const SI r = SI( blockIdx.x ) * BLOCK + threadIdx.x;
@@ -1810,6 +1943,7 @@ struct Solver {
     // the zone certificate ( `zones`, the default; false: the former certificates and the exact path with psi_max )
     bool zones = true;
     bool zone_predict = true;                            ///< ring 2 at once on the cells a seed of ring 2 cuts ( their support, `zones1_kernel` )
+    int zone_f32 = 1;                                    ///< bit 0 ( the default ): the prediction of `zones1_kernel` in floats ( biased to "cut", exact by construction; 2080 Ti sharp 1024 14.0 -> 8.4 ns/seed ); ( timing only ) 32: no zone table in ring 1, 64: no integration in ring 1
     unsigned char *lvl, *zbadA, *zbadB;                  ///< the level of each cell ( 0, 1: ring 1 ); the bad zones of the last two tables
     float *zbx;                                          ///< the boxes of the cells ( floats rounded outward )
     double *zE;                                          ///< the sums of a table ( 2 per zone, side 1 at most )
@@ -1824,6 +1958,13 @@ struct Solver {
     int *exr_buf = nullptr;
     double *exr_w = nullptr;
     SI exr_cap = 0;
+    // ( the card's merge: room for `exm_cap` entries, the keys and weights twice ( the sorts ), the heads and their scan, cub's room )
+    unsigned long long *exm_k = nullptr, *exm_w = nullptr;
+    int *exm_h = nullptr;
+    void *exm_tmp = nullptr;
+    size_t exm_tmp_bytes = 0;
+    SI exm_cap = 0;
+    bool merge_check = false;                            ///< ( experiment ) the host's merge too, the rows compared ( stdout )
     // the exact path
     ExactOffsets eo;
     int rb = RB;                                         ///< the rings of `eo`
@@ -1957,6 +2098,7 @@ struct Solver {
             i1_c = grab<double>( 4 * din.nx * din.ny ); i1_k = grab<double>( din.nx + din.ny + 2 ); i1_p = grab<double>( 6 * ( din.nx + 1 ) * din.ny );
         }
         exr_cap = 0;
+        exm_cap = 0;
     }
 
     template<class T>
@@ -2159,7 +2301,7 @@ struct Solver {
         const ZoneTable zt0{ double( s ), nzs, nullptr, 0, 1, zE };
         with_density( [&]( const auto &dens ) {
             using Dn = std::decay_t<decltype( dens )>;
-            launch_kernel( queue, &zones1_kernel<Dn>, blocks_for( nn ), BLOCK, 0, n, dens, ps, zt0, zbx, mass, W, zone_predict ? check : nullptr, cnt );
+            launch_kernel( queue, &zones1_kernel<Dn>, blocks_for( nn ), BLOCK, 0, n, dens, ps, zt0, zbx, mass, W, zone_predict ? check : nullptr, cnt, zone_f32 );
         } );
         lap( "ring 1" );
         down( &hc, cnt, 1 );
@@ -2242,6 +2384,8 @@ struct Solver {
             launch_kernel( queue, &zones_stale_extras, blocks_for( nx ), BLOCK, 0, nx, xs, ( const unsigned char * ) lvl );
             if ( ! merge_extras( n, nx ) ) return false;
         }
+        lap( "extras" );
+        if ( ztrace ) std::printf( "    zones faces out of ring 1: %u\n", hc.nx );
         cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( grid diagram )" );
         t_geom += grid_now() - t0;
         return true;
@@ -2251,54 +2395,86 @@ struct Solver {
     /// THE FACES OUT OF RING 1, on the host ( `Evaluator::gather_extras` + `symmetrize` ): sorted by ( i, j ); for a density whose
     /// faces are not exact, each pair once per side at the mean of what both saw ( a face seen from one side only counts half );
     /// then by row for the card
+    /// the faces out of ring 1 as rows ( `exr` ), on the card: the live ones as ( i, j ) keys ( twice when symmetrized ), sorted by
+    /// weight then ( stable ) by key -- a fixed order, whatever the order the atomics wrote them in --, then the heads of the rows
+    /// scanned. Two reads back: the number of entries, the number of rows
     bool merge_extras( int n, SI nx ) {
+        const bool sym = kind != 0;
+        const SI M = sym ? 2 * nx : nx;
+        if ( M > exm_cap || 3 * M + 1 > exr_cap ) {
+            const SI cap = 2 * M;
+            size_t b0 = 0, b1 = 0;
+            cub::DoubleBuffer<unsigned long long> dk( nullptr, nullptr ), dv( nullptr, nullptr );
+            cub::DeviceRadixSort::SortPairs( nullptr, b0, dk, dv, int( cap ), 0, 64, queue.stream );
+            cub::DeviceScan::ExclusiveSum( nullptr, b1, ( int * ) nullptr, ( int * ) nullptr, int( cap ), queue.stream );
+            exm_tmp_bytes = std::max( b0, b1 );
+            exm_k = grab<unsigned long long>( 2 * cap ); exm_w = grab<unsigned long long>( 2 * cap );
+            exm_h = grab<int>( 2 * cap + 1 ); exm_tmp = grab<unsigned char>( SI( exm_tmp_bytes ) );
+            exr_cap = 3 * cap + 1;
+            exr_buf = grab<int>( exr_cap ); exr_w = grab<double>( cap );
+            if ( ! room() ) return false;
+            exm_cap = cap;
+        }
+        unsigned *ne_d = reinterpret_cast<unsigned *>( exm_h + 2 * exm_cap );
+        zero_fill( queue, ne_d, sizeof( unsigned ) );
+        launch_kernel( queue, &ex_keys_kernel, blocks_for( nx ), BLOCK, 0, nx, xs, sym, exm_k, exm_w, ne_d );
+        unsigned ne_h = 0;
+        down( &ne_h, ( const unsigned * ) ne_d, 1 );
+        const SI ne = ne_h;
+        if ( ! ne ) { exr.nr = 0; return true; }
+        // ( by weight, the keys along; then by key, stable: a fixed order )
+        cub::DoubleBuffer<unsigned long long> K( exm_k, exm_k + exm_cap ), W( exm_w, exm_w + exm_cap );
+        size_t bytes = exm_tmp_bytes;
+        cuda_check( cub::DeviceRadixSort::SortPairs( exm_tmp, bytes, W, K, int( ne ), 0, 64, queue.stream ), "sort of the faces ( weights )" );
+        int top = 1;                                     // ( the bits of the largest index: i, j < n^2 )
+        while ( ( SI( 1 ) << top ) < SI( n ) * n ) ++top;
+        bytes = exm_tmp_bytes;
+        cuda_check( cub::DeviceRadixSort::SortPairs( exm_tmp, bytes, K, W, int( ne ), 0, 32 + top, queue.stream ), "sort of the faces ( keys )" );
+        int *head = exm_h, *pos = exm_h + exm_cap;
+        launch_kernel( queue, &ex_heads_kernel, blocks_for( ne ), BLOCK, 0, ne, ( const unsigned long long * ) K.Current(), head );
+        bytes = exm_tmp_bytes;
+        cuda_check( cub::DeviceScan::ExclusiveSum( exm_tmp, bytes, head, pos, int( ne ), queue.stream ), "scan of the rows of the faces" );
+        int *rows = exr_buf, *beg = exr_buf + ne, *cols = exr_buf + 2 * ne + 1;
+        int *nr_d = reinterpret_cast<int *>( ne_d );
+        launch_kernel( queue, &ex_rows_kernel, blocks_for( ne ), BLOCK, 0, ne, ( const unsigned long long * ) K.Current(), ( const unsigned long long * ) W.Current(),
+                       ( const int * ) head, ( const int * ) pos, rows, beg, cols, exr_w, nr_d );
+        int nr = 0;
+        down( &nr, ( const int * ) nr_d, 1 );
+        exr = ExRows{ rows, beg, cols, exr_w, SI( nr ) };
+        if ( merge_check ) check_merge( n, nx, ne );
+        return true;
+    }
+
+    /// ( `merge_check` ) the host's former merge of the same faces: per row, sum w, sum w i and sum w j against the card's rows
+    void check_merge( int n, SI nx, SI ne ) {
         std::vector<int> hi( nx ), hj( nx );
         std::vector<double> hw( nx );
         down( hi.data(), xs.i, nx ); down( hj.data(), xs.j, nx ); down( hw.data(), xs.w, nx );
-        struct E { int i, j; double w; };
-        std::vector<E> e( nx );
-        e.clear();
-        for ( SI q = 0; q < nx; ++q ) if ( hi[ q ] >= 0 ) e.push_back( { hi[ q ], hj[ q ], hw[ q ] } );   // ( -1: dropped, `zones_stale_extras` )
-        const bool exact = kind == 0;
-        if ( ! exact ) for ( auto &x : e ) if ( x.i > x.j ) std::swap( x.i, x.j );
-        std::sort( e.begin(), e.end(), []( const E &a, const E &b ) { return a.i != b.i ? a.i < b.i : a.j != b.j ? a.j < b.j : a.w < b.w; } );
-        if ( ! exact ) {
-            std::vector<E> merged;
-            for ( size_t q = 0; q < e.size(); ) {
-                size_t r = q;
-                double s = 0;
-                for ( ; r < e.size() && e[ r ].i == e[ q ].i && e[ r ].j == e[ q ].j; ++r ) s += e[ r ].w;
-                merged.push_back( { e[ q ].i, e[ q ].j, s / 2 } );
-                merged.push_back( { e[ q ].j, e[ q ].i, s / 2 } );
-                q = r;
+        const SI nr = exr.nr;
+        std::vector<int> rows( nr ), beg( nr + 1 ), cols( ne );
+        std::vector<double> w( ne );
+        down( rows.data(), exr.rows, nr ); down( beg.data(), exr.beg, nr + 1 ); down( cols.data(), exr.cols, ne ); down( w.data(), exr.w, ne );
+        const bool sym = kind != 0;
+        std::vector<double> a( 3 * SI( n ) * n, 0.0 ), b( 3 * SI( n ) * n, 0.0 );
+        for ( SI q = 0; q < nx; ++q ) {
+            if ( hi[ q ] < 0 ) continue;
+            const double v = sym ? hw[ q ] / 2 : hw[ q ];
+            auto add = [&]( int i, int j ) { a[ 3 * SI( i ) ] += v; a[ 3 * SI( i ) + 1 ] += v * ( j / n ); a[ 3 * SI( i ) + 2 ] += v * ( j % n ); };
+            add( hi[ q ], hj[ q ] ); if ( sym ) add( hj[ q ], hi[ q ] );
+        }
+        bool sorted = true;
+        for ( SI r = 0; r < nr; ++r ) {
+            if ( r && rows[ r ] <= rows[ r - 1 ] ) sorted = false;
+            for ( int e = beg[ r ]; e < beg[ r + 1 ]; ++e ) {
+                const int i = rows[ r ], j = cols[ e ];
+                b[ 3 * SI( i ) ] += w[ e ]; b[ 3 * SI( i ) + 1 ] += w[ e ] * ( j / n ); b[ 3 * SI( i ) + 2 ] += w[ e ] * ( j % n );
             }
-            std::sort( merged.begin(), merged.end(), []( const E &a, const E &b ) { return a.i != b.i ? a.i < b.i : a.j < b.j; } );
-            e.swap( merged );
         }
-        std::vector<int> rows, beg, cols;
-        std::vector<double> w;
-        for ( size_t q = 0; q < e.size(); ++q ) {
-            if ( rows.empty() || rows.back() != e[ q ].i ) { rows.push_back( e[ q ].i ); beg.push_back( int( q ) ); }
-            cols.push_back( e[ q ].j );
-            w.push_back( e[ q ].w );
-        }
-        beg.push_back( int( e.size() ) );
-        const SI ne = SI( e.size() ), nr = SI( rows.size() );
-        if ( 2 * nr + 1 + ne > exr_cap ) {
-            exr_cap = 2 * ( 2 * nr + 1 + ne );
-            exr_buf = grab<int>( exr_cap );
-            exr_w = grab<double>( exr_cap );
-            if ( ! ok ) return false;
-        }
-        std::vector<int> buf;
-        buf.insert( buf.end(), rows.begin(), rows.end() );
-        buf.insert( buf.end(), beg.begin(), beg.end() );
-        buf.insert( buf.end(), cols.begin(), cols.end() );
-        upload( exr_buf, buf.data(), SI( buf.size() ) );
-        upload( exr_w, w.data(), ne );
-        exr = ExRows{ exr_buf, exr_buf + nr, exr_buf + 2 * nr + 1, exr_w, nr };
-        ( void ) n;
-        return true;
+        double dm = 0, am = 0;
+        for ( size_t k = 0; k < a.size(); ++k ) { dm = std::max( dm, std::abs( a[ k ] - b[ k ] ) ); am = std::max( am, std::abs( a[ k ] ) ); }
+        std::printf( "    merge check: %lld faces, %lld entries, %lld rows, rows sorted %d, max |host - card| %.2e ( max %.2e )\n",
+                     ( long long ) nx, ( long long ) ne, ( long long ) nr, int( sorted ), dm, am );
+        std::fflush( stdout );
     }
 
     // ---- the linear system ------------------------------------------------------------------------------------------
@@ -2753,12 +2929,18 @@ void diagram_call( const CudaQueue &queue, Alloc &allocator, const auto &psi_in,
     const SI nn = SI( N ) * N;
     Solver<Alloc> sv( queue, allocator, N );
     sv.zones = op[ 1 ] != 0;
+    if ( no > 4 ) { const int fl = int( op[ 4 ] ); sv.zone_f32 = fl & ( 1 | 32 | 64 ); sv.zone_predict = ! ( fl & 4 ); sv.merge_check = fl & 8; }   // ( experiment flags )
     if ( ! sv.prepare( N, DensityIn{} ) ) return;
     sv.kind = 0;
     using TP = std::remove_const_t<typename std::decay_t<decltype( psi_in )>::TF>;
     launch_kernel( queue, &read_input<TP>, blocks_for( nn ), BLOCK, 0, nn, strided( psi_in ), 1.0, sv.psi );
     sv.run( N, sv.psi, true );                           // ( warm-up: the lists grow there )
-    if ( op[ 3 ] != 0 ) { sv.ztrace = true; std::printf( "  traced diagram\n" ); sv.run( N, sv.psi, true ); sv.ztrace = false; }
+    if ( op[ 3 ] != 0 ) {
+        cudaFuncAttributes fa{};
+        if ( cudaFuncGetAttributes( &fa, ( const void * ) &zones1_kernel<GUnit> ) == cudaSuccess )
+            std::printf( "  zones1_kernel<GUnit>: %d registers, %zu bytes of local memory, max %d threads per block\n", fa.numRegs, fa.localSizeBytes, fa.maxThreadsPerBlock );
+        sv.ztrace = true; std::printf( "  traced diagram\n" ); sv.run( N, sv.psi, true ); sv.ztrace = false;
+    }
     double tg = 1e300, tt = 1e300;
     for ( int r = 0; r < reps; ++r ) {
         cuda_check( cudaStreamSynchronize( queue.stream ), "sync ( grid diagram )" );

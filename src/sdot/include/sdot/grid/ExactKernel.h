@@ -61,7 +61,7 @@ struct ExactKernel {
             const int na = a + ox[ o ], nb = b + oy[ o ];
             if( na < 0 || na >= N || nb < 0 || nb >= N ) continue;
             const T kx = ox[ o ], ky = oy[ o ];
-            const T c = ( kx * kx + ky * ky + pi[ 0 ] - pi[ ox[ o ] * P + oy[ o ] ] ) / 2;
+            const T c = ( kx * kx + ky * ky + ( pi[ 0 ] - pi[ ox[ o ] * P + oy[ o ] ] ) ) / 2;
             T s[ C ];
             bool out = false;
             for( int e = 0; e < n; ++e ) { s[ e ] = kx * px[ e ] + ky * py[ e ] - c; out |= s[ e ] > 0; }

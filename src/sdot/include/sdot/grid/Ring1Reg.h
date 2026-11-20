@@ -36,6 +36,7 @@ struct Ring1Reg {
     /// the extra outputs for the zone certificate. `p2`: psi padded by two cells of -inf ( `Evaluator::pad( 2 )` ), N + 4 columns
     struct Ext {
         const T *p2;
+        bool predict = true;                              // false: no prediction ( cut2, cuto stay 0: the caller predicts )
         alignas( 64 ) T zb[ 4 ][ B ];                    // the box, absolute: x min, x max, y min, y max
         U inv, cut2;                                      // bit x: the cell is inverted / a seed of ring 2 cuts it
         U cuto[ 16 ];                                     // bit x: the seed o of ring 2 ( `r2x`, `r2y` ) cuts the cell
@@ -95,7 +96,7 @@ struct Ring1Reg {
         const V pj[ D ] = { L[ 0 ], L[ 1 ], L[ 2 ], C[ 2 ], R[ 2 ], R[ 1 ], R[ 0 ], C[ 0 ] };
         V h[ D ];
         [&]<int... k>( std::integer_sequence<int,k...> ) {
-            ( ( h[ k ] = ( V( T( Tb::off_sqn[ k ] ) ) + pi - pj[ k ] ) * half ), ... );
+            ( ( h[ k ] = ( V( T( Tb::off_sqn[ k ] ) ) + ( pi - pj[ k ] ) ) * half ), ... );
             ( ( ok[ k ] |= ( unsigned long long )( asimd::to_bits( h[ k ] < V( inf ) ) ) << ( j * W ) ), ... );
         }( std::make_integer_sequence<int,D>() );
         // the box ( it wins ties, as in `row_block` )
@@ -140,6 +141,7 @@ struct Ring1Reg {
             ( ( mg = asimd::min( mg, mulc<-Tb::dir_y[ k ]>( X[ k ] - X[ ( k + D - 1 ) % D ] ) + mulc<Tb::dir_x[ k ]>( Y[ k ] - Y[ ( k + D - 1 ) % D ] ) ) ), ... );
         }( std::make_integer_sequence<int,D>() );
         ex.inv |= U( asimd::to_bits( mg < V( T( -1e-9 ) ) * sc ) ) << ( j * W );
+        if( ! ex.predict ) return;
         // the prediction: a seed j of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j ( exact for ring 2 )
         V c2 = zero, one( T( 1 ) );
         [&]<int... o>( std::integer_sequence<int,o...> ) {
@@ -147,8 +149,8 @@ struct Ring1Reg {
                 constexpr int kx = r2x[ o ], ky = r2y[ o ];
                 const V h = support<kx,ky,sup_mask( kx, ky )>( X, Y );
                 const V pj = V::load_unaligned( q[ kx + 2 ] + j * W + ky );
-                ex.cuto[ o ] |= U( asimd::to_bits( h + h > V( T( kx * kx + ky * ky ) ) + pi - pj ) ) << ( j * W );
-                c2 = asimd::select( h + h > V( T( kx * kx + ky * ky ) ) + pi - pj, one, c2 );
+                ex.cuto[ o ] |= U( asimd::to_bits( h + h > V( T( kx * kx + ky * ky ) ) + ( pi - pj ) ) ) << ( j * W );
+                c2 = asimd::select( h + h > V( T( kx * kx + ky * ky ) ) + ( pi - pj ), one, c2 );
             }() ), ... );
         }( std::make_integer_sequence<int,16>() );
         ex.cut2 |= U( asimd::to_bits( c2 > zero ) ) << ( j * W );

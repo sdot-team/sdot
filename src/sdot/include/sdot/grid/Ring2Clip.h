@@ -92,7 +92,7 @@ struct Ring2Clip {
     // the cut by the seed q of ring 2 ( offset ( ox, oy ), direction k ): o . x <= h, h = ( |o|^2 + psi_i - psi_j ) / 2
     template<int q> [[gnu::always_inline]] static void clip( V ( &X )[ D ], V ( &Y )[ D ], const V &pi, const V &pj, signed char ( &own )[ D ][ B ], int o, U &all_out ) {
         constexpr int ox = r2x[ q ], oy = r2y[ q ], oi = off_index( ox, oy ), k = T2::off_dir[ oi ];
-        const V h = ( V( T( ox * ox + oy * oy ) ) + pi - pj ) * V( T( 0.5 ) );
+        const V h = ( V( T( ox * ox + oy * oy ) ) + ( pi - pj ) ) * V( T( 0.5 ) );
         V d[ D ];
         [&]<int... m>( std::integer_sequence<int,m...> ) {
             ( ( d[ m ] = V( T( ox ) ) * X[ m ] + V( T( oy ) ) * Y[ m ] ), ... );

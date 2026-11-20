@@ -81,7 +81,7 @@ struct StencilKernel {
             const T *pj = pi + Tb::off_x[ o ] * P + Tb::off_y[ o ];
             #pragma omp simd
             for( int x = 0; x < B; ++x ) {
-                T hk = ( c + pi[ x ] - pj[ x ] ) * s;
+                T hk = ( c + ( pi[ x ] - pj[ x ] ) ) * s;
                 bool lt = hk < h[ d ][ x ];
                 h[ d ][ x ] = lt ? hk : h[ d ][ x ];
                 own[ d ][ x ] = lt ? (signed char)o : own[ d ][ x ];
@@ -221,7 +221,7 @@ struct StencilKernel {
             const int sh = Tb::off_x[ o ] * P + Tb::off_y[ o ];
             #pragma omp simd
             for( int x = 0; x < B; ++x ) {
-                T hk = ( c + psi_pad[ base[ x ] ] - psi_pad[ base[ x ] + sh ] ) * s;
+                T hk = ( c + ( psi_pad[ base[ x ] ] - psi_pad[ base[ x ] + sh ] ) ) * s;
                 bool lt = hk < h[ d ][ x ];
                 h[ d ][ x ] = lt ? hk : h[ d ][ x ];
                 own[ d ][ x ] = lt ? (signed char)o : own[ d ][ x ];

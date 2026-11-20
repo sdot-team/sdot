@@ -61,8 +61,10 @@ inline double now_ms() { return std::chrono::duration<double, std::milli>( std::
 // ================================================================================================
 // threads
 // ================================================================================================
-/// CONTIGUOUS SLICES of `[ 0, n )`, one per thread of the CPU queue; the partial results combined in thread order, so that the
-/// result depends on the number of threads only. Serial below `min_work` items of work ( a launch costs a few microseconds ).
+inline long par_regions = 0, par_serial = 0;          // ( TEMPORARY: SDOT_SOLVE_TRACE, the parallel / serial loops of the launcher )
+/// CONTIGUOUS SLICES of `[ 0, n )`, one per thread of the CPU queue, at most one per `min_work` items of work; the partial results
+/// combined in thread order, so that the result depends on the number of threads ( and the work ) only. Serial below `min_work`
+/// items of work ( a launch costs a few microseconds ).
 struct Par {
     static constexpr SI min_work = SI( 1 ) << 15;
     const CpuQueue *queue = nullptr;
@@ -76,9 +78,12 @@ struct Par {
     /// `f( b, e, t )` on the slices of `[ 0, n )`; `work`: what the whole loop touches
     template<class F>
     void slices( int n, SI work, F &&f ) const {
-        if( ! on( work ) || n < 2 ) { if( n > 0 ) f( 0, n, 0 ); return; }
-        queue->run_threads( nt, [&]( int t ) {
-            const int b = int( SI( n ) * t / nt ), e = int( SI( n ) * ( t + 1 ) / nt );
+        if( ! on( work ) || n < 2 ) { ++par_serial; if( n > 0 ) f( 0, n, 0 ); return; }
+        ++par_regions;
+        // ( a thread per `min_work` of work at most: the small loops of the coarse levels pay the launch of few threads )
+        const int m = int( std::min<SI>( nt, std::max<SI>( 2, work / min_work ) ) );
+        queue->run_threads( m, [&]( int t ) {
+            const int b = int( SI( n ) * t / m ), e = int( SI( n ) * ( t + 1 ) / m );
             if( b < e ) f( b, e, t );
         } );
     }
@@ -130,6 +135,23 @@ struct GridListPd {
 // ================================================================================================
 /// `Integ`: a density of `GridDensities.h` ( SIMD tiers + a scalar path ), or `DistCells`, the cells of sdot ( any density ). One copy of it per thread ( its
 /// scratch ); the threads take contiguous slices of rows or of cells.
+/// the default of `Evaluator::zone_prev` ( the experiments switch it for the evaluators that `solve` makes ). Off: on sharp 1024 it
+/// gains 1 % and keeps at ring 1 slivers of 2e-8 that a ring-2 seed cuts, below the tolerance of the zone certificate
+inline bool zone_prev_default = false;
+/// the zone tolerance counts eps |psi_i| per cell ( the former scale, for the rounding of |k|^2 + psi_i before - psi_j ). Off ( the
+/// default ): the plane offsets are |k|^2 + ( psi_i - psi_j ), and the scale is the distance from the seed to its cell ( `seed_reach` )
+inline bool zone_psi_tol = false;
+/// ( experiment ) the bound of a cell in the zone tolerance: 0 ( dm + reach + s ) s, the former form ( s the zone side ); 1 ( the
+/// default ) ( dm + reach + 1 ) ( w + h + 1 ), the rounding of the edges ( moved by ~ eps ( dm + reach ) ) along its perimeter ( w, h its
+/// box ); `zone_tol_c` the factor of the tolerance, eps times a margin
+inline int zone_tol_form = 1;
+inline double zone_tol_c = 2e-15;                 // ( sharp 1024: 5e-16 flags exact zones ( rounding ), 2e-15 does not )
+
+/// ( diagnostic, null by default ) called at the end of each `run_zones` with the level of each cell and the time of the call: the
+/// experiments on what the previous calls tell ( `exp_rings_lvlseq_n14.py` )
+inline void ( *lvl_hook )( void *ctx, int N, const unsigned char *lvl, const double *psi, double ms ) = nullptr;
+inline void *lvl_hook_ctx = nullptr;
+
 template<class Integ>
 struct Evaluator {
     int N, P1;                                           // P1 = N + 2: padded planes of the hessian weights
@@ -163,6 +185,9 @@ struct Evaluator {
     int zone0 = 8;                                       // side of the zones of the ring-1 table, in pixels
     T zone_min = T( 1 );                                 // the zones of the next tables halve down to this side
     bool zone_predict = true;                            // ring 2 before the first table on the cells the local certificate flags
+    bool zone_prev = zone_prev_default;                  // ( fused, with `zone_predict` ) the prediction = the cells at ring 2 or more in the previous
+                                                         // call ( the support test on the first call ); the misses go to the tables
+    std::vector<unsigned char> lvl_prev;                 // ( fused ) `lvl` of the previous call ( `zone_prev` )
     bool zone_all2 = false;                              // ( fused, experiment ) every cell built with ring 2 at once: no ring 1, no prediction
     bool k2_reg = true;                                  // ( fused ) ring 2 by `Ring2Reg` ( unrolled, asimd ); false: `StencilKernel<2>::cells_verts`
     int k2_span = 0;                                     // ( with `k2_reg` ) the tightening on the pairs of span <= k2_span ( 4, 5, 6 ), certified; 0: the 21 pairs ( sharp needs span 6 on 98 % of its ring-2 cells: no gain )
@@ -502,7 +527,7 @@ struct Evaluator {
                 for( int d = 0; d < side && n; ++d ) {
                     const int ja = it.u * side + c, jb = it.v * side + d, kx = ja - a, ky = jb - b;
                     if( std::abs( kx ) <= skip && std::abs( ky ) <= skip ) continue;
-                    const T fx = T( kx ), fy = T( ky ), cc = ( fx * fx + fy * fy + pi - psi[ size_t( ja ) * N + jb ] ) / 2;
+                    const T fx = T( kx ), fy = T( ky ), cc = ( fx * fx + fy * fy + ( pi - psi[ size_t( ja ) * N + jb ] ) ) / 2;
                     bool out = false;
                     for( int e = 0; e < n; ++e ) { sv[ e ] = fx * px[ e ] + fy * py[ e ] - cc; out |= sv[ e ] > 0; }
                     if( ! out ) continue;
@@ -531,7 +556,7 @@ struct Evaluator {
                 const int q = o++, na = a + ox[ q ], nb = b + oy[ q ];
                 if( na < 0 || na >= N || nb < 0 || nb >= N ) continue;
                 const T kx = T( ox[ q ] ), ky = T( oy[ q ] );
-                p.dir[ 0 ] = kx; p.dir[ 1 ] = ky; p.off = ( kx * kx + ky * ky + pi[ 0 ] - pi[ ox[ q ] * P + oy[ q ] ] ) / 2; p.id = q;
+                p.dir[ 0 ] = kx; p.dir[ 1 ] = ky; p.off = ( kx * kx + ky * ky + ( pi[ 0 ] - pi[ ox[ q ] * P + oy[ q ] ] ) ) / 2; p.id = q;
                 return true;
             }
             return false;
@@ -556,6 +581,41 @@ struct Evaluator {
         n = c.nb;
         for( int e = 0; e < n; ++e ) { px[ e ] = c.vx[ e ]; py[ e ] = c.vy[ e ]; pl[ e ] = c.cid[ e ]; }
         return true;
+    }
+
+    // the areas of the polygon ( px, py, n ) in x <= X ( AL, when `cx` ), y <= Y ( AB, when `cy` ) and both ( ALB, when both ), in a
+    // frame centred on ( X, Y ): the pieces of a cell over 2 x 2 zones at most by differences, 3 cuts instead of 4 per piece ( the
+    // card's `quad_area` )
+    static void quad_areas( const T *px, const T *py, int n, T X, T Y, bool cx, bool cy, T &AL, T &AB, T &ALB ) {
+        constexpr int C = ExactKernel<T>::C + 8;
+        T ax[ C ], ay[ C ], bx[ C ], by[ C ], dx[ C ], dy[ C ];
+        const int m = std::min( n, C - 8 );
+        for( int e = 0; e < m; ++e ) { ax[ e ] = px[ e ] - X; ay[ e ] = py[ e ] - Y; }
+        auto cut = [&]( const T *sx, const T *sy, int k, T *ox, T *oy, bool along_x ) {   // keep x <= 0 ( along_x ) or y <= 0
+            int q = 0;
+            for( int e = 0; e < k; ++e ) {
+                const int f = e + 1 == k ? 0 : e + 1;
+                const T s0 = along_x ? sx[ e ] : sy[ e ], s1 = along_x ? sx[ f ] : sy[ f ];
+                if( s0 <= 0 ) { ox[ q ] = sx[ e ]; oy[ q ] = sy[ e ]; ++q; }
+                if( ( s0 <= 0 ) != ( s1 <= 0 ) ) {
+                    const T u = s0 / ( s0 - s1 );
+                    ox[ q ] = along_x ? T( 0 ) : sx[ e ] + u * ( sx[ f ] - sx[ e ] ); oy[ q ] = along_x ? sy[ e ] + u * ( sy[ f ] - sy[ e ] ) : T( 0 ); ++q;
+                }
+            }
+            return q;
+        };
+        auto area = [&]( const T *sx, const T *sy, int k ) {
+            T s = 0;
+            for( int e = 0; e < k; ++e ) { const int f = e + 1 == k ? 0 : e + 1; s += sx[ e ] * sy[ f ] - sy[ e ] * sx[ f ]; }
+            return s / 2;
+        };
+        AL = AB = ALB = 0;
+        if( cx ) {
+            const int l = cut( ax, ay, m, bx, by, true );
+            AL = area( bx, by, l );
+            if( cy ) { const int lb = cut( bx, by, l, dx, dy, false ); ALB = area( dx, dy, lb ); }
+        }
+        if( cy ) { const int b = cut( ax, ay, m, bx, by, false ); AB = area( bx, by, b ); }
     }
 
     // the area of the polygon ( px, py, n ) inside the box [ x0, x1 ] x [ y0, y1 ] ( same frame )
@@ -735,7 +795,7 @@ struct Evaluator {
                         const int j = prev_nb[ r ], dx = j / N - i / N, dy = j % N - i % N;
                         if( std::abs( dx ) > ek.RB || std::abs( dy ) > ek.RB ) continue;
                         const int o = ek_idx[ size_t( dx + ek.RB ) * S + dy + ek.RB ];
-                        const T fx = T( dx ), fy = T( dy ), cc = ( fx * fx + fy * fy + psi[ i ] - psi[ j ] ) / 2;
+                        const T fx = T( dx ), fy = T( dy ), cc = ( fx * fx + fy * fy + ( psi[ i ] - psi[ j ] ) ) / 2;
                         bool out = false;
                         for( int e = 0; e < n; ++e ) { sv[ e ] = fx * px[ e ] + fy * py[ e ] - cc; out |= sv[ e ] > 0; }
                         if( ! out || n + 1 >= C ) continue;
@@ -1149,6 +1209,10 @@ struct Evaluator {
         const T inf = std::numeric_limits<T>::infinity(), lo = T( -0.5 ), hi = T( N ) - T( 0.5 );
         pad( 1, psi, p1 );
         if( zone_predict || zone_all2 || k1_reg ) pad( 2, psi, p2 );
+        // ( the previous call's levels, the prediction of this one )
+        const bool prv = zone_predict && zone_prev && fused_last && lvl.size() == size_t( nn );
+        if( prv ) lvl_prev.swap( lvl );
+        else lvl_prev.clear();
         lvl.assign( nn, 0 );
         fused_last = true;
         auto tk = [&]( int k, double &tc ) { if( kern_timing ) { const double t = now_ms(); t_kern[ k ] += t - tc; tc = t; } };
@@ -1159,7 +1223,9 @@ struct Evaluator {
         double tz = now_ms();
         auto lap = [&]( int k ) { const double t = now_ms(); t_zone[ k ] += t - tz; tz = t; };
         const T sn = T( 1e-13 );                         // ( a cell past a zone line by rounding only is in one zone, see the card's )
-        auto ztol = [&]( T az, T sr ) { return T( 1e-14 ) * ( az + sr ); };
+        auto ztol = [&]( T az, T sr ) { return T( zone_tol_c ) * ( az + sr ); };
+        const int tform = zone_tol_form;
+        auto cbound = [&]( T dm, T pa, T w, T h, T s ) { return tform == 0 ? ( dm + pa + s ) * s : ( dm + pa + 1 ) * ( w + h + 1 ); };
         auto put_box = [&]( int i, const T *bb ) {
             // ( rounded outward by more than one float ulp, no libm call; the same in the SIMD scatter of ring 1 )
             float *z = &zbx[ 4 * size_t( i ) ];
@@ -1168,20 +1234,41 @@ struct Evaluator {
             z[ 2 ] = float( c2 - std::abs( c2 ) * T( 0x1p-22 ) - T( 1e-30 ) ); z[ 3 ] = float( c3 + std::abs( c3 ) * T( 0x1p-22 ) + T( 1e-30 ) );
         };
         auto empty_box = [&]( int i ) { zbx[ 4 * size_t( i ) ] = 1; zbx[ 4 * size_t( i ) + 1 ] = 0; };
+        // the rounding scale of a cell beside its zone: its vertices are computed relative to the seed, from plane offsets
+        // ( |k|^2 + psi_i - psi_j ) / 2 ~ k . x for x on the cell, so they move by ~ eps times the distance from the seed to the cell
+        // ( absolute box bb ); `zone_psi_tol`: |psi_i| instead, the former scale
+        auto seed_reach = [&]( int i, const T *bb ) -> T {
+            if( zone_psi_tol ) return std::abs( psi[ i ] );
+            const T a = T( i / N ), b = T( i % N );
+            return std::max( std::max( std::abs( bb[ 0 ] - a ), std::abs( bb[ 1 ] - a ) ), std::max( std::abs( bb[ 2 ] - b ), std::abs( bb[ 3 ] - b ) ) );
+        };
         // the pieces of a polygon cell ( absolute box bb ) in the zones of side s that `in( u, v )` counts
         auto pieces = [&]( int i, const T *px, const T *py, int n, T ar, const T *bb, T s, int nzs, auto &&in, std::vector<T> &E ) {
-            const T pa = std::abs( psi[ i ] );           // ( the planes' rounding: edges moved by ~ eps |psi|, see the card's `cell_pieces` )
             auto zof = [&]( T x ) { return std::clamp( int( std::floor( ( x - lo ) / s ) ), 0, nzs - 1 ); };
             const int a = i / N, b = i % N;
+            const T pa = seed_reach( i, bb );            // ( see `zone_psi_tol` )
             const int u0 = zof( bb[ 0 ] + sn ), u1 = zof( bb[ 1 ] - sn ), v0 = zof( bb[ 2 ] + sn ), v1 = zof( bb[ 3 ] - sn );
+            // ( over 2 x 2 zones at most: the pieces by differences of the parts in x <= X, y <= Y, X and Y the lines between them )
+            const bool one = u0 == u1 && v0 == v1, small = ! one && u1 - u0 <= 1 && v1 - v0 <= 1;
+            T AL = 0, AB = 0, ALB = 0;
+            if( small ) quad_areas( px, py, n, lo + ( u0 + 1 ) * s - a, lo + ( v0 + 1 ) * s - b, u1 > u0, v1 > v0, AL, AB, ALB );
             for( int u = u0; u <= u1; ++u )
                 for( int v = v0; v <= v1; ++v ) {
                     if( ! in( u, v ) ) continue;
                     const T r0 = lo + u * s, r1 = std::min( hi, lo + ( u + 1 ) * s ), r2 = lo + v * s, r3 = std::min( hi, lo + ( v + 1 ) * s );
                     const size_t z = size_t( u ) * nzs + v;
-                    E[ 2 * z ] += u0 == u1 && v0 == v1 ? ar : rect_area( px, py, n, r0 - a, r1 - a, r2 - b, r3 - b );
+                    T pc;
+                    if( one ) pc = ar;
+                    else if( small ) {
+                        const bool lu = u == u0, lv = v == v0;
+                        if( u1 > u0 && v1 > v0 ) pc = lu ? ( lv ? ALB : AL - ALB ) : ( lv ? AB - ALB : ar - AL - AB + ALB );
+                        else if( u1 > u0 ) pc = lu ? AL : ar - AL;
+                        else pc = lv ? AB : ar - AB;
+                    } else
+                        pc = rect_area( px, py, n, r0 - a, r1 - a, r2 - b, r3 - b );
+                    E[ 2 * z ] += pc;
                     const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
-                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + pa + s ) * s;
+                    E[ 2 * z + 1 ] += cbound( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ), pa, bb[ 1 ] - bb[ 0 ], bb[ 3 ] - bb[ 2 ], s );
                 }
         };
         // a polygon cell integrated ( its faces out of ring 1 tagged with its level ) and added to a table
@@ -1283,7 +1370,7 @@ struct Evaluator {
                     const size_t z = size_t( u0 ) * nzs + v0;
                     const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
                     E[ 2 * z ] += ar[ x ];
-                    E[ 2 * z + 1 ] += ( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ) + std::abs( psi[ i ] ) + s ) * s;
+                    E[ 2 * z + 1 ] += cbound( std::max( std::max( std::abs( bb[ 0 ] - cx ), std::abs( bb[ 1 ] - cx ) ), std::max( std::abs( bb[ 2 ] - cy ), std::abs( bb[ 3 ] - cy ) ) ), seed_reach( i, bb ), bb[ 1 ] - bb[ 0 ], bb[ 3 ] - bb[ 2 ], s );
                 } else {
                     poly();
                     pieces( i, px, py, D2, ar[ x ], bb, s, nzs, []( int, int ) { return true; }, E );
@@ -1389,7 +1476,9 @@ struct Evaluator {
                 one |= on << o;
                 // the bound, the sums into the table ( the lanes thrown or over several zones: one by one below )
                 const V dm = asimd::max( asimd::max( vabs( z0 - cx ), vabs( z1 - cx ) ), asimd::max( vabs( z2 - cy ), vabs( z3 - cy ) ) );
-                const V zv = ( dm + vabs( V::load_unaligned( ps + o ) ) + vs ) * vs;
+                const V sb = V::iota( T( b0 + o ) ), sa = V( T( a ) );
+                const V pv = zone_psi_tol ? vabs( V::load_unaligned( ps + o ) ) : asimd::max( asimd::max( vabs( z0 - sa ), vabs( z1 - sa ) ), asimd::max( vabs( z2 - sb ), vabs( z3 - sb ) ) );
+                const V zv = tform == 0 ? ( dm + pv + vs ) * vs : ( dm + pv + V( T( 1 ) ) ) * ( ( z1 - z0 ) + ( z3 - z2 ) + V( T( 1 ) ) );
                 const V rv = V::load_aligned( ra + o );
                 const U g = on & ~( thrown >> o ) & lanes;
                 const size_t zz = size_t( u ) * nzs + v;
@@ -1494,7 +1583,7 @@ struct Evaluator {
                     // ( a full block in registers: the box, the inversion test and the prediction there too, the scatter in asimd below )
                     const bool reg = k1_reg && n == B && zone0 % R1::W == 0;
                     typename R1::Ext rex;
-                    if( reg ) { rex.p2 = p2.data(); R1::block( N, p1.data(), a, b0, vx, vy, fok, ra, &rex ); }
+                    if( reg ) { rex.p2 = p2.data(); rex.predict = ! prv; R1::block( N, p1.data(), a, b0, vx, vy, fok, ra, &rex ); }
                     else if( k1_reg ) {                          // ring 1 in registers ( `Ring1Reg` ), straight into vx, vy
                         if( n == B ) R1::block( N, p1.data(), a, b0, vx, vy, fok, ra );
                         else R1::block_tail( N, p1.data(), a, b0, n, vx, vy, fok, ra );
@@ -1514,6 +1603,13 @@ struct Evaluator {
                     tk( 1, tc );
                     if( reg ) {
                         if( ! zone_predict ) rex.cut2 = 0;
+                        else if( prv ) {                 // ( the cells at ring 2 or more in the previous call )
+                            using U = unsigned long long;
+                            const unsigned char *lp = lvl_prev.data() + size_t( a ) * N + b0;
+                            U c = 0;
+                            for( int x = 0; x < B; ++x ) c |= U( lp[ x ] >= 2 ) << x;
+                            rex.cut2 = c;
+                        }
                         tk( 2, tc );
                         const double k2t = t_kern[ 4 ] + t_kern[ 5 ] + t_kern[ 6 ];
                         scatter_reg( t, a, b0, rex, vx, vy, fok, ra, ms, face, bad, s, nzs, E, fl, pr, npr, pd );
@@ -1524,7 +1620,8 @@ struct Evaluator {
                     // THE PREDICTION, in SIMD over the block: a seed of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j, h( k ) =
                     // max_v k . v its support ( `p2`: psi padded by -inf, a seed out of the grid cuts nothing ); level 2 at once ( below )
                     alignas( 64 ) unsigned char cut2[ B ] = {};
-                    if( zone_predict ) {
+                    if( prv ) for( int x = 0; x < n; ++x ) cut2[ x ] = lvl_prev[ size_t( a ) * N + b0 + x ] >= 2;
+                    else if( zone_predict ) {
                         const int P2 = N + 4;
                         const T *pi = p2.data() + size_t( a + 2 ) * P2 + b0 + 2;
                         for( int dx = -2; dx <= 2; ++dx )
@@ -1535,7 +1632,7 @@ struct Evaluator {
                                 for( int x = 0; x < B; ++x ) {
                                     T h = dx * vx[ 0 ][ x ] + dy * vy[ 0 ][ x ];
                                     for( int k = 1; k < 8; ++k ) { const T v = dx * vx[ k ][ x ] + dy * vy[ k ][ x ]; h = v > h ? v : h; }   // ( not fmax: gcc )
-                                    cut2[ x ] |= 2 * h > k2 + pi[ x ] - pj[ x ];
+                                    cut2[ x ] |= 2 * h > k2 + ( pi[ x ] - pj[ x ] );
                                 }
                             }
                     }
@@ -1580,8 +1677,8 @@ struct Evaluator {
                             const T cx = ( r0 + r1 ) / 2, cy = ( r2 + r3 ) / 2;
                             T d0 = zb[ 0 ][ x ] - cx, d1 = zb[ 1 ][ x ] - cx, d2 = zb[ 2 ][ x ] - cy, d3 = zb[ 3 ][ x ] - cy;
                             d0 = d0 < 0 ? -d0 : d0; d1 = d1 < 0 ? -d1 : d1; d2 = d2 < 0 ? -d2 : d2; d3 = d3 < 0 ? -d3 : d3;
-                            const T dm = std::max( std::max( d0, d1 ), std::max( d2, d3 ) ), pa = ps[ x ] < 0 ? -ps[ x ] : ps[ x ];
-                            ze[ x ] = ( dm + pa + s ) * s;
+                            const T dm = std::max( std::max( d0, d1 ), std::max( d2, d3 ) ), pa = zone_psi_tol ? ( ps[ x ] < 0 ? -ps[ x ] : ps[ x ] ) : std::max( std::max( std::abs( zb[ 0 ][ x ] - T( a ) ), std::abs( zb[ 1 ][ x ] - T( a ) ) ), std::max( std::abs( zb[ 2 ][ x ] - T( b0 + x ) ), std::abs( zb[ 3 ][ x ] - T( b0 + x ) ) ) );
+                            ze[ x ] = tform == 0 ? ( dm + pa + s ) * s : ( dm + pa + 1 ) * ( ( zb[ 1 ][ x ] - zb[ 0 ][ x ] ) + ( zb[ 3 ][ x ] - zb[ 2 ][ x ] ) + 1 );
                             // the box in floats, rounded outward by more than one float ulp ( `put_box` steps one; an inverted cell
                             // gets its empty box below, a predicted one its ring-2 box )
                             if( x < n ) {
@@ -1722,6 +1819,7 @@ struct Evaluator {
         if constexpr ( ! Integ::exact )
             symmetrize();
         t_geom += now_ms() - t0;
+        if( lvl_hook ) lvl_hook( lvl_hook_ctx, N, lvl.data(), psi.data(), now_ms() - t0 );
         if( exhausted && ek.RB < N ) {                   // ( a cell past the rings: twice as many )
             ek = ExactKernel<T>( std::min( 2 * ek.RB, N ) );
             exhausted = false;
@@ -1966,15 +2064,23 @@ struct Operator {
     const NoInitVector<T> *W;
     std::vector<std::pair<int,int>> ex_ij;
     std::vector<T> ex_w;
+    std::vector<int> ex_row;                             ///< the faces of row a: [ ex_row[ a ], ex_row[ a + 1 ] ) ( `ex_ij` sorted by row )
     int off[ 8 ];
 
     template<class Ev>
     void bind( const Ev &ev ) {
         N = ev.N; P = N + 2; W = &ev.W;
         ex_ij.clear(); ex_w.clear();
+        // ( by row of i, stably: the slices of rows of the matvec take their own faces )
+        ex_row.assign( N + 1, 0 );
+        for( auto &e : ev.extras ) ++ex_row[ e.i / N + 1 ];
+        for( int a = 0; a < N; ++a ) ex_row[ a + 1 ] += ex_row[ a ];
+        ex_ij.resize( ev.extras.size() ); ex_w.resize( ev.extras.size() );
+        std::vector<int> fill( ex_row.begin(), ex_row.end() - 1 );
         for( auto &e : ev.extras ) {
-            ex_ij.push_back( { ( e.i / N + 1 ) * P + e.i % N + 1, ( e.j / N + 1 ) * P + e.j % N + 1 } );
-            ex_w.push_back( e.w );
+            const int q = fill[ e.i / N ]++;
+            ex_ij[ q ] = { ( e.i / N + 1 ) * P + e.i % N + 1, ( e.j / N + 1 ) * P + e.j % N + 1 };
+            ex_w[ q ] = e.w;
         }
         for( int k = 0; k < 8; ++k ) off[ k ] = T1::off_x[ k ] * P + T1::off_y[ k ];
     }
@@ -2133,8 +2239,32 @@ struct TensorPrecond {
         std::memcpy( g[ 0 ].data() + a * N, rv, N * sizeof( T ) );
         Tents::restrict_row( rv, N / 2, g[ gi( 0, 1 ) ].data() + a * ( N / 2 ) );
     }
-    // the rest of the tree from the ( 0, 0 ) and ( 0, 1 ) grids, scaling, prolongation down to ( 1, 0 ) and ( 0, 1 )
+    // the rest of the tree from the ( 0, 0 ) and ( 0, 1 ) grids, scaling, prolongation down to ( 1, 0 ) and ( 0, 1 ). The chain
+    // along b of a level la ( restrictions, scalings, prolongations ) is row by row: one launch per level, each row's chain in cache
+    // ( the same operations, in the same order, as `coarse_split` )
     void coarse() {
+        restrict_a( g[ 0 ].data(), N, N, g[ gi( 1, 0 ) ].data() );
+        for( int la = 2; la <= L; ++la ) restrict_a( g[ gi( la - 1, 0 ) ].data(), N >> ( la - 1 ), N, g[ gi( la, 0 ) ].data() );
+        for( int la = 0; la <= L; ++la ) {
+            const int lb0 = la ? 0 : 1, na = N >> la;
+            par.slices( na, SI( na ) * N * 3, [&]( int a0, int a1, int ) {
+                for( int a = a0; a < a1; ++a ) {
+                    for( int lb = lb0 + 1; lb <= L; ++lb ) Tents::restrict_row( g[ gi( la, lb - 1 ) ].data() + a * ( N >> ( lb - 1 ) ), N >> lb, g[ gi( la, lb ) ].data() + a * ( N >> lb ) );
+                    for( int lb = lb0; lb <= L; ++lb ) {
+                        const int q = gi( la, lb ), m = N >> lb;
+                        T *v = g[ q ].data() + a * m;
+                        if( Di[ q ].empty() ) { std::fill( v, v + m, T( 0 ) ); continue; }
+                        const T *d = Di[ q ].data() + a * m;
+                        #pragma omp simd
+                        for( int b = 0; b < m; ++b ) v[ b ] *= d[ b ];
+                    }
+                    for( int lb = L; lb >= lb0 + 1; --lb ) Tents::prolong_row_add( g[ gi( la, lb ) ].data() + a * ( N >> lb ), N >> lb, g[ gi( la, lb - 1 ) ].data() + a * ( N >> ( lb - 1 ) ) );
+                }
+            } );
+        }
+        for( int la = L; la >= 2; --la ) prolong_a_add( g[ gi( la, 0 ) ].data(), N >> la, N, g[ gi( la - 1, 0 ) ].data() );
+    }
+    void coarse_split() {
         restrict_a( g[ 0 ].data(), N, N, g[ gi( 1, 0 ) ].data() );
         restrict_tree( 2 );
         for( int q = 1; q < ( L + 1 ) * ( L + 1 ); ++q ) {
@@ -2168,7 +2298,10 @@ struct TensorPrecond {
 /// PCG in row passes per iteration, each on slices of rows ( p update; matvec; x / r update + Jacobi + row half of the
 /// restriction; the coarse tree; row half of the prolongation + sums, the mean projection folded in ). H is singular along
 /// the constants: the iterates are kept at zero mean. Returns the number of iterations.
+inline double pcg_t[ 6 ] = {};                          // ( TEMPORARY: SDOT_SOLVE_TRACE: p update, matvec, pass B, coarse, pass C, setup; ms )
 inline int pcg_fused( const Operator &op, TensorPrecond &M, const std::vector<T> &b, std::vector<T> &x, T rtol, int maxit, const Par &par ) {
+    double tq = now_ms();
+    auto lapq = [&]( int k ) { const double t = now_ms(); pcg_t[ k ] += t - tq; tq = t; };
     const int N = op.N, P = op.P, PP = P * P;
     const SI nn = SI( N ) * N;
     std::vector<T> r = b, z( PP, 0 ), p( PP, 0 ), q( PP, 0 );
@@ -2216,6 +2349,7 @@ inline int pcg_fused( const Operator &op, TensorPrecond &M, const std::vector<T>
     pass_c( s, rz );
     T beta = 0;
     int it = 0;
+    lapq( 5 );
     for( ; it < maxit; ++it ) {
         // pass A: the new direction, then the matvec ( a row reads the rows a - 1 .. a + 1 of p: two launches )
         par.slices( N, nn * 3, [&]( int a0, int a1, int ) {
@@ -2225,6 +2359,7 @@ inline int pcg_fused( const Operator &op, TensorPrecond &M, const std::vector<T>
                 for( int x = 0; x < N; ++x ) p[ row + x ] = z[ row + x ] - s + beta * p[ row + x ];
             }
         } );
+        lapq( 0 );
         T pq = par.template sum<T>( N, nn * 18, [&]( int a0, int a1 ) {
             T pq = 0;
             const T *pv = p.data();
@@ -2241,14 +2376,16 @@ inline int pcg_fused( const Operator &op, TensorPrecond &M, const std::vector<T>
                     pq += vi * acc;
                 }
             }
+            // ( the faces out of ring 1 of these rows: by the slice that owns them, not after it in series )
+            for( int e = op.ex_row[ a0 ]; e < op.ex_row[ a1 ]; ++e ) {
+                const int i = op.ex_ij[ e ].first, j = op.ex_ij[ e ].second;
+                const T d = op.ex_w[ e ] * ( pv[ i ] - pv[ j ] );
+                qv[ i ] += d;
+                pq += pv[ i ] * d;
+            }
             return pq;
         } );
-        for( size_t e = 0; e < op.ex_w.size(); ++e ) {
-            const int i = op.ex_ij[ e ].first, j = op.ex_ij[ e ].second;
-            const T d = op.ex_w[ e ] * ( p[ i ] - p[ j ] );
-            q[ i ] += d;
-            pq += p[ i ] * d;
-        }
+        lapq( 1 );
         if( ! ( pq > 0 ) ) break;                        // ( the rounding of a system solved as far as it can be )
         // pass B
         const T alpha = rz / pq;
@@ -2270,11 +2407,14 @@ inline int pcg_fused( const Operator &op, TensorPrecond &M, const std::vector<T>
             }
             return rr;
         } );
+        lapq( 2 );
         if( std::sqrt( rr ) <= rtol * nb ) { ++it; break; }
         // coarse levels + pass C
         M.coarse();
+        lapq( 3 );
         T rz2;
         pass_c( s, rz2 );
+        lapq( 4 );
         beta = rz2 / rz;
         rz = rz2;
     }
@@ -2337,6 +2477,8 @@ inline std::vector<T> refine_psi( int n, const std::vector<T> &pc, const Par &pa
 template<class Integ>
 void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, double tol_rel, double tol_abs, double S,
              const Options &o, Stats &st, double domain = 0 ) {
+    const double tw0 = now_ms();                         // ( TEMPORARY: SDOT_SOLVE_TRACE, the phases of a solve )
+    double tw_limit = 0, tw_repair = 0;
     const int N = ev.N;
     const Par &par = ev.par;
     const SI nn = SI( N ) * N;
@@ -2380,7 +2522,7 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     // mass are a fraction of a pixel wide, so that a step good for all the others ( the residual divided by 30 ) still crosses a
     // few of them. Each one searches its own psi, `sdotplan/WarmRepair.h`, one diagram per round. On return `ev` is at `p`.
     std::vector<T> rlo, rhi, rstep, rtouched;
-    auto repair = [ & ]( std::vector<T> &p ) {
+    auto repair_ = [ & ]( std::vector<T> &p ) {
         rlo.resize( nn ); rhi.resize( nn ); rstep.resize( nn ); rtouched.resize( nn );
         int nb_small = 0;
         for( int i = 0; i < N * N; ++i ) {
@@ -2396,6 +2538,7 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
             ++st.nb_diag;
         }
     };
+    auto repair = [ & ]( std::vector<T> &p ) { const double t = now_ms(); repair_( p ); tw_repair += now_ms() - t; };
     // ( the line search on the L2 norm of the residual: the one an ( inexact ) Newton step reduces as predicted -- the largest
     // relative error can sit on a small cell that a CG at 1e-2 leaves out )
     const T min_t = *std::min_element( target.begin(), target.end() );
@@ -2418,7 +2561,7 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     // keeps them all above the floor, 0 when they do not fall with their edges frozen. An edge may still appear before: the trial checks
     std::vector<int> bad, bad_nb, bad_of, cand, fell;
     std::vector<char> below;
-    auto tau_limit = [ & ]( T tau ) {
+    auto tau_limit_ = [ & ]( T tau ) {
         bad.clear();
         for( int i = 0; i < N * N; ++i ) if( ev.mass[ i ] <= eps0 ) bad.push_back( i );
         ev.geometry( psi );
@@ -2458,6 +2601,7 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
         }
         return lo;
     };
+    auto tau_limit = [ & ]( T tau ) { const double t = now_ms(); const T r = tau_limit_( tau ); tw_limit += now_ms() - t; return r; };
     for( int it = 1; it <= o.max_iter && ! done( err ) && ! ev.exhausted; ++it ) {
         // the linear system H dx = target - m
         const double tl = now_ms();
@@ -2525,6 +2669,13 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     st.exhausted = st.exhausted || ev.exhausted;
     st.status = ev.exhausted || stuck ? 6 : done( err ) ? 1 : 2;
     st.t_diag = ( ev.t_geom + ev.t_int ) / 1e3;
+    if( std::getenv( "SDOT_SOLVE_TRACE" ) ) {
+        std::printf( "  newton N %d: %.3f s, diagrams %.3f, linear %.3f, tau_limit %.3f, repair %.3f, steps %d, diagrams %d, CG %d | pcg ms: p %.1f matvec %.1f B %.1f coarse %.1f C %.1f setup %.1f | regions %ld parallel, %ld serial\n",
+                     N, ( now_ms() - tw0 ) / 1e3, st.t_diag, st.t_lin, tw_limit / 1e3, tw_repair / 1e3, st.nb_iter, st.nb_diag, st.lin_nb_iter,
+                     pcg_t[ 0 ], pcg_t[ 1 ], pcg_t[ 2 ], pcg_t[ 3 ], pcg_t[ 4 ], pcg_t[ 5 ], par_regions, par_serial );
+        for( auto &t : pcg_t ) t = 0;
+        par_regions = par_serial = 0;
+    }
 }
 
 /// THE SOLVE: `make_integ( n, h_n, blur )` gives the integrals of level `n` ( side `h_n` ), `blur` the width of the
@@ -2579,8 +2730,11 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
         const double S = double( n ) * n, hl = h * N / n;
         std::vector<T> target( nus[ l ].size() );
         for( size_t i = 0; i < target.size(); ++i ) target[ i ] = nus[ l ][ i ] * S;
+        const double tq0 = now_ms();
         auto integ = make_integ( n, hl, 0.0 );
+        const double tq1 = now_ms();
         Evaluator<DECAYED_TYPE_OF( integ )> ev( n, integ, par );
+        if( std::getenv( "SDOT_SOLVE_TRACE" ) ) std::printf( "  level %d: integrals %.3f s, evaluator %.3f s\n", n, ( tq1 - tq0 ) / 1e3, ( now_ms() - tq1 ) / 1e3 );
         Stats sl;
         const bool fine = n == N;
         newton( ev, target, psi, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl, domain );
@@ -2595,7 +2749,9 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
         st.domain_mass = sl.domain_mass;
         // the outputs, physical
         std::vector<T> bx, by, m2;
+        const double tm0 = now_ms();
         ev.moments( psi, bx, by, m2 );
+        if( std::getenv( "SDOT_SOLVE_TRACE" ) ) std::printf( "  moments %.3f s\n", ( now_ms() - tm0 ) / 1e3 );
         cost = par.template sum<double>( N, SI( N ) * N, [&]( int a0, int a1 ) {
             double c = 0;
             for( int i = a0 * N; i < a1 * N; ++i ) {
