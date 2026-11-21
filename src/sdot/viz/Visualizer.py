@@ -1277,6 +1277,26 @@ _HTML = r"""<!DOCTYPE html>
   .svc { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; font-size: 12px; }
   .sdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .sdot.ok { background: var(--ok); } .sdot.warn { background: var(--warn); } .sdot.idle { border: 1.5px solid var(--ok); box-sizing: border-box; }
+  #panels:has(.panel[data-pane="services"].open:not(.folded)) { width: min(460px, calc(100vw - 24px)); }
+  .svcCard { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 8px; border-top: 1px solid var(--line); font-size: 12px; }
+  .svcCard:first-child { border-top: none; padding-top: 0; }
+  .svcTop { display: grid; grid-template-columns: 18px 10px minmax(0, 1fr); gap: 6px; align-items: center; }
+  .svcTop .more { width: 18px; height: 20px; padding: 0; border: none; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  .svcTop .more svg { width: 11px; height: 11px; transition: transform 0.12s; } .svcCard.open .svcTop .more svg { transform: rotate(90deg); }
+  .svcName b { font-weight: 500; } .svcName code { font: 11px ui-monospace, Menlo, monospace; }
+  .svcOn { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; padding-left: 24px; }
+  .svcOn select { min-width: 0; } .svcOn > span:last-child { grid-column: 2; }
+  .warnText { color: var(--warn); }
+  .svcDet { display: none; flex-direction: column; gap: 6px; padding-left: 24px; }
+  .svcCard.open .svcDet { display: flex; }
+  .svcMissing { color: var(--text) !important; }
+  .svcFound { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+  pre.cmd { margin: 0; padding: 7px 9px; border-radius: 6px; background: var(--well); border: 1px solid var(--line);
+            font: 11px/1.5 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; }
+  pre.cmd .cmt { color: var(--muted); } pre.cmd .cmt.bad, .hint.bad { color: #d9534f; }
+  .svcCopyRow, .svcCopy, .svcPath { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .svcPath input { flex: 1; min-width: 0; }
+  #renderGroup.off { background: var(--well); } #renderGroup.off button { color: var(--muted); }
 
   /* over the view: the picture's state and its card, the colour scale */
   #renderHint { position: fixed; z-index: 4; left: 50%; top: 12px; transform: translateX(-50%); display: none; align-items: center; gap: 8px;
@@ -1831,6 +1851,8 @@ function buildScene() {
   //    not a storage format, the expense stays in GPU memory.
   let nTri = hp.length / 9;
   for (const [a, b] of polys) for (let p = a; p < b; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
+  FLOOR = floorOn && D >= 3 && !FLAT ? floorOf(polys, edgs, pnts, hp) : null;
+  if (FLOOR) nTri += 2;
   TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9), ao: new Float32Array(nTri * 3).fill(1),
           col: new Float32Array(nTri * 12), n: nTri };
   let t = 0;
@@ -1861,6 +1883,11 @@ function buildScene() {
   }
   for (let i = 0; i + 8 < hp.length; i += 9)
     putTri(hp.slice(i, i + 3), hp.slice(i + 3, i + 6), hp.slice(i + 6, i + 9), hpc[i / 9]);
+  if (FLOOR) {
+    const [a, b, c, d] = FLOOR.corners;
+    putTri(a, b, c, FLOOR.color);
+    putTri(a, c, d, FLOOR.color);
+  }
 
   // 4. edges: one INSTANCE per edge (two ends), widened into a quadrilateral in the
   //    shader -- gl.lineWidth is capped at 1 pixel on most drivers.
@@ -1896,6 +1923,7 @@ function buildScene() {
     i++;
   }
   PNT.n = i;
+  shownRange = rng;
   showLegend(rng);
 
   upload();
@@ -1907,6 +1935,32 @@ function buildScene() {
   sceneVersion++;                                       // ( a picture of the scene before is out of date )
 }
 var sceneVersion = 0;
+// the FLOOR ( a layer, off at first ): a square under what is shown, three times as wide, across the world axis closest
+// to the screen's vertical when it is switched on ( kept then: the floor stays where it was put ), below the lowest point
+// less a gap; a picture by Blender gets its corners, and the shadows on it
+var floorOn = false, FLOOR = null, floorUp = null, shownRange = null;
+function floorOf(polys, edgs, pnts, hp) {
+  if (!floorUp) {
+    const u = camBasis().up;
+    let k = 0;
+    for (let q = 1; q < 3; q++) if (Math.abs(u[q]) > Math.abs(u[k])) k = q;
+    floorUp = { axis: k, sign: u[k] >= 0 ? 1 : -1 };
+  }
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const add = v => { for (let k = 0; k < 3; k++) { const x = PR[3 * v + k]; if (x < lo[k]) lo[k] = x; if (x > hi[k]) hi[k] = x; } };
+  for (const [a, b] of polys) for (let p = a; p < b; p++) for (let o = POLY_OFF[p]; o < POLY_OFF[p + 1]; o++) add(POLY_V[o]);
+  for (const [a, b] of edgs) for (let i = a; i < b; i++) { add(EDG_V[2 * i]); add(EDG_V[2 * i + 1]); }
+  for (const [a, b] of pnts) for (let j = a; j < b; j++) add(PNT_V[j]);
+  for (let i = 0; i + 2 < hp.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], hp[i + k]); hi[k] = Math.max(hi[k], hp[i + k]); }
+  if (!(lo[0] <= hi[0])) return null;
+  const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-9), dark = document.body.classList.contains("dark");
+  const k = floorUp.axis, s = floorUp.sign, i = (k + 1) % 3, j = (k + 2) % 3, h = 1.5 * span;
+  const level = s > 0 ? lo[k] - 0.02 * span : hi[k] + 0.02 * span;
+  const ci = (lo[i] + hi[i]) / 2, cj = (lo[j] + hi[j]) / 2;
+  const pt = (di, dj) => { const p = [0, 0, 0]; p[k] = level; p[i] = ci + di * h; p[j] = cj + dj * h; return p; };
+  const corners = s > 0 ? [pt(-1, -1), pt(1, -1), pt(1, 1), pt(-1, 1)] : [pt(-1, -1), pt(-1, 1), pt(1, 1), pt(1, -1)];  // ( facing up )
+  return { axis: k, level, corners, color: dark ? [0.42, 0.42, 0.45, 1] : [0.80, 0.80, 0.80, 1] };
+}
 
 // ============================================================================================
 // FIELDS: the points coloured by their values. The range is robust ( the 1st and 99th percentiles ), over all the
@@ -2067,6 +2121,9 @@ function initTools() {                                 // ( called once `ui` exi
       if (D >= 3) { const c = document.createElement("label"); c.className = "chk"; c.append(ui.depth, document.createTextNode(" coloured by depth")); pane.appendChild(c); }
     });
   LAYERS.forEach((l, k) => addLayer(l[0], () => layerOn[k + 1], on => { layerOn[k + 1] = on; buildScene(); draw(); }, null, "var(--accent)"));
+  if (D >= 3 && !FLAT)                                  // a floor under the scene ( z down ), for its shadow in pictures
+    addLayer("floor", () => floorOn, on => { floorOn = on; if (on) floorUp = null; buildScene(); draw(); }, () => floorOn && FLOOR ? "xyz"[FLOOR.axis] + " = " + fmtNum(FLOOR.level) : "",
+             "linear-gradient(180deg, transparent 55%, var(--muted) 55%)");
   if (!layerRows.length) document.getElementById("layers").style.display = "none";
   // the Colour pane: one choice per field, the range
   const list = document.getElementById("fieldList");
@@ -3665,102 +3722,227 @@ async function serviceStates() {                     // ( null: not served by er
   try { const r = await fetch(".errand/services", { cache: "no-store" }); return r.ok ? await r.json() : null; }
   catch (e) { return null; }
 }
-// the base URL of service `name`: given by hand ( `?svc.<name>=` ), else through errand's relay when it can run there
+async function getJson(url, opts) {
+  try { const r = await fetch(url, Object.assign({ cache: "no-store" }, opts || {})); return r.ok ? await r.json() : null; }
+  catch (e) { return null; }
+}
+const postJson = (url, body) => getJson(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// only `ready` and `running` are reached through the relay ( ADR errand 0027 ); `declared` / `stopped`: an older errand
+const REACHABLE = st => st === "ready" || st === "running" || st === "declared" || st === "stopped";
+// the base URL of service `name`: given by hand ( `?svc.<name>=` ), else through errand's relay to the machine chosen
 function serviceUrl(name, states) {
   const byHand = URL_OPTS.get("svc." + name);
   if (byHand) return byHand.replace(/\/?$/, "/");
   const s = states && states[name];
-  return s && s.state !== "missing" ? ".errand/svc/" + name + "/" : null;
+  return s && REACHABLE(s.state) ? ".errand/svc/" + name + "/" : null;
 }
-function missingHint(el, what, s) {
-  if (!s || s.state !== "missing") return false;
-  el.textContent = what + ": " + ((s.install && s.install.how) || "declare the service");
+// one line: why a service cannot be used now, on the machine chosen
+function svcReason(s) {
+  if (!s) return "not offered here";
+  if (s.needs_copy) return s.on + " has no copy of this store";
+  return (s.on ? s.on + ": " : "") + (s.state === "installable" ? "not declared" : s.state) + (s.why ? " — " + s.why : "");
+}
+function reasonHint(el, what, s) {
+  el.textContent = what + " — " + svcReason(s) + " ( see Services )";
   el.style.display = "block";
-  return true;
 }
-// the services this machine has for the page ( `.errand/services` ): the chip of the bar, its panel
-let svcStates = null;
-const SVC_DOT = st => st === "missing" ? "warn" : (st === "declared" || st === "stopped" ? "idle" : "ok");
+// THE SERVICES PANEL ( ADR errand 0027 ): per service, the machine it runs on, its state, what that machine's agent
+// found, the lines that would make it ready there ( to type: the page installs nothing ), a place to look for a tool,
+// and the copy of the store when that machine lacks it.
+let svcStates = null, svcMachines = [], svcTools = {}, svcOpen = {};
+const SVC_DOT = st => REACHABLE(st) ? (st === "running" ? "ok" : "idle") : "warn";
 const SVC_WHAT = { "blender": "pictures", "sdot.ao": "occlusion", "sdot.region": "cells of a region" };
+function svcEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function syncSvcChip(states) {
   const body = document.getElementById("svcBody"), badge = document.getElementById("svcBadge");
   const names = Object.keys(states || {}).filter(k => k[0] !== ".");
   tabAvailable("services", names.length > 0);
   if (!names.length) return;
-  const miss = names.filter(n => states[n].state === "missing").length;
-  badge.className = "badge " + (miss ? "warn" : "ok");
-  iconOf("services").title = "services: " + (names.length - miss) + " ready" + (miss ? ", " + miss + " missing" : "");
+  const bad = names.filter(n => !REACHABLE(states[n].state)).length;
+  badge.className = "badge " + (bad ? "warn" : "ok");
+  iconOf("services").title = "services: " + (names.length - bad) + " ready" + (bad ? ", " + bad + " not" : "");
   body.innerHTML = "";
-  const grid = document.createElement("div"); grid.className = "svc";
-  for (const n of names) {
-    const s = states[n];
-    const dot = document.createElement("span"); dot.className = "sdot " + SVC_DOT(s.state);
-    const nm = document.createElement("span"); nm.innerHTML = "<b style='font-weight: 500'></b> <span class='muted'></span>";
-    nm.firstChild.textContent = n; nm.lastChild.textContent = SVC_WHAT[n] ? "· " + SVC_WHAT[n] : "";
-    const st = document.createElement("span"); st.className = "muted";
-    st.textContent = s.state === "missing" ? "not here" : s.state === "declared" ? "ready, not started" : s.state;
-    grid.append(dot, nm, st);
+  if (states[".error"]) body.appendChild(svcEl("div", "hint bad", states[".error"]));
+  for (const n of names) body.appendChild(svcCard(n, states[n]));
+}
+function svcCard(n, s) {
+  const card = svcEl("div", "svcCard"), ok = REACHABLE(s.state) && !s.needs_copy;
+  const top = svcEl("div", "svcTop");
+  const fold = svcEl("button", "more"); fold.innerHTML = CHEV; fold.title = "what the machine has";
+  const open = svcOpen[n] != null ? svcOpen[n] : !ok;
+  card.classList.toggle("open", open);
+  fold.addEventListener("click", () => { svcOpen[n] = !card.classList.contains("open"); card.classList.toggle("open", svcOpen[n]); });
+  const nm = svcEl("span", "svcName"); nm.append(svcEl("b", null, n));
+  if (s.version) nm.append(svcEl("code", "muted", " #" + s.version));
+  if (SVC_WHAT[n]) nm.append(svcEl("span", "muted", " · " + SVC_WHAT[n]));
+  const dot = svcEl("span", "sdot " + SVC_DOT(s.state));
+  top.append(fold, dot, nm);
+  card.appendChild(top);
+  // the machine, and the state there
+  const row = svcEl("div", "svcOn");
+  row.append(svcEl("span", "muted", "on"));
+  const sel = document.createElement("select"); sel.title = "the machine " + n + " runs on";
+  const ms = svcMachines.length ? svcMachines : [{ name: s.on, here: true }];
+  for (const m of ms) {
+    const ms_ = m.services && m.services[n];
+    const label = m.name + (m.here ? " · here" : "") + (m.origin ? " · where the run wrote it" : "") + (ms_ ? " — " + ms_.state : "");
+    const o = new Option(label, m.name); o.selected = m.name === s.on;
+    if (ms_ && ms_.state === "unreachable") { o.disabled = m.name !== s.on; o.title = ms_.why || ""; }
+    sel.add(o);
   }
-  body.appendChild(grid);
-  for (const n of names) if (states[n].state === "missing" && states[n].install) {
-    const h = document.createElement("div"); h.className = "hint"; h.style.marginTop = "8px";
-    h.textContent = n + ": " + (states[n].install.text || "") + " To declare it here:"; body.appendChild(h);
-    const c = document.createElement("code"); c.className = "cmd"; c.textContent = states[n].install.how || ""; c.style.marginTop = "4px";
-    body.appendChild(c);
+  sel.addEventListener("change", async () => {
+    sel.disabled = true;
+    await postJson(".errand/services/" + encodeURIComponent(n), { on: sel.value });
+    await refreshServices(false);
+  });
+  const st = svcEl("span", ok ? "muted" : "warnText", ok ? (s.state === "running" ? "running" : "ready") : svcReason(s).replace(s.on + ": ", ""));
+  row.append(sel, st);
+  card.appendChild(row);
+  // the details: what the agent found, the lines, a path, the copy
+  const det = svcEl("div", "svcDet");
+  if (s.needs_copy || (s.store && s.store.copying)) {
+    const c = s.store && s.store.copying, box = svcEl("div", "svcCopy");
+    if (c && c.state === "copying") box.append(svcEl("span", "muted", "copying the store to " + s.on + "… " + Math.round(100 * (c.done || 0)) + " %"));
+    else {
+      const sz = s.store && s.store.size ? " ( " + (s.store.size / 1e6).toFixed(s.store.size > 1e7 ? 0 : 1) + " MB )" : "";
+      const b = svcEl("button", "btn", "Copy the store to " + s.on);
+      b.title = "its files into errand's cache on " + s.on + sz + ": data, nothing run";
+      b.addEventListener("click", async () => { b.disabled = true; await postJson(".errand/copy", { on: s.on }); setTimeout(() => refreshServices(false), 800); });
+      box.append(b, svcEl("span", "muted", s.on + " has no copy of this store" + sz));
+    }
+    det.appendChild(box);
+  }
+  if (s.missing && s.missing.length) {
+    det.appendChild(svcEl("h3", "warnText", "Missing on " + s.on));
+    const ul = svcEl("ul", "svcFound svcMissing");
+    for (const f of s.missing) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
+    det.appendChild(ul);
+  }
+  if (s.found && s.found.length) {
+    det.appendChild(svcEl("h3", null, "What " + s.on + "'s agent found"));
+    const ul = svcEl("ul", "svcFound");
+    for (const f of s.found) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
+    det.appendChild(ul);
+  }
+  if (s.lines && s.lines.length) {
+    det.appendChild(svcEl("h3", null, "To type, in this order"));
+    const pre = svcEl("pre", "cmd");
+    let text = "";
+    for (const l of s.lines) {
+      const c = svcEl("span", "cmt" + (l.unknown_source ? " bad" : ""),
+                      "# " + l.comment + (l.unknown_source ? " — a source outside your list" : "")
+                      + (l.described_by === "store" ? " ( as the store describes it )" : "") + "\n");
+      pre.append(c, document.createTextNode(l.command + "\n"));
+      text += l.command + "\n";
+    }
+    det.appendChild(pre);
+    const cp = svcEl("div", "svcCopyRow");
+    const b = svcEl("button", "btn", "Copy the lines");
+    b.addEventListener("click", () => { navigator.clipboard && navigator.clipboard.writeText(text); b.textContent = "copied"; setTimeout(() => b.textContent = "Copy the lines", 1200); });
+    cp.append(b, svcEl("span", "muted", "the page runs none of them"));
+    det.appendChild(cp);
+  }
+  // a place to look, per tool the description names ( never run: the agent reads its files )
+  for (const tool of svcTools[n] || []) {
+    const r = svcEl("div", "svcPath");
+    const inp = document.createElement("input"); inp.type = "text"; inp.placeholder = "another " + tool + " on " + s.on + ": its path";
+    const b = svcEl("button", "btn", "Look there");
+    b.addEventListener("click", async () => {
+      if (!inp.value.trim()) return;
+      b.disabled = true;
+      await postJson(".errand/machines/" + encodeURIComponent(s.on) + "/paths", { tool, path: inp.value.trim() });
+      await refreshServices(false);
+    });
+    r.append(inp, b);
+    det.appendChild(r);
+  }
+  if (!det.childNodes.length && !ok) det.appendChild(svcEl("div", "hint", s.text || ""));
+  card.appendChild(det);
+  return card;
+}
+// the tools each service's description names ( for the path fields ): the store's own services.json
+async function readTools() {
+  const j = await getJson("services.json");
+  const out = {};
+  if (j && j.format === 2 && j.services)
+    for (const [n, v] of Object.entries(j.services)) out[n] = Object.keys((v && v.described && v.described.tools) || {});
+  return out;
+}
+async function refreshServices(again) {
+  const b = document.getElementById("svcRefresh"); b.disabled = true;
+  if (again && svcStates) {            // ( each machine chosen looks again )
+    const ms = new Set(Object.keys(svcStates).filter(k => k[0] !== ".").map(k => svcStates[k].on).filter(Boolean));
+    await Promise.all(Array.from(ms).map(m => getJson(".errand/machines/" + encodeURIComponent(m) + "?refresh=1")));
+  }
+  const [states, machines] = await Promise.all([serviceStates(), getJson(".errand/machines")]);
+  svcMachines = machines || [];
+  svcStates = states;
+  syncSvcChip(states);
+  applyServices(states);
+  b.disabled = false;
+  // ( a copy under way: asked again until it is done )
+  if (states && Object.values(states).some(s => s && s.store && s.store.copying && s.store.copying.state === "copying"))
+    setTimeout(() => refreshServices(false), 1500);
+}
+document.getElementById("svcRefresh").addEventListener("click", () => { if (STORED) refreshServices(true); });
+// the controls of each service, enabled when its machine says ready or running ( run again after a refresh, a choice )
+let svcWired = false, keptLoaded = false;
+function applyServices(states) {
+  if (D !== 3) return;
+  if (!svcWired) {
+    svcWired = true;
+    document.getElementById("bakeBtn").addEventListener("click", e => {
+      const btn = e.currentTarget; serviceBake = true; btn.disabled = true; btn.textContent = "baking…"; bakeFrame(frameIdx);
+    });
+    for (const rb of document.querySelectorAll('#regionChoices input'))
+      rb.addEventListener("change", () => { regionMode = rb.value; regionPlane = null; syncChoices(); showRegion(frameIdx); });
+    document.getElementById("regionBtn").addEventListener("click", () => {
+      regionMode = "cut"; regionPlane = null; syncChoices(); showRegion(frameIdx);
+    });
+  }
+  // sdot.ao: the occlusion of a frame stored without
+  const box = document.getElementById("bakeBox"), btn = document.getElementById("bakeBtn"), hint = document.getElementById("bakeHint");
+  const aoAsked = states && states["sdot.ao"];
+  SVC.ao = serviceUrl("sdot.ao", states);
+  if (!(POLY_AO && POLY_AO.length) && (SVC.ao || aoAsked)) {
+    document.getElementById("bakeLbl").style.display = "none";
+    box.style.display = "flex";
+    btn.style.display = "inline-flex";
+    if (!serviceBake) btn.disabled = !SVC.ao;
+    if (SVC.ao) hint.style.display = "none"; else reasonHint(hint, "occlusion on demand", aoAsked);
+  }
+  // sdot.region: the cells of a region, rebuilt from the frame's seeds ( the frames that kept their sources )
+  const sources = STORE.m.frames.some(fr => fr.sources), rAsked = states && states["sdot.region"];
+  SVC.region = sources ? serviceUrl("sdot.region", states) : null;
+  if (sources && (SVC.region || rAsked)) {
+    document.getElementById("cellsBox").style.display = "flex";
+    for (const rb of document.querySelectorAll('#regionChoices input')) rb.disabled = !SVC.region;
+    document.getElementById("regionBtn").disabled = !SVC.region;
+    const rh = document.getElementById("regionHint");
+    if (SVC.region) { if (rh.dataset.why) { rh.style.display = "none"; delete rh.dataset.why; } }
+    else { reasonHint(rh, "cells of a region", rAsked); rh.dataset.why = "1"; }
+    syncChoices();
+  }
+  // blender: pictures of this view
+  const bAsked = states && states.blender;
+  SVC.blender = serviceUrl("blender", states);
+  if (SVC.blender || bAsked) {
+    document.getElementById("renderGroup").style.display = "flex";
+    tabAvailable("pictures", true);
+    const rb = document.getElementById("renderBtn");
+    rb.disabled = !SVC.blender;
+    rb.title = SVC.blender ? "a picture of this view by Blender ( r )" : "pictures by Blender — " + svcReason(bAsked);
+    document.getElementById("renderGroup").classList.toggle("off", !SVC.blender);
+    if (SVC.blender) {
+      if (!keptLoaded) { keptLoaded = true; loadKept(); }
+      lastViewKey = null; renderStale();               // ( a mode that renders: the view as it is now )
+    }
   }
 }
-document.getElementById("svcRefresh").addEventListener("click", async () => {
-  if (!STORED) return;
-  const b = document.getElementById("svcRefresh"); b.disabled = true;
-  syncSvcChip(svcStates = await serviceStates());
-  b.disabled = false;
-});
 async function findServices() {
   if (STORED) {
-    const states = svcStates = await serviceStates();
-    syncSvcChip(states);
-    if (D === 3) {
-      // sdot.ao: the occlusion of a frame stored without
-      const box = document.getElementById("bakeBox"), btn = document.getElementById("bakeBtn"), hint = document.getElementById("bakeHint");
-      SVC.ao = serviceUrl("sdot.ao", states);
-      if (!SVC.ao && missingHint(hint, "occlusion on demand", states && states["sdot.ao"])) {
-        box.style.display = "flex";
-        if (!(POLY_AO && POLY_AO.length)) document.getElementById("bakeLbl").style.display = "none";
-      } else if (SVC.ao && !(POLY_AO && POLY_AO.length)) {
-        document.getElementById("bakeLbl").style.display = "none";
-        btn.style.display = "inline-flex"; box.style.display = "flex";
-        btn.addEventListener("click", () => { serviceBake = true; btn.disabled = true; btn.textContent = "baking…"; bakeFrame(frameIdx); });
-      }
-      // sdot.region: the cells of a region, rebuilt from the frame's seeds ( the frames that kept their sources )
-      const sources = STORE.m.frames.some(fr => fr.sources);
-      SVC.region = sources ? serviceUrl("sdot.region", states) : null;
-      if (SVC.region) {
-        document.getElementById("cellsBox").style.display = "flex";
-        for (const rb of document.querySelectorAll('#regionChoices input'))
-          rb.addEventListener("change", () => { regionMode = rb.value; regionPlane = null; syncChoices(); showRegion(frameIdx); });
-        document.getElementById("regionBtn").addEventListener("click", () => {
-          regionMode = "cut"; regionPlane = null; syncChoices(); showRegion(frameIdx);
-        });
-        syncChoices();
-      } else if (sources && missingHint(document.getElementById("regionHint"), "cells of a region", states && states["sdot.region"])) {
-        document.getElementById("cellsBox").style.display = "flex";
-        for (const rb of document.querySelectorAll('#regionChoices input')) rb.disabled = true;
-        document.getElementById("regionBtn").style.display = "none";
-      }
-      // blender: pictures of this view
-      SVC.blender = serviceUrl("blender", states);
-      if (SVC.blender) {
-        document.getElementById("renderGroup").style.display = "flex";
-        tabAvailable("pictures", true);
-        loadKept();
-        lastViewKey = null; renderStale();               // ( a mode that renders: the view as it is now )
-      } else if (states && states.blender && states.blender.state === "missing") {
-        tabAvailable("pictures", true);
-        const box = document.getElementById("renderBox");
-        box.innerHTML = '<div class="hint"></div>';
-        missingHint(box.firstChild, "pictures by Blender", states.blender);
-      }
-    }
+    svcTools = await readTools();
+    await refreshServices(false);
   }
   try { if (!EMBED) for (const n of JSON.parse(localStorage.getItem("sviz.panels") || "[]")) { const i = iconOf(n); if (i && i.style.display !== "none") openTab(n); } } catch (e) {}
 }
@@ -3886,6 +4068,9 @@ function renderRequest(samples, scale, keep) {
            width: Math.max(16, Math.round(canvas.clientWidth * scale)), height: Math.max(16, Math.round(H * scale)), samples,
            point_radius: pointRadius(), edge_radius: 0.8 * 2 * orthoHalfH() / H,
            faces: ui.faces.checked, edges: ui.edgeMode.value !== "none", points: ui.points.checked, keep: !!keep,
+           ...(FLOOR ? { floor: FLOOR } : {}),
+           ...(fieldIdx >= 0 && shownRange ? { field: { name: FIELDS[fieldIdx].name, lo: shownRange[0], hi: shownRange[1],
+                                                         diverging: isDiverging(FIELDS[fieldIdx]) } } : {}),
            ...(regionShown ? { region: b64Of(regionShown) } : {}) };          // ( the cells on display, not the stored ones )
 }
 function b64Of(buf) {

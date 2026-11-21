@@ -16,7 +16,7 @@ The scene takes the whole window; everything else floats over it, translucent.
 - **The colour scale** of a field, at the bottom left. It moves by its grip. A click opens the Colour panel.
 - **The curves**: one see-through window per chart, below the axes, moved by their title and resized by their corner. A click in a chart goes to that frame, and hovering shows the values there. The whole curve is drawn, with the current frame marked.
 - **The toolbar**, at the top right: Render (when a server offers pictures), the navigation switch, then one icon per panel. A click opens the panel, a second click closes it. Open panels stack on the right, and each one folds or closes on its own. The page remembers which panels were open.
-  - **Layers**: faces, points, your own layers. Each row has its settings behind the chevron on the left (opacity, edges, radius, the field that colours the points) and its eye on the right.
+  - **Layers**: faces, points, your own layers, and in 3D a **floor** (off at first): a square under the scene, across the axis closest to the screen's vertical when it is switched on. Pictures by Blender get it too, with the shadows on it. Each row has its settings behind the chevron on the left (opacity, edges, radius, the field that colours the points) and its eye on the right.
   - **Curves**: one row per chart, with its scale (linear, log) and its eye.
   - **Colour**: what colours the points, and the range (this frame, all frames, typed).
   - **Display**: the theme (light, dark, auto), the light (flat, relief, custom), the view (projection, reset, axes and slices beyond 3D), the occlusion.
@@ -25,12 +25,14 @@ The scene takes the whole window; everything else floats over it, translucent.
 
 **Embedded** in an iframe, as in this documentation, only the axes, the colour scale, the curves and three buttons stay: the navigation switch, a page of its own, and the settings button, which brings back the toolbar. `?embed=0` or `?embed=1` forces one or the other.
 
-**Services.** A store served by errand (`errand run` of a run that writes one, or `sviz open`) gets what this machine's services offer:
+**Services.** A store served by errand (the link `errand run` prints for a run that writes one, or `errand open DIR` for a store already written) gets what this machine's services offer:
 - **pictures by Blender**: the Render button, whose icon chooses when (once, when the view rests, also while playing). Each picture is refined in steps (8, 32, 128 samples...) and stays over the view until the view moves. Keep writes it into the store.
 - **the baked occlusion** of a frame;
 - **the cells of a region** (a cut across the view, the boundary), rebuilt from the seeds that a power diagram keeps in its store.
 
-The Services panel lists them, with their state, and gives the command that declares a missing one. The ↻ button reads the state again. The page itself installs nothing.
+Blender draws what the page shows: the cells of a region, each edge in its colour, the points coloured by the field shown (same map, same range), the floor.
+
+The Services panel shows, for each service, the machine it runs on (here, the machine the run wrote the store on, every machine errand knows), its state there, what is missing there (first), and what that machine's agent found. When the service is not ready there, it also shows the lines to type, each with a comment saying what it does. A field lets the agent look for a tool installed somewhere unusual. When that machine has no copy of the store, a button copies it into errand's cache there. ↻ asks again. The page itself installs and runs nothing; Render, Bake and the cells are enabled only when their machine says `ready` or `running`.
 
 ## Looking at one object
 

@@ -18,7 +18,7 @@ def _store( frames = 2 ):
             v.new_frame( k )
         v.add_faces( cube + [ 0, 0, 0.2 * k ], F, color = "#ff0000" )
         v.add_edges( cube, [ [ 0, 1 ], [ 1, 2 ] ] )
-        v.add_points( np.array( [ [ 0.5, 0.5, 1.5 ] ] ) )
+        v.add_points( np.array( [ [ 0.5, 0.5, 1.5 ] ] ), fields = { "heat": np.array( [ 2.0 ] ) } )
     v.close()
     return path
 
@@ -34,6 +34,11 @@ if test( "a frame as Blender gets it: the base then the frame, colours in linear
     assert np.allclose( red[ :3 ], [ 1, 0, 0 ] ) and abs( d[ "face_col" ][ 0 ][ 0 ] - 0.2158 ) < 1e-3, "#808080: 0.216 in linear"
     assert d[ "edge_v" ].shape == ( 2, 2 ) and len( d[ "pnt_v" ] ) == 1 and np.allclose( d[ "bg" ], 1 )
     assert np.allclose( frame_data( path, 0, axes = ( 2, 0, 1 ) )[ "pos" ][ :, 0 ], frame_data( path, 0 )[ "pos" ][ :, 2 ] )
+    assert d[ "edge_cols" ].shape == ( 2, 4 ), "a colour per edge, as the page draws them"
+    from sdot.viz.services.blender import SEQ, _linear
+    f = frame_data( path, 1, field = dict( name = "heat", lo = 0.0, hi = 2.0, diverging = False ) )
+    assert np.allclose( f[ "pnt_col" ][ 0, :3 ], _linear( SEQ[ -1 ] ) ), "the point coloured by its field, at the top of the map"
+    assert not np.allclose( d[ "pnt_col" ][ 0, :3 ], f[ "pnt_col" ][ 0, :3 ] )
 
 
 if test( "under Blender: the service renders the view asked for, and keeps it in the store" ):

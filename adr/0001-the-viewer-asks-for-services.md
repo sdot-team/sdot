@@ -298,4 +298,11 @@ scenes that are not power diagrams.
 - 2026-11-21, done (uncommitted): `viz/services/errand-services.json`, the entry point `errand.services` in
   `pyproject.toml`, `declare()` in format 2 and `version()` (errand ADR 0027 §2: the same digits as errand's). The old
   recipes (paths, `PYTHONPATH`, `sys.executable`) are gone. `test_viz_ao` updated. Existing editable installs must be
-  reinstalled (`pip install -e .`) for errand to see the entry point.
+  reinstalled (`pip install --no-deps -e .`: without `--no-deps`, loom-ffi from PyPI hides the editable loom) for errand to see the entry point.
+- 2026-11-21, the page side of errand ADR 0027 (uncommitted): per service a machine menu (`.errand/machines`, the choice
+  POSTed to `.errand/services/<name>`), the state there, "What M's agent found", the lines with their comments (red for a
+  source outside the user's list) and *Copy the lines*, a path field per tool named in the store's `services.json`
+  (`.errand/machines/<M>/paths`), *Copy the store to M* with its progress; ↻ asks each chosen machine again
+  (`?refresh=1`). Render, Bake and the cells are enabled on `ready` / `running` only, with the reason otherwise. Checked
+  in a browser on the seeds store behind an isolated errand: all three `installable`, then sdot.region declared by its
+  line → `ready`, a cut of 1508 cells. Not tried: another machine, the copy.

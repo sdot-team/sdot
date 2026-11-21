@@ -7,11 +7,13 @@ from `X-Errand-Root` ( relayed by errand ) or from `--root` ( started by hand ),
 
 How each one runs is DATA, in `errand-services.json` beside this file: the words of its command ( `{python}`, `{file:…}`,
 `{tool:blender}`, `{port}`, resolved by errand on the machine that runs it ), the files that make its version, its needs,
-and the tools it uses ( Blender: where to look, where to read its version, the pinned downloads ). errand finds that file
-through the entry point `errand.services` of the installed package, without importing sdot.
+and the tools it uses ( Blender: where to look, where to read its version, the pinned downloads ). On a machine, errand
+takes the code from this repository at the store's commit, into an env of the service's own ( or only the files, for
+Blender ), and finds this file there through the entry point `errand.services`, without importing sdot.
 
 `declare( store )` writes the store's `services.json` ( format 2 ): for each service, its name, its version ( `version`,
-the algorithm of errand ADR 0027 §2 ), the package that provides it, and a copy of its description. No path, no Python of
+the algorithm of errand ADR 0027 §2 ), the package that provides it, where its code is ( `source`: this checkout's
+repository and commit, `dirty` when the service's files differ from it ), and a copy of its description. No path, no Python of
 the writer's: the same store gets lines tailored to whichever machine it is opened on.
 """
 from __future__ import annotations
@@ -53,6 +55,40 @@ def _package_version( ) -> str | None:
         return None
 
 
+def _git( *args ) -> str | None:
+    import subprocess
+    try:
+        got = subprocess.run( [ "git", "-C", str( HERE ), *args ], capture_output = True, text = True, timeout = 10 )
+    except ( OSError, subprocess.TimeoutExpired ):
+        return None
+    return got.stdout.strip() if got.returncode == 0 else None
+
+
+def _https( url: str ) -> str:
+    """`git@github.com:owner/repo.git` -> `https://github.com/owner/repo`"""
+    import re
+    m = re.fullmatch( r"(?:ssh://)?git@([^:/]+)[:/](.+?)(?:\.git)?/?", url )
+    if m:
+        return f"https://{m.group( 1 )}/{m.group( 2 )}"
+    return re.sub( r"\.git/?$", "", url )
+
+
+def source( files = ( ) ) -> dict | None:
+    """where the services' code is ( errand ADR 0027, amendment ): this checkout's repository, its commit, the directory of
+    this file in it, and whether `files` ( relative to this directory ) differ from that commit; None outside a checkout"""
+    rev = _git( "rev-parse", "HEAD" )
+    url = _git( "remote", "get-url", "origin" )
+    if not rev or not url:
+        return None
+    rel = ( _git( "rev-parse", "--show-prefix" ) or "" ).rstrip( "/" )
+    dirty = bool( _git( "status", "--porcelain", "--", *( files or [ "." ] ) ) )
+    up = next( ( p for p in HERE.parents if ( p / "pyproject.toml" ).is_file() ), None )     # ( the package's root, for pip )
+    top = HERE.parents[ len( Path( rel ).parts ) - 1 ] if rel else HERE                     # ( the checkout's top )
+    root = up.relative_to( top ).as_posix() if up is not None and top in ( up, *up.parents ) else ""
+    root = "" if root == "." else root
+    return { "git": _https( url ), "rev": rev, "dir": rel, "root": root, "dirty": dirty }
+
+
 def declare( store, dims: int | None = None ):
     """`services.json` in `store`: the services that make sense for it ( all three are about 3D scenes )"""
     d = described()
@@ -61,8 +97,9 @@ def declare( store, dims: int | None = None ):
     for name, entry in d[ "services" ].items():
         if dims not in ( None, 3 ):
             continue
+        src = source( [ *entry.get( "version_of", [ ] ), DESCRIBED.name ] )
         services[ name ] = { "version": version( name, entry ), "protocol": entry.get( "protocol", 1 ), "optional": True,
-                             "text": entry.get( "text", "" ), "package": pkg,
+                             "text": entry.get( "text", "" ), "package": pkg, **( { "source": src } if src else { } ),
                              "described": { **entry, "package": d[ "package" ] } }
     path = Path( store ) / "services.json"
     tmp = path.with_name( f".services.json.{ os.getpid() }.tmp" )

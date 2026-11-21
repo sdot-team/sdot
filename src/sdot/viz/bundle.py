@@ -215,7 +215,14 @@ _BOOT = r"""<!DOCTYPE html>
     return;
   }
   if (location.protocol === "file:")
-    say("This store is read through a server, not as a file: <code>sviz open DIR</code>, or <code>python -m http.server</code> in it.");
+  {
+    // ( a browser reads no file beside a page opened as a file: the store is opened through errand, which serves it )
+    const dir = decodeURIComponent(location.pathname.replace(/\/[^/]*$/, ""));
+    const cmd = "errand open '" + dir.replace(/'/g, "'\\''") + "'";
+    say("A store opens through a server, not as a file. In a terminal:<br><code id=\"cmd\" style=\"user-select: all\"></code>" +
+        "<br><small>( it serves the store beside <code>errand web</code>, with the services it asks for, and opens it here )</small>");
+    document.getElementById("cmd").textContent = cmd;
+  }
   else
     say("Viewer <code>" + pin.file + "</code> not found: neither in <code>viewer/</code> nor at " + pin.urls.map(u => u.replace("{file}", pin.file)).join(", ") +
         ".<br>Copy it here with <code>sviz pack DIR</code> ( <code>--upgrade</code> for the installed viewer ).");

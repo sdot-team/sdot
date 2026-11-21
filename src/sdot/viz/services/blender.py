@@ -57,10 +57,24 @@ def _store_module():
 
 # -- the data of a frame ( no bpy: tested without Blender ) ----------------------------------------------------------------
 
-def frame_data( store, i: int, axes = ( 0, 1, 2 ), theme = "light", region = None ) -> dict:
+SEQ = [ [ 0.267, 0.005, 0.329 ], [ 0.230, 0.322, 0.546 ], [ 0.128, 0.567, 0.551 ], [ 0.369, 0.789, 0.383 ], [ 0.993, 0.906, 0.144 ] ]
+DIV = [ [ 0.230, 0.299, 0.754 ], [ 0.552, 0.690, 0.996 ], [ 0.865, 0.865, 0.865 ], [ 0.958, 0.604, 0.482 ], [ 0.706, 0.016, 0.150 ] ]
+
+
+def ramp( stops, t ):
+    """the page's `ramp`: sRGB colours along `stops`, `t` in [ 0, 1 ] ( clipped )"""
+    s = np.asarray( stops, np.float64 )
+    t = np.clip( np.asarray( t, np.float64 ), 0, 1 ) * ( len( s ) - 1 )
+    k = np.minimum( len( s ) - 2, np.floor( t ).astype( np.int64 ) )
+    u = ( t - k )[ :, None ]
+    return s[ k ] + u * ( s[ k + 1 ] - s[ k ] )
+
+
+def frame_data( store, i: int, axes = ( 0, 1, 2 ), theme = "light", region = None, field = None ) -> dict:
     """the base and frame `i` of `store` combined as the page combines them, in 3D ( `axes` chosen ), colours resolved.
     `region`: `( arrays, meta )` of a chunk of `sdot.region`, whose faces and edges replace the frame's ( the page shows
-    them so ), its colours from its own table"""
+    them so ), its colours from its own table. `field`: `{ name, lo, hi, diverging }`, the points coloured as the page
+    colours them ( the points without a value keep their own colour )"""
     st = _store_module()
     sc = st.read_scene( store )
     ( ba, _ ), ( fa, _ ) = sc.base(), sc.frame( i )
@@ -87,8 +101,18 @@ def frame_data( store, i: int, axes = ( 0, 1, 2 ), theme = "light", region = Non
     out[ "edge_v" ] = cat( "edge_v", True ).reshape( -1, 2 )
     ec = cat( "edge_c" )
     out[ "edge_col" ] = table[ Counter( ec.tolist() ).most_common( 1 )[ 0 ][ 0 ] ] if len( ec ) else np.array( [ .1, .1, .1, 1 ] )
+    out[ "edge_cols" ] = table[ ec ] if len( ec ) else np.zeros( ( 0, 4 ) )    # ( one per edge, as the page draws them )
     out[ "pnt_v" ] = cat( "pnt_v", True )
     out[ "pnt_col" ] = table[ cat( "pnt_c" ) ] if len( out[ "pnt_v" ] ) else np.zeros( ( 0, 4 ) )
+    key = f"field:{ field[ 'name' ] }" if field else None
+    if key and len( out[ "pnt_v" ] ):
+        vals = np.concatenate( [ x[ key ].astype( np.float64 ) if key in x else np.full( len( x.get( "pnt_v", ( ) ) ), np.nan )
+                                 for x in ( ba, fa ) if "pnt_v" in x ] )
+        lo, hi = float( field[ "lo" ] ), float( field[ "hi" ] )
+        ok = np.isfinite( vals )
+        if len( vals ) == len( out[ "pnt_col" ] ) and ok.any():
+            rgb = _linear( ramp( DIV if field.get( "diverging" ) else SEQ, ( vals[ ok ] - lo ) / ( hi - lo if hi != lo else 1.0 ) ) )
+            out[ "pnt_col" ][ ok, :3 ] = rgb
     out[ "pnt_r" ] = cat( "pnt_r", kind = np.float64 ) if len( out[ "pnt_v" ] ) else np.zeros( 0 )
     if region is not None:
         ra, rm = region
@@ -104,6 +128,7 @@ def frame_data( store, i: int, axes = ( 0, 1, 2 ), theme = "light", region = Non
         ec = ra[ "edge_c" ].astype( np.int64 )
         if len( ec ):
             out[ "edge_col" ] = rtab[ Counter( ec.tolist() ).most_common( 1 )[ 0 ][ 0 ] ]
+        out[ "edge_cols" ] = rtab[ ec ] if len( ec ) else np.zeros( ( 0, 4 ) )
     bg = ( sc.manifest.get( "options" ) or { } ).get( "bg" ) or [ None, None ]
     bgc = bg[ 1 if theme == "dark" else 0 ]
     out[ "bg" ] = _linear( np.asarray( bgc if bgc is not None else ( [ 0.12, 0.12, 0.12 ] if theme == "dark" else [ 1.0, 1.0, 1.0 ] ), float )[ :3 ] )
@@ -159,11 +184,18 @@ class Scene:
             ob.data.materials.append( self._material( "faces", attribute = "col", kind = "GEOMETRY" ) )
             sc.collection.objects.link( ob )
         if len( d[ "edge_v" ] ):
+            # ( each edge its own two vertices: its colour rides on them through the tubes, as the page gives one per edge )
+            ev = d[ "edge_v" ]
             me = bpy.data.meshes.new( "edges" )
-            me.from_pydata( pos.tolist(), d[ "edge_v" ].tolist(), [ ] )
+            me.from_pydata( pos[ ev.reshape( -1 ) ].tolist(), np.arange( 2 * len( ev ) ).reshape( -1, 2 ).tolist(), [ ] )
+            cols = d.get( "edge_cols" )
+            if cols is None or len( cols ) != len( ev ):
+                cols = np.tile( np.asarray( d[ "edge_col" ], np.float64 )[ None ], ( len( ev ), 1 ) )
+            c = me.color_attributes.new( "ecol", "FLOAT_COLOR", "POINT" )
+            c.data.foreach_set( "color", np.repeat( cols, 2, axis = 0 ).astype( np.float32 ).reshape( -1 ) )
             ob = bpy.data.objects.new( "edges", me )
             sc.collection.objects.link( ob )
-            self.tube = self._tubes( ob, self._material( "edges", color = d[ "edge_col" ] ) )
+            self.tube = self._tubes( ob, self._material( "edges", attribute = "ecol", kind = "GEOMETRY" ) )
         if len( d[ "pnt_v" ] ):
             me = bpy.data.meshes.new( "points" )
             me.from_pydata( pos[ d[ "pnt_v" ] ].tolist(), [ ], [ ] )
@@ -182,7 +214,7 @@ class Scene:
         wn = world.node_tree.nodes                                    # ( the camera sees the theme's colour, the light is dimmer )
         bgn = wn.get( "Background" )
         bgn.inputs[ "Color" ].default_value = ( 1.0, 1.0, 1.0, 1.0 )   # ( a neutral sky, whatever the theme )
-        bgn.inputs[ "Strength" ].default_value = 0.6
+        bgn.inputs[ "Strength" ].default_value = 0.45
         seen, mix, path = wn.new( "ShaderNodeBackground" ), wn.new( "ShaderNodeMixShader" ), wn.new( "ShaderNodeLightPath" )
         seen.inputs[ "Color" ].default_value = ( *d[ "bg" ].tolist(), 1.0 )
         seen.inputs[ "Strength" ].default_value = 1.0
@@ -192,7 +224,7 @@ class Scene:
         wl.new( seen.outputs[ 0 ], mix.inputs[ 2 ] )
         wl.new( mix.outputs[ 0 ], wn.get( "World Output" ).inputs[ "Surface" ] )
         sun = bpy.data.objects.new( "sun", bpy.data.lights.new( "sun", "SUN" ) )
-        sun.data.energy = 3.0
+        sun.data.energy = 1.8
         sun.data.angle = 0.2
         sc.collection.objects.link( sun )
         self.sun = sun
@@ -259,6 +291,28 @@ class Scene:
         g.links.new( rad.outputs[ "Attribute" ], inst.inputs[ "Scale" ] )
         g.links.new( inst.outputs[ "Instances" ], go.inputs[ 0 ] )
         ob.modifiers.new( "spheres", "NODES" ).node_group = g
+
+    def set_floor( self, floor ):
+        """the page's floor ( `{ corners: 4 x [ x, y, z ], color }`, sRGB, in the axes shown ): a square that catches the shadows, or none"""
+        import bpy
+        ob = bpy.data.objects.get( "floor" )
+        if ob is not None:
+            me = ob.data
+            bpy.data.objects.remove( ob, do_unlink = True )
+            bpy.data.meshes.remove( me )
+        if not floor:
+            return
+        corners = [ [ float( x ) for x in c ][ :3 ] for c in floor.get( "corners" ) or [ ] ]
+        if len( corners ) != 4:
+            return
+        me = bpy.data.meshes.new( "floor" )
+        me.from_pydata( corners, [ ], [ ( 0, 1, 2, 3 ) ] )
+        ob = bpy.data.objects.new( "floor", me )
+        col = _linear( np.asarray( floor.get( "color", [ 0.86, 0.86, 0.86 ] ), float )[ :3 ] )
+        mat = bpy.data.materials.get( "floor" ) or self._material( "floor", color = col )
+        mat.node_tree.nodes.get( "Principled BSDF" ).inputs[ "Base Color" ].default_value = ( *col.tolist(), 1.0 )
+        me.materials.append( mat )
+        bpy.context.scene.collection.objects.link( ob )
 
     def frame( self, cam: dict, width: int, height: int, samples: int, point_radius = None, edge_radius = None,
                shown = None ) -> bytes:
@@ -343,12 +397,15 @@ def render( store, req: dict ) -> bytes:
     i = int( req.get( "frame", 0 ) )
     m = json.loads( ( Path( store ) / "manifest.json" ).read_text() )
     raw = base64.b64decode( req[ "region" ] ) if req.get( "region" ) else None
-    key = ( str( store ), m[ "frames" ][ i ][ "file" ], m.get( "base" ), theme, axes, hashlib.sha1( raw ).hexdigest() if raw else None )
+    field = req.get( "field" ) if isinstance( req.get( "field" ), dict ) else None
+    key = ( str( store ), m[ "frames" ][ i ][ "file" ], m.get( "base" ), theme, axes, hashlib.sha1( raw ).hexdigest() if raw else None,
+            json.dumps( field, sort_keys = True ) if field else None )
     if key != SCENE.key:
-        d = frame_data( store, i, axes, theme, _store_module().read_chunk( raw ) if raw else None )
+        d = frame_data( store, i, axes, theme, _store_module().read_chunk( raw ) if raw else None, field )
         SCENE.load( d )
         SCENE.key = key
         SCENE.data = d
+    SCENE.set_floor( req.get( "floor" ) if isinstance( req.get( "floor" ), dict ) else None )
     cam = req.get( "camera" ) or default_camera( SCENE.data )
     return SCENE.frame( cam, req.get( "width", 800 ), req.get( "height", 600 ), req.get( "samples", 64 ),
                         req.get( "point_radius" ), req.get( "edge_radius" ),
