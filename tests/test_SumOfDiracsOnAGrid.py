@@ -315,3 +315,49 @@ if test( "the_grid_solver_takes_sharp_masses" ):
     ref = OtProblem( SumOfDiracsOnAGrid( ( N, N ), weights = m ), target() ).solve( Iterative( tol = 1e-9, tuning = Tuning( grid_solver = "cells" ) ) )
     assert p.converged, p.stats
     assert numpy.allclose( _host( p.cell_masses ), _host( ref.cell_masses ), atol = 1e-8 )
+
+if test( "a_trial_out_of_the_rings_does_not_condemn_the_next_ones" ):
+    import numpy
+    from loom.testing import need
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    need( "cpu" )
+    # sharp bands at 30 degrees, a floor of 1e-3: the full first Newton step sends cells past the rings of the exact path. The
+    # damped trials after it are judged on their own ( the fused zones once kept `exhausted` from the first one: every trial
+    # rejected, status "failure" after 0 iterations )
+    P, N = 256, 32
+    t = ( numpy.arange( P ) + 0.5 ) / P
+    x, y = numpy.meshgrid( t, t, indexing = "ij" )
+    th = numpy.deg2rad( 30 )
+    v = numpy.maximum( ( numpy.sin( 2 * numpy.pi * ( x * numpy.cos( th ) + y * numpy.sin( th ) ) / 0.25 ) > 0 ).astype( float ), 1e-3 )
+    p = OtProblem( SumOfDiracsOnAGrid( ( N, N ) ), Image( v ) ).solve( Iterative( tol = 1e-9, max_iter = 100, on_failure = "ignore",
+                                                                                   tuning = Tuning( grid_solver = "dedicated" ) ) )
+    print( { k: p.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "residual" ) } )
+    assert p.converged and int( p.stats[ "nb_iter" ] ) > 0, p.stats
+    assert numpy.abs( _host( p.cell_masses ) - 1 / N ** 2 ).max() < 1e-9
+
+if test( "the_grid_solver_blurs_a_contrasted_image_first" ):
+    import numpy
+    from matplotlib.path import Path
+    from loom.testing import need
+    from sdot.distributions.Image import Image
+    from sdot.distributions.SumOfDiracsOnAGrid import SumOfDiracsOnAGrid
+    from sdot.OtProblem import Iterative, OtProblem, Tuning
+    need( "cpu" )
+    # a white star on black, a floor of 1e-3: the Voronoi start leaves the dark cells at 1e-3 of their targets, and the jumps
+    # crush cells at every full step ( steps of 1e-3, max_iter without the continuation ). The width continuation of the image
+    # ( `GridNewton2D.h::solve` ) brings it back to the general path's count
+    P, N = 256, 32
+    t = ( numpy.arange( P ) + 0.5 ) / P
+    x, y = numpy.meshgrid( t, t, indexing = "ij" )
+    k = numpy.arange( 10 )
+    r, a = numpy.where( k % 2 == 0, 0.42, 0.17 ), numpy.pi / 2 + k * numpy.pi / 5
+    star = Path( numpy.stack( [ 0.5 + r * numpy.cos( a ), 0.5 + r * numpy.sin( a ) ], axis = 1 ) )
+    v = numpy.maximum( star.contains_points( numpy.stack( [ x.ravel(), y.ravel() ], axis = 1 ) ).reshape( P, P ).astype( float ), 1e-3 )
+    p = OtProblem( SumOfDiracsOnAGrid( ( N, N ) ), Image( v ) ).solve( Iterative( tol = 1e-9, max_iter = 100, on_failure = "ignore",
+                                                                                   tuning = Tuning( grid_solver = "dedicated" ) ) )
+    print( { k: p.stats[ k ] for k in ( "status", "nb_iter", "nb_backtracks", "nb_continuation_steps", "residual" ) } )
+    assert p.converged and int( p.stats[ "nb_continuation_steps" ] ) > 1, p.stats
+    assert int( p.stats[ "nb_iter" ] ) <= 60, p.stats
+    assert numpy.abs( _host( p.cell_masses ) - 1 / N ** 2 ).max() < 1e-9

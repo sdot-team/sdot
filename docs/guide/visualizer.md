@@ -8,6 +8,30 @@ Plans, power diagrams, cells, cell complexes and some distributions can draw the
 
 This page goes through the usual cases. The figures are written by [`visualizer_figures.py`](https://github.com/sdot-team/sdot/blob/main/docs/guide/visualizer_figures.py), the way the page tells it. The full list of arguments is in the [API reference](../api/visualization).
 
+## The page
+
+The scene takes the whole window; everything else floats over it, translucent.
+
+- **The frame axes**, at the top left: one pill per axis (play, value, slider). A run's store being written shows `live` there. Each pill moves by its grip, and a double click puts it back.
+- **The colour scale** of a field, at the bottom left. It moves by its grip. A click opens the Colour panel.
+- **The curves**: one see-through window per chart, below the axes, moved by their title and resized by their corner. A click in a chart goes to that frame, and hovering shows the values there. The whole curve is drawn, with the current frame marked.
+- **The toolbar**, at the top right: Render (when a server offers pictures), the navigation switch, then one icon per panel. A click opens the panel, a second click closes it. Open panels stack on the right, and each one folds or closes on its own. The page remembers which panels were open.
+  - **Layers**: faces, points, your own layers. Each row has its settings behind the chevron on the left (opacity, edges, radius, the field that colours the points) and its eye on the right.
+  - **Curves**: one row per chart, with its scale (linear, log) and its eye.
+  - **Colour**: what colours the points, and the range (this frame, all frames, typed).
+  - **Display**: the theme (light, dark, auto), the light (flat, relief, custom), the view (projection, reset, axes and slices beyond 3D), the occlusion.
+  - **Pictures** and **Services** appear when a server offers them. The services icon only shows their state: a green dot when all are ready, orange when one is missing.
+  - **More** (`⋯`): the cells of a region, the exports (a GIF of the frames, a PNG of the view), and the scene's name, state and size.
+
+**Embedded** in an iframe, as in this documentation, only the axes, the colour scale, the curves and three buttons stay: the navigation switch, a page of its own, and the settings button, which brings back the toolbar. `?embed=0` or `?embed=1` forces one or the other.
+
+**Services.** A store served by errand (`errand run` of a run that writes one, or `sviz open`) gets what this machine's services offer:
+- **pictures by Blender**: the Render button, whose icon chooses when (once, when the view rests, also while playing). Each picture is refined in steps (8, 32, 128 samples...) and stays over the view until the view moves. Keep writes it into the store.
+- **the baked occlusion** of a frame;
+- **the cells of a region** (a cut across the view, the boundary), rebuilt from the seeds that a power diagram keeps in its store.
+
+The Services panel lists them, with their state, and gives the command that declares a missing one. The ↻ button reads the state again. The page itself installs nothing.
+
 ## Looking at one object
 
 Every object that draws itself has the same four methods:
@@ -88,7 +112,7 @@ The **dimension** is not declared: it is read from the positions, and everything
 
 ## Replaying a descent
 
-`viz.new_frame( value )` opens a **frame**: what is added afterwards belongs to it. Each frame is a complete state, independent of the others, so cells can appear, vanish or change shape from one to the next. The page gets a bar with a play button, next to the menu; the arrows of the keyboard step through it and `Space` plays.
+`viz.new_frame( value )` opens a **frame**: what is added afterwards belongs to it. Each frame is a complete state, independent of the others, so cells can appear, vanish or change shape from one to the next. The page gets a timeline at the bottom, one row per frame axis with its play button; the arrows of the keyboard step through it and `Space` plays.
 
 To replay an algorithm, record its states in a callback, then draw one frame per state. Here, the power diagrams of the Lloyd iterations of [`sdot.quantization`](../examples/lloyd-quantization):
 
@@ -183,7 +207,7 @@ In 2D, `flat_points = True` draws the points as flat discs rather than shaded sp
 
 ## Beyond 3D: slices
 
-In dimension 4 and more, the menu chooses the 3 displayed coordinates and fixes the others with sliders. Polytopes are truly **cut** by this affine 3-space: the slice of a cell is again a polytope, whose vertices are enumerated in the browser at each move of a slider. Points and meshes are projected.
+In dimension 4 and more, the Display tab of the inspector chooses the 3 displayed coordinates and fixes the others with sliders. Polytopes are truly **cut** by this affine 3-space: the slice of a cell is again a polytope, whose vertices are enumerated in the browser at each move of a slider. Points and meshes are projected.
 
 The cells of a diagram are sent as polytopes, so nothing changes on the Python side:
 
@@ -235,6 +259,8 @@ sdot.write_convergence_html( { "300 diracs": moves }, "convergence.html", ylabel
 | `?play=0`, `?play=1` | play on opening, or not |
 | `?depth=0`, `?depth=1` | colors by depth |
 | `?opacity=0.4` | the opacity of the faces |
+| `?bake=0.8` | the strength of the baked occlusion |
+| `?embed=0`, `?embed=1` | the full page, or the embedded one (by default: embedded in an iframe) |
 
 ```html
 <iframe src="plan.html?wheel=0&touch=0" style="width: 100%; height: 60vh; border: 0"></iframe>
@@ -255,6 +281,9 @@ sdot.write_convergence_html( { "300 diracs": moves }, "convergence.html", ylabel
 | `Space` | play or pause |
 | `[`, `]` | radius of the points |
 | `f`, `p` | show or hide the faces, the points |
+| `1` … `9` | show or hide a layer, in the order of the Display tab |
+| `g` | the curves |
+| `r` | a picture by Blender (with the service) |
 | `e` | the hidden edges: removed, ghost, visible, none |
 | `c` | colors by depth |
 | `o` | perspective or orthographic |

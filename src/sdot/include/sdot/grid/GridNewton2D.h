@@ -35,6 +35,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <numeric>
 #include <vector>
 #include <unordered_map>
@@ -179,6 +180,12 @@ struct Evaluator {
     T pmax = 0;                                          // the largest psi, for the exact path ( `pe`: psi padded for it )
     bool exhausted = false;                              // the exact path ran out of its list ( a cell wider than all the rings ), or
                                                          // a cell that sdot could not build ( `DistCells::failed` )
+    /// EARLY REJECTION ( `run_zones` ): called after the first table, before the rounds, when some zones are bad, with the masses
+    /// and the cells whose box meets a bad zone: the other masses are exact, those of the listed cells upper bounds ( their cells
+    /// contain the true ones ). Returning false stops the call there ( `aborted`: the masses of the listed cells stay upper bounds,
+    /// the faces are not gathered ): a line search rejects a wild trial without paying its rounds.
+    std::function<bool( const std::vector<T> &mass, const std::vector<int> &cells )> pre_rounds;
+    bool aborted = false;
     double t_geom = 0, t_int = 0;
     // ZONE CERTIFICATE ( `use_zones`, see `geometry_zones` )
     bool use_zones = true;
@@ -1215,6 +1222,8 @@ struct Evaluator {
         else lvl_prev.clear();
         lvl.assign( nn, 0 );
         fused_last = true;
+        exhausted = false;                               // ( this call's: a trial out of the rings must not condemn the next ones )
+        aborted = false;
         auto tk = [&]( int k, double &tc ) { if( kern_timing ) { const double t = now_ms(); t_kern[ k ] += t - tc; tc = t; } };
         zbx.resize( 4 * size_t( nn ) );
         n_flag1 = n_exact = n_rounds = 0;
@@ -1752,6 +1761,21 @@ struct Evaluator {
         round_bad.push_back( nbad ); round_cells.push_back( 0 );
         lap( 0 );
 
+        // ---- the early rejection ( `pre_rounds` ): the cells whose box meets a bad zone, as the first round finds them
+        if( pre_rounds && nbad ) {
+            std::vector<int> cells;
+            auto zof = [&]( float x ) { return std::clamp( int( std::floor( ( T( x ) - lo ) / s ) ), 0, nzs - 1 ); };
+            for( int i = 0; i < nn; ++i ) {
+                const float *z = &zbx[ 4 * size_t( i ) ];
+                if( z[ 0 ] > z[ 1 ] ) continue;
+                bool hit = false;
+                for( int u = zof( z[ 0 ] ); u <= zof( z[ 1 ] ) && ! hit; ++u )
+                    for( int v = zof( z[ 2 ] ); v <= zof( z[ 3 ] ) && ! hit; ++v ) hit = bad[ size_t( u ) * nzs + v ];
+                if( hit ) cells.push_back( i );
+            }
+            if( ! pre_rounds( mass, cells ) ) { aborted = true; t_geom += now_ms() - t0; return; }
+        }
+
         // ---- the rounds
         std::vector<std::vector<int>> rl_th( par.nt );
         for( int k = 1; nbad && k < 64; ++k ) {
@@ -2239,37 +2263,19 @@ struct TensorPrecond {
         std::memcpy( g[ 0 ].data() + a * N, rv, N * sizeof( T ) );
         Tents::restrict_row( rv, N / 2, g[ gi( 0, 1 ) ].data() + a * ( N / 2 ) );
     }
-    // the rest of the tree from the ( 0, 0 ) and ( 0, 1 ) grids, scaling, prolongation down to ( 1, 0 ) and ( 0, 1 ). The chain
-    // along b of a level la ( restrictions, scalings, prolongations ) is row by row: one launch per level, each row's chain in cache
-    // ( the same operations, in the same order, as `coarse_split` )
+    // the rest of the tree from the ( 0, 0 ) and ( 0, 1 ) grids, scaling, prolongation down to ( 1, 0 ) and ( 0, 1 ) ( a fused
+    // version, each level's chain along b row by row in one launch, was tried 2026-11-20: same CG, no faster )
+    // ( the grids of a level la above the last kept one carry nothing back: not restricted, not prolonged )
+    int lb_top( int la ) const { for( int lb = L; lb >= 1; --lb ) if( kept( la, lb ) ) return lb; return la ? 0 : 1; }
     void coarse() {
         restrict_a( g[ 0 ].data(), N, N, g[ gi( 1, 0 ) ].data() );
         for( int la = 2; la <= L; ++la ) restrict_a( g[ gi( la - 1, 0 ) ].data(), N >> ( la - 1 ), N, g[ gi( la, 0 ) ].data() );
-        for( int la = 0; la <= L; ++la ) {
-            const int lb0 = la ? 0 : 1, na = N >> la;
-            par.slices( na, SI( na ) * N * 3, [&]( int a0, int a1, int ) {
-                for( int a = a0; a < a1; ++a ) {
-                    for( int lb = lb0 + 1; lb <= L; ++lb ) Tents::restrict_row( g[ gi( la, lb - 1 ) ].data() + a * ( N >> ( lb - 1 ) ), N >> lb, g[ gi( la, lb ) ].data() + a * ( N >> lb ) );
-                    for( int lb = lb0; lb <= L; ++lb ) {
-                        const int q = gi( la, lb ), m = N >> lb;
-                        T *v = g[ q ].data() + a * m;
-                        if( Di[ q ].empty() ) { std::fill( v, v + m, T( 0 ) ); continue; }
-                        const T *d = Di[ q ].data() + a * m;
-                        #pragma omp simd
-                        for( int b = 0; b < m; ++b ) v[ b ] *= d[ b ];
-                    }
-                    for( int lb = L; lb >= lb0 + 1; --lb ) Tents::prolong_row_add( g[ gi( la, lb ) ].data() + a * ( N >> lb ), N >> lb, g[ gi( la, lb - 1 ) ].data() + a * ( N >> ( lb - 1 ) ) );
-                }
-            } );
-        }
-        for( int la = L; la >= 2; --la ) prolong_a_add( g[ gi( la, 0 ) ].data(), N >> la, N, g[ gi( la - 1, 0 ) ].data() );
-    }
-    void coarse_split() {
-        restrict_a( g[ 0 ].data(), N, N, g[ gi( 1, 0 ) ].data() );
-        restrict_tree( 2 );
+        for( int la = 0; la <= L; ++la )
+            for( int lb = la ? 1 : 2, top = lb_top( la ); lb <= top; ++lb ) restrict_b( g[ gi( la, lb - 1 ) ].data(), N >> la, N >> ( lb - 1 ), g[ gi( la, lb ) ].data() );
         for( int q = 1; q < ( L + 1 ) * ( L + 1 ); ++q ) {
             T *v = g[ q ].data();
             const int n = int( g[ q ].size() );
+            if( q % ( L + 1 ) > lb_top( q / ( L + 1 ) ) ) continue;
             if( Di[ q ].empty() ) { std::fill( v, v + n, T( 0 ) ); continue; }
             const T *d = Di[ q ].data();
             par.slices( n, n, [&]( int c0, int c1, int ) {
@@ -2278,7 +2284,7 @@ struct TensorPrecond {
             } );
         }
         for( int la = 0; la <= L; ++la )
-            for( int lb = L; lb >= ( la ? 1 : 2 ); --lb ) prolong_b_add( g[ gi( la, lb ) ].data(), N >> la, N >> lb, g[ gi( la, lb - 1 ) ].data() );
+            for( int lb = lb_top( la ); lb >= ( la ? 1 : 2 ); --lb ) prolong_b_add( g[ gi( la, lb ) ].data(), N >> la, N >> lb, g[ gi( la, lb - 1 ) ].data() );
         for( int la = L; la >= 2; --la ) prolong_a_add( g[ gi( la, 0 ) ].data(), N >> la, N, g[ gi( la - 1, 0 ) ].data() );
     }
     // row a of z ( already r / diag ): add the ( 0, 1 ) and ( 1, 0 ) parts
@@ -2430,6 +2436,7 @@ struct Options {
     int    n0 = 64;                                      ///< the coarsest level ( `N` itself: no coarse to fine )
     int    max_iter = 50;
     double cg_rtol = 1e-2;
+    double conv_threshold = 1e-2;                        ///< an image: the width continuation when the start leaves a cell under this times its target ( 0: never )
 };
 
 struct Stats {
@@ -2473,10 +2480,12 @@ inline std::vector<T> refine_psi( int n, const std::vector<T> &pc, const Par &pa
 }
 
 /// DAMPED NEWTON on one level. `target`: the masses in index units ( they sum to the mass of the domain in index units ).
-/// `psi`: start on input, solution on output. `S`: index units per unit of mass ( for `tol_abs` ).
+/// `psi`: start on input, solution on output. `S`: index units per unit of mass ( for `tol_abs` ). `repair_start`: the cells
+/// of the start under `WarmRepair::LO` of their targets searched first ( off for the stages of the width continuation: the
+/// weights of the previous width, whose thin cells the repair would push into the jumps of the image -- 77 steps instead of 6 )
 template<class Integ>
 void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, double tol_rel, double tol_abs, double S,
-             const Options &o, Stats &st, double domain = 0 ) {
+             const Options &o, Stats &st, double domain = 0, bool repair_start = true ) {
     const double tw0 = now_ms();                         // ( TEMPORARY: SDOT_SOLVE_TRACE, the phases of a solve )
     double tw_limit = 0, tw_repair = 0;
     const int N = ev.N;
@@ -2505,7 +2514,6 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
         return r;
     };
     auto done = [ & ]( const Err &e ) { return e.rel <= tol_rel || e.abs <= tol_abs * S; };
-
     ev.run( psi );
     ++st.nb_diag;
     // the targets scaled to what the domain holds ( a density with mass outside of it: a gaussian on a box ), as
@@ -2544,7 +2552,7 @@ void newton( Evaluator<Integ> &ev, std::vector<T> target, std::vector<T> &psi, d
     const T min_t = *std::min_element( target.begin(), target.end() );
     Err err = err_of( ev.mass );
     if( st.residual0 < 0 ) st.residual0 = err.abs / S;
-    if( err.mmin < sdotplan::WarmRepair::LO * min_t ) {
+    if( repair_start && err.mmin < sdotplan::WarmRepair::LO * min_t ) {
         repair( psi );
         err = err_of( ev.mass );
         if( ! ( err.mmin > 0 ) ) {                       // ( too many cells, or a search that failed: the last resort is the Voronoi, as in `sdotplan/Solve.h` )
@@ -2689,7 +2697,24 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
     Stats st;
     const double t0 = now_ms();
     const Par par( queue );
-    const int n0 = w0 ? N : std::min( std::max( o.n0, 32 ), N );
+    // the smallest ratio mass / target ( the targets scaled to what the domain holds ) on level `n` at the width `b`, from `p`
+    auto ratio_at = [&]( int n, double b, const std::vector<T> &p, const std::vector<T> &target ) {
+        Evaluator<DECAYED_TYPE_OF( make_integ( n, h, 0.0 ) )> ev( n, make_integ( n, h * N / n, b ), par );
+        ev.run( p );
+        ++st.nb_diag;
+        T sm = 0, stt = 0;
+        for( size_t i = 0; i < target.size(); ++i ) { sm += ev.mass[ i ]; stt += target[ i ]; }
+        T r = std::numeric_limits<T>::max();
+        for( size_t i = 0; i < target.size(); ++i ) r = std::min( r, ev.mass[ i ] / ( target[ i ] * sm / stt ) );
+        return double( r );
+    };
+    // ( an image whose Voronoi leaves a cell under `conv_threshold` of its target: the width continuation below, on the finest level
+    //   alone -- the levels refined from a coarse solution stall on the jumps as the Voronoi does )
+    bool blur_cont = false;
+    if constexpr ( requires( const DECAYED_TYPE_OF( make_integ( N, h, 0.0 ) ) &ig ) { ig.blurrable; ig.pixel; } )
+        if( ! w0 && o.conv_threshold > 0 )
+            blur_cont = ratio_at( N, 0.0, std::vector<T>( size_t( N ) * N, T( 0 ) ), std::vector<T>( nu, nu + size_t( N ) * N ) ) < o.conv_threshold;
+    const int n0 = w0 || blur_cont ? N : std::min( std::max( o.n0, 32 ), N );
     std::vector<T> psi;
     if( w0 ) {
         psi.resize( size_t( N ) * N );
@@ -2724,6 +2749,48 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
             }
         }
     }
+    // THE WIDTH CONTINUATION OF AN IMAGE ( `blur_cont` ): a start whose cells hold under `conv_threshold` of their targets ( the
+    // Voronoi on a contrasted image: the cells of the dark pixels ) leaves Newton a step limited by the cells that the jumps crush,
+    // at every iteration ( 1e-3 ). As `sdotplan/Solve.h` ( adaptive ), on the finest level: the image blurred by a gaussian of `b`,
+    // from the narrowest width of the ladder `diam / 2 / 4^k` where the start is admissible; after each solved width, the image itself
+    // as soon as the weights are admissible for it ( the level loop below ), `b / 4`, `b / 2`, `b / sqrt 2` otherwise ( the first
+    // that is admissible -- for `sqrt 2`, that leaves no cell empty -- and solved ), down to a quarter of a pixel
+    if constexpr ( requires( const Integ0 &ig ) { ig.blurrable; ig.pixel; } ) {
+        if( blur_cont ) {
+            const double hl = h * N / n0, S = double( n0 ) * n0;
+            std::vector<T> target( nus.back().size() );
+            for( size_t i = 0; i < target.size(); ++i ) target[ i ] = nus.back()[ i ] * S;
+            const double s_min = make_integ( n0, hl, 0.0 ).pixel / 4;
+            std::vector<double> ladder;                  // ( decreasing )
+            for( double b = h * N / std::sqrt( 2.0 ); b >= s_min; b /= 4 ) ladder.push_back( b );
+            if( ladder.empty() ) ladder.push_back( s_min );
+            size_t k = ladder.size() - 1;
+            while( k > 0 && ratio_at( n0, ladder[ k ], psi, target ) < o.conv_threshold ) --k;
+            auto stage = [&]( double b ) {
+                Evaluator<Integ0> ev( n0, make_integ( n0, hl, b ), par );
+                Stats sl;
+                newton( ev, target, psi, o.tol_rel, o.tol_abs, S, o, sl, 0.0, false );
+                st.nb_iter += sl.nb_iter; st.nb_diag += sl.nb_diag; st.nb_backtracks += sl.nb_backtracks; st.lin_nb_iter += sl.lin_nb_iter;
+                st.t_diag += sl.t_diag; st.t_lin += sl.t_lin; ++st.nb_levels;
+                if( st.residual0 < 0 ) st.residual0 = sl.residual0;
+                if( std::getenv( "SDOT_SOLVE_TRACE" ) ) std::printf( "  continuation b %.4e: status %d, %d steps\n", b, sl.status, sl.nb_iter );
+                return sl.status == 1;
+            };
+            double b = ladder[ k ];
+            stage( b );
+            while( b > s_min && ratio_at( n0, 0.0, psi, target ) < o.conv_threshold ) {
+                bool moved = false;
+                for( double r : { 4.0, 2.0, std::sqrt( 2.0 ) } ) {
+                    const double nb = std::max( b / r, s_min );
+                    if( ! ( nb < b ) || ! ( ratio_at( n0, nb, psi, target ) >= ( r > 1.5 ? o.conv_threshold : 1e-300 ) ) ) continue;
+                    const std::vector<T> keep = psi;
+                    if( stage( nb ) ) { b = nb; moved = true; break; }
+                    psi = keep;                          // ( abandoned: the solved weights again )
+                }
+                if( ! moved ) break;
+            }
+        }
+    }
     double domain = 0;                                   // ( what the domain holds, from the coarsest level )
     for( int n = n0, l = int( nus.size() ) - 1; n <= N; n *= 2, --l ) {
         if( n > n0 ) psi = refine_psi( n / 2, psi, par );
@@ -2737,7 +2804,7 @@ Stats solve( const CpuQueue &queue, int N, double ox, double oy, double h, MakeI
         if( std::getenv( "SDOT_SOLVE_TRACE" ) ) std::printf( "  level %d: integrals %.3f s, evaluator %.3f s\n", n, ( tq1 - tq0 ) / 1e3, ( now_ms() - tq1 ) / 1e3 );
         Stats sl;
         const bool fine = n == N;
-        newton( ev, target, psi, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl, domain );
+        newton( ev, target, psi, fine ? o.tol_rel : std::max( o.tol_rel, o.ctol ), fine ? o.tol_abs : 0.0, S, o, sl, domain, ! blur_cont );
         domain = sl.domain_mass;
         st.nb_iter += sl.nb_iter; st.nb_diag += sl.nb_diag; st.nb_backtracks += sl.nb_backtracks; st.lin_nb_iter += sl.lin_nb_iter;
         st.t_diag += sl.t_diag; st.t_lin += sl.t_lin; ++st.nb_levels;

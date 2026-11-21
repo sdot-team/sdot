@@ -1094,15 +1094,16 @@ class SdotPlanNd( Displayable ):
         from loom.tensor.host import to_host
         w0 = None if w0_given is None else RealTensor[ pd.num_point ]( np.asarray( to_host( getattr( w0_given, "raw", w0_given ) ), dtype = np.float64 ).reshape( -1 ) )
         opts = [ N, origin[ 0 ], origin[ 1 ], h, float( settings.tol ), float( tun.mass_rtol ), tun.grid_ctol, tun.grid_n0, int( settings.max_iter ),
-                 tun.grid_cg_rtol, 0.0 if w0 is None else 1.0 ]
+                 tun.grid_cg_rtol, 0.0 if w0 is None else 1.0,
+                 0.0 if settings.continuation == "never" else float( tun.conv_threshold ) ]
         # ( `dp`: the parameters of the density, physical; `Sh2 = n^2 h_n^2`, the factor of the densities in index units )
         kind, dist_kwargs, dom_kwargs = g[ "kind" ], {}, {}
         prm = g[ "prm" ] if g[ "prm" ] is not None else np.zeros( 1 )
         if kind == "unit":
             integ = "[&]( int, double, double ) { return sdot::grid::UnitCells{}; }"
         elif kind == "image":
-            integ = ( "[&]( int n, double hl, double ) { const int nx = int( dp[ 0 ] ), ny = int( dp[ 1 ] ); "
-                      "return sdot::grid::ImageCells( nx, ny, dp.data() + 2, dp.data() + 3 + nx, dp.data() + 4 + nx + ny, ox, oy, hl, double( n ) * n * hl * hl ); }" )
+            integ = ( "[&]( int n, double hl, double blur ) { const int nx = int( dp[ 0 ] ), ny = int( dp[ 1 ] ); "
+                      "return sdot::grid::ImageCells( nx, ny, dp.data() + 2, dp.data() + 3 + nx, dp.data() + 4 + nx + ny, ox, oy, hl, double( n ) * n * hl * hl, blur ); }" )
         elif kind == "gauss":
             integ = "[&]( int n, double hl, double blur ) { return sdot::grid::GaussCells( int( dp[ 0 ] ), dp.data() + 1, ox, oy, hl, double( n ) * n * hl * hl, blur ); }"
         else:
@@ -1117,7 +1118,7 @@ class SdotPlanNd( Displayable ):
                 "using TK_grid = double;",
                 "auto op = [&]( int k ) { return double( inputs.options( k ) ); };",
                 "const int N = int( op( 0 ) ); const double ox = op( 1 ), oy = op( 2 ), h = op( 3 );",
-                "sdot::grid::Options o; o.tol_abs = op( 4 ); o.tol_rel = op( 5 ); o.ctol = op( 6 ); o.n0 = int( op( 7 ) ); o.max_iter = int( op( 8 ) ); o.cg_rtol = op( 9 );",
+                "sdot::grid::Options o; o.tol_abs = op( 4 ); o.tol_rel = op( 5 ); o.ctol = op( 6 ); o.n0 = int( op( 7 ) ); o.max_iter = int( op( 8 ) ); o.cg_rtol = op( 9 ); o.conv_threshold = op( 11 );",
                 "const SI n = SI( N ) * N;",
                 "std::vector<double> dp( inputs.dens_prm.shape( 0 ) ); for ( size_t q = 0; q < dp.size(); ++q ) dp[ q ] = double( inputs.dens_prm( SI( q ) ) );",
                 "std::vector<double> nu( n ), w0v, w( n ), m( n ), b( 2 * n );",

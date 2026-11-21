@@ -1,5 +1,11 @@
 #pragma once
 
+// ( the lambdas of the unrolled folds: clang leaves them as calls once their body is large -- closures and arrays in memory, Ring1Reg with
+// its extras 41 -> 14 ns/cell on an M4 when forced )
+#ifndef SDOT_INLINE_LAMBDA
+#define SDOT_INLINE_LAMBDA __attribute__( ( always_inline ) )
+#endif
+
 #include <asimd/asimd.h>
 #include <atomic>
 #include <bit>
@@ -73,8 +79,8 @@ struct Ring2Reg {
         for( int k = 0; k < D; ++k ) hs[ k ] = asimd::min( h[ k ], big );
         V ex[ SD ], ey[ SD ], eh[ SD ], evx[ SD ], evy[ SD ], sx[ D ], sy[ D ], cnt = one;
         for( int i = 0; i < SD; ++i ) { ex[ i ] = V( T( Tb::dir_x[ 0 ] ) ); ey[ i ] = V( T( Tb::dir_y[ 0 ] ) ); eh[ i ] = hs[ 0 ]; evx[ i ] = evy[ i ] = zero; }
-        [&]<int... t>( std::integer_sequence<int,t...> ) {
-            ( ( [&] {
+        [&]<int... t>( std::integer_sequence<int,t...> ) SDOT_INLINE_LAMBDA {
+            ( ( [&]() SDOT_INLINE_LAMBDA {
                 constexpr int l = ( t + 1 ) % D;
                 const V lx = V( T( Tb::dir_x[ l ] ) ), ly = V( T( Tb::dir_y[ l ] ) );
                 for( int r = 0; r < SP; ++r ) {
@@ -94,8 +100,8 @@ struct Ring2Reg {
             }() ), ... );
         }( std::make_integer_sequence<int,D+D/2>() );
         V wx = sx[ D / 2 ], wy = sy[ D / 2 ];
-        [&]<int... t>( std::integer_sequence<int,t...> ) {
-            ( ( [&] {
+        [&]<int... t>( std::integer_sequence<int,t...> ) SDOT_INLINE_LAMBDA {
+            ( ( [&]() SDOT_INLINE_LAMBDA {
                 constexpr int j = ( D + D / 2 - 1 - t ) % D;
                 const V v = mulc<Tb::dir_x[ j ]>( wx ) + mulc<Tb::dir_y[ j ]>( wy );
                 const auto act = v - hs[ j ] + V( T( 1e-12 ) ) * ( one + asimd::max( v, zero - v ) ) > zero;
@@ -124,7 +130,7 @@ struct Ring2Reg {
             base[ x ] = ( i / N + 2 ) * P + i % N + 2;
             if constexpr ( ! GATHER ) {
                 pi[ x ] = psi_pad[ base[ x ] ];
-                [&]<int... q>( std::integer_sequence<int,q...> ) {
+                [&]<int... q>( std::integer_sequence<int,q...> ) SDOT_INLINE_LAMBDA {
                     ( ( pj[ q ][ x ] = psi_pad[ base[ x ] + Tb::off_x[ q ] * P + Tb::off_y[ q ] ] ), ... );
                 }( std::make_integer_sequence<int,NO>() );
             }
@@ -143,8 +149,8 @@ struct Ring2Reg {
             };
             // each direction once: the min over its seeds
             V h[ D ];
-            [&]<int... d>( std::integer_sequence<int,d...> ) {
-                ( ( [&] {
+            [&]<int... d>( std::integer_sequence<int,d...> ) SDOT_INLINE_LAMBDA {
+                ( ( [&]() SDOT_INLINE_LAMBDA {
                     constexpr int q0 = seed( d, 0 ), q1 = seed( d, 1 );
                     h[ d ] = hq.template operator()<q0>();
                     if constexpr ( q1 >= 0 ) {
@@ -166,7 +172,7 @@ struct Ring2Reg {
             // the tightening, each vertex as soon as its two ht are known ( ht 0 kept for the last one ), the area
             if constexpr ( TIGHT >= 100 && TIGHT < 200 )
                 for( int r = 0; r < TIGHT - 100; ++r )
-                    [&]<int... k>( std::integer_sequence<int,k...> ) {
+                    [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
                         ( ( h[ k ] = asimd::min( h[ k ], mulc<Tb::pair_lam[ npair( k ) ]>( h[ Tb::pair_j[ npair( k ) ] ] ) + mulc<Tb::pair_mu[ npair( k ) ]>( h[ Tb::pair_l[ npair( k ) ] ] ) ) ), ... );
                     }( std::make_integer_sequence<int,D>() );
             // the pairs of span <= S, certified by the local convexity on the neighbours ( ht_k <= lam ht_{k-1} + mu ht_{k+1} for every k:
@@ -175,10 +181,10 @@ struct Ring2Reg {
             if constexpr ( TIGHT >= 300 ) {
                 V ht[ D ];
                 if constexpr ( TIGHT == 400 ) sweep( h, ht );
-                else [&]<int... k>( std::integer_sequence<int,k...> ) { ( ( ht[ k ] = h[ k ], tighten<TIGHT-300,k,Tb::pair_beg[ k ]>( h, ht[ k ] ) ), ... ); }( std::make_integer_sequence<int,D>() );
+                else [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA { ( ( ht[ k ] = h[ k ], tighten<TIGHT-300,k,Tb::pair_beg[ k ]>( h, ht[ k ] ) ), ... ); }( std::make_integer_sequence<int,D>() );
                 V viol( T( -1 ) );
-                [&]<int... k>( std::integer_sequence<int,k...> ) {
-                    ( ( [&] {
+                [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
+                    ( ( [&]() SDOT_INLINE_LAMBDA {
                         constexpr int p = npair( k );
                         const V c = mulc<Tb::pair_lam[ p ]>( ht[ Tb::pair_j[ p ] ] ) + mulc<Tb::pair_mu[ p ]>( ht[ Tb::pair_l[ p ] ] );
                         viol = asimd::max( viol, ht[ k ] - c - V( T( 1e-12 ) ) * ( V( T( 1 ) ) + asimd::max( c, V( T( 0 ) ) - c ) ) );
@@ -187,11 +193,11 @@ struct Ring2Reg {
                 if ( const auto fb = asimd::to_bits( viol > V( T( 0 ) ) ) ) {
                     fallbacks.fetch_add( 1, std::memory_order_relaxed );
                     V h4[ D ]; for( int k = 0; k < D; ++k ) h4[ k ] = ht[ k ];
-                    [&]<int... k>( std::integer_sequence<int,k...> ) { ( ( ht[ k ] = h[ k ], tighten<0,k,Tb::pair_beg[ k ]>( h, ht[ k ] ) ), ... ); }( std::make_integer_sequence<int,D>() );
+                    [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA { ( ( ht[ k ] = h[ k ], tighten<0,k,Tb::pair_beg[ k ]>( h, ht[ k ] ) ), ... ); }( std::make_integer_sequence<int,D>() );
                     if ( diag ) {                        // ( which lanes failed, which changed, which stay inverted with the 21 pairs: empty )
                         V ch( T( -1 ) ), vf( T( -1 ) );
-                        [&]<int... k>( std::integer_sequence<int,k...> ) {
-                            ( ( [&] {
+                        [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
+                            ( ( [&]() SDOT_INLINE_LAMBDA {
                                 constexpr int p = npair( k );
                                 const V c = mulc<Tb::pair_lam[ p ]>( ht[ Tb::pair_j[ p ] ] ) + mulc<Tb::pair_mu[ p ]>( ht[ Tb::pair_l[ p ] ] );
                                 vf = asimd::max( vf, ht[ k ] - c - V( T( 1e-12 ) ) * ( V( T( 1 ) ) + asimd::max( c, V( T( 0 ) ) - c ) ) );
@@ -208,8 +214,8 @@ struct Ring2Reg {
                 for( int k = 0; k < D; ++k ) h[ k ] = ht[ k ];
             }
             V ht0, hp, X0, Y0, Xp, Yp, s( T( 0 ) );
-            [&]<int... k>( std::integer_sequence<int,k...> ) {
-                ( ( [&] {
+            [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
+                ( ( [&]() SDOT_INLINE_LAMBDA {
                     V t = h[ k ];
                     if constexpr ( TIGHT == 1 ) tighten<0,k,Tb::pair_beg[ k ]>( h, t );
                     if constexpr ( TIGHT >= 200 && TIGHT < 300 ) tighten<TIGHT-200,k,Tb::pair_beg[ k ]>( h, t );
@@ -233,8 +239,8 @@ struct Ring2Reg {
             ( s * half ).store_aligned( ar + o );
         }
         // the owners: the box or no seed -1, else the seed that won
-        [&]<int... d>( std::integer_sequence<int,d...> ) {
-            ( ( [&] {
+        [&]<int... d>( std::integer_sequence<int,d...> ) SDOT_INLINE_LAMBDA {
+            ( ( [&]() SDOT_INLINE_LAMBDA {
                 constexpr int q0 = seed( d, 0 ), q1 = seed( d, 1 );
                 for( int x = 0; x < B; ++x )
                     own[ d ][ x ] = ! ( ( fin[ d ] >> x ) & 1 ) ? -1 : q1 >= 0 && ( ( sec[ d ] >> x ) & 1 ) ? q1 : q0;

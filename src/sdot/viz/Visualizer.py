@@ -249,7 +249,13 @@ class Visualizer:
     one opens ( `new_frame` ), then forgotten -- the frames of a long run never stay in memory, and a viewer reads them while
     the run goes on. `close()` writes the last one. The shared primitives and the images go to a base written once ( again
     when they change ); the curves are given again whole as they grow ( `clear_curves`, then `add_curve` ). `on_frame`: called
-    after each write of the manifest ( a run says there that its view changed ).
+    after each write of the manifest ( a run says there that its view changed ). `viewer`: whether the store holds its
+    viewer ( `"copy"` ), only names it ( `"link"` ), or holds it unless it is published ( `"auto"` ), see `bundle.py`.
+
+    `ao`: in 3D, the faces get a BAKED ambient occlusion ( `occlusion.py` ): how open the space is in front of each corner,
+    computed when the page or the frame is written, then used by the lighting ( the "baked occlusion" slider, `?bake=` ).
+    `True`, or the options of `ambient_occlusion` ( `dict( rays = 64, radius = 0.05 )` ). Each frame is baked with the
+    shared faces as occluders; the shared faces with themselves.
 
     `face_opacity`: the starting value of the opacity slider of the faces ( `?opacity=` in the URL wins ) -- below 1 for a
     density drawn under diracs.
@@ -258,8 +264,9 @@ class Visualizer:
     def __init__( self, title = "sdot", background = None, frame_axis = "time",
                   playable = True, fps = 5.0, frame_value = 0.0, depth_colors = False, morph = 0, loop = False,
                   autoplay = False, face_opacity = 1.0, flat_points = False , field = None, compact = False,
-                  store = None, on_frame = None ):
+                  store = None, on_frame = None, viewer = "auto", ao = False ):
         self.title      = title
+        self.ao         = ao              # baked occlusion of the faces ( 3D ): False, True, or the options of `ambient_occlusion`
         self.face_opacity = float( face_opacity )
         self.flat_points = flat_points
         self.depth_colors = depth_colors
@@ -321,14 +328,18 @@ class Visualizer:
         # Only the frame being built stays in the lists above; the shared primitives go to a second scene, the BASE,
         # which shares the tables of colours, layers and images with this one.
         self._writer = None
+        self._sources = None
         if store is not None:
             from .store import StoreWriter
             self._writer = StoreWriter( store, on_frame = on_frame )
-            b = self._base_viz = Visualizer( title = title, compact = compact )
+            b = self._base_viz = Visualizer( title = title, compact = compact, ao = ao )
             b._colors, b._colors_dark, b._col_ids, b._layers, b._images = self._colors, self._colors_dark, self._col_ids, self._layers, self._images
             self._base_dirty = False
             self._closed = False
-            ( Path( store ) / "index.html" ).write_text( store_page( title ) )     # ( read through a server: no file:// )
+            from .bundle import write_store_page                                 # ( a bootstrap naming a pinned viewer, sdot ADR 0001 )
+            write_store_page( store, title, viewer = viewer )                    # ( read through a server: no file:// )
+            from .services import declare                                        # ( what its page may ask for, errand ADR 0026 )
+            declare( store )
             self._writer.write_manifest( self, force = True )
 
     # ---- colors -------------------------------------------------------------------------------
@@ -347,6 +358,17 @@ class Visualizer:
     def next_color( self ):
         """The next free color (the one an `add_*` without `color` would take), without advancing."""
         return self.color_at( self._next_color )
+
+    def add_sources( self, kind: str, arrays: dict, meta: dict | None = None ):
+        """SOURCES of the frame being built: small data its scene can be REBUILT from ( sdot ADR 0001 §6 ), for the services
+        of a store ( `sdot.region` rebuilds the cells of a region from the seeds and weights of a power diagram ). `kind`
+        says what they are ( `"sdot.power_diagram"` ); a viewer that does not know it ignores them.
+
+        Kept by stores only ( `sources/<frame>.bin`, named in the frame's entry of the manifest ); a page has no use for
+        them. The last call of a frame wins."""
+        if self._writer is not None:
+            self._sources = ( str( kind ), { k: np.asarray( v ) for k, v in arrays.items() }, dict( meta or { } ) )
+        return self
 
     def reserve_colors( self, nb = 1 ):
         """Reserves `nb` CONSECUTIVE indices on the scale and returns the first.
@@ -501,6 +523,7 @@ class Visualizer:
             self._base_dirty = False
         if self.nb_dims is not None:
             self._writer.write_frame( self, self._frames[ 0 ][ "values" ] )
+        self._sources = None
         self._pools, self._bb_pts, self._keep, self._base, self._size, self._nb_verts = [ ], [ ], [ ], { }, { }, 0
         self._poly_v, self._poly_len, self._poly_c = [ ], [ ], [ ]
         self._edge_v, self._edge_c, self._edge_l = [ ], [ ], [ ]
@@ -538,6 +561,37 @@ class Visualizer:
         them, rewritten after each frame )."""
         self._curves = [ ]
         return self
+
+    def _ao_options( self ) -> dict:
+        return dict( self.ao ) if isinstance( self.ao, dict ) else { }
+
+    def _baked_occlusion( self ) -> np.ndarray:
+        """the occlusion codes of every corner of `_poly_v` ( uint8, 255 = open ): the shared faces with themselves, each
+        frame's with the shared ones"""
+        from .occlusion import ambient_occlusion, as_codes
+        pos = self.positions
+        pv = np.asarray( self._poly_v, np.int64 )
+        off = np.concatenate( [ [ 0 ], np.cumsum( self._poly_len ) ] ).astype( np.int64 )
+        codes = np.full( len( pv ), 255, np.uint8 )
+        sp = self._shared[ "poly" ]
+        opts = self._ao_options()
+
+        def bake( polys ):                                  # ( polygon indices ) -> the occlusion of their corners, in order
+            polys = np.asarray( polys, np.int64 )
+            lens = off[ polys + 1 ] - off[ polys ]
+            corners = np.concatenate( [ np.arange( off[ p ], off[ p + 1 ] ) for p in polys ] ) if len( polys ) else np.zeros( 0, np.int64 )
+            return corners, ambient_occlusion( pos, pv[ corners ], np.concatenate( [ [ 0 ], np.cumsum( lens ) ] ), **opts )
+
+        if sp:
+            c, a = bake( np.arange( sp ) )
+            codes[ c ] = as_codes( a )
+        r = self._frame_ranges( "poly" )
+        for i in range( len( r ) - 1 ):
+            if r[ i + 1 ] > r[ i ]:
+                c, a = bake( np.r_[ np.arange( sp ), np.arange( r[ i ], r[ i + 1 ] ) ] )
+                own = len( c ) - int( off[ r[ i + 1 ] ] - off[ r[ i ] ] )
+                codes[ c[ own: ] ] = as_codes( a[ own: ] )
+        return codes
 
     def _frame_ranges( self, key ):
         """The bounds of the frames over one of the primitive lists: `nb_frames + 1` integers ( after the shared
@@ -1020,6 +1074,7 @@ class Visualizer:
             "__POLY_V__"  : _b64( np.asarray( self._poly_v, dtype = np.int32 ) ),
             "__POLY_OFF__": _b64( poly_off ),
             "__POLY_C__"  : _b64( self.polygon_colors ),
+            "__POLY_AO__" : _b64( self._baked_occlusion() ) if self.ao and self.nb_dims == 3 else "",
             "__EDG_V__"   : _b64( self.edges.reshape( -1 ) ),
             "__EDG_C__"   : _b64( self.edge_colors ),
             "__PNT_V__"   : _b64( self.points ),
@@ -1088,209 +1143,347 @@ _HTML = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <title>__TITLE__</title>
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #ffffff; color: #111; }
+  /* the page: the SCENE takes the whole window. Over it float, translucent: the frame AXES ( top left, one pill each ),
+     the TOOLBAR ( top right: Render, one icon per panel ), the PANELS opened by those icons ( stacked under it ), the
+     colour SCALE ( bottom left ) and the curve WINDOWS. Axes and the scale can be taken out of their place and moved
+     by their grip; a double-click on the grip puts them back. Colours per theme, as variables. */
+  :root {
+    --bg: #ffffff; --glass: rgba(250,250,250,0.62); --pane: rgba(250,250,250,0.80); --raised: #ffffff; --well: rgba(0,0,0,0.05);
+    --line: rgba(0,0,0,0.12); --soft: rgba(0,0,0,0.06); --text: #1d1d1f; --muted: #5f6368; --accent: #1f6fd1; --accent-ink: #174f96;
+    --accent-soft: rgba(31,111,209,0.16); --sel: rgba(0,0,0,0.10); --ok: #2e9e57; --warn: #c27a16; --chart: rgba(255,255,255,0.55);
+    --shadow: 0 2px 12px rgba(0,0,0,0.12);
+  }
+  body.dark {
+    --bg: #1a1a1a; --glass: rgba(28,28,30,0.55); --pane: rgba(28,28,30,0.74); --raised: #242426; --well: rgba(0,0,0,0.30);
+    --line: rgba(255,255,255,0.14); --soft: rgba(255,255,255,0.07); --text: #ececec; --muted: #b0b0b5; --accent: #1f6fd1;
+    --accent-ink: #8ab4f8; --accent-soft: rgba(138,180,248,0.22); --sel: rgba(255,255,255,0.16); --ok: #4cc274; --warn: #f0b45a;
+    --chart: rgba(28,28,30,0.45); --shadow: 0 6px 24px rgba(0,0,0,0.40);
+  }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; }
   canvas { display: block; }
-  #controls {
-    display: none; position: absolute; top: 30px; left: 0;
-    max-height: calc(100vh - 50px); overflow-y: auto;
-    background: rgba(255,255,255,0.88); padding: 8px 12px; border-radius: 6px;
-    font-family: sans-serif; font-size: 13px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    width: 244px; box-sizing: border-box;
-  }
-  #controls *, #controls { box-sizing: border-box; }
-  #menu { position: fixed; top: 10px; left: 10px; z-index: 2; }
-  #menuBtn {
-    display: block; width: 30px; height: 30px; padding: 0; cursor: pointer; border: none;
-    border-radius: 6px; background: rgba(255,255,255,0.88); color: #333; font-size: 18px; line-height: 1;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  }
-  #menu:hover #controls, #menu.open #controls { display: block; }
-  #controls a { color: inherit; }
-  #controls button.act { font-size: 12px; cursor: pointer; }
-  body.dark #menuBtn { background: rgba(30,30,30,0.92); color: #ddd; }
-  #controls label { display: block; margin: 2px 0; }
-  #controls input[type=range] { vertical-align: middle; width: 100%; }
-  #controls select { font-size: 12px; }
-  #controls .hint { color: #666; margin-top: 6px; }
-  #controls .sec { margin-top: 8px; padding-top: 8px; border-top: 1px solid #ddd; }
-  #controls .val { color: #666; font-variant-numeric: tabular-nums; }
-  /* the frame axes: in plain sight, right of the menu button -- one row per axis */
-  #anim {
-    display: none; position: fixed; top: 10px; left: 48px; z-index: 1;
-    width: min(460px, calc(100vw - 96px)); box-sizing: border-box; padding: 2px 8px;
-    background: rgba(255,255,255,0.88); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    font-family: sans-serif; font-size: 13px;
-    grid-template-columns: auto minmax(40px, 1fr) auto; align-items: center; column-gap: 8px;
-  }
-  #anim .row { display: contents; }
-  #anim .row > * { margin: 2px 0; }
-  #anim input[type=range] { width: 100%; accent-color: #2a7de1; }
-  #anim .play {
-    cursor: pointer; border: none; border-radius: 50%; background: #2a7de1; color: #fff; padding: 0;
-    width: 22px; height: 22px; font-size: 10px; line-height: 22px; flex: none;
-  }
-  #anim .play.on { background: #444; }
-  #anim .gap { width: 22px; flex: none; }
-  #anim .lab { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  #anim .cnt { color: #888; font-size: 11px; margin-left: 4px; }
-  body.dark #anim { background: rgba(30,30,30,0.92); color: #ddd; }
-  body.dark #anim input[type=range] { accent-color: #8ab4f8; }
-  body.dark #anim .play { background: #8ab4f8; color: #172033; }
-  body.dark #anim .play.on { background: #ddd; }
-  body.dark #anim .cnt { color: #999; }
-  /* the curves ( `add_curve` ): one WINDOW per chart over the scene, moved by its title, resized by its corner */
-  #curves { position: fixed; inset: 0; z-index: 1; pointer-events: none; font-family: sans-serif; font-size: 11px; }
-  #curves .chart {
-    position: absolute; display: flex; flex-direction: column; box-sizing: border-box; min-width: 160px; min-height: 80px;
-    pointer-events: auto; resize: both; overflow: hidden;
-    background: rgba(255,255,255,0.72); border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,0.3); padding: 2px 8px 2px;
-  }
-  #curves .chart .bar { cursor: move; user-select: none; touch-action: none; }
-  #curves .chart .x { cursor: pointer; color: #888; padding: 0 2px; }
-  #curves .chart .ttl > span + span { margin-left: 8px; flex: none; }
-  #curves .chart .ttl .x { margin-left: 4px; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+  .glass { background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .ibtn { width: 30px; height: 30px; padding: 0; border-radius: 7px; border: none; background: transparent; position: relative;
+          display: inline-flex; align-items: center; justify-content: center; flex: none; text-decoration: none; color: inherit; }
+  .ibtn svg { width: 16px; height: 16px; }
+  .ibtn.on { background: var(--accent-soft); color: var(--accent-ink); }
+  .ibtn .badge { position: absolute; right: 4px; top: 4px; width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 0 2px var(--raised); display: none; }
+  .ibtn .badge.ok { display: block; background: var(--ok); } .ibtn .badge.warn { display: block; background: var(--warn); }
+  .btn { height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; font-size: 12px;
+         display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: inherit; box-sizing: border-box; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  .btn.primary { border: none; background: var(--accent); color: #fff; font-weight: 500; }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { height: 24px; border: none; background: transparent; font-size: 12px; padding: 0 4px; }
+  .seg button.on { background: var(--sel); font-weight: 500; }
+  .grip { width: 14px; height: 18px; flex: none; cursor: grab; color: var(--muted); display: flex; align-items: center; justify-content: center; touch-action: none; }
+  .grip svg { width: 10px; height: 14px; }
+  .pop { position: fixed; z-index: 8; padding: 6px; border-radius: 10px; background: var(--raised); border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .menu { display: flex; flex-direction: column; gap: 2px; min-width: 250px; }
+  .menu > button { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 10px; align-items: center; text-align: left;
+                   padding: 7px 10px; border: none; border-radius: 6px; background: transparent; }
+  .menu > button:hover { background: var(--soft); }
+  .menu > button.on { background: var(--accent-soft); }
+  .menu > button svg { width: 18px; height: 18px; }
+  .menu > button small { grid-column: 2; color: var(--muted); font-size: 12px; }
+  .menu hr { border: none; height: 1px; background: var(--line); margin: 4px 6px; }
+  code.cmd { display: block; padding: 7px 9px; border-radius: 6px; background: var(--well); border: 1px solid var(--line);
+             font: 11.5px/1.5 ui-monospace, "JetBrains Mono", Menlo, monospace; user-select: all; white-space: pre-wrap; word-break: break-all; }
+
+  #view { position: fixed; inset: 0; overflow: hidden; }
+  #renderImg { position: absolute; left: 0; top: 0; pointer-events: none; display: none; }
+
+  /* the AXES: one pill per frame axis */
+  #anim { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  #axesDock { position: fixed; z-index: 4; left: 12px; top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .axis { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 2px; border-radius: 999px; }
+  .axis.floating { position: fixed; z-index: 5; box-shadow: var(--shadow); }
+  .axis .play { width: 26px; height: 26px; border-radius: 50%; border: none; background: var(--text); color: var(--bg); padding: 0;
+                display: flex; align-items: center; justify-content: center; flex: none; }
+  .axis .play svg { width: 10px; height: 10px; }
+  .axis .gap { width: 26px; flex: none; }
+  .axis .lab { white-space: nowrap; font-variant-numeric: tabular-nums; min-width: 92px; }
+  .axis .lab b { font-weight: 600; }
+  .axis .cnt { color: var(--muted); margin-left: 4px; }
+  .axis input[type=range] { width: 240px; accent-color: var(--accent); }
+  .axis .live { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ok); }
+  .axis .live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+
+  /* the TOOLBAR and the PANELS */
+  #toolbar { position: fixed; z-index: 6; right: 12px; top: 10px; display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 10px; }
+  #toolbar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+  #renderGroup { display: none; height: 30px; border-radius: 7px; background: var(--accent); overflow: hidden; color: #fff; }
+  #renderGroup button { border: none; background: transparent; color: #fff; }
+  #renderBtn { padding: 0 8px 0 10px; font-weight: 500; }
+  #renderMode { width: 30px; border-left: 1px solid rgba(255,255,255,0.28) !important; display: flex; align-items: center; justify-content: center; }
+  #renderMode svg { width: 15px; height: 15px; }
+  #renderMode.open { background: rgba(0,0,0,0.2) !important; }
+  #panels { position: fixed; z-index: 5; right: 12px; top: 56px; bottom: 12px; width: 320px; display: flex; flex-direction: column; gap: 8px;
+            overflow-y: auto; pointer-events: none; }
+  .panel { pointer-events: auto; flex: none; border-radius: 10px; background: var(--pane); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+           border: 1px solid var(--line); padding: 6px 10px 10px; display: none; flex-direction: column; gap: 10px; }
+  .panel.open { display: flex; }
+  .panel > .head { display: flex; align-items: center; gap: 6px; height: 26px; }
+  .panel > .head b { flex: 1; font-weight: 600; }
+  .panel > .head small { color: var(--muted); font-size: 12px; }
+  .panel > .head button { width: 22px; height: 22px; padding: 0; border: none; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+  .panel > .head button svg { width: 12px; height: 12px; }
+  .panel.folded > :not(.head) { display: none !important; }
+  .panel.folded .fold svg { transform: rotate(180deg); }
+  .panel section { display: flex; flex-direction: column; gap: 8px; }
+  .panel h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .panel .row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 44px; align-items: center; gap: 8px; }
+  .panel .row .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .panel .kv { display: grid; grid-template-columns: 60px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; }
+  .panel .kv > span:nth-child(odd) { color: var(--muted); }
+  .panel input[type=range] { width: 100%; accent-color: var(--accent); }
+  .panel label.chk { display: flex; align-items: center; gap: 8px; }
+  .panel .hint { color: var(--muted); font-size: 12px; }
+  .panel select { height: 26px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); padding: 0 4px; }
+  .panel input.numf { height: 26px; width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--line);
+                      background: var(--raised); padding: 0 6px; font-variant-numeric: tabular-nums; }
+  /* a row of a list ( layers, curves ): its settings' chevron, a mark, the name, what it holds, the eye */
+  .item { display: grid; grid-template-columns: 18px 12px minmax(0, 1fr) auto 26px; align-items: center; gap: 8px; height: 30px; padding-left: 2px; border-radius: 6px; }
+  .item.open { background: var(--soft); }
+  .item.off { color: var(--muted); }
+  .item .more, .item .eye { width: 22px; height: 26px; padding: 0; border: none; background: transparent; color: inherit; display: flex; align-items: center; justify-content: center; }
+  .item .more { color: var(--muted); }
+  .item .more svg { width: 11px; height: 11px; transition: transform 0.15s; }
+  .item.open .more svg { transform: rotate(90deg); }
+  .item .eye svg { width: 16px; height: 16px; }
+  .item .mark { width: 12px; height: 12px; border-radius: 3px; }
+  .item .mark.line { height: 3px; border-radius: 2px; }
+  .item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .what { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sub { display: none; flex-direction: column; gap: 8px; padding: 4px 4px 10px 28px; }
+  .sub.open { display: flex; }
+  .panel .sub .row { grid-template-columns: 58px minmax(0, 1fr) 40px; }
+  .panel .sub .seg button { font-size: 11px; padding: 0 2px; }
+  .list { display: flex; flex-direction: column; gap: 1px; }
+  .choice { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); cursor: pointer; }
+  .choice.on { border-color: var(--accent-ink); background: var(--accent-soft); }
+  .choice b { font-weight: 500; } .choice small { display: block; color: var(--muted); font-size: 12px; }
+  #kept { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  #kept figure { margin: 0; display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+  #kept img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); box-sizing: border-box; }
+  #kept figcaption { font-size: 12px; color: var(--muted); }
+  #views { display: flex; flex-wrap: wrap; gap: 6px; }
+  #views button { height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; font-size: 12px; }
+  #views button.add { border-style: dashed; color: var(--muted); }
+  .svc { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; font-size: 12px; }
+  .sdot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .sdot.ok { background: var(--ok); } .sdot.warn { background: var(--warn); } .sdot.idle { border: 1.5px solid var(--ok); box-sizing: border-box; }
+
+  /* over the view: the picture's state and its card, the colour scale */
+  #renderHint { position: fixed; z-index: 4; left: 50%; top: 12px; transform: translateX(-50%); display: none; align-items: center; gap: 8px;
+                padding: 5px 12px; border-radius: 999px; font-size: 12px; }
+  #renderCard { position: fixed; z-index: 4; left: 50%; bottom: 14px; transform: translateX(-50%); display: none; align-items: center;
+                gap: 8px; padding: 6px 8px 6px 12px; border-radius: 10px; }
+  #renderCard .info { font-variant-numeric: tabular-nums; font-size: 12px; padding-right: 4px; }
+  #scalesDock { position: fixed; z-index: 4; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  #legend { display: none; align-items: center; gap: 8px; padding: 5px 10px 5px 2px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+  #legend.floating { position: fixed; z-index: 5; box-shadow: var(--shadow); }
+  #legend canvas { width: 120px; height: 8px; border-radius: 2px; }
+  #legend .name { font-weight: 500; }
+
+  /* the CURVES: one window per chart, see-through, moved by its title, resized by its corner */
+  #curves { position: fixed; inset: 0; z-index: 3; pointer-events: none; font-size: 11px; }
+  #curves.off { visibility: hidden; }
+  #curves .chart { position: absolute; display: flex; flex-direction: column; box-sizing: border-box; min-width: 200px; min-height: 30px;
+                   pointer-events: auto; resize: both; overflow: hidden; border-radius: 10px; background: var(--chart);
+                   backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); border: 1px solid var(--line); }
+  #curves .chart.folded { resize: none; height: 30px !important; }
+  #curves .chart.folded .plot, #curves .chart.folded .axes { display: none; }
+  #curves .ttl { display: flex; align-items: center; gap: 7px; height: 28px; flex: none; padding: 0 4px 0 10px; cursor: grab; user-select: none; touch-action: none; font-size: 12px; }
+  #curves .ttl .mk { width: 10px; height: 3px; border-radius: 2px; flex: none; }
+  #curves .ttl .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #curves .ttl .v { font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  #curves .ttl button { height: 20px; min-width: 20px; padding: 0 5px; border-radius: 4px; border: none; background: transparent;
+                        color: var(--muted); font-size: 11px; display: flex; align-items: center; justify-content: center; flex: none; }
+  #curves .ttl button.log { border: 1px solid var(--line); color: var(--text); }
+  #curves .ttl button.log.on { border-color: var(--accent-ink); background: var(--accent-soft); }
+  #curves .ttl button svg { width: 11px; height: 11px; }
+  #curves .plot { position: relative; flex: 1 1 auto; min-height: 30px; margin: 2px 10px 0 50px; }
   #curves svg { display: block; width: 100%; height: 100%; overflow: visible; cursor: crosshair; }
-  #curves .plot { position: relative; flex: 1 1 auto; min-height: 30px; }
-  #curves .plot .dec { position: absolute; right: 2px; font-size: 9px; color: #888; }
-  #curves svg text { fill: #888; font-size: 9px; }
-  #curves svg .axis { stroke: #bbb; stroke-width: 1; }
-  #curves svg .cur { stroke: #333; stroke-width: 1; stroke-dasharray: 3 2; }
-  body.dark #curves svg .cur { stroke: #eee; }
-  body.dark #curves .chart { background: rgba(30,30,30,0.72); color: #ddd; }
-  body.dark #curves .chart .ttl .v { color: #aaa; }
-  body.dark #curves svg .axis { stroke: #555; }
-  /* the TOOLS: in plain sight, in the top row after the frame bar -- what is shown ( layers ), the colour by a field and its range */
-  #tools {
-    display: none; position: fixed; top: 10px; left: 48px; z-index: 2; height: 30px; box-sizing: border-box; padding: 0 6px;
-    align-items: center; gap: 6px; background: rgba(255,255,255,0.88); border-radius: 6px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3); font-family: sans-serif; font-size: 12px; white-space: nowrap;
-  }
-  #tools select, #tools input, #tools button { font-size: 12px; }
-  #tools .tbtn {
-    display: flex; align-items: center; justify-content: center; height: 22px; min-width: 22px; padding: 0 4px; cursor: pointer;
-    border: 1px solid #bbb; border-radius: 4px; background: transparent; color: inherit;
-  }
-  #tools .tbtn svg { width: 16px; height: 16px; }
-  #tools .sep { width: 1px; height: 18px; background: #ccc; }
-  #tools input.num { width: 64px; font-variant-numeric: tabular-nums; }
-  #showPop .head { margin: 6px 0 2px; color: #888; font-size: 11px; }
-  #tools canvas { width: 72px; height: 10px; border-radius: 2px; }
-  #fieldRange { display: none; align-items: center; gap: 4px; }
-  #showPop {
-    display: none; position: absolute; top: 32px; left: 0; padding: 6px 10px; border-radius: 6px;
-    background: rgba(255,255,255,0.95); box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  }
-  #showPop.open { display: block; }
-  #showPop label { display: block; margin: 3px 0; cursor: pointer; }
-  body.dark #tools { background: rgba(30,30,30,0.92); color: #ddd; }
-  body.dark #tools .tbtn { border-color: #666; }
-  body.dark #tools .sep { background: #555; }
-  body.dark #showPop { background: rgba(30,30,30,0.95); color: #ddd; }
-  #slices .row { display: flex; align-items: center; gap: 6px; }
-  #slices .row span { flex: none; width: 62px; }
-  #axes select { width: 58px; }
-  #nav {
-    position: fixed; top: 10px; right: 10px; z-index: 1; width: 30px; height: 30px; padding: 0;
-    display: flex; align-items: center; justify-content: center; cursor: pointer; border: none; border-radius: 6px;
-    background: rgba(255,255,255,0.88); color: #888; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-    transition: background 0.2s, color 0.2s, transform 0.2s;
-  }
-  #nav svg { width: 20px; height: 20px; }
-  #nav.on { color: #2a7de1; box-shadow: 0 0 0 2px #2a7de1; }
-  #nav.pulse { transform: scale(1.15); background: #2a7de1; color: #fff; }
-  body.dark #nav { background: rgba(30,30,30,0.92); color: #999; }
-  body.dark #nav.on { color: #8ab4f8; box-shadow: 0 0 0 2px #8ab4f8; }
-  body.dark #nav.pulse { background: #8ab4f8; color: #172033; }
-  #help {
-    display: none; position: fixed; top: 48px; right: 10px; z-index: 2;
-    background: rgba(255,255,255,0.95); padding: 10px 14px; border-radius: 6px;
-    font-family: sans-serif; font-size: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  }
+  #curves .ylab { position: absolute; left: -48px; width: 44px; text-align: right; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #curves .axes { display: flex; justify-content: space-between; margin: 2px 10px 5px 50px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #curves svg .grid { stroke: var(--line); stroke-width: 1; }
+  #curves svg .cur { stroke: var(--text); stroke-width: 1; }
+  #curves svg .hov { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  #curveTip { position: fixed; z-index: 9; display: none; padding: 5px 8px; border-radius: 6px; background: var(--text); color: var(--bg);
+              font-size: 12px; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+
+  #help { display: none; position: fixed; z-index: 9; top: 56px; right: 344px; font-size: 12px; padding: 12px 14px; }
   #help table { border-collapse: collapse; }
   #help td { padding: 1px 0; }
-  #help td:first-child { padding-right: 10px; color: #333; white-space: nowrap; }
-  #help td:last-child { color: #666; }
-  body.dark { background: #1a1a1a; color: #ddd; }
-  body.dark #controls { background: rgba(30,30,30,0.92); color: #ddd; }
-  body.dark #controls .hint, body.dark #controls .val { color: #aaa; }
-  body.dark #controls .sec { border-top-color: #555; }
-  body.dark #controls input[type=range] { accent-color: #8ab4f8; }
-  body.dark #help { background: rgba(30,30,30,0.95); color: #ccc; }
-  body.dark #help td:first-child { color: #ddd; }
-  body.dark #help td:last-child { color: #aaa; }
+  #help td:first-child { padding-right: 12px; white-space: nowrap; }
+  #help td:last-child { color: var(--muted); }
+  #nav.pulse { transform: scale(1.15); background: var(--accent); color: #fff; }
+  #nav { transition: transform 0.2s, background 0.2s; }
+
+  /* EMBEDDED ( an iframe ): the toolbar shows the navigation, a page of its own and the gear; the gear shows the rest */
+  body.embed #toolbar .full { display: none; }
+  body.embed.tools #toolbar .full { display: inline-flex; }
+  body:not(.embed) #gearBtn, body:not(.embed) #openFull { display: none; }
 </style>
 </head>
 <body data-theme="light">
-<div id="menu">
-<button id="menuBtn" title="menu">&#9776;</button>
-<div id="controls">
-  <div id="counts"></div>
-  <div class="sec">
-    <label><input type="checkbox" id="cbFaces" checked> faces</label>
-    <label>opacity <span class="val" id="opVal"></span>
-      <input id="op" type="range" min="0.05" max="1" step="0.01" value="1"></label>
-    <label>edges: <select id="edgeMode">
-      <option value="hide">hidden removed</option>
-      <option value="ghost" selected>hidden as ghost</option>
-      <option value="all">all visible</option>
-      <option value="none">none</option>
-    </select></label>
-  </div>
-  <div class="sec" id="ptBox">
-    <label><input type="checkbox" id="cbPoints" checked> points</label>
-    <label id="depthLbl" style="display:none"><input type="checkbox" id="cbDepth"> colored by depth</label>
-    <label>radius <span class="val" id="rVal"></span>
-      <input id="r" type="range" min="0" max="1" step="0.001" value="0.5"></label>
-  </div>
-  <div class="sec" id="edlBox" style="display:none">
-    <label><input type="checkbox" id="cbEdl" checked> eye-dome lighting</label>
-    <label>strength <span class="val" id="edlVal"></span>
-      <input id="edlK" type="range" min="0" max="1" step="0.01" value="0.5"></label>
-    <label><input type="checkbox" id="cbAo" checked> ambient occlusion</label>
-    <label>strength <span class="val" id="aoKVal"></span>
-      <input id="aoK" type="range" min="0" max="1" step="0.01" value="0.7"></label>
-    <label>radius ( &times; points ) <span class="val" id="aoRVal"></span>
-      <input id="aoR" type="range" min="1" max="20" step="0.5" value="5"></label>
-  </div>
-  <div class="sec" id="axes" style="display:none">
-    views on <select id="axX"></select><select id="axY"></select><select id="axZ"></select>
-  </div>
-  <div id="slices"></div>
-  <div class="sec">
-    <label><input type="checkbox" id="cbWheel"> wheel moves/zooms the view</label>
-    <label><input type="checkbox" id="cbTouch"> touch drives the view</label>
-    <a id="openFull" href="#" target="_blank" style="display:none">open in a separate page &#8599;</a>
-  </div>
-  <div class="sec" id="gifBox" style="display:none">
-    <button class="act" id="gifBtn" title="one image per frame of the played axis, as the view shows it">save as GIF</button>
-  </div>
-  <div class="hint"><b>?</b>: help · <b>d</b>: <span id="modeLabel">light</span></div>
+<div id="view">
+  <canvas id="c"></canvas>
+  <img id="renderImg" alt="">
 </div>
+
+<div id="axesDock" aria-label="Frames"><div id="anim"></div></div>
+
+<div id="toolbar" class="glass" role="toolbar" aria-label="Tools">
+  <div id="renderGroup" class="full">
+    <button id="renderBtn" title="a picture of this view by Blender ( r )">Render</button>
+    <button id="renderMode" aria-haspopup="menu" title="when to render"></button>
+  </div>
+  <button class="ibtn" id="nav" aria-label="Navigation: wheel, pinch and touch drive the view"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg></button>
+  <a class="ibtn" id="openFull" href="#" target="_blank" aria-label="Open in a page of its own" title="open in a page of its own"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3h6v6M17 3l-8 8M14 12v5H3V6h5"/></svg></a>
+  <span class="sep full"></span>
+  <button class="ibtn full" data-panel="layers" title="layers"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M10 3 18 7l-8 4-8-4z"/><path d="M2 11l8 4 8-4"/><path d="M2 14.5l8 4 8-4"/></svg></button>
+  <button class="ibtn full" data-panel="curves" title="curves ( g: all shown / hidden )"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 15l5-6 4 3 7-8"/></svg></button>
+  <button class="ibtn full" data-panel="colour" title="colour by a field"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M3 13l4-4 3 3 3-4 4 5"/></svg></button>
+  <button class="ibtn full" data-panel="display" title="display: theme, light, view"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></svg></button>
+  <button class="ibtn full" data-panel="pictures" title="pictures by Blender"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 6h3l1.5-2h5L14 6h3v10H3z"/><circle cx="10" cy="11" r="2.6"/></svg></button>
+  <button class="ibtn full" data-panel="services" title="services"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="3" y="4" width="14" height="5" rx="1.5"/><rect x="3" y="11" width="14" height="5" rx="1.5"/></svg><span class="badge" id="svcBadge"></span></button>
+  <button class="ibtn full" data-panel="more" title="cells, export, about, help"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M4 10h.01M10 10h.01M16 10h.01"/></svg></button>
+  <button class="ibtn" id="gearBtn" aria-label="All the tools" title="all the tools"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 6h12M4 10h12M4 14h12"/><circle cx="8" cy="6" r="1.6" fill="var(--raised)"/><circle cx="13" cy="10" r="1.6" fill="var(--raised)"/><circle cx="7" cy="14" r="1.6" fill="var(--raised)"/></svg></button>
 </div>
-<div id="anim"></div>
+
+<div id="panels">
+  <section class="panel" data-pane="layers" aria-label="Layers">
+    <div class="head"><b>Layers</b><small>1–9</small><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <div class="list" id="layers"></div>
+  </section>
+  <section class="panel" data-pane="curves" aria-label="Curves">
+    <div class="head"><b>Curves</b><small>g</small><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <div class="list" id="curveList"></div>
+  </section>
+  <section class="panel" data-pane="colour" aria-label="Colour">
+    <div class="head"><b>Colour</b><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <section>
+      <h3>Points by</h3>
+      <div id="fieldList" style="display: flex; flex-direction: column; gap: 6px"></div>
+      <select id="field" class="hidden"><option value="-1">plain colours</option></select>
+    </section>
+    <section id="fieldRange">
+      <h3>Range</h3>
+      <div class="seg" id="scaleSeg"><button data-s="frame">this frame</button><button data-s="all">all frames</button><button data-s="manual">typed</button></div>
+      <div style="display: grid; grid-template-columns: 72px minmax(0, 1fr) 72px; gap: 8px; align-items: center">
+        <input class="numf" id="fieldMin" inputmode="decimal" title="the start of the scale ( typed: the scale stays )">
+        <canvas id="legendBar2" width="120" height="10" style="width: 100%; height: 10px; border-radius: 2px"></canvas>
+        <input class="numf" id="fieldMax" inputmode="decimal" title="the end of the scale">
+      </div>
+      <button id="scaleBtn" class="hidden"></button>
+    </section>
+  </section>
+  <section class="panel" data-pane="display" aria-label="Display">
+    <div class="head"><b>Display</b><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <div class="kv">
+      <span>theme</span><div class="seg" id="themeSeg"><button data-t="light">light</button><button data-t="dark">dark</button><button data-t="auto">auto</button></div>
+      <span id="lightLbl">light</span><div class="seg" id="lightSeg"><button data-l="flat">flat</button><button data-l="relief">relief</button><button data-l="custom">custom</button></div>
+      <span>view</span><div style="display: flex; gap: 6px"><div class="seg" id="projSeg" style="flex: 1"><button data-p="persp">persp.</button><button data-p="ortho">ortho.</button></div><button class="btn" id="resetBtn" title="reset the view ( 0 )">Reset</button></div>
+    </div>
+    <div id="lightCustom" style="display: none; flex-direction: column; gap: 8px">
+      <label class="chk"><input type="checkbox" id="cbEdl" checked> eye-dome lighting</label>
+      <div class="row"><span>strength</span><input id="edlK" type="range" min="0" max="1" step="0.01" value="0.5"><span class="val" id="edlVal"></span></div>
+      <label class="chk"><input type="checkbox" id="cbAo" checked> occlusion, on screen</label>
+      <div class="row"><span>strength</span><input id="aoK" type="range" min="0" max="1" step="0.01" value="0.7"><span class="val" id="aoKVal"></span></div>
+      <div class="row"><span>radius × points</span><input id="aoR" type="range" min="1" max="20" step="0.5" value="5"><span class="val" id="aoRVal"></span></div>
+    </div>
+    <div id="bakeBox" style="display: none; flex-direction: column; gap: 6px">
+      <div class="row" id="bakeLbl"><span>baked occlusion</span><input id="bake" type="range" min="0" max="1" step="0.01" value="0.8"><span class="val" id="bakeVal"></span></div>
+      <div><button class="btn" id="bakeBtn" style="display: none" title="asks the sdot.ao service">Bake the occlusion</button></div>
+      <div class="hint" id="bakeHint" style="display: none"></div>
+    </div>
+    <div id="axes" style="display: none">views on <select id="axX"></select> <select id="axY"></select> <select id="axZ"></select></div>
+    <div id="slices"></div>
+    <label class="chk"><input type="checkbox" id="cbWheel"> the wheel moves / zooms the view</label>
+    <label class="chk"><input type="checkbox" id="cbTouch"> touch drives the view</label>
+  </section>
+  <section class="panel" data-pane="pictures" aria-label="Pictures">
+    <div class="head"><b>Pictures</b><small>r</small><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <section id="renderBox">
+      <h3>Refining</h3>
+      <div class="seg" id="stepsSeg"><button data-n="8">8</button><button data-n="32">32</button><button data-n="128">128</button><button data-n="512">512</button></div>
+      <div class="row"><span>auto, at rest</span><input id="restDelay" type="range" min="0.2" max="3" step="0.1" value="0.6"><span class="val" id="restVal"></span></div>
+      <input type="number" id="renderSamples" class="hidden" value="128">
+    </section>
+    <section>
+      <h3>Kept <span id="keptCount"></span></h3>
+      <div id="kept"></div>
+      <div class="hint" id="keptHint"></div>
+    </section>
+    <section>
+      <h3>Views</h3>
+      <div id="views"></div>
+    </section>
+  </section>
+  <section class="panel" data-pane="services" aria-label="Services">
+    <div class="head"><b>Services</b><button id="svcRefresh" title="ask again what the machine has"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3.5v3.2h-3.2"/></svg></button><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <div id="svcBody"></div>
+  </section>
+  <section class="panel" data-pane="more" aria-label="More">
+    <div class="head"><b>More</b><button class="fold" title="fold"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg></button><button class="close" title="close"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button></div>
+    <section id="cellsBox" style="display: none">
+      <h3>Cells <span class="muted" style="text-transform: none; letter-spacing: 0; font-weight: 400">· rebuilt from the seeds</span></h3>
+      <div id="regionChoices" style="display: flex; flex-direction: column; gap: 6px">
+        <label class="choice" data-m="off"><input type="radio" name="region" value="off" checked><span><b>as stored</b><small>what the run wrote</small></span></label>
+        <label class="choice" data-m="cut"><input type="radio" name="region" value="cut"><span><b>cut</b><small>the cells behind a plane across the view</small></span></label>
+        <label class="choice" data-m="boundary"><input type="radio" name="region" value="boundary"><span><b>boundary</b><small>the cells touching the domain</small></span></label>
+      </div>
+      <select id="regionMode" class="hidden"><option value="off">as stored</option><option value="cut">cut</option><option value="boundary">boundary</option></select>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <button class="btn" id="regionBtn" title="the cut again, through the target of the view as it is now">Cut here</button>
+        <label class="chk"><input type="checkbox" id="regionFollow" checked> follow the view</label>
+      </div>
+      <div class="hint" id="regionHint" style="display: none"></div>
+    </section>
+    <section>
+      <h3>Export</h3>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap">
+        <button class="btn" id="gifBtn" title="one image per frame of the played axis, as the view shows it"><span>GIF of the frames</span></button>
+        <button class="btn" id="pngBtn" title="the view as it is">PNG of the view</button>
+      </div>
+    </section>
+    <section>
+      <h3>About</h3>
+      <div class="kv" id="about">
+        <span>name</span><span id="storeTitle" style="overflow: hidden; text-overflow: ellipsis">__TITLE__</span>
+        <span>state</span><span id="statusText">—</span>
+        <span>holds</span><span id="counts"></span>
+      </div>
+      <div><button class="btn" id="helpBtn">Keyboard shortcuts ( ? )</button></div>
+    </section>
+  </section>
+</div>
+
+<div id="scalesDock"><div id="legend" class="glass" title="a click: the colour settings">
+  <span class="grip" title="move it ( a double-click puts it back )"><svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="3" r="1.1"/><circle cx="7" cy="3" r="1.1"/><circle cx="3" cy="7" r="1.1"/><circle cx="7" cy="7" r="1.1"/><circle cx="3" cy="11" r="1.1"/><circle cx="7" cy="11" r="1.1"/></svg></span>
+  <span class="name" id="legendName"></span><span class="muted" id="legendLo"></span><canvas id="legendBar" width="120" height="8"></canvas><span class="muted" id="legendHi"></span>
+</div></div>
+<div id="renderHint" class="glass"><span class="sdot ok"></span><span id="renderHintText"></span></div>
+<div id="renderCard" class="glass">
+  <span class="info" id="renderInfo"></span>
+  <button class="btn primary" id="keepBtn" title="written into the store ( renders/ )">Keep</button>
+  <button class="btn" id="compareBtn" title="hold: the live view">Compare</button>
+  <a class="btn" id="downloadBtn" download="render.png">Download</a>
+  <button class="ibtn" id="closeRenderBtn" aria-label="Close the picture" style="width: 26px; height: 26px"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+</div>
 <div id="curves"></div>
-<div id="tools">
-  <button class="tbtn" id="showBtn" title="what is shown">
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.5 6-8.5 6-8.5-6-8.5-6z"/><circle cx="10" cy="10" r="2.6"/></svg></button>
-  <div id="showPop"></div>
-  <span class="sep" id="fieldSep"></span>
-  <select id="field" title="colour of the points"><option value="-1">plain colours</option></select>
-  <span id="fieldRange">
-    <input type="text" inputmode="decimal" class="num" id="fieldMin" title="the value at the start of the scale ( typed: the scale stays )">
-    <canvas id="legendBar" width="72" height="10"></canvas>
-    <input type="text" inputmode="decimal" class="num" id="fieldMax" title="the value at the end of the scale">
-    <button class="tbtn" id="scaleBtn"></button>
-  </span>
-</div>
-<button id="nav" title="navigation: wheel, pinch and touch move / zoom the view">
-  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M10 2v16M2 10h16M7.5 4.5 10 2l2.5 2.5M7.5 15.5 10 18l2.5-2.5M4.5 7.5 2 10l2.5 2.5M15.5 7.5 18 10l-2.5 2.5"/></svg>
-</button>
-<div id="help">
+<div id="curveTip"></div>
+<div class="pop menu" id="renderMenu" role="menu" style="display: none"></div>
+<div class="pop" id="help">
   <b>Keyboard shortcuts</b>
   <table>
-    <tr><td>&larr; / &rarr;</td><td id="hTime">frame -1 / +1 (a bar of the top row has the focus)</td></tr>
+    <tr><td>&larr; / &rarr;</td><td id="hTime">frame -1 / +1 (an axis has the focus)</td></tr>
     <tr><td>Home / End</td><td>first / last frame</td></tr>
     <tr><td>Space</td><td>play / pause</td></tr>
     <tr><td>drag</td><td id="hDrag">orbit</td></tr>
@@ -1299,18 +1492,24 @@ _HTML = r"""<!DOCTYPE html>
     <tr><td>&larr; &rarr; &uarr; &darr;</td><td id="hArrows">rotate (Shift/Ctrl: faster)</td></tr>
     <tr><td>+ / -</td><td>zoom in / out</td></tr>
     <tr><td>[ / ]</td><td>point radius - / +</td></tr>
-    <tr><td>f</td><td>faces</td></tr>
-    <tr><td>e</td><td>hidden-edge mode</td></tr>
-    <tr><td>p</td><td>points</td></tr>
-    <tr><td>c</td><td>points colored by depth (3D)</td></tr>
-    <tr><td>g</td><td>curves (when the scene has some)</td></tr>
+    <tr><td>f · e · p</td><td>faces · hidden-edge mode · points</td></tr>
+    <tr><td>1 – 9</td><td>a layer on / off</td></tr>
+    <tr><td>c</td><td>points coloured by depth (3D)</td></tr>
+    <tr><td>g</td><td>the curves</td></tr>
+    <tr><td>r</td><td>a picture by Blender ( with the service )</td></tr>
     <tr><td>o</td><td>ortho / perspective projection</td></tr>
     <tr><td>0 · double-click</td><td>reset the view</td></tr>
-    <tr><td>d</td><td>light / dark</td></tr>
+    <tr><td>d</td><td>light / dark ( <span id="modeLabel">light</span> )</td></tr>
     <tr><td>?</td><td>show / hide this help</td></tr>
   </table>
 </div>
-<canvas id="c"></canvas>
+<div class="hidden">
+  <input type="checkbox" id="cbFaces" checked><input id="op" type="range" min="0.05" max="1" step="0.01" value="1"><span id="opVal"></span>
+  <select id="edgeMode"><option value="hide">hidden removed</option><option value="ghost" selected>hidden as ghost</option><option value="all">all visible</option><option value="none">none</option></select>
+  <input type="checkbox" id="cbPoints" checked><input type="checkbox" id="cbDepth"><input id="r" type="range" min="0" max="1" step="0.001" value="0.5"><span id="rVal"></span>
+  <span id="status"></span><span id="svcBtn"></span><div id="svcPop"></div><div id="exportMenu"></div><span id="curvesLbl"></span><button id="curvesBtn"></button><span id="keptCountDummy"></span>
+  <button id="themeBtn"></button><div id="exportCli"></div><span id="lightBox"></span>
+</div>
 <script id="main" type="text/plain">
 // ============================================================================================
 // data -- everything is encoded in base64 in the page (self-contained file, openable as file://); the big arrays are
@@ -1326,6 +1525,7 @@ function b64bytes(s) {
 function decF32(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Float32Array(b.buffer, 0, b.length / 4); }
 function decI32(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Int32Array(b.buffer, 0, b.length / 4); }
 function decU16(s) { if (typeof s !== "string") return s; const b = b64bytes(s); return new Uint16Array(b.buffer, 0, b.length / 2); }
+function decU8(s) { if (typeof s !== "string") return s; return b64bytes(s); }
 // the pool of positions: float32, or 16 bits per coordinate ( "codes|lo per dim|step per dim", `compact` )
 function decPos(s) {
   if (typeof s !== "string") return s;
@@ -1357,6 +1557,9 @@ let PAL = COLORS;                      // the table of the CURRENT theme        
 // polygons of FREE length: POLY_OFF slices POLY_V (POLY_OFF[p] .. POLY_OFF[p+1]). They are only
 // triangulated here, at display time -- the file itself keeps the faces as they are.
 let POLY_V = decI32("__POLY_V__"), POLY_OFF = decI32("__POLY_OFF__"), POLY_C = decU16("__POLY_C__");
+// the BAKED occlusion ( `Visualizer( ao = True )`, see `occlusion.py` ): a code per corner, aligned with POLY_V, 255 = open;
+// empty when none was baked
+let POLY_AO = decU8("__POLY_AO__");
 let EDG_V  = decI32("__EDG_V__"),  EDG_C    = decU16("__EDG_C__");
 let PNT_V  = decI32("__PNT_V__"),  PNT_C    = decU16("__PNT_C__"), PNT_R = decF32("__PNT_R__");
 let PNT_M  = decF32("__PNT_M__");    // a matrix per point, row by row: an ELLIPSE ( all 0: a disc )
@@ -1396,7 +1599,7 @@ let curScene = null;
 function useScene(sc) {
   if (sc === curScene) return;
   curScene = sc;
-  ({ POS, POLY_V, POLY_OFF, POLY_C, EDG_V, EDG_C, EDG_L, PNT_V, PNT_C, PNT_R, PNT_M, PNT_L, SHARED, HPOLY } = sc);
+  ({ POS, POLY_V, POLY_OFF, POLY_C, POLY_AO, EDG_V, EDG_C, EDG_L, PNT_V, PNT_C, PNT_R, PNT_M, PNT_L, SHARED, HPOLY } = sc);
   for (const f of FIELDS) f.data = sc.fields[f.name];
   const fr = (a, b) => { const r = new Int32Array(NB_FRAMES + 1); r.fill(a, 0, frameIdx + 1); r.fill(b, frameIdx + 1); return r; };
   FR_POLY = fr(SHARED.poly, POLY_OFF.length - 1); FR_EDG = fr(SHARED.edge, EDG_V.length / 2);
@@ -1560,7 +1763,7 @@ function polygon2D(A, b) {
 // ============================================================================================
 // building the rendered scene (projected 3D positions + sliced polytopes)
 // ============================================================================================
-let TRI = { pos: null, nrm: null, col: null, n: 0 };
+let TRI = { pos: null, nrm: null, col: null, ao: null, n: 0 };
 let LIN = { a: null, b: null, col: null, n: 0 };
 let PNT = { pos: null, col: null, rad: null, mat: null, n: 0 };
 
@@ -1628,11 +1831,12 @@ function buildScene() {
   //    not a storage format, the expense stays in GPU memory.
   let nTri = hp.length / 9;
   for (const [a, b] of polys) for (let p = a; p < b; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
-  TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9),
+  TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9), ao: new Float32Array(nTri * 3).fill(1),
           col: new Float32Array(nTri * 12), n: nTri };
   let t = 0;
-  function putTri(a, b, c, col) {
+  function putTri(a, b, c, col, ka, kb, kc) {
     const o = t * 9;
+    if (ka !== undefined) { TRI.ao[t * 3] = ka; TRI.ao[t * 3 + 1] = kb; TRI.ao[t * 3 + 2] = kc; }
     TRI.pos[o    ] = a[0]; TRI.pos[o + 1] = a[1]; TRI.pos[o + 2] = a[2];
     TRI.pos[o + 3] = b[0]; TRI.pos[o + 4] = b[1]; TRI.pos[o + 5] = b[2];
     TRI.pos[o + 6] = c[0]; TRI.pos[o + 7] = c[1]; TRI.pos[o + 8] = c[2];
@@ -1648,10 +1852,12 @@ function buildScene() {
     t++;
   }
   const at = i => [PR[3 * i], PR[3 * i + 1], PR[3 * i + 2]];
+  const baked = !!POLY_AO && POLY_AO.length === POLY_V.length && POLY_AO.length > 0;
   for (const [a, b] of polys) for (let p = a; p < b; p++) {
     const o0 = POLY_OFF[p], o1 = POLY_OFF[p + 1], col = PAL[POLY_C[p]];
     for (let k = o0 + 1; k + 1 < o1; k++)                 // fan from the first vertex
-      putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col);
+      if (baked) putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col, POLY_AO[o0] / 255, POLY_AO[k] / 255, POLY_AO[k + 1] / 255);
+      else putTri(at(POLY_V[o0]), at(POLY_V[k]), at(POLY_V[k + 1]), col);
   }
   for (let i = 0; i + 8 < hp.length; i += 9)
     putTri(hp.slice(i, i + 3), hp.slice(i + 3, i + 6), hp.slice(i + 6, i + 9), hpc[i / 9]);
@@ -1696,9 +1902,11 @@ function buildScene() {
   pivotDirty = true;                                    // the scene changed: nothing aimed at anymore
   centerRays.length = 0;
   document.getElementById("counts").textContent =
-    PNT.n + " points · " + LIN.n + " edges · " + TRI.n + " triangles";
+    [[PNT.n, "points"], [LIN.n, "edges"], [TRI.n, "triangles"]].filter(([n]) => n > 0).map(([n, w]) => n.toLocaleString() + " " + w).join(" · ");
   sceneBuilt = true;
+  sceneVersion++;                                       // ( a picture of the scene before is out of date )
 }
+var sceneVersion = 0;
 
 // ============================================================================================
 // FIELDS: the points coloured by their values. The range is robust ( the 1st and 99th percentiles ), over all the
@@ -1711,15 +1919,9 @@ let scaleMode = "frame";
 const fieldUi = { sel: document.getElementById("field"), range: document.getElementById("fieldRange"),
                   btn: document.getElementById("scaleBtn"), lo: document.getElementById("fieldMin"),
                   hi: document.getElementById("fieldMax") };
-const SCALE_ICON = {
-  frame : ['<rect x="5" y="4" width="10" height="12" rx="1"/>', "range over this frame ( click: over all the frames )"],
-  all   : ['<rect x="3" y="6" width="9" height="11" rx="1"/><path d="M6 3.5h9.5a1 1 0 0 1 1 1V14"/>', "range over all the frames ( click: over this frame )"],
-  manual: ['<path d="M4 16l1-4 8-8 3 3-8 8-4 1z"/><path d="M11.5 5.5l3 3"/>', "range typed ( click: over this frame )"],
-};
+// the scale's mode, in the Colour pane: this frame, all the frames, typed
 function syncScaleBtn() {
-  const [path, title] = SCALE_ICON[scaleMode];
-  fieldUi.btn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">' + path + "</svg>";
-  fieldUi.btn.title = title;
+  for (const b of document.querySelectorAll("#scaleSeg button")) b.classList.toggle("on", b.dataset.s === scaleMode);
 }
 function quantiles(vals) {                             // [ q01, q99 ] of the finite values
   const v = Float64Array.from(vals.filter(x => x === x)).sort();
@@ -1763,66 +1965,140 @@ function fieldColor(v, r, alpha) {
   return [c[0], c[1], c[2], alpha];
 }
 function showLegend(r) {
-  const was = fieldUi.range.style.display;
-  fieldUi.range.style.display = r ? "flex" : "none";
-  if (was !== fieldUi.range.style.display && typeof placeTools === "function") placeTools();   // ( wider or narrower )
+  const chip = document.getElementById("legend");
+  chip.style.display = r ? "flex" : "none";
   if (!r) return;
-  const cv = document.getElementById("legendBar"), ctx = cv.getContext("2d"), div = isDiverging(FIELDS[fieldIdx]);
-  for (let x = 0; x < cv.width; x++) {
-    const c = ramp(div ? DIV : SEQ, x / (cv.width - 1));
-    ctx.fillStyle = "rgb(" + c.map(q => Math.round(255 * q)).join(",") + ")";
-    ctx.fillRect(x, 0, 1, cv.height);
+  const div = isDiverging(FIELDS[fieldIdx]);
+  for (const id of ["legendBar", "legendBar2"]) {
+    const cv = document.getElementById(id), ctx = cv.getContext("2d");
+    for (let x = 0; x < cv.width; x++) {
+      const c = ramp(div ? DIV : SEQ, x / (cv.width - 1));
+      ctx.fillStyle = "rgb(" + c.map(q => Math.round(255 * q)).join(",") + ")";
+      ctx.fillRect(x, 0, 1, cv.height);
+    }
+    cv.title = div ? "diverging: white in the middle of the range" : "";
   }
-  cv.title = div ? "diverging: white in the middle of the range" : "";
+  document.getElementById("legendName").textContent = FIELDS[fieldIdx].name;
+  document.getElementById("legendLo").textContent = fmtNum(r[0]);
+  document.getElementById("legendHi").textContent = fmtNum(r[1]);
 }
-// the TOOLS, top row: what is shown ( the points, each layer ), and the colour by a field
-const tools = document.getElementById("tools"), showPop = document.getElementById("showPop");
-// an entry of the eye's panel: `get()` its state, `set( on )` when clicked; `mirror`: a box elsewhere it follows
-function addShowItem(name, get, set, mirror, head) {
-  if (head) { const h = document.createElement("div"); h.className = "head"; h.textContent = head; showPop.appendChild(h); }
-  const lab = document.createElement("label"), cb = document.createElement("input");
-  cb.type = "checkbox"; cb.checked = get();
-  cb.addEventListener("change", () => set(cb.checked));
-  lab.appendChild(cb); lab.appendChild(document.createTextNode(" " + name));
-  showPop.appendChild(lab);
-  if (mirror) mirror.addEventListener("change", () => { cb.checked = mirror.checked; });
-  return cb;
+const fmtNum = v => v === 0 ? "0" : (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3 ? v.toExponential(2) : String(parseFloat(v.toPrecision(3))));
+
+// LAYERS, in the Display pane: one row each -- the eye, a mark, the name, what it holds; the faces and the points fold
+// their own settings ( the controls of `ui`, moved there ). Keys 1-9 switch them in that order.
+const EYE = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.5 6-8.5 6-8.5-6-8.5-6z"/><circle cx="10" cy="10" r="2.6"/></svg>';
+const EYE_OFF = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l14 14M8 5.2A9 9 0 0 1 10 5c5 0 8.5 5 8.5 5a14 14 0 0 1-2.6 3M5.5 6.6C3 8.2 1.5 10 1.5 10S5 16 10 16a8 8 0 0 0 3.2-.7"/></svg>';
+const CHEV = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 5l5 5-5 5"/></svg>';
+const layerRows = [];
+// a row: `get()` / `set( on )` its state, `what()` what it holds, `mark` a css background, `sub` its folded settings
+function addLayer(name, get, set, what, mark, sub, boxId, line) {
+  const box = document.getElementById(boxId || "layers");
+  const row = document.createElement("div"); row.className = "item";
+  const eye = document.createElement("button"); eye.className = "eye";
+  const mk = document.createElement("span"); mk.className = "mark" + (line ? " line" : ""); mk.style.background = mark || "var(--muted)";
+  const nm = document.createElement("span"); nm.className = "name"; nm.textContent = name;
+  const wh = document.createElement("span"); wh.className = "what";
+  const more = document.createElement("button"); more.className = "more";
+  row.append(more, mk, nm, wh, eye);
+  box.appendChild(row);
+  let pane = null;
+  if (sub) { pane = document.createElement("div"); pane.className = "sub"; sub(pane); box.appendChild(pane); more.innerHTML = CHEV; more.title = "its settings"; }
+  else more.style.visibility = "hidden";
+  const sync = () => {
+    const on = get();
+    eye.innerHTML = on ? EYE : EYE_OFF; eye.title = (on ? "hide " : "show ") + name;
+    row.classList.toggle("off", !on);
+    wh.textContent = what ? what() : "";
+  };
+  eye.addEventListener("click", () => { set(!get()); sync(); });
+  more.addEventListener("click", () => { const o = !pane.classList.contains("open"); pane.classList.toggle("open", o); row.classList.toggle("open", o); });
+  const item = { name, get, set, sync, row, mk };
+  if (!boxId) layerRows.push(item);
+  sync();
+  return item;
 }
-// the bar is shown when it has something: the eye with more than the points, or fields
-function syncTools() {
-  const showSome = showPop.querySelectorAll("label").length > (PNT_V.length ? 1 : 0);
-  document.getElementById("showBtn").style.display = showSome ? "" : "none";
-  tools.style.display = showSome || FIELDS.length ? "flex" : "none";
-  if (typeof placeTools === "function") placeTools();
+function syncLayers() { for (const l of layerRows) l.sync(); }
+// a segmented control over `options` ( [ value, label ] ), `get()` the current one, `set( v )` on a click
+function segmented(options, get, set) {
+  const seg = document.createElement("div"); seg.className = "seg";
+  const btns = options.map(([v, label]) => {
+    const b = document.createElement("button"); b.textContent = label;
+    b.addEventListener("click", () => { set(v); sync(); });
+    seg.appendChild(b); return [v, b];
+  });
+  const sync = () => { for (const [v, b] of btns) b.classList.toggle("on", get() === v); };
+  sync(); seg.sync = sync;
+  return seg;
 }
+function sliderRow(label, input, valId) {
+  const row = document.createElement("div"); row.className = "row";
+  const l = document.createElement("span"); l.textContent = label;
+  const v = document.getElementById(valId) || document.createElement("span"); v.className = "val";
+  row.append(l, input, v);
+  return row;
+}
+let edgeSeg = null;
 function initTools() {                                 // ( called once `ui` exists )
-if (PNT_V.length) addShowItem("points", () => ui.points.checked, on => { ui.points.checked = on; draw(); }, ui.points);
-LAYERS.forEach((l, k) => addShowItem(l[0], () => layerOn[k + 1], on => { layerOn[k + 1] = on; buildScene(); draw(); }));
-document.getElementById("showBtn").addEventListener("click", e => { showPop.classList.toggle("open"); e.stopPropagation(); });
-document.addEventListener("click", e => { if (!showPop.contains(e.target)) showPop.classList.remove("open"); });
-if (!FIELDS.length) { fieldUi.sel.style.display = "none"; document.getElementById("fieldSep").style.display = "none"; }
-syncTools();
-if (FIELDS.length) {
-  FIELDS.forEach((f, k) => { const o = document.createElement("option"); o.value = k; o.textContent = f.name; fieldUi.sel.appendChild(o); });
-  fieldIdx = FIELDS.findIndex(f => f.name === FIELD0);                 // ( -1: plain colours )
-  fieldUi.sel.value = String(fieldIdx);
-  const rebuild = () => { buildScene(); draw(); };
-  syncScaleBtn();
-  fieldUi.sel.addEventListener("change", () => { fieldIdx = parseInt(fieldUi.sel.value); rebuild(); });
-  fieldUi.btn.addEventListener("click", () => { scaleMode = scaleMode === "frame" ? "all" : "frame"; syncScaleBtn(); rebuild(); });
-  for (const inp of [fieldUi.lo, fieldUi.hi])
-    inp.addEventListener("change", () => { scaleMode = "manual"; syncScaleBtn(); rebuild(); });
+  const any = arr => arr && arr.length > 0;
+  const stored = k => STORED && STORE.m.frames.some(f => f.n && f.n[k]);
+  if (POLY_OFF.length > 1 || HPOLY.length || stored("poly"))
+    addLayer("faces", () => ui.faces.checked, on => { ui.faces.checked = on; draw(); },
+             () => TRI.n ? TRI.n + " triangles" : "", "linear-gradient(135deg,#5ec962,#3b528b,#c4621a)", pane => {
+      pane.appendChild(sliderRow("opacity", ui.op, "opVal"));
+      edgeSeg = segmented([["hide", "hidden"], ["ghost", "ghost"], ["all", "all"], ["none", "none"]],
+                          () => ui.edgeMode.value, v => { ui.edgeMode.value = v; draw(); });
+      const r = document.createElement("div"); r.className = "row";
+      const l = document.createElement("span"); l.textContent = "edges"; edgeSeg.style.gridColumn = "span 2";
+      r.append(l, edgeSeg); pane.appendChild(r);
+    });
+  if (PNT_V.length || stored("pnt"))
+    addLayer("points", () => ui.points.checked, on => { ui.points.checked = on; draw(); },
+             () => PNT.n ? PNT.n + " points" : "", "var(--text)", pane => {
+      pane.appendChild(sliderRow("radius", ui.r, "rVal"));
+      if (FIELDS.length) {
+        const r = document.createElement("div"); r.className = "row";
+        const l = document.createElement("span"); l.textContent = "colour";
+        const sel = document.createElement("select"); sel.style.gridColumn = "span 2"; sel.id = "pointField";
+        sel.add(new Option("their own colours", -1));
+        FIELDS.forEach((f, k) => sel.add(new Option(f.name, k)));
+        sel.addEventListener("change", () => { fieldIdx = parseInt(sel.value, 10); fieldUi.sel.value = sel.value; syncFieldPane(); buildScene(); draw(); });
+        r.append(l, sel); pane.appendChild(r);
+      }
+      if (D >= 3) { const c = document.createElement("label"); c.className = "chk"; c.append(ui.depth, document.createTextNode(" coloured by depth")); pane.appendChild(c); }
+    });
+  LAYERS.forEach((l, k) => addLayer(l[0], () => layerOn[k + 1], on => { layerOn[k + 1] = on; buildScene(); draw(); }, null, "var(--accent)"));
+  if (!layerRows.length) document.getElementById("layers").style.display = "none";
+  // the Colour pane: one choice per field, the range
+  const list = document.getElementById("fieldList");
+  const choice = (label, k) => {
+    const lab = document.createElement("label"); lab.className = "chk";
+    const rb = document.createElement("input"); rb.type = "radio"; rb.name = "field"; rb.value = k;
+    rb.addEventListener("change", () => { fieldIdx = k; fieldUi.sel.value = String(k); syncFieldPane(); buildScene(); draw(); });
+    lab.append(rb, document.createTextNode(" " + label)); list.appendChild(lab);
+  };
+  if (FIELDS.length) {
+    choice("their own colours", -1);
+    FIELDS.forEach((f, k) => {
+      choice(f.name, k);
+      const o = document.createElement("option"); o.value = k; o.textContent = f.name; fieldUi.sel.appendChild(o);
+    });
+    fieldIdx = FIELDS.findIndex(f => f.name === FIELD0);                 // ( -1: plain colours )
+    fieldUi.sel.value = String(fieldIdx);
+    const rebuild = () => { buildScene(); draw(); };
+    for (const b of document.querySelectorAll("#scaleSeg button"))
+      b.addEventListener("click", () => { scaleMode = b.dataset.s; syncScaleBtn(); rebuild(); });
+    for (const inp of [fieldUi.lo, fieldUi.hi])
+      inp.addEventListener("change", () => { scaleMode = "manual"; syncScaleBtn(); rebuild(); });
+    syncScaleBtn(); syncFieldPane();
+  }
 }
+function syncFieldPane() {
+  for (const rb of document.querySelectorAll('#fieldList input')) rb.checked = parseInt(rb.value, 10) === fieldIdx;
+  const pf = document.getElementById("pointField"); if (pf) pf.value = String(fieldIdx);
+  document.getElementById("fieldRange").style.display = fieldIdx >= 0 ? "flex" : "none";
 }
-// in the top row after the frame bar when there is room, else under it
-function placeTools() {
-  const a = document.getElementById("anim"), shown = getComputedStyle(a).display !== "none";
-  const r = shown ? a.getBoundingClientRect() : { right: 40, bottom: 40 };
-  const fits = r.right + 8 + tools.offsetWidth <= window.innerWidth - 48;
-  tools.style.left = (fits ? r.right + 8 : 48) + "px";
-  tools.style.top = (fits || !shown ? 10 : r.bottom + 6) + "px";
-}
-window.addEventListener("resize", placeTools);
+function syncTools() { syncLayers(); }
+function placeTools() {}
 
 // ============================================================================================
 // linear algebra (just what the camera needs)
@@ -2132,19 +2408,20 @@ function prog(vs, fs) {
 }
 
 const pFace = prog(`#version 300 es
-in vec3 aPos; in vec3 aNrm; in vec4 aCol;
+in vec3 aPos; in vec3 aNrm; in vec4 aCol; in float aAo;
 uniform mat4 uMVP; uniform mat4 uMV;
-out vec4 vCol; out vec3 vN;
-void main() { gl_Position = uMVP * vec4(aPos, 1.0); vN = mat3(uMV) * aNrm; vCol = aCol; }`,
+out vec4 vCol; out vec3 vN; out float vAo;
+void main() { gl_Position = uMVP * vec4(aPos, 1.0); vN = mat3(uMV) * aNrm; vCol = aCol; vAo = aAo; }`,
 `#version 300 es
 precision highp float;
-in vec4 vCol; in vec3 vN; out vec4 oCol;
-uniform float uAlpha;
+in vec4 vCol; in vec3 vN; in float vAo; out vec4 oCol;
+uniform float uAlpha; uniform float uBake;
 void main() {
-  // frontal lighting, DOUBLE-SIDED (abs): the inside of an open cell stays readable.
+  // frontal lighting, DOUBLE-SIDED (abs): the inside of an open cell stays readable. The baked occlusion ( 1 = open )
+  // darkens the corners of the faces that something stands in front of, by uBake ( no backquote: this is a JS template ).
   vec3 n = normalize(vN);
   float d = abs(dot(n, normalize(vec3(0.25, 0.45, 1.0))));
-  oCol = vec4(vCol.rgb * (0.45 + 0.55 * d), vCol.a * uAlpha);
+  oCol = vec4(vCol.rgb * (0.45 + 0.55 * d) * mix(1.0, vAo, uBake), vCol.a * uAlpha);
 }`);
 
 const pLine = prog(`#version 300 es
@@ -2321,7 +2598,7 @@ for (const m of IMAGES) {
 const vaoImage = gl.createVertexArray();
 
 const buf = {};
-["triPos", "triNrm", "triCol", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad", "pntMat"]
+["triPos", "triNrm", "triCol", "triAo", "linA", "linB", "linCol", "linCorner", "pntPos", "pntCol", "pntRad", "pntMat"]
   .forEach(k => buf[k] = gl.createBuffer());
 
 gl.bindBuffer(gl.ARRAY_BUFFER, buf.linCorner);
@@ -2339,6 +2616,7 @@ function attr(p, name, b, size, divisor) {
 }
 gl.bindVertexArray(vaoFace);
 attr(pFace, "aPos", buf.triPos, 3); attr(pFace, "aNrm", buf.triNrm, 3); attr(pFace, "aCol", buf.triCol, 4);
+attr(pFace, "aAo", buf.triAo, 1);
 gl.bindVertexArray(vaoLine);
 attr(pLine, "aCorner", buf.linCorner, 2);
 attr(pLine, "aA", buf.linA, 3, 1); attr(pLine, "aB", buf.linB, 3, 1); attr(pLine, "aCol", buf.linCol, 4, 1);
@@ -2349,7 +2627,7 @@ gl.bindVertexArray(null);
 
 function up(b, data) { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
 function upload() {
-  up(buf.triPos, TRI.pos); up(buf.triNrm, TRI.nrm); up(buf.triCol, TRI.col);
+  up(buf.triPos, TRI.pos); up(buf.triNrm, TRI.nrm); up(buf.triCol, TRI.col); up(buf.triAo, TRI.ao);
   up(buf.linA, LIN.a); up(buf.linB, LIN.b); up(buf.linCol, LIN.col);
   up(buf.pntPos, PNT.pos); up(buf.pntCol, PNT.col); up(buf.pntRad, PNT.rad); up(buf.pntMat, PNT.mat);
 }
@@ -2363,14 +2641,16 @@ const ui = {
   r: document.getElementById("r"),
   edl: document.getElementById("cbEdl"), edlK: document.getElementById("edlK"),
   ao: document.getElementById("cbAo"), aoK: document.getElementById("aoK"), aoR: document.getElementById("aoR"),
-  depth: document.getElementById("cbDepth"),
+  depth: document.getElementById("cbDepth"), bake: document.getElementById("bake"),
 };
+{ const b = new URLSearchParams(location.search).get("bake"); if (b !== null) ui.bake.value = b; }   // ( before the first draw )
 function pointRadius() { return RMIN * Math.pow(RMAX / RMIN, parseFloat(ui.r.value)); }
 ui.r.value = Math.log(R0 / RMIN) / Math.log(RMAX / RMIN);      // ( the start: R0, i.e. the given radii as they are )
 // every point has its own radius: the slider is a factor on them
 const PNT_SIZED = PNT_R.length > 0 && PNT_R.every(r => r > 0);
 
 function draw() {
+  if (typeof renderStale === "function") renderStale();   // ( a Blender picture over an older view: hidden )
   const w = canvas.width, h = canvas.height;
   const dark = document.body.classList.contains("dark");
   const useEdl = D >= 3 && (ui.edl.checked || ui.ao.checked);   // the post pass: eye-dome lighting and / or occlusion
@@ -2439,6 +2719,7 @@ function draw() {
     gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMVP"), false, MVP);
     gl.uniformMatrix4fv(gl.getUniformLocation(pFace, "uMV"), false, V);
     gl.uniform1f(gl.getUniformLocation(pFace, "uAlpha"), alpha);
+    gl.uniform1f(gl.getUniformLocation(pFace, "uBake"), POLY_AO && POLY_AO.length ? parseFloat(ui.bake.value) : 0);
     gl.depthFunc(gl.LEQUAL);
     gl.depthMask(!needDepth);
     gl.drawArrays(gl.TRIANGLES, 0, TRI.n * 3);
@@ -2515,10 +2796,12 @@ function draw() {
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(window.innerWidth * dpr);
-  const h = Math.max(50, window.innerHeight);           // ( the curves float over the view )
+  if (typeof layoutTimeline === "function") layoutTimeline();
+  const view = document.getElementById("view");
+  const w = Math.max(50, view.clientWidth), h = Math.max(50, view.clientHeight);   // ( the curves float over the view )
+  canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
-  canvas.style.width = window.innerWidth + "px";
+  canvas.style.width = w + "px";
   canvas.style.height = h + "px";
   if (viewUntouched && typeof resetView === "function") resetView();   // ( the page resized before anyone moved the view: refit )
   else draw();
@@ -2671,9 +2954,15 @@ canvas.addEventListener("touchend", e => { if (e.touches.length === 0) touch = n
 function pick(e, a, b, c) { return (e.ctrlKey || e.metaKey) ? c : (e.shiftKey ? b : a); }
 const helpPanel = document.getElementById("help");
 
-// menu: shown on hover, or toggled by a click (touch screens have no hover)
-const menu = document.getElementById("menu");
-document.getElementById("menuBtn").addEventListener("click", () => menu.classList.toggle("open"));
+// EMBEDDED ( an iframe, `?embed=1`; `?embed=0` never ): no bar, a few buttons over the view, the inspector behind the gear
+const EMBED = URL_OPTS.has("embed") ? URL_OPTS.get("embed") === "1" : window.self !== window.top;
+document.body.classList.toggle("embed", EMBED);
+document.getElementById("gearBtn").addEventListener("click", () => {
+  const on = !document.body.classList.contains("tools");
+  document.body.classList.toggle("tools", on);
+  if (!on) closePanel();
+});
+document.getElementById("helpBtn").addEventListener("click", e => { e.stopPropagation(); helpPanel.style.display = helpPanel.style.display === "block" ? "none" : "block"; });
 const cbWheel = document.getElementById("cbWheel"), cbTouch = document.getElementById("cbTouch");
 cbWheel.checked = wheelEnabled; cbTouch.checked = touchEnabled;
 const navBtn = document.getElementById("nav");
@@ -2701,7 +2990,7 @@ canvas.addEventListener("wheel", () => {
 // embedded: offer the standalone page -- unless there is none (`srcdoc` iframe of a notebook)
 if (window.self !== window.top && location.href !== "about:srcdoc") {
   const a = document.getElementById("openFull");
-  a.href = location.pathname; a.style.display = "block";
+  a.href = location.pathname + "?embed=0"; a.style.display = "inline-flex";
 }
 window.addEventListener("keydown", e => {
   if (e.key === "?") { e.preventDefault(); helpPanel.style.display = helpPanel.style.display === "block" ? "none" : "block"; return; }
@@ -2731,9 +3020,17 @@ window.addEventListener("keydown", e => {
       ui.edgeMode.value = opts[(opts.indexOf(ui.edgeMode.value) + 1) % opts.length];
       break;
     }
-    case "o": case "O": cam.ortho = !cam.ortho; break;
-    default: return;
+    case "o": case "O": cam.ortho = !cam.ortho; syncProj(); break;
+    case "r": case "R": if (SVC.blender) { e.preventDefault(); renderView(false); } return;
+    default:
+      if (e.key >= "1" && e.key <= "9" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const l = layerRows[parseInt(e.key, 10) - 1];
+        if (l) { l.set(!l.get()); l.sync(); }
+        return;
+      }
+      return;
   }
+  syncLayers(); if (edgeSeg) edgeSeg.sync();
   draw();
 });
 
@@ -2781,18 +3078,20 @@ function buildBar() {
   const again = barKey !== null;
   barKey = key; animBox.innerHTML = ""; axRows = [];
   const anyPlay = PLAYABLE.some((p, a) => p && AX_VALS[a].length > 1);
-  animBox.style.gridTemplateColumns = anyPlay ? "" : "minmax(40px, 1fr) auto";
   for (let a = 0; a < NB_AXES; a++) {
     if (AX_VALS[a].length < 2) { axRows.push(null); continue; }
-    const row = document.createElement("div"); row.className = "row";
+    const row = document.createElement("div"); row.className = "axis glass";
+    const grip = document.createElement("span"); grip.className = "grip"; grip.innerHTML = GRIP; grip.title = "move it ( a double-click puts it back )";
     const btn = document.createElement(PLAYABLE[a] ? "button" : "span");
     btn.className = PLAYABLE[a] ? "play" : "gap";
     if (!anyPlay) btn.style.display = "none";
-    if (PLAYABLE[a]) { btn.innerHTML = "&#9654;"; btn.title = "play / pause " + AXES[a] + " (Space)"; }
+    if (PLAYABLE[a]) { btn.innerHTML = PLAY_ICON; btn.title = "play / pause " + AXES[a] + " (Space)"; btn.setAttribute("aria-label", "play " + AXES[a]); }
     const inp = document.createElement("input");
     inp.type = "range"; inp.min = 0; inp.max = AX_VALS[a].length - 1; inp.step = 1; inp.title = AXES[a];
     const lab = document.createElement("span"); lab.className = "lab";
-    row.append(btn, inp, lab);
+    row.append(grip, btn, lab, inp);
+    if (a === 0) { const live = document.createElement("span"); live.className = "live hidden"; live.id = "liveTag"; live.textContent = "live"; row.appendChild(live); }
+    movable(row, grip);
     animBox.appendChild(row);
     inp.addEventListener("input", () => {
       stopPlaying();
@@ -2806,12 +3105,34 @@ function buildBar() {
   shownAxes = axRows.map((r, a) => r ? a : -1).filter(a => a >= 0);
   playableAxes = shownAxes.filter(a => PLAYABLE[a]);
   if (!axRows[focusAxis]) focusAxis = playableAxes.length ? playableAxes[0] : (shownAxes.length ? shownAxes[0] : -1);
-  animBox.style.display = shownAxes.length ? "grid" : "none";
-  if (again) placeTools();
+  animBox.style.display = shownAxes.length ? "flex" : "none";
+  layoutTimeline();
+}
+const GRIP = '<svg viewBox="0 0 10 14" fill="currentColor"><circle cx="3" cy="3" r="1.1"/><circle cx="7" cy="3" r="1.1"/><circle cx="3" cy="7" r="1.1"/><circle cx="7" cy="7" r="1.1"/><circle cx="3" cy="11" r="1.1"/><circle cx="7" cy="11" r="1.1"/></svg>';
+// an axis or a scale taken out of its place by its grip: it floats where it is dropped; a double-click puts it back
+function movable(el, grip) {
+  grip.addEventListener("pointerdown", e => {
+    e.preventDefault(); e.stopPropagation();
+    const r = el.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    grip.setPointerCapture(e.pointerId);
+    el.classList.add("floating"); el.style.left = r.left + "px"; el.style.top = r.top + "px";
+    const mv = ev => {
+      el.style.left = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - dx)) + "px";
+      el.style.top = Math.max(0, Math.min(window.innerHeight - 30, ev.clientY - dy)) + "px";
+    };
+    const up = () => { grip.removeEventListener("pointermove", mv); grip.removeEventListener("pointerup", up); };
+    grip.addEventListener("pointermove", mv); grip.addEventListener("pointerup", up);
+  });
+  grip.addEventListener("dblclick", () => { el.classList.remove("floating"); el.style.left = el.style.top = ""; });
+}
+const PLAY_ICON = '<svg viewBox="0 0 20 20" fill="currentColor"><path d="M5 3l12 7-12 7z"/></svg>';
+const PAUSE_ICON = '<svg viewBox="0 0 20 20" fill="currentColor"><rect x="4.5" y="3" width="4" height="14" rx="1"/><rect x="11.5" y="3" width="4" height="14" rx="1"/></svg>';
+// the timeline is there when there are frames to go through, or curves; the view and the rail end above it
+function layoutTimeline() {
+  document.getElementById("axesDock").style.display = shownAxes.length ? "flex" : "none";
 }
 buildBar();
 initTools();
-placeTools();
 
 let playing = -1, playTimer = null;          // `playing`: the axis being played, -1 when paused
 const curRanks = () => Array.from(FR_RANK.subarray(frameIdx * NB_AXES, (frameIdx + 1) * NB_AXES));
@@ -2820,8 +3141,8 @@ function syncBar() {
   for (const a of shownAxes) {
     const r = FR_RANK[frameIdx * NB_AXES + a], row = axRows[a];
     row.inp.value = r;
-    row.lab.innerHTML = AXES[a] + " = " + fmtVal(FR_VAL[frameIdx * NB_AXES + a]) +
-      '<span class="cnt">' + (r + 1) + "/" + AX_VALS[a].length + "</span>";
+    row.lab.innerHTML = "<b>" + AXES[a] + " " + fmtVal(FR_VAL[frameIdx * NB_AXES + a]) + "</b>" +
+      '<span class="cnt">' + (r + 1) + " / " + AX_VALS[a].length + "</span>";
   }
 }
 function setFrame(i) {
@@ -2829,7 +3150,11 @@ function setFrame(i) {
   syncBar();
   curveCursors();
   if (STORED) {                                       // its chunk: at once from the cache, else drawn when it arrives
-    STORE.want(frameIdx, f => { if (f !== frameIdx) return; useScene(STORE.get(f)); buildScene(); draw(); });
+    STORE.want(frameIdx, f => {
+      if (f !== frameIdx) return;
+      useScene(STORE.get(f)); buildScene(); draw(); bakeFrame(f);
+      if (regionMode !== "off") showRegion(f);
+    });
     return;
   }
   buildScene();                                       // only the displayed frame is rebuilt
@@ -2839,123 +3164,191 @@ function setFrame(i) {
 // ============================================================================================
 // the CURVES ( `add_curve` ): one chart per name, the abscissa on the first frame axis. Each chart: its curves, the
 // extreme values of both axes, a cursor at the displayed frame with the value of the nearest sample of each curve.
-const curveBox = document.getElementById("curves"), charts = [];
-const CW = 300, CH = 84, CL = 4, CR = 4, CT = 4, CB = 12;
+const curveBox = document.getElementById("curves"), curveTip = document.getElementById("curveTip");
+var charts = [];                                       // ( var: the timeline asks for it before this line )
+const CW = 300, CH = 80;                               // ( the svg's units: it is stretched to its window )
 const fmtY = v => v === 0 ? "0" : (Math.abs(v) >= 1e4 || Math.abs(v) < 1e-3 ? v.toExponential(2) : String(parseFloat(v.toPrecision(4))));
+const logOf = {};                                      // a chart's log scale, as switched by its button ( name -> bool )
+const cssCol = c => "rgb(" + c.map(v => Math.round(255 * v)).join(",") + ")";
 function curveNames() {
   const names = [];
   for (const c of CURVES) if (c.x.length && !names.includes(c.name)) names.push(c.name);
   return names;
 }
+// the nearest sample of curve `c` at `x` ( abscissas in increasing order )
+function nearest(c, x) {
+  let lo = 0, hi = c.x.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c.x[m] <= x) lo = m; else hi = m; }
+  return Math.abs(c.x[hi] - x) < Math.abs(c.x[lo] - x) ? hi : lo;
+}
 function makeChart(name) {
     const NS = "http://www.w3.org/2000/svg";
-    const cs = CURVES.filter(c => c.name === name && c.x.length), log = cs.some(c => c.log);
+    const cs = CURVES.filter(c => c.name === name && c.x.length);
+    const canLog = cs.every(c => c.y.every(v => v > 0 || v !== v));
+    const log = canLog && (logOf[name] !== undefined ? logOf[name] : cs.some(c => c.log));
     const ty = v => log ? Math.log10(v) : v;
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
     for (const c of cs) for (let i = 0; i < c.x.length; i++) {
-      x0 = Math.min(x0, c.x[i]); x1 = Math.max(x1, c.x[i]); y0 = Math.min(y0, ty(c.y[i])); y1 = Math.max(y1, ty(c.y[i]));
+      x0 = Math.min(x0, c.x[i]); x1 = Math.max(x1, c.x[i]);
+      const y = ty(c.y[i]); if (y === y && isFinite(y)) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
     }
     if (x1 <= x0) x1 = x0 + 1;
-    if (y1 <= y0) { const m = Math.abs(y0) * 0.05 || 1; y0 -= m; y1 += m; }
-    const sx = x => CL + (x - x0) / (x1 - x0) * (CW - CL - CR), sy = y => CH - CB - (ty(y) - y0) / (y1 - y0) * (CH - CT - CB);
+    if (!(y1 > y0)) { const m = Math.abs(y0) * 0.05 || 1; y0 -= m; y1 += m; }
+    const pad = 0.06 * (y1 - y0); y0 -= pad; y1 += pad;
+    const sx = x => (x - x0) / (x1 - x0) * CW, sy = y => CH - (ty(y) - y0) / (y1 - y0) * CH;
     const div = document.createElement("div"); div.className = "chart";
-    const ttl = document.createElement("div"); ttl.className = "ttl bar";
-    const nm = document.createElement("span"); nm.textContent = name + (log ? " ( log )" : ""); nm.title = name;
+    // the title bar: a mark per curve, the name, the values at the frame shown, log, fold, close
+    const ttl = document.createElement("div"); ttl.className = "ttl";
+    const marks = cs.map(() => { const m = document.createElement("span"); m.className = "mk"; ttl.appendChild(m); return m; });
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = name; nm.title = name;
     const val = document.createElement("span"); val.className = "v";
-    const close = document.createElement("span"); close.className = "x"; close.innerHTML = "&times;"; close.title = "hide";
-    const right = document.createElement("span"); right.append(val, close);
-    ttl.append(nm, right);
+    const logB = document.createElement("button"); logB.className = "log" + (log ? " on" : ""); logB.textContent = "log";
+    logB.title = canLog ? "logarithmic scale" : "values not all positive: no log scale"; logB.disabled = !canLog;
+    const fold = document.createElement("button"); fold.title = "fold"; fold.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12l5-5 5 5"/></svg>';
+    const close = document.createElement("button"); close.title = "hide"; close.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg>';
+    ttl.append(nm, val, logB, fold, close);
     const svg = document.createElementNS(NS, "svg");
     svg.setAttribute("viewBox", "0 0 " + CW + " " + CH); svg.setAttribute("preserveAspectRatio", "none");
     const mk = (tag, at) => { const e = document.createElementNS(NS, tag); for (const k in at) e.setAttribute(k, at[k]); svg.appendChild(e); return e; };
-    mk("line", { class: "axis", x1: CL, x2: CW - CR, y1: CH - CB, y2: CH - CB, "vector-effect": "non-scaling-stroke" });
-    const paths = cs.map(c => mk("polyline", { fill: "none", "stroke-width": 1.4, "vector-effect": "non-scaling-stroke",
-      points: c.x.map((x, i) => sx(x).toFixed(2) + "," + sy(c.y[i]).toFixed(2)).join(" ") }));
-    const cur = mk("line", { class: "cur", y1: CT, y2: CH - CB, "vector-effect": "non-scaling-stroke" });
-    // a log scale shows its DECADES: a line and its value at each power of ten in range ( the labels in HTML: the svg is
-    // stretched in width, its height is in pixels )
     const plot = document.createElement("div"); plot.className = "plot";
     plot.appendChild(svg);
-    if (log) for (let k = Math.ceil(y0 - 1e-9); k <= Math.floor(y1 + 1e-9); k++) {
-      const y = CH - CB - (k - y0) / (y1 - y0) * (CH - CT - CB);
-      mk("line", { class: "axis", x1: CL, x2: CW - CR, y1: y, y2: y, "stroke-dasharray": "2 3", "vector-effect": "non-scaling-stroke" });
-      const t = document.createElement("span"); t.className = "dec"; t.style.top = "calc(" + (100 * y / CH) + "% - 10px)"; t.textContent = "1e" + k;
-      plot.appendChild(t);
-    }
-    div.append(ttl, plot);
-    // the labels in HTML, over the svg ( which is stretched ): the range of y at the left, of x at the bottom
-    const lab = document.createElement("div"); lab.className = "ttl"; lab.style.color = "#888"; lab.style.fontSize = "9px";
+    const ylab = (y, txt) => { const s = document.createElement("span"); s.className = "ylab"; s.style.top = "calc(" + (100 * y / CH) + "% - 6px)"; s.textContent = txt; plot.appendChild(s); };
     const inv = v => log ? Math.pow(10, v) : v;
-    lab.innerHTML = "<span>y: " + fmtY(inv(y0)) + " &hellip; " + fmtY(inv(y1)) + "</span><span>" + AXES[0] + ": " + fmtVal(x0) + " &hellip; " + fmtVal(x1) + "</span>";
-    div.appendChild(lab);
+    // the grid: the decades of a log scale, else the quarters
+    if (log && Math.floor(y1) - Math.ceil(y0) >= 1) {
+      for (let k = Math.ceil(y0 - 1e-9); k <= Math.floor(y1 + 1e-9); k++) {
+        const y = CH - (k - y0) / (y1 - y0) * CH;
+        mk("line", { class: "grid", x1: 0, x2: CW, y1: y, y2: y, "vector-effect": "non-scaling-stroke" });
+        ylab(y, "1e" + k);
+      }
+    } else {
+      for (const q of [0, 0.5, 1]) {
+        const y = CH * (1 - q);
+        mk("line", { class: "grid", x1: 0, x2: CW, y1: y, y2: y, "vector-effect": "non-scaling-stroke" });
+        ylab(y, fmtY(inv(y0 + q * (y1 - y0))));
+      }
+    }
+    const pts = c => c.x.map((x, i) => sx(x).toFixed(2) + "," + sy(c.y[i]).toFixed(2)).join(" ");
+    const areas = cs.length === 1 ? [mk("polygon", { points: "0," + CH + " " + pts(cs[0]) + " " + CW + "," + CH, "fill-opacity": 0.09, stroke: "none" })] : [];
+    const paths = cs.map(c => mk("polyline", { fill: "none", "stroke-width": 1.6, "vector-effect": "non-scaling-stroke", points: pts(c) }));
+    const hov = mk("line", { class: "hov", y1: 0, y2: CH, "vector-effect": "non-scaling-stroke", visibility: "hidden" });
+    const cur = mk("line", { class: "cur", y1: 0, y2: CH, "vector-effect": "non-scaling-stroke" });
+    // the dots at the frame shown: html, round whatever the stretch of the svg
+    const dots = cs.map(() => { const d = document.createElement("span"); d.style.cssText = "position:absolute;width:7px;height:7px;margin:-4.5px 0 0 -4.5px;border-radius:50%;background:var(--raised);border:1.6px solid;pointer-events:none"; plot.appendChild(d); return d; });
+    const axes = document.createElement("div"); axes.className = "axes";
+    axes.innerHTML = "<span>" + fmtVal(x0) + "</span><span>" + AXES[0] + "</span><span>" + fmtVal(x1) + "</span>";
+    div.append(ttl, plot, axes);
     curveBox.appendChild(div);
-    // a click ( or a drag ) goes to the frame whose value on the first axis is the nearest
+    // a click ( or a drag ) goes to the frame whose value on the first axis is the nearest; hovering says the values there
+    const xAt = e => { const r = svg.getBoundingClientRect(); return x0 + (e.clientX - r.left) / r.width * (x1 - x0); };
     const go = e => {
-      const r = svg.getBoundingClientRect(), x = x0 + ((e.clientX - r.left) / r.width * CW - CL) / (CW - CL - CR) * (x1 - x0);
+      const x = xAt(e);
       let best = 0, bd = Infinity;
       AX_VALS[0].forEach((v, k) => { const d = Math.abs(v - x); if (d < bd) { bd = d; best = k; } });
       stopPlaying();
       const rk = curRanks(); rk[0] = best; setFrame(frameFor(rk, 0));
     };
     svg.addEventListener("pointerdown", e => { svg.setPointerCapture(e.pointerId); go(e); });
-    svg.addEventListener("pointermove", e => { if (e.buttons & 1) go(e); });
-    // a window: moved by its title bar, resized by its corner ( css ), hidden by its cross or from the eye's panel
+    svg.addEventListener("pointermove", e => {
+      if (e.buttons & 1) go(e);
+      const x = xAt(e);
+      hov.setAttribute("x1", sx(x)); hov.setAttribute("x2", sx(x)); hov.setAttribute("visibility", "visible");
+      curveTip.textContent = AXES[0] + " " + fmtVal(x) + " · " + cs.map(c => fmtY(c.y[nearest(c, x)])).join(" · ");
+      curveTip.style.display = "block";
+      curveTip.style.left = (e.clientX + 12) + "px"; curveTip.style.top = (e.clientY - 30) + "px";
+    });
+    svg.addEventListener("pointerleave", () => { hov.setAttribute("visibility", "hidden"); curveTip.style.display = "none"; });
+    // a window: moved by its title bar, resized by its corner ( css ), folded, hidden by its cross
     div.style.display = cs.some(c => c.visible !== false) ? "flex" : "none";
     ttl.addEventListener("pointerdown", e => {
-      if (e.target === close) return;
+      if (e.target.closest("button")) return;
       const r = div.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
-      ttl.setPointerCapture(e.pointerId);
+      ttl.setPointerCapture(e.pointerId); ttl.style.cursor = "grabbing";
       const mv = ev => {
-        div.style.left = Math.max(0, Math.min(window.innerWidth - 40, ev.clientX - dx)) + "px";
-        div.style.top = Math.max(0, Math.min(window.innerHeight - 20, ev.clientY - dy)) + "px";
-        div.style.bottom = "auto";
+        div.style.left = Math.max(0, Math.min(window.innerWidth - 60, ev.clientX - dx)) + "px";
+        div.style.top = Math.max(0, Math.min(window.innerHeight - 34, ev.clientY - dy)) + "px";
       };
-      const up = () => { ttl.removeEventListener("pointermove", mv); ttl.removeEventListener("pointerup", up); };
+      const up = () => { ttl.style.cursor = ""; ttl.removeEventListener("pointermove", mv); ttl.removeEventListener("pointerup", up); };
       ttl.addEventListener("pointermove", mv); ttl.addEventListener("pointerup", up);
     });
-    return { cs, paths, cur, val, sx, div, name, close };
+    const ch = { cs, paths, areas, marks, dots, cur, val, sx, sy, div, name, close, log };
+    fold.addEventListener("click", () => {
+      const f = !div.classList.contains("folded");
+      div.classList.toggle("folded", f);
+      fold.firstChild.style.transform = f ? "rotate(180deg)" : "";
+    });
+    logB.addEventListener("click", () => { logOf[name] = !log; refreshCurves(); });
+    return ch;
 }
-// its line in the eye's panel, and its cross
-function chartItem(ch, head) {
-  ch.cb = addShowItem(ch.name, () => ch.div.style.display !== "none", on => {
-    ch.div.style.display = on ? "flex" : "none";
-    if (on) { const r = ch.div.getBoundingClientRect(); if (r.right < 20 || r.top > window.innerHeight - 10) { ch.div.style.left = "10px"; ch.div.style.top = "auto"; ch.div.style.bottom = "10px"; } }
-  }, null, head ? "curves" : null);
-  ch.close.addEventListener("click", () => { ch.div.style.display = "none"; ch.cb.checked = false; });
+function chartItem(ch) {
+  ch.close.addEventListener("click", () => { ch.div.style.display = "none"; if (ch.item) ch.item.sync(); });
 }
-// the store mode: the curves given again ( longer ); each chart is made again where the user left it
+// the start: the windows stacked at the top left of the view
+function placeCharts() {
+  const dock = document.getElementById("axesDock");
+  let y = (dock.style.display !== "none" ? dock.getBoundingClientRect().bottom : 0) + 10;
+  for (const ch of charts) {
+    ch.div.style.width = "300px"; ch.div.style.height = "150px"; ch.div.style.left = "12px"; ch.div.style.top = y + "px";
+    if (ch.div.style.display !== "none") y += 160;
+  }
+}
+// the store mode: the curves given again ( longer ), or a scale switched; each window made again where it was
 function refreshCurves() {
   for (const name of curveNames()) {
     const ch = charts.find(c => c.name === name), n = makeChart(name);
     if (!ch) {
-      n.div.style.width = "300px"; n.div.style.height = "130px"; n.div.style.bottom = "10px"; n.div.style.left = "10px";
-      charts.push(n); chartItem(n, charts.length === 1); syncTools();
+      charts.push(n); chartItem(n);
+      const prev = charts.length > 1 ? charts[charts.length - 2].div.getBoundingClientRect() : null;
+      n.div.style.width = "300px"; n.div.style.height = "150px"; n.div.style.left = "12px";
+      n.div.style.top = (prev ? prev.bottom + 10 : document.getElementById("axesDock").getBoundingClientRect().bottom + 10) + "px";
       continue;
     }
-    for (const k of ["left", "top", "bottom", "width", "height", "display"]) n.div.style[k] = ch.div.style[k];
+    for (const k of ["left", "top", "width", "height", "display"]) n.div.style[k] = ch.div.style[k];
+    n.div.classList.toggle("folded", ch.div.classList.contains("folded"));
     ch.div.replaceWith(n.div);
-    n.close.addEventListener("click", () => { n.div.style.display = "none"; ch.cb.checked = false; });
-    Object.assign(ch, n, { cb: ch.cb });
+    Object.assign(ch, n);
+    chartItem(ch);
   }
+  syncCurvesBtn(); layoutTimeline();
   curveCursors();
 }
-function buildCurves() {
-  for (const name of curveNames()) charts.push(makeChart(name));
-  // the start: the shown windows side by side along the bottom
-  let left = 10;
+// the timeline's button: how many, shown or not; a click hides them all, or brings them all back
+// the Curves panel: one row per chart -- its settings ( the scale, folded ), the value at the frame shown, its eye
+function syncCurvesBtn() {
+  tabAvailable("curves", charts.length > 0);
+  const box = document.getElementById("curveList"), dark = document.body.classList.contains("dark");
+  box.innerHTML = "";
   for (const ch of charts) {
-    ch.div.style.width = "300px"; ch.div.style.height = "130px"; ch.div.style.bottom = "10px";
-    if (ch.div.style.display === "none") { ch.div.style.left = "10px"; continue; }
-    ch.div.style.left = left + "px"; left += 308;
+    ch.item = addLayer(ch.name, () => ch.div.style.display !== "none" && !curveBox.classList.contains("off"),
+      on => { if (on) curveBox.classList.remove("off"); ch.div.style.display = on ? "flex" : "none"; },
+      () => ch.val.textContent, cssCol(ch.cs[0].color[dark ? 1 : 0]), pane => {
+        const r = document.createElement("div"); r.className = "row";
+        const l = document.createElement("span"); l.textContent = "scale";
+        const seg = segmented([[false, "linear"], [true, "log"]], () => !!ch.log, v => { logOf[ch.name] = v; refreshCurves(); });
+        seg.style.gridColumn = "span 2"; r.append(l, seg); pane.appendChild(r);
+        const f = document.createElement("label"); f.className = "chk";
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = ch.div.classList.contains("folded");
+        cb.addEventListener("change", () => ch.div.classList.toggle("folded", cb.checked));
+        f.append(cb, document.createTextNode(" window folded")); pane.appendChild(f);
+      }, "curveList", true);
   }
-  charts.forEach((ch, k) => chartItem(ch, !k));
-  if (charts.length) {
-    syncTools();
+}
+function toggleCurves() {
+  const off = curveBox.classList.contains("off") || charts.every(c => c.div.style.display === "none");
+  curveBox.classList.toggle("off", !off);
+  if (off) for (const ch of charts) ch.div.style.display = "flex";
+  for (const ch of charts) if (ch.item) ch.item.sync();
+}
+function buildCurves() {
+  for (const name of curveNames()) { const ch = makeChart(name); charts.push(ch); chartItem(ch); }
+  placeCharts();
+  syncCurvesBtn();
+  if (charts.length)
     document.addEventListener("keydown", e => {                        // [g]: all the curves out of the way, or back
       if ((e.key === "g" || e.key === "G") && e.target.tagName !== "SELECT" && !(e.target.tagName === "INPUT" && e.target.type !== "range"))
-        curveBox.style.visibility = curveBox.style.visibility === "hidden" ? "" : "hidden";
+        toggleCurves();
     });
-  }
+  layoutTimeline();
 }
 function curveCursors() {
   if (!charts.length) return;
@@ -2964,17 +3357,21 @@ function curveCursors() {
     ch.cur.setAttribute("x1", ch.sx(x)); ch.cur.setAttribute("x2", ch.sx(x));
     const vals = [];
     ch.cs.forEach((c, k) => {
-      const col = c.color[dark ? 1 : 0];
-      ch.paths[k].setAttribute("stroke", "rgb(" + col.map(v => Math.round(255 * v)).join(",") + ")");
-      let lo = 0, hi = c.x.length - 1;                 // the nearest sample ( abscissas in increasing order )
-      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (c.x[m] <= x) lo = m; else hi = m; }
-      vals.push(fmtY(c.y[Math.abs(c.x[hi] - x) < Math.abs(c.x[lo] - x) ? hi : lo]));
+      const col = cssCol(c.color[dark ? 1 : 0]);
+      ch.paths[k].setAttribute("stroke", col); ch.marks[k].style.background = col;
+      if (ch.areas[k]) ch.areas[k].setAttribute("fill", col);
+      const i = nearest(c, x);
+      vals.push(fmtY(c.y[i]));
+      const d = ch.dots[k];
+      d.style.left = (100 * ch.sx(c.x[i]) / CW) + "%"; d.style.top = (100 * ch.sy(c.y[i]) / CH) + "%"; d.style.borderColor = col;
+      d.style.display = c.y[i] === c.y[i] ? "" : "none";
     });
     ch.val.textContent = vals.join(" · ");
+    if (ch.item) ch.item.sync();
   }
 }
 function stopPlaying() {
-  if (playing >= 0) { axRows[playing].btn.innerHTML = "&#9654;"; axRows[playing].btn.classList.remove("on"); }
+  if (playing >= 0 && axRows[playing]) { axRows[playing].btn.innerHTML = PLAY_ICON; axRows[playing].btn.classList.remove("on"); }
   playing = -1;
   clearInterval(playTimer);
 }
@@ -3026,7 +3423,7 @@ function togglePlay(a) {
   stopPlaying();
   if (was === a) return;
   playing = a; focusAxis = a;
-  axRows[a].btn.innerHTML = "&#10074;&#10074;"; axRows[a].btn.classList.add("on");
+  axRows[a].btn.innerHTML = PAUSE_ICON; axRows[a].btn.classList.add("on");
   if (curRanks()[a] >= AX_VALS[a].length - 1 && !LOOP) { const r = curRanks(); r[a] = 0; setFrame(frameFor(r, a)); }
   sub = 0; hold = 0;
   playTimer = setInterval(step, 1000 / FPS);
@@ -3066,7 +3463,7 @@ async function exportGif() {
   const a = playing >= 0 ? playing : (playableAxes.length ? playableAxes[0] : focusAxis);
   if (a === undefined || a < 0 || !axRows[a] || gifBtn.disabled) return;
   stopPlaying();
-  const keep = frameIdx, label = gifBtn.textContent, ranks = curRanks(), n = AX_VALS[a].length;
+  const keep = frameIdx, label = gifLabel.textContent, ranks = curRanks(), n = AX_VALS[a].length;
   const frames = Array.from({ length: n }, (_, k) => { ranks[a] = k; return frameFor(ranks, a); });
   const maxW = parseInt(URL_OPTS.get("gif_width") || "800", 10);
   const sc = Math.min(1, maxW / canvas.width), W = Math.max(1, Math.round(canvas.width * sc)), H = Math.max(1, Math.round(canvas.height * sc));
@@ -3080,7 +3477,7 @@ async function exportGif() {
     // (1) the palette: the 256 most frequent colors ( 5 bits per channel ), each the mean of its bucket
     const cnt = new Float64Array(32768), sum = new Float64Array(3 * 32768);
     for (let k = 0; k < n; k++) {
-      gifBtn.textContent = "colors " + (k + 1) + "/" + n; await pause();
+      gifLabel.textContent = "colors " + (k + 1) + "/" + n; await pause();
       const px = await grab(frames[k]);
       for (let i = 0; i < px.length; i += 4) {
         const key = ((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3);
@@ -3104,7 +3501,7 @@ async function exportGif() {
     out.push(0x21, 0xFF, 11, ...Array.from("NETSCAPE2.0", ch => ch.charCodeAt(0)), 3, 1, 0, 0, 0);
     let prev = null;
     for (let k = 0; k < n; k++) {
-      gifBtn.textContent = "GIF " + (k + 1) + "/" + n; await pause();
+      gifLabel.textContent = "GIF " + (k + 1) + "/" + n; await pause();
       const px = await grab(frames[k]), idx = new Uint8Array(W * H);
       for (let i = 0, j = 0; j < idx.length; i += 4, j++) idx[j] = lut[((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3)];
       let x0 = 0, y0 = 0, x1 = W - 1, y1 = H - 1;     // the box that changed since the previous frame
@@ -3129,12 +3526,105 @@ async function exportGif() {
     document.body.appendChild(link); link.click(); link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 10000);
   } finally {
-    gifBtn.textContent = label; gifBtn.disabled = false;
+    gifLabel.textContent = label; gifBtn.disabled = false;
     setFrame(keep);
   }
 }
-const gifBtn = document.getElementById("gifBtn");
-if (shownAxes.length) { document.getElementById("gifBox").style.display = ""; gifBtn.addEventListener("click", exportGif); }
+const gifBtn = document.getElementById("gifBtn"), gifLabel = gifBtn.querySelector("span");
+if (shownAxes.length) gifBtn.addEventListener("click", () => { closePops(); exportGif(); });
+else gifBtn.style.display = "none";
+document.getElementById("pngBtn").addEventListener("click", () => {     // ( read in the task that draws: no preserved buffer )
+  closePops(); draw();
+  const link = document.createElement("a");
+  link.href = canvas.toDataURL("image/png");
+  link.download = (document.title.replace(/[^\w\-]+/g, "-").replace(/^-+|-+$/g, "") || "view") + ".png";
+  document.body.appendChild(link); link.click(); link.remove();
+});
+
+// ============================================================================================
+// the PANELS: one per icon of the toolbar, the open ones stacked under it ( a click on its icon again closes it ); each
+// folds or closes from its head. Which are open is kept in this browser.
+let currentTab = null;
+const panelOf = name => document.querySelector('#panels .panel[data-pane="' + name + '"]');
+const iconOf = name => document.querySelector('#toolbar [data-panel="' + name + '"]');
+function savePanels() {
+  try { localStorage.setItem("sviz.panels", JSON.stringify(Array.from(document.querySelectorAll("#panels .panel.open")).map(p => p.dataset.pane))); } catch (e) {}
+}
+function tabAvailable(name, on) {
+  const i = iconOf(name); if (i) i.style.display = on ? "" : "none";
+  if (!on) { const p = panelOf(name); if (p) p.classList.remove("open"); if (i) i.classList.remove("on"); }
+}
+function openTab(name) {
+  const p = panelOf(name); if (!p) return;
+  currentTab = name; p.classList.add("open"); p.classList.remove("folded");
+  const i = iconOf(name); if (i) i.classList.add("on");
+  savePanels();
+}
+function closeTab(name) {
+  const p = panelOf(name); if (p) p.classList.remove("open");
+  const i = iconOf(name); if (i) i.classList.remove("on");
+  savePanels();
+}
+function closePanel() { for (const p of document.querySelectorAll("#panels .panel")) closeTab(p.dataset.pane); }
+for (const b of document.querySelectorAll("#toolbar [data-panel]"))
+  b.addEventListener("click", () => { const n = b.dataset.panel; if (panelOf(n).classList.contains("open")) closeTab(n); else openTab(n); });
+for (const p of document.querySelectorAll("#panels .panel")) {
+  p.querySelector(".head .close").addEventListener("click", () => closeTab(p.dataset.pane));
+  p.querySelector(".head .fold").addEventListener("click", () => p.classList.toggle("folded"));
+}
+tabAvailable("colour", FIELDS.length > 0);
+tabAvailable("pictures", false);                        // ( shown when the services say so, `findServices` )
+tabAvailable("services", false);
+// the light: flat ( no shading of the scene ), relief ( eye-dome lighting and occlusion ), or custom ( the sliders )
+let lightMode = "relief";
+function setLight(m) {
+  lightMode = m;
+  if (m === "flat") { ui.edl.checked = false; ui.ao.checked = false; }
+  if (m === "relief") { ui.edl.checked = true; ui.ao.checked = true; ui.edlK.value = 0.5; ui.aoK.value = 0.7; }
+  for (const b of document.querySelectorAll("#lightSeg button")) b.classList.toggle("on", b.dataset.l === m);
+  document.getElementById("lightCustom").style.display = m === "custom" ? "flex" : "none";
+  syncLabels();
+}
+for (const b of document.querySelectorAll("#lightSeg button")) b.addEventListener("click", () => setLight(b.dataset.l));
+if (D < 3) { document.getElementById("lightLbl").style.display = "none"; document.getElementById("lightSeg").style.display = "none"; }
+function syncProj() { for (const b of document.querySelectorAll("#projSeg button")) b.classList.toggle("on", (b.dataset.p === "ortho") === !!cam.ortho); }
+for (const b of document.querySelectorAll("#projSeg button")) b.addEventListener("click", () => { cam.ortho = b.dataset.p === "ortho"; syncProj(); draw(); });
+if (FLAT) document.getElementById("projSeg").style.display = "none";
+document.getElementById("resetBtn").addEventListener("click", resetView);
+// popovers ( menus, the services ): one at a time, closed by a click elsewhere or Escape
+const POPS = ["renderMenu"];
+function closePops(except) {
+  for (const id of POPS) if (id !== except) document.getElementById(id).style.display = "none";
+  document.getElementById("renderMode").classList.remove("open");
+}
+function openPop(id, anchor) {
+  const el = document.getElementById(id), was = el.style.display !== "none";
+  closePops();
+  if (was) return false;
+  el.style.display = id === "svcPop" ? "block" : "flex";
+  const r = anchor.getBoundingClientRect();
+  el.style.top = (r.bottom + 6) + "px";
+  el.style.left = Math.max(8, Math.min(window.innerWidth - el.offsetWidth - 8, r.right - el.offsetWidth)) + "px";
+  return true;
+}
+document.addEventListener("click", e => {
+  if (!e.target.closest(".pop") && !e.target.closest("#renderMode")) closePops();
+  if (!e.target.closest("#help, #helpBtn")) helpPanel.style.display = "none";
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePops(); });
+for (const b of document.querySelectorAll("#themeSeg button")) b.addEventListener("click", () => window.setThemeMode(b.dataset.t));
+// the colour scale: a click opens the colour panel; its grip moves it
+{ const lg = document.getElementById("legend");
+  movable(lg, lg.querySelector(".grip"));
+  lg.addEventListener("click", e => { if (!e.target.closest(".grip")) openTab("colour"); }); }
+// the state of a store ( live while its run writes it ): in About, and beside the first axis
+function syncStatus() {
+  const txt = document.getElementById("statusText"), tag = document.getElementById("liveTag");
+  if (!STORED) { txt.textContent = NB_FRAMES > 1 ? NB_FRAMES + " frames" : "one frame"; return; }
+  const live = !STORE.m.complete;
+  txt.textContent = (live ? "live · " : "complete · ") + NB_FRAMES + (NB_FRAMES > 1 ? " frames" : " frame");
+  if (tag) tag.classList.toggle("hidden", !live);
+}
 
 // ============================================================================================
 // panel: opacity, radius, viewed dimensions, slices
@@ -3145,8 +3635,11 @@ function syncLabels() {
   document.getElementById("edlVal").textContent = edlStrength().toFixed(0);
   document.getElementById("aoKVal").textContent = parseFloat(ui.aoK.value).toFixed(2);
   document.getElementById("aoRVal").textContent = parseFloat(ui.aoR.value).toFixed(1);
+  document.getElementById("bakeVal").textContent = parseFloat(ui.bake.value).toFixed(2);
+  document.getElementById("restVal").textContent = parseFloat(document.getElementById("restDelay").value).toFixed(1) + " s";
   draw();
 }
+document.getElementById("restDelay").addEventListener("input", syncLabels);
 ui.op.addEventListener("input", syncLabels);
 ui.r.addEventListener("input", syncLabels);
 ui.faces.addEventListener("change", draw);
@@ -3160,9 +3653,373 @@ ui.edlK.addEventListener("input", syncLabels);
 ui.ao.addEventListener("change", draw);
 ui.aoK.addEventListener("input", syncLabels);
 ui.aoR.addEventListener("input", syncLabels);
-if (D >= 3) document.getElementById("edlBox").style.display = "block";
-if (D >= 3) document.getElementById("depthLbl").style.display = "block";
-if (PNT_V.length === 0) document.getElementById("ptBox").style.display = "none";
+ui.bake.addEventListener("input", syncLabels);
+if (POLY_AO && POLY_AO.length) document.getElementById("bakeBox").style.display = "flex";
+
+// SERVICES ( errand ADR 0026; sdot ADR 0001 ): what errand serves this page beside its files ( `.errand/services` ), or a
+// server given by hand ( `?svc.sdot.ao=http://127.0.0.1:PORT` ). `sdot.ao` bakes the occlusion of a frame stored without.
+const SVC = { ao: null, blender: null, region: null };
+let serviceBake = false;
+const aoAsked = new Map();
+async function serviceStates() {                     // ( null: not served by errand -- the files alone )
+  try { const r = await fetch(".errand/services", { cache: "no-store" }); return r.ok ? await r.json() : null; }
+  catch (e) { return null; }
+}
+// the base URL of service `name`: given by hand ( `?svc.<name>=` ), else through errand's relay when it can run there
+function serviceUrl(name, states) {
+  const byHand = URL_OPTS.get("svc." + name);
+  if (byHand) return byHand.replace(/\/?$/, "/");
+  const s = states && states[name];
+  return s && s.state !== "missing" ? ".errand/svc/" + name + "/" : null;
+}
+function missingHint(el, what, s) {
+  if (!s || s.state !== "missing") return false;
+  el.textContent = what + ": " + ((s.install && s.install.how) || "declare the service");
+  el.style.display = "block";
+  return true;
+}
+// the services this machine has for the page ( `.errand/services` ): the chip of the bar, its panel
+let svcStates = null;
+const SVC_DOT = st => st === "missing" ? "warn" : (st === "declared" || st === "stopped" ? "idle" : "ok");
+const SVC_WHAT = { "blender": "pictures", "sdot.ao": "occlusion", "sdot.region": "cells of a region" };
+function syncSvcChip(states) {
+  const body = document.getElementById("svcBody"), badge = document.getElementById("svcBadge");
+  const names = Object.keys(states || {}).filter(k => k[0] !== ".");
+  tabAvailable("services", names.length > 0);
+  if (!names.length) return;
+  const miss = names.filter(n => states[n].state === "missing").length;
+  badge.className = "badge " + (miss ? "warn" : "ok");
+  iconOf("services").title = "services: " + (names.length - miss) + " ready" + (miss ? ", " + miss + " missing" : "");
+  body.innerHTML = "";
+  const grid = document.createElement("div"); grid.className = "svc";
+  for (const n of names) {
+    const s = states[n];
+    const dot = document.createElement("span"); dot.className = "sdot " + SVC_DOT(s.state);
+    const nm = document.createElement("span"); nm.innerHTML = "<b style='font-weight: 500'></b> <span class='muted'></span>";
+    nm.firstChild.textContent = n; nm.lastChild.textContent = SVC_WHAT[n] ? "· " + SVC_WHAT[n] : "";
+    const st = document.createElement("span"); st.className = "muted";
+    st.textContent = s.state === "missing" ? "not here" : s.state === "declared" ? "ready, not started" : s.state;
+    grid.append(dot, nm, st);
+  }
+  body.appendChild(grid);
+  for (const n of names) if (states[n].state === "missing" && states[n].install) {
+    const h = document.createElement("div"); h.className = "hint"; h.style.marginTop = "8px";
+    h.textContent = n + ": " + (states[n].install.text || "") + " To declare it here:"; body.appendChild(h);
+    const c = document.createElement("code"); c.className = "cmd"; c.textContent = states[n].install.how || ""; c.style.marginTop = "4px";
+    body.appendChild(c);
+  }
+}
+document.getElementById("svcRefresh").addEventListener("click", async () => {
+  if (!STORED) return;
+  const b = document.getElementById("svcRefresh"); b.disabled = true;
+  syncSvcChip(svcStates = await serviceStates());
+  b.disabled = false;
+});
+async function findServices() {
+  if (STORED) {
+    const states = svcStates = await serviceStates();
+    syncSvcChip(states);
+    if (D === 3) {
+      // sdot.ao: the occlusion of a frame stored without
+      const box = document.getElementById("bakeBox"), btn = document.getElementById("bakeBtn"), hint = document.getElementById("bakeHint");
+      SVC.ao = serviceUrl("sdot.ao", states);
+      if (!SVC.ao && missingHint(hint, "occlusion on demand", states && states["sdot.ao"])) {
+        box.style.display = "flex";
+        if (!(POLY_AO && POLY_AO.length)) document.getElementById("bakeLbl").style.display = "none";
+      } else if (SVC.ao && !(POLY_AO && POLY_AO.length)) {
+        document.getElementById("bakeLbl").style.display = "none";
+        btn.style.display = "inline-flex"; box.style.display = "flex";
+        btn.addEventListener("click", () => { serviceBake = true; btn.disabled = true; btn.textContent = "baking…"; bakeFrame(frameIdx); });
+      }
+      // sdot.region: the cells of a region, rebuilt from the frame's seeds ( the frames that kept their sources )
+      const sources = STORE.m.frames.some(fr => fr.sources);
+      SVC.region = sources ? serviceUrl("sdot.region", states) : null;
+      if (SVC.region) {
+        document.getElementById("cellsBox").style.display = "flex";
+        for (const rb of document.querySelectorAll('#regionChoices input'))
+          rb.addEventListener("change", () => { regionMode = rb.value; regionPlane = null; syncChoices(); showRegion(frameIdx); });
+        document.getElementById("regionBtn").addEventListener("click", () => {
+          regionMode = "cut"; regionPlane = null; syncChoices(); showRegion(frameIdx);
+        });
+        syncChoices();
+      } else if (sources && missingHint(document.getElementById("regionHint"), "cells of a region", states && states["sdot.region"])) {
+        document.getElementById("cellsBox").style.display = "flex";
+        for (const rb of document.querySelectorAll('#regionChoices input')) rb.disabled = true;
+        document.getElementById("regionBtn").style.display = "none";
+      }
+      // blender: pictures of this view
+      SVC.blender = serviceUrl("blender", states);
+      if (SVC.blender) {
+        document.getElementById("renderGroup").style.display = "flex";
+        tabAvailable("pictures", true);
+        loadKept();
+        lastViewKey = null; renderStale();               // ( a mode that renders: the view as it is now )
+      } else if (states && states.blender && states.blender.state === "missing") {
+        tabAvailable("pictures", true);
+        const box = document.getElementById("renderBox");
+        box.innerHTML = '<div class="hint"></div>';
+        missingHint(box.firstChild, "pictures by Blender", states.blender);
+      }
+    }
+  }
+  try { if (!EMBED) for (const n of JSON.parse(localStorage.getItem("sviz.panels") || "[]")) { const i = iconOf(n); if (i && i.style.display !== "none") openTab(n); } } catch (e) {}
+}
+function syncChoices() {
+  for (const l of document.querySelectorAll("#regionChoices .choice")) {
+    const on = l.dataset.m === regionMode;
+    l.classList.toggle("on", on); l.querySelector("input").checked = on;
+  }
+}
+// REGIONS ( sdot.region ): the frame's cells replaced by those of a region, rebuilt by the service from the seeds. The cut
+// is the plane through the view's target, across the view: the cells whose seed is beyond it stay. Its plane is taken
+// when asked ( `cut here` ), then kept from frame to frame.
+var regionMode = "off", regionPlane = null, regionShown = null;   // ( regionShown: the bytes of the region on display )
+const regionCache = new Map();
+function regionQuery() {
+  if (regionMode === "boundary") return "mode=boundary";
+  if (!regionPlane) {
+    const f = camBasis().fwd, n = new Array(D).fill(0);
+    let d = 0;
+    for (let k = 0; k < 3; k++) if (AX[k] >= 0) { n[AX[k]] = -f[k]; d -= f[k] * cam.target[k]; }
+    regionPlane = n.concat([d]);
+  }
+  return "mode=half&plane=" + regionPlane.map(v => v.toPrecision(7)).join(",");
+}
+async function showRegion(f) {
+  const hint = document.getElementById("regionHint");
+  if (!SVC.region || !STORE.has(f)) return;
+  if (regionMode === "off" || !STORE.m.frames[f].sources) {
+    hint.style.display = "none"; regionShown = null;
+    useScene(STORE.get(f)); buildScene(); draw();
+    return;
+  }
+  const q = regionQuery(), key = f + "?" + q;
+  let ch = regionCache.get(key);
+  if (!ch) {
+    hint.textContent = "asking sdot.region…"; hint.style.display = "block";
+    let r;
+    try { r = await fetch(SVC.region + "frame/" + f + "?" + q, { cache: "no-store" }); }
+    catch (e) { hint.textContent = "sdot.region: " + e; return; }
+    if (!r.ok) { hint.textContent = "sdot.region: " + r.status + " " + (await r.text()); return; }
+    const raw = await r.arrayBuffer();
+    ch = await readChunk(raw);
+    ch.raw = raw;
+    ch.colBase = COLORS.length;                          // ( its colours appended to the tables, light and dark )
+    for (const c of ch.meta.colors) COLORS.push(c);
+    for (const c of ch.meta.colors_dark) COLORS_DARK.push(c);
+    regionCache.set(key, ch);
+    if (regionCache.size > 8) regionCache.delete(regionCache.keys().next().value);
+  }
+  if (f !== frameIdx) return;
+  if (regionShown === ch.raw && curScene && curScene.REGION === ch) { hint.textContent = ch.meta.cells + " cells"; return; }   // ( already shown )
+  const sc = STORE.get(f), A = ch.arrays, nv = sc.POS.length / D;
+  const plus = (x, d, T) => { const o = new T(x.length); for (let i = 0; i < x.length; i++) o[i] = x[i] + d; return o; };
+  const pos = new Float32Array(sc.POS.length + A.pos.length);
+  pos.set(sc.POS); pos.set(A.pos, sc.POS.length);
+  useScene(Object.assign({}, sc, {
+    POS: pos, POLY_V: plus(A.poly_v, nv, Int32Array), POLY_OFF: A.poly_off, POLY_C: plus(A.poly_c, ch.colBase, Uint16Array),
+    POLY_AO: new Uint8Array(0), EDG_V: plus(A.edge_v, nv, Int32Array), EDG_C: plus(A.edge_c, ch.colBase, Uint16Array),
+    EDG_L: new Uint8Array(A.edge_c.length), SHARED: { poly: 0, edge: 0, pnt: sc.SHARED.pnt }, REGION: ch,
+  }));
+  regionShown = ch.raw;
+  buildScene(); draw();
+  hint.textContent = ch.meta.cells + " cells"; hint.style.display = "block";
+}
+// PICTURES by Blender. The Render button renders the view; its MODE ( the icon beside it ): once, when asked; when the
+// view rests ( `restDelay` without a move ); also while playing ( each frame, the first step only ). A picture is
+// refined by the steps of the Pictures pane ( 8, 32, 128 samples... ), each replacing the last; it stays over the view
+// until the view, the frame or the size change.
+var renderShownKey = null, renderSeq = 0, lastViewKey = null, lastCamKey = null, restTimer = 0, cutTimer = 0, renderBusy = false;   // ( var: draw() runs before )
+let renderMode = "once";
+try { renderMode = localStorage.getItem("sviz.renderMode") || "once"; } catch (e) {}
+const MODE_ICON = {
+  once: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h3l1.5-2h5L14 6h3v10H3z"/><circle cx="10" cy="11" r="2.6"/></svg>',
+  rest: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3.5v3.2h-3.2"/><circle cx="10" cy="10" r="1.6" fill="currentColor" stroke="none"/></svg>',
+  play: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M16 3.5v3.2h-3.2"/><path d="M8.5 7.5v5l4-2.5z" fill="currentColor"/></svg>',
+};
+const MODES = [["once", "Once", "a picture of this view when you press Render"],
+               ["rest", "When the view rests", "rendered once the view stays still, then refined"],
+               ["play", "Also while playing", "each frame, the first step only"]];
+function syncRenderMode() {
+  const b = document.getElementById("renderMode");
+  b.innerHTML = MODE_ICON[renderMode];
+  b.title = "when to render: " + MODES.find(m => m[0] === renderMode)[1].toLowerCase();
+  const menu = document.getElementById("renderMenu");
+  menu.innerHTML = "";
+  for (const [m, label, what] of MODES) {
+    const it = document.createElement("button"); it.setAttribute("role", "menuitemradio");
+    it.setAttribute("aria-checked", String(m === renderMode)); it.classList.toggle("on", m === renderMode);
+    it.innerHTML = MODE_ICON[m] + "<span></span><small></small>";
+    it.children[1].textContent = label; it.children[2].textContent = what;
+    it.addEventListener("click", () => {
+      renderMode = m; try { localStorage.setItem("sviz.renderMode", m); } catch (e) {}
+      syncRenderMode(); closePops(); lastViewKey = null;
+      if (m !== "once") renderStale();               // ( a mode that renders: now )
+    });
+    menu.appendChild(it);
+  }
+  const hr = document.createElement("hr"); menu.appendChild(hr);
+  const note = document.createElement("small"); note.className = "muted"; note.style.cssText = "padding: 2px 10px 6px; font-size: 12px";
+  note.textContent = "the steps and the delay: the Pictures tab"; menu.appendChild(note);
+}
+document.getElementById("renderMode").addEventListener("click", e => {
+  if (openPop("renderMenu", e.currentTarget)) e.currentTarget.classList.add("open");
+});
+document.getElementById("renderBtn").addEventListener("click", () => renderView(false));
+syncRenderMode();
+// the steps: the samples of each picture of a series
+for (const b of document.querySelectorAll("#stepsSeg button")) {
+  b.classList.toggle("on", ["8", "32", "128"].includes(b.dataset.n));
+  b.addEventListener("click", () => {
+    b.classList.toggle("on");
+    if (!document.querySelector("#stepsSeg button.on")) b.classList.add("on");
+  });
+}
+const renderSteps = () => Array.from(document.querySelectorAll("#stepsSeg button.on")).map(b => parseInt(b.dataset.n, 10)).sort((a, b) => a - b);
+function camKey() { return JSON.stringify([camEye(), cam.rot, cam.ortho, canvas.clientWidth, canvas.clientHeight]); }
+function renderKey() { return camKey() + frameIdx + "/" + sceneVersion; }
+function renderRequest(samples, scale, keep) {
+  const b = camBasis(), H = canvas.clientHeight;
+  return { frame: frameIdx, axes: AX, theme: document.body.classList.contains("dark") ? "dark" : "light",
+           camera: { eye: camEye(), right: b.right, up: b.up, fwd: b.fwd, fov: FOV, ortho: !!cam.ortho, half_h: orthoHalfH() },
+           view: { target: cam.target, dist: cam.dist, rot: cam.rot, ortho: !!cam.ortho },
+           width: Math.max(16, Math.round(canvas.clientWidth * scale)), height: Math.max(16, Math.round(H * scale)), samples,
+           point_radius: pointRadius(), edge_radius: 0.8 * 2 * orthoHalfH() / H,
+           faces: ui.faces.checked, edges: ui.edgeMode.value !== "none", points: ui.points.checked, keep: !!keep,
+           ...(regionShown ? { region: b64Of(regionShown) } : {}) };          // ( the cells on display, not the stored ones )
+}
+function b64Of(buf) {
+  const u = new Uint8Array(buf); let s = "";
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+const renderUi = { img: document.getElementById("renderImg"), hint: document.getElementById("renderHint"),
+                   hintText: document.getElementById("renderHintText"), card: document.getElementById("renderCard"),
+                   info: document.getElementById("renderInfo") };
+function say(text) { renderUi.hintText.textContent = text; renderUi.hint.style.display = text ? "flex" : "none"; }
+let lastSamples = 0;
+async function renderView(keep, only) {
+  if (!SVC.blender) return;
+  const seq = ++renderSeq, key = renderKey();
+  const all = renderSteps(), steps = keep ? [lastSamples || all[all.length - 1]] : (only ? all.slice(0, 1) : all);
+  renderBusy = true;
+  try {
+    for (const samples of steps) {
+      say((keep ? "keeping, " : "rendering, ") + samples + " samples…");
+      let r;
+      try {
+        r = await fetch(SVC.blender + "render", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                  body: JSON.stringify(renderRequest(samples, samples <= 8 && !keep ? 0.5 : 1, keep)) });
+      } catch (e) { say("render failed: " + e); return; }
+      if (!r.ok) { say("render failed: " + r.status + " " + (await r.text())); return; }
+      const blob = await r.blob();
+      if (seq !== renderSeq || key !== renderKey()) return;              // ( the view moved: that picture is for nothing )
+      if (renderUi.img.src) URL.revokeObjectURL(renderUi.img.src);
+      renderUi.img.src = URL.createObjectURL(blob);
+      renderUi.img.style.width = canvas.clientWidth + "px"; renderUi.img.style.height = canvas.clientHeight + "px";
+      renderUi.img.style.display = "block";
+      document.getElementById("downloadBtn").href = renderUi.img.src;
+      renderShownKey = key; lastSamples = samples;
+      renderUi.info.textContent = "Cycles · " + samples + " samples" + (NB_FRAMES > 1 ? " · " + AXES[0] + " " + fmtVal(FR_VAL[frameIdx * NB_AXES]) : "");
+      renderUi.card.style.display = "flex";
+      const kept = r.headers.get("X-Kept");
+      if (kept) { say("kept: " + kept); loadKept(); setTimeout(() => { if (renderShownKey === key) say(""); }, 2500); }
+    }
+    if (!keep) say("");
+  } finally { renderBusy = false; }
+}
+// at each draw: a picture over an older view goes; a mode that renders asks again once the view rests ( or at once,
+// playing, when nothing is on its way )
+function renderStale() {
+  const k = renderKey();
+  if (k === lastViewKey) return;
+  lastViewKey = k;
+  if (renderShownKey !== null && renderShownKey !== k) {
+    renderUi.img.style.display = "none"; renderUi.card.style.display = "none"; renderShownKey = null; say("");
+  }
+  const delay = 1000 * parseFloat(document.getElementById("restDelay").value);
+  // a cut that follows the view: made again through the new target once the CAMERA rests ( its own change of scene
+  // does not ask for another )
+  const ck = camKey();
+  if (ck !== lastCamKey) {
+    lastCamKey = ck;
+    if (SVC.region && regionMode === "cut" && document.getElementById("regionFollow").checked && playing < 0) {
+      clearTimeout(cutTimer);
+      cutTimer = setTimeout(() => { if (!drag && !touch && camKey() === ck) { regionPlane = null; showRegion(frameIdx); } }, delay);
+    }
+  }
+  if (!SVC.blender || renderMode === "once") return;
+  clearTimeout(restTimer);
+  if (playing >= 0) { if (renderMode === "play" && !renderBusy) renderView(false, true); return; }
+  restTimer = setTimeout(() => { if (!drag && !touch && renderKey() === k) renderView(false); }, delay);
+}
+document.getElementById("keepBtn").addEventListener("click", () => renderView(true));
+document.getElementById("closeRenderBtn").addEventListener("click", () => {
+  renderSeq++; renderUi.img.style.display = "none"; renderUi.card.style.display = "none"; renderShownKey = null; say("");
+});
+{ const cmp = document.getElementById("compareBtn");               // ( held: the live view under the picture )
+  cmp.addEventListener("pointerdown", () => { renderUi.img.style.visibility = "hidden"; });
+  for (const ev of ["pointerup", "pointerleave"]) cmp.addEventListener(ev, () => { renderUi.img.style.visibility = ""; }); }
+// what was kept ( `renders/index.json`, written by the service ): a click goes back to that frame and that view
+async function loadKept() {
+  let list = [];
+  try { const r = await fetch("renders/index.json", { cache: "no-store" }); if (r.ok) list = await r.json(); } catch (e) {}
+  const box = document.getElementById("kept");
+  box.innerHTML = "";
+  document.getElementById("keptCount").textContent = list.length ? "· " + list.length : "";
+  document.getElementById("keptHint").textContent = list.length ? "a click: back to that frame and that view" : "Keep, over a picture, writes it here";
+  for (const e of list.slice().reverse()) {
+    const fig = document.createElement("figure"), img = document.createElement("img"), cap = document.createElement("figcaption");
+    img.src = e.file; img.alt = "kept picture"; img.loading = "lazy";
+    cap.textContent = (e.frame < NB_FRAMES && NB_FRAMES > 1 ? AXES[0] + " " + fmtVal(FR_VAL[e.frame * NB_AXES]) + " · " : "") + e.samples + " samples";
+    fig.append(img, cap); box.appendChild(fig);
+    fig.addEventListener("click", () => {
+      if (e.view) { cam.target = e.view.target.slice(); cam.dist = e.view.dist; cam.rot = e.view.rot.slice(); cam.ortho = e.view.ortho; syncProj(); viewUntouched = false; }
+      if (e.frame < NB_FRAMES) setFrame(e.frame); else draw();
+    });
+  }
+}
+// VIEWS: named cameras, kept in this browser ( per store )
+const VIEWS_KEY = "sviz.views:" + location.pathname;
+function readViews() { try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || "[]"); } catch (e) { return []; } }
+function syncViews() {
+  const box = document.getElementById("views"), list = readViews();
+  box.innerHTML = "";
+  for (const v of list) {
+    const b = document.createElement("button"); b.textContent = v.name; b.title = "go to this view ( alt-click: forget it )";
+    b.addEventListener("click", e => {
+      if (e.altKey) { try { localStorage.setItem(VIEWS_KEY, JSON.stringify(readViews().filter(w => w.name !== v.name))); } catch (err) {} syncViews(); return; }
+      cam.target = v.target.slice(); cam.dist = v.dist; cam.rot = v.rot.slice(); cam.ortho = v.ortho; syncProj(); viewUntouched = false; draw();
+    });
+    box.appendChild(b);
+  }
+  const add = document.createElement("button"); add.className = "add"; add.textContent = "+ this view";
+  add.addEventListener("click", () => {
+    const name = window.prompt("a name for this view", "view " + (list.length + 1));
+    if (!name) return;
+    const all = readViews().filter(w => w.name !== name);
+    all.push({ name, target: cam.target.slice(), dist: cam.dist, rot: cam.rot.slice(), ortho: !!cam.ortho });
+    try { localStorage.setItem(VIEWS_KEY, JSON.stringify(all)); } catch (e) {}
+    syncViews();
+  });
+  box.appendChild(add);
+}
+syncViews();
+function bakeFrame(f) {
+  if (!serviceBake || !SVC.ao || !STORE.has(f)) return;
+  const sc = STORE.get(f);
+  if (!sc.POLY_V.length || (sc.POLY_AO && sc.POLY_AO.length) || aoAsked.has(f)) return;
+  aoAsked.set(f, fetch(SVC.ao + "frame/" + f, { cache: "no-store" })
+    .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error("sdot.ao: " + r.status)))
+    .then(readChunk)
+    .then(ch => {
+      sc.POLY_AO = ch.arrays.poly_ao;
+      const btn = document.getElementById("bakeBtn");
+      btn.style.display = "none"; document.getElementById("bakeLbl").style.display = "";
+      if (f === frameIdx && curScene === sc) { POLY_AO = sc.POLY_AO; buildScene(); draw(); }
+    }, e => { aoAsked.delete(f); console.error(e); document.getElementById("bakeBtn").textContent = "bake failed"; }));
+}
+findServices();
 
 // beyond 3 dimensions: we choose the 3 we look at, and fix the others (the SLICE).
 if (D > 3) {
@@ -3187,8 +4044,8 @@ function buildSlices() {
   const hidden = [];
   for (let k = 0; k < D; k++) if (k !== AX[0] && k !== AX[1] && k !== AX[2]) hidden.push(k);
   if (!hidden.length) return;
-  box.className = "sec";
-  const t = document.createElement("div");
+  box.style.cssText = "display: flex; flex-direction: column; gap: 6px";
+  const t = document.createElement("h3");
   t.textContent = "slice";
   box.appendChild(t);
   for (const k of hidden) {
@@ -3202,7 +4059,8 @@ function buildSlices() {
     const upd = () => { lab.textContent = "x" + k + " = " + parseFloat(inp.value).toPrecision(3); };
     upd();
     inp.addEventListener("input", () => { SLICE[k] = parseFloat(inp.value); upd(); buildScene(); draw(); });
-    row.appendChild(lab); row.appendChild(inp);
+    const val = document.createElement("span"); val.className = "val";
+    row.appendChild(lab); row.appendChild(inp); row.appendChild(val);
     box.appendChild(row);
   }
 }
@@ -3212,15 +4070,18 @@ if (FLAT) {
   document.getElementById("hArrows").textContent = "move (Shift/Ctrl: faster)";
 }
 
-// dark mode: `?theme=dark|light`, else the theme of the page that embeds this one ( its `dark` class, followed live: a
-// VitePress page, same origin ), else the system preference; then toggled with [d]. Colors given per theme switch with it.
+// theme: `?theme=dark|light`, else the viewer's choice ( Display: light, dark, auto -- kept in this browser ), auto
+// following the page that embeds this one ( its `dark` class, followed live: a VitePress page, same origin ), else the
+// system preference; [d] flips light and dark. Colors given per theme switch with it.
 let sceneBuilt = false;
 (function () {
   const ml = window.matchMedia("(prefers-color-scheme: dark)");
   const asked = URL_OPTS.get("theme");
   let host = null;
   try { if (window.parent !== window) host = window.parent.document.documentElement; } catch (e) { host = null; }
-  let cur = asked ? asked === "dark" : host ? host.classList.contains("dark") : ml.matches;
+  let mode = asked || "auto", cur = false;
+  if (!asked && !EMBED) try { mode = localStorage.getItem("sviz.theme") || "auto"; } catch (e) {}
+  const autoDark = () => host ? host.classList.contains("dark") : ml.matches;
   function setTheme(on) {
     cur = on;
     document.body.classList.toggle("dark", on);
@@ -3230,15 +4091,21 @@ let sceneBuilt = false;
     if (pal !== PAL) { PAL = pal; if (sceneBuilt) buildScene(); }
     draw();
     curveCursors();
+    if (typeof syncCurvesBtn === "function" && typeof charts !== "undefined" && charts.length) syncCurvesBtn();
   }
-  setTheme(cur);
-  if (!asked && host)
-    new MutationObserver(() => setTheme(host.classList.contains("dark"))).observe(host, { attributes: true, attributeFilter: ["class"] });
-  else if (!asked)
-    ml.addEventListener("change", e => setTheme(e.matches));
+  window.setThemeMode = m => {
+    mode = m;
+    if (!asked && !EMBED) try { localStorage.setItem("sviz.theme", m); } catch (e) {}
+    for (const b of document.querySelectorAll("#themeSeg button")) b.classList.toggle("on", b.dataset.t === m);
+    setTheme(m === "auto" ? autoDark() : m === "dark");
+  };
+  window.toggleTheme = () => window.setThemeMode(cur ? "light" : "dark");
+  window.setThemeMode(mode);
+  if (host) new MutationObserver(() => { if (mode === "auto") setTheme(autoDark()); }).observe(host, { attributes: true, attributeFilter: ["class"] });
+  ml.addEventListener("change", () => { if (mode === "auto") setTheme(autoDark()); });
   document.addEventListener("keydown", e => {
     if ((e.key === "d" || e.key === "D") && e.target.tagName !== "SELECT" && e.target.tagName !== "INPUT")
-      { e.preventDefault(); setTheme(!cur); }
+      { e.preventDefault(); window.toggleTheme(); }
   });
 })();
 
@@ -3261,17 +4128,19 @@ if (STORED && !STORE.m.complete) (function follow() {
       FR_VAL = STORE.FR_VAL; NB_FRAMES = FR_VAL.length / NB_AXES;
       for (const f of FIELDS) { f.all = STORE.fieldAll(f.name); f.div = undefined; }
       frameGrid(); buildBar();
-      if (playing >= 0 && axRows[playing]) { axRows[playing].btn.innerHTML = "&#10074;&#10074;"; axRows[playing].btn.classList.add("on"); }
+      if (playing >= 0 && axRows[playing]) { axRows[playing].btn.innerHTML = PAUSE_ICON; axRows[playing].btn.classList.add("on"); }
       if (last) setFrame(NB_FRAMES - 1); else syncBar();
+      syncStatus();
     }
     if (ch.base) { curScene = null; setFrame(frameIdx); }
     if (ch.curves) { CURVES = STORE.m.curves; refreshCurves(); }
-    if (!STORE.m.complete) setTimeout(follow, 1000);
+    if (!STORE.m.complete) setTimeout(follow, 1000); else syncStatus();
   }, () => setTimeout(follow, 2000));
 })();
 // a store served: the page says it is open ( a server that stops when nobody asks, `sviz serve --idle`, keeps going )
 if (STORED && !STORE_FILES) setInterval(() => fetch("manifest.json", { method: "HEAD", cache: "no-store" }).catch(() => {}), 60000);
-syncLabels();
+setLight(ui.edl.checked || ui.ao.checked ? "relief" : "flat");
+syncProj(); syncStatus(); syncLayers();
 resize();                         // BEFORE framing: the latter depends on the window's aspect ratio
 resetView();
 // The bar of an axis takes the focus: the arrows drive it NATIVELY (and Home/End too),
@@ -3361,6 +4230,8 @@ async function storeOpen() {
       POLY_V: cat(Int32Array, A.poly_v, shift(F.poly_v, nv)),
       POLY_OFF: cat(Int32Array, A.poly_off || new Int32Array(1), F.poly_off ? shift(F.poly_off.subarray(1), offB) : null),
       POLY_C: cat(Uint16Array, A.poly_c, F.poly_c),
+      POLY_AO: A.poly_ao || F.poly_ao ? cat(Uint8Array, A.poly_v ? A.poly_ao || new Uint8Array(A.poly_v.length).fill(255) : null,
+                                         F.poly_v ? F.poly_ao || new Uint8Array(F.poly_v.length).fill(255) : null) : new Uint8Array(0),
       EDG_V: cat(Int32Array, A.edge_v, shift(F.edge_v, nv)), EDG_C: cat(Uint16Array, A.edge_c, F.edge_c), EDG_L: cat(Uint8Array, A.edge_l, F.edge_l),
       PNT_V: cat(Int32Array, A.pnt_v, shift(F.pnt_v, nv)), PNT_C: cat(Uint16Array, A.pnt_c, F.pnt_c),
       PNT_R: cat(Float32Array, A.pnt_r, F.pnt_r), PNT_M: cat(Float32Array, A.pnt_m, F.pnt_m), PNT_L: cat(Uint8Array, A.pnt_l, F.pnt_l),

@@ -1,7 +1,7 @@
 # The loom website lives under docs/ ( VitePress ), with its own package.json, so the project root
 # stays a Python package root. `npm install` is idempotent, so there is no separate step to remember.
 
-.PHONY: help site site-build site-deploy api-docs anim version bump_version kernels wheels wheels_all check_wheels publish
+.PHONY: help viewer site site-build site-deploy api-docs anim version bump_version kernels wheels wheels_all check_wheels publish
 
 help:
 	@echo "  make site          the website, live reloading   ( docs/, VitePress )"
@@ -15,6 +15,7 @@ help:
 	@echo "  make wheels_all    make wheels for every platform of pyproject.toml, in loom's build environments ( PLATFORMS=... for some )"
 	@echo "  make check_wheels  install this version's wheel in a clean venv and run the checks"
 	@echo "  make publish       upload this version's wheels of dist/ ( TWINE_PASSWORD = your PyPI token )"
+	@echo "  make viewer        the viewer's bundle into docs/public/viewer, listed as published ( before site-deploy, at a release )"
 	@echo "  make anim          regenerate the tutorials' animations ( docs/public/anim/*.gif ) -- needs jax + matplotlib"
 
 site: docs/node_modules
@@ -22,6 +23,11 @@ site: docs/node_modules
 
 site-build: docs/node_modules
 	cd docs && npm run build
+
+# the viewer of scene stores, pinned by its hash ( sdot ADR 0001 ): served by the site, so that stores only name it.
+# Every published bundle stays in docs/public/viewer ( committed ): stores written by older versions still find theirs.
+viewer:
+	$(PYTHON) -m sdot.viz.sviz bundle docs/public/viewer --publish
 
 # the API reference ( docs/api/*.md ), from the docstrings -- `tests/test_api_docs.py` says when it is stale
 api-docs:

@@ -124,7 +124,9 @@ def reference_cells( lat, psi, pos = None, tol = 1e-10, dens = None ):
     x0, x1, y0, y1 = lat.box
     tree = cKDTree( pos )
     pmax = psi.max()
-    K = min( n, 48 )
+    # ( all the neighbours at once below 6000 seeds: a second, larger query does not return ties in the same order, and the
+    # walk skipped a seed at the distance where the first query stopped )
+    K = n if n <= 6000 else 48
     dd, jj = tree.query( pos, k = K )
     out = Cells()
     out.area = np.zeros( n )

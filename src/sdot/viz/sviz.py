@@ -5,6 +5,10 @@
     sviz export xyz.sviz --html out.html [--every k] [--frames a:b] [--max-mb N]
                                       ONE self-contained page ( the manifest and the chunks inlined ), to send to someone
     sviz export xyz.sviz --vtk out/name   the ParaView series ( `.vtu` per frame + `.pvd` )
+    sviz pack xyz.sviz [--upgrade]    the viewer the store names, copied into `xyz.sviz/viewer/`: the directory then works
+                                      offline, under any static server ( --upgrade: moved to the installed viewer first )
+    sviz bundle DIR [--publish]       the installed viewer's bundle written into DIR ( the documentation's public/viewer );
+                                      --publish: listed in `published.json`, the stores then only name it ( see `bundle.py` )
     sviz serve [--idle 10m]           the server, in the foreground
     sviz stop                         the server stopped
 
@@ -12,8 +16,9 @@
 
 One per user, for every directory opened: `http://127.0.0.1:<port>/<token>/<id>/`. The token is in the path ( other
 accounts of the machine reach 127.0.0.1 too ), kept in `~/.cache/sdot/sviz/token` so that a URL stays valid from one
-start to the next, as the port does when it is free. Static files, Python stdlib only, nothing computed but the page,
-which is the INSTALLED viewer ( `store_page` ), not the copy inside the directory ( it may be older ). The directories
+start to the next, as the port does when it is free. Static files, Python stdlib only. The page is the store's own
+`index.html`, a bootstrap that loads the viewer it is pinned to ( sdot ADR 0001, `bundle.py` ); `?viewer=installed` serves
+the INSTALLED viewer instead ( `store_page` ), as for an older store, whose `index.html` is a whole viewer. The directories
 opened are listed in `dirs.json`, read at each request: `sviz open` registers one without talking to the server.
 
 Started detached by `sviz open` when it does not answer; it stops itself after `--idle` without a request ( an open
@@ -96,6 +101,7 @@ def serve( port = 0, idle = IDLE ):
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from .Visualizer import store_page
+    from .bundle import pinned
 
     token, last = _token(), [ time.monotonic() ]
 
@@ -128,7 +134,9 @@ def serve( port = 0, idle = IDLE ):
                 self.end_headers()
                 return
             rel = "/".join( parts[ 2: ] ) or "index.html"
-            if rel == "index.html":
+            from urllib.parse import parse_qs, urlsplit
+            installed = parse_qs( urlsplit( self.path ).query ).get( "viewer" ) == [ "installed" ]
+            if rel == "index.html" and ( installed or pinned( root ) is None ):     # ( an older store: its page is the whole viewer )
                 try:
                     title = json.loads( ( root / "manifest.json" ).read_text() ).get( "title", root.stem )
                 except ( OSError, ValueError ):
@@ -137,7 +145,7 @@ def serve( port = 0, idle = IDLE ):
             f = ( root / rel ).resolve()
             if root.resolve() not in f.parents or not f.is_file():
                 return self._send( 404, b"not found", head = head )
-            ctype = "application/json" if f.suffix == ".json" else "application/octet-stream"
+            ctype = { ".json": "application/json", ".html": "text/html; charset=utf-8" }.get( f.suffix, "application/octet-stream" )
             return self._send( 200, f.read_bytes(), ctype, head )
 
         def do_GET( self ):
@@ -345,6 +353,12 @@ def main( argv = None ):
     e.add_argument( "--every", type = int, default = 1, help = "one frame out of k" )
     e.add_argument( "--frames", help = "a:b, the frames a to b ( python slice )" )
     e.add_argument( "--max-mb", type = float, help = "fewer frames until the page is under N MB ( the last one kept )" )
+    k = sub.add_parser( "pack", help = "copy the viewer the store names into it ( offline, any static server )" )
+    k.add_argument( "path" )
+    k.add_argument( "--upgrade", action = "store_true", help = "move the store to the installed viewer first" )
+    b = sub.add_parser( "bundle", help = "write the installed viewer's bundle into a directory" )
+    b.add_argument( "dir" )
+    b.add_argument( "--publish", action = "store_true", help = "list it in published.json: stores then only name it" )
     s = sub.add_parser( "serve", help = "the server, in the foreground" )
     s.add_argument( "--port", type = int, default = 0 )
     s.add_argument( "--idle", default = "0", help = "stop after this time without a request ( 0: never )" )
@@ -363,6 +377,12 @@ def main( argv = None ):
         if a.every != 1 or a.frames or a.max_mb:
             p.error( "--every, --frames, --max-mb: with --html only" )
         print( export_vtk( a.path, a.vtk ) )
+    elif a.cmd == "pack":
+        from .bundle import pack
+        print( pack( a.path, a.upgrade ) )
+    elif a.cmd == "bundle":
+        from .bundle import bundle
+        print( bundle( a.dir, a.publish ) )
     elif a.cmd == "serve":
         serve( a.port, _seconds( a.idle ) )
     elif a.cmd == "stop":

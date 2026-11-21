@@ -92,7 +92,7 @@ if test( "the server: the page and the files of a registered store, behind the t
             return e.code
 
     assert sviz._server()[ "port" ] == port
-    page = get( f"{ token }/{ sid }/" ).decode()
+    page = get( f"{ token }/{ sid }/?viewer=installed" ).decode()                   # ( the bootstrap: tested below )
     assert "storeOpen" in page and "decPos(STORE.POS)" in page
     assert json.loads( get( f"{ token }/{ sid }/manifest.json" ) )[ "complete" ]
     assert get( f"{ token }/{ sid }/frames/000002.bin" ) == ( Path( path ) / "frames/000002.bin" ).read_bytes()
@@ -102,3 +102,79 @@ if test( "the server: the page and the files of a registered store, behind the t
     assert status( f"{ token }/{ sid }/%2e%2e/manifest.json" ) == 404
     th.join( 6 )
     assert not th.is_alive() and not ( sviz.STATE / "server.json" ).exists(), "an idle server stops"
+
+
+if test( "the viewer is pinned: copied when unpublished, named only when published, packed, upgraded" ):
+    import hashlib
+    import json
+    import os
+    import tempfile
+    import numpy as np
+    from pathlib import Path
+    from sdot.viz import bundle
+    from sdot.viz.Visualizer import Visualizer
+    ident = bundle.viewer_id()
+    assert ident[ "sha256" ] == hashlib.sha256( bundle.viewer_bytes() ).hexdigest() and ident[ "sha256" ][ :12 ] in ident[ "file" ]
+    path = _store( 2 )
+    pin = bundle.pinned( path )
+    assert { k: pin[ k ] for k in ident } == ident and pin[ "urls" ] == bundle.URLS
+    f = Path( path, "viewer", ident[ "file" ] )
+    assert f.read_bytes() == bundle.viewer_bytes(), "unpublished ( a checkout ): the store holds its viewer"
+    # named only ( published, or asked ), then packed from the installed viewer
+    p2 = tempfile.mkdtemp() + "/l.sviz"
+    v = Visualizer( store = p2, viewer = "link" )
+    v.add_points( np.random.rand( 4, 2 ) )
+    v.close()
+    assert not Path( p2, "viewer" ).exists()
+    assert bundle.pack( p2 ).read_bytes() == bundle.viewer_bytes()
+    # a store pinned to another viewer, which no URL serves: refused, then upgraded
+    idx = Path( p2, "index.html" )
+    idx.write_text( bundle.bootstrap_page( "old", dict( version = "0", sha256 = "0" * 64, file = "sdot-viz-0-000000000000.html" ), urls = [ ] ) )
+    try:
+        bundle.pack( p2 )
+        assert False, "an unknown viewer cannot be packed"
+    except RuntimeError as e:
+        assert "--upgrade" in str( e )
+    bundle.pack( p2, upgrade = True )
+    assert bundle.pinned( p2 )[ "sha256" ] == ident[ "sha256" ]
+    # published: listed, then only named
+    out = tempfile.mkdtemp()
+    saved = bundle.PUBLISHED
+    bundle.PUBLISHED = Path( out ) / "published.json"
+    try:
+        assert bundle.bundle( out, publish = True ).name == ident[ "file" ]
+        assert ident[ "sha256" ] in bundle.published()
+        p3 = tempfile.mkdtemp() + "/p.sviz"
+        v = Visualizer( store = p3 )
+        v.add_points( np.random.rand( 4, 2 ) )
+        v.close()
+        assert not Path( p3, "viewer" ).exists(), "published: only named"
+    finally:
+        bundle.PUBLISHED = saved
+
+
+if test( "sviz serve: the store's own bootstrap, the installed viewer on ?viewer=installed" ):
+    import threading
+    import urllib.request
+    from sdot.viz import sviz
+    import tempfile
+    from pathlib import Path
+    from sdot.viz.bundle import TITLE, pinned
+    sviz.STATE = Path( tempfile.mkdtemp() )                                  # ( not the user's server )
+    path = _store( 2 )
+    vid = sviz.register( path )
+    t = threading.Thread( target = sviz.serve, kwargs = dict( idle = 3 ), daemon = True )
+    t.start()
+    import time
+    for _ in range( 50 ):
+        s = sviz._server()
+        if s:
+            break
+        time.sleep( 0.1 )
+    base = f"http://127.0.0.1:{ s[ 'port' ] }/{ sviz._token() }/{ vid }/"
+    boot = urllib.request.urlopen( base ).read().decode()
+    assert 'id="sdot-viz"' in boot
+    r = urllib.request.urlopen( base + "viewer/" + pinned( path )[ "file" ] )
+    assert r.headers[ "Content-Type" ].startswith( "text/html" ) and TITLE in r.read().decode()
+    inst = urllib.request.urlopen( base + "index.html?viewer=installed" ).read().decode()
+    assert 'id="sdot-viz"' not in inst and "storeOpen" in inst

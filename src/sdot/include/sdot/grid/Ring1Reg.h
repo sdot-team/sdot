@@ -1,5 +1,11 @@
 #pragma once
 
+// ( the lambdas of the unrolled folds: clang leaves them as calls once their body is large -- closures and arrays in memory, Ring1Reg with
+// its extras 41 -> 14 ns/cell on an M4 when forced )
+#ifndef SDOT_INLINE_LAMBDA
+#define SDOT_INLINE_LAMBDA __attribute__( ( always_inline ) )
+#endif
+
 #include <asimd/asimd.h>
 #include <bit>
 #include <limits>
@@ -95,7 +101,7 @@ struct Ring1Reg {
         // the psi of the neighbour of each direction ( off_x: the row, off_y: the column )
         const V pj[ D ] = { L[ 0 ], L[ 1 ], L[ 2 ], C[ 2 ], R[ 2 ], R[ 1 ], R[ 0 ], C[ 0 ] };
         V h[ D ];
-        [&]<int... k>( std::integer_sequence<int,k...> ) {
+        [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
             ( ( h[ k ] = ( V( T( Tb::off_sqn[ k ] ) ) + ( pi - pj[ k ] ) ) * half ), ... );
             ( ( ok[ k ] |= ( unsigned long long )( asimd::to_bits( h[ k ] < V( inf ) ) ) << ( j * W ) ), ... );
         }( std::make_integer_sequence<int,D>() );
@@ -110,13 +116,13 @@ struct Ring1Reg {
         }
         // the tightening, the vertices, the area
         V ht[ D ], X[ D ], Y[ D ];
-        [&]<int... k>( std::integer_sequence<int,k...> ) {
+        [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
             ( ( ht[ k ] = h[ k ], tighten<k,Tb::pair_beg[ k ]>( h, ht[ k ] ) ), ... );
             ( ( X[ k ] = mulc<Tb::vinv[ 4 * k + 0 ]>( ht[ k ] ) + mulc<Tb::vinv[ 4 * k + 1 ]>( ht[ ( k + 1 ) % D ] ),
                 Y[ k ] = mulc<Tb::vinv[ 4 * k + 2 ]>( ht[ k ] ) + mulc<Tb::vinv[ 4 * k + 3 ]>( ht[ ( k + 1 ) % D ] ) ), ... );
         }( std::make_integer_sequence<int,D>() );
         V s( T( 0 ) );
-        [&]<int... k>( std::integer_sequence<int,k...> ) {
+        [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
             ( ( s = s + ( X[ ( k + D - 1 ) % D ] * Y[ k ] - Y[ ( k + D - 1 ) % D ] * X[ k ] ) ), ... );
             ( ( X[ k ].store_aligned( vx[ k ] + j * W ), Y[ k ].store_aligned( vy[ k ] + j * W ) ), ... );
         }( std::make_integer_sequence<int,D>() );
@@ -137,15 +143,15 @@ struct Ring1Reg {
         const V zero( T( 0 ) );
         const V sc = asimd::max( V( T( 1 ) ), asimd::max( zero - x0, x1 ) + asimd::max( zero - y0, y1 ) );
         V mg = zero;
-        [&]<int... k>( std::integer_sequence<int,k...> ) {
+        [&]<int... k>( std::integer_sequence<int,k...> ) SDOT_INLINE_LAMBDA {
             ( ( mg = asimd::min( mg, mulc<-Tb::dir_y[ k ]>( X[ k ] - X[ ( k + D - 1 ) % D ] ) + mulc<Tb::dir_x[ k ]>( Y[ k ] - Y[ ( k + D - 1 ) % D ] ) ) ), ... );
         }( std::make_integer_sequence<int,D>() );
         ex.inv |= U( asimd::to_bits( mg < V( T( -1e-9 ) ) * sc ) ) << ( j * W );
         if( ! ex.predict ) return;
         // the prediction: a seed j of ring 2 cuts the cell iff 2 h( k ) > |k|^2 + psi_i - psi_j ( exact for ring 2 )
         V c2 = zero, one( T( 1 ) );
-        [&]<int... o>( std::integer_sequence<int,o...> ) {
-            ( ( [&] {
+        [&]<int... o>( std::integer_sequence<int,o...> ) SDOT_INLINE_LAMBDA {
+            ( ( [&]() SDOT_INLINE_LAMBDA {
                 constexpr int kx = r2x[ o ], ky = r2y[ o ];
                 const V h = support<kx,ky,sup_mask( kx, ky )>( X, Y );
                 const V pj = V::load_unaligned( q[ kx + 2 ] + j * W + ky );
@@ -171,8 +177,8 @@ struct Ring1Reg {
             // the vectors of the three rows roll: prev, cur, next; only next is loaded ( the halos: one scalar each end )
             V pv[ 3 ], cu[ 3 ], nx[ 3 ];
             for( int d = 0; d < 3; ++d ) { pv[ d ] = V( r[ d ][ -1 ] ); cu[ d ] = V::load_unaligned( r[ d ] ); }
-            [&]<int... j>( std::integer_sequence<int,j...> ) {
-                ( ( [&] {
+            [&]<int... j>( std::integer_sequence<int,j...> ) SDOT_INLINE_LAMBDA {
+                ( ( [&]() SDOT_INLINE_LAMBDA {
                     for( int d = 0; d < 3; ++d ) nx[ d ] = j + 1 < NV ? V::load_unaligned( r[ d ] + ( j + 1 ) * W ) : V( r[ d ][ B ] );
                     V L[ 3 ], R[ 3 ];
                     for( int d = 0; d < 3; ++d ) { L[ d ] = asimd::ext_lanes( pv[ d ], cu[ d ], asimd::N<W-1>() ); R[ d ] = asimd::ext_lanes( cu[ d ], nx[ d ], asimd::N<1>() ); }
@@ -214,8 +220,8 @@ private:
     // the cells of the block from the three rows ( pointers on the column of the first cell ), unaligned loads
     static void rows( int N, const T *const ( &r )[ 3 ], int a, int b0, T ( &vx )[ D ][ B ], T ( &vy )[ D ][ B ], unsigned long long ( &ok )[ D ], T *ar,
                       Ext *ex = nullptr, const T *const *q = nullptr ) {
-        [&]<int... j>( std::integer_sequence<int,j...> ) {
-            ( ( [&] {
+        [&]<int... j>( std::integer_sequence<int,j...> ) SDOT_INLINE_LAMBDA {
+            ( ( [&]() SDOT_INLINE_LAMBDA {
                 V L[ 3 ], C[ 3 ], R[ 3 ];
                 for( int d = 0; d < 3; ++d ) { L[ d ] = V::load_unaligned( r[ d ] + j * W - 1 ); C[ d ] = V::load_unaligned( r[ d ] + j * W ); R[ d ] = V::load_unaligned( r[ d ] + j * W + 1 ); }
                 cells( N, a, b0 + j * W, L, C, R, vx, vy, ok, ar, j, ex, q );

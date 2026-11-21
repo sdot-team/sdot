@@ -137,9 +137,15 @@ if test( "a store holds its page: the template, every placeholder read from STOR
     v = Visualizer( title = "a <b>", store = path )
     v.add_points( np.random.rand( 10, 2 ) )
     v.close()
-    page = open( path + "/index.html" ).read()
+    boot = open( path + "/index.html" ).read()
+    from sdot.viz.bundle import TITLE, pinned
+    pin = pinned( path )
+    assert pin[ "title" ] == "a <b>" and "<title>a &lt;b&gt;</title>" in boot, "a bootstrap naming its viewer"
+    page = open( path + "/viewer/" + pin[ "file" ] ).read()                  # ( a checkout's viewer is not published: copied )
+    assert page.count( TITLE ) == 2, "the tab and the bar"
+    page = page.replace( TITLE, "x" )
     assert not re.search( r"__[A-Z0-9_]+__", page ), "a placeholder left"
-    assert "if (true) window.STORE = await storeOpen();" in page and "<title>a &lt;b&gt;</title>" in page
+    assert "if (true) window.STORE = await storeOpen();" in page
     assert "decPos(STORE.POS)" in page and "const D      = STORE.D;" in page
     # the self-contained page: same template, its data inlined, no store
     w = Visualizer()

@@ -8,6 +8,8 @@ ADR 0017 ). What a run writes instead of one self-contained page.
         base-<hash>.bin      what every frame draws ( the SHARED primitives, the images ): a chunk named by its contents,
                              so a changed base is a new file
         frames/000123.bin    one frame, a chunk written once ( a temporary name, then renamed ), never changed
+        sources/000123.bin   ( optional ) what frame 123 can be rebuilt from ( `Visualizer.add_sources`, sdot ADR 0001 §6 ):
+                             a chunk whose `meta.kind` says what it is, named by the frame's `sources` entry
 
 = A chunk
 
@@ -23,6 +25,7 @@ but the base. Its arrays, by the names the page uses:
 
     pos [ n, d ]                         the pool of positions
     poly_v, poly_off, poly_c             polygons of free length ( indices, offsets [ nb + 1 ], colour ids )
+    poly_ao                              ( `ao = True` ) the baked occlusion of each corner, uint8, 255 = open
     edge_v [ m, 2 ], edge_c, edge_l      edges, their colour ids, their layers
     pnt_v, pnt_c, pnt_r, pnt_m [ k, 4 ], pnt_l     points, colour ids, radii, matrices, layers
     field:<name> [ k ]                   a value per point, NaN where a point has none
@@ -144,6 +147,10 @@ def scene_arrays( viz, frame = 0, images = False ) -> tuple:
         arrays.update( poly_v = local[ poly_v ].astype( np.int32 ),
                        poly_off = np.concatenate( [ [ 0 ], np.cumsum( [ len( p ) for p in polys ] ) ] ).astype( np.int32 ),
                        poly_c = fr[ "polygon_colors" ].astype( np.uint16 ) )
+        if getattr( viz, "ao", False ) and d == 3:                     # ( the faces of this chunk baked among themselves )
+            from .occlusion import ambient_occlusion, as_codes
+            arrays[ "poly_ao" ] = as_codes( ambient_occlusion( arrays[ "pos" ], arrays[ "poly_v" ], arrays[ "poly_off" ],
+                                                               **viz._ao_options() ) )
     if len( edges ):
         layers = _cat_u8( viz._edge_l )
         arrays.update( edge_v = local[ edges ].astype( np.int32 ), edge_c = fr[ "edge_colors" ].astype( np.uint16 ),
@@ -199,7 +206,7 @@ class StoreWriter:
     def __init__( self, path, on_frame = None, every = 1.0 ):
         self.path = Path( path )
         ( self.path / "frames" ).mkdir( parents = True, exist_ok = True )
-        for old in self.path.glob( "frames/*.bin" ):              # a store written again starts empty
+        for old in [ *self.path.glob( "frames/*.bin" ), *self.path.glob( "sources/*.bin" ) ]:   # a store written again starts empty
             old.unlink()
         self.on_frame, self.every = on_frame, float( every )
         self.frames, self.base, self.bounds, self.written = [ ], None, None, 0.0
@@ -210,8 +217,16 @@ class StoreWriter:
         name = f"frames/{ len( self.frames ):06d}.bin"
         _atomic( self.path / name, data )
         self._note_bounds( viz )
-        self.frames.append( dict( v = list( value ), file = name, size = len( data ), fields = ranges,
-                                  n = { k: int( len( arrays[ a ] ) ) for k, a in ( ( "pnt", "pnt_v" ), ( "edge", "edge_v" ), ( "poly", "poly_c" ) ) if a in arrays } ) )
+        entry = dict( v = list( value ), file = name, size = len( data ), fields = ranges,
+                      n = { k: int( len( arrays[ a ] ) ) for k, a in ( ( "pnt", "pnt_v" ), ( "edge", "edge_v" ), ( "poly", "poly_c" ) ) if a in arrays } )
+        src = getattr( viz, "_sources", None )
+        if src is not None:                                            # ( what the frame can be rebuilt from, ADR 0001 §6 )
+            kind, arr, meta = src
+            sname = f"sources/{ len( self.frames ):06d}.bin"
+            ( self.path / "sources" ).mkdir( exist_ok = True )
+            _atomic( self.path / sname, chunk_bytes( arr, dict( meta, kind = kind ), exact = tuple( arr ) ) )
+            entry[ "sources" ] = dict( kind = kind, file = sname )
+        self.frames.append( entry )
         return len( data )
 
     def write_base( self, base_viz ):
@@ -310,6 +325,11 @@ class Scene:
 
     def frame( self, i ):
         return read_chunk( ( self.path / self.manifest[ "frames" ][ i ][ "file" ] ).read_bytes() )
+
+    def sources( self, i ):
+        """`( arrays, meta )` of frame `i`'s sources ( `meta[ "kind" ]` ), None when it has none"""
+        s = self.manifest[ "frames" ][ i ].get( "sources" )
+        return read_chunk( ( self.path / s[ "file" ] ).read_bytes() ) if s else None
 
 
 def read_scene( path ) -> Scene:

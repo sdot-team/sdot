@@ -1410,6 +1410,19 @@ class PowerDiagram( Aggregate, Displayable ):
             res.cut( direction, offset, j )
         return res
 
+    def _sources_to( self, viz, first_color ):
+        """the seeds, weights and domain as the sources of the frame ( `Visualizer.add_sources`, kind `sdot.power_diagram` );
+        only for the plain case ( no periodicity, sink, groups, radial integrand: those are not rebuilt )"""
+        if self._periodic is not None or self._groups is not None or self.sink_weight.is_defined or self.radial_eps.is_defined:
+            return
+        arrays = dict( seeds = np.asarray( self.positions, float ) )
+        if self.weights.is_defined:
+            arrays[ "weights" ] = np.asarray( self.weights, float ).reshape( -1 )
+        dom = self._domain_half_spaces()                  # ( the start box and the `bnd_*` together )
+        if dom is not None:
+            arrays[ "bnd_dirs" ], arrays[ "bnd_offs" ] = np.asarray( dom[ 0 ], float ), np.asarray( dom[ 1 ], float ).reshape( -1 )
+        viz.add_sources( "sdot.power_diagram", arrays, dict( color0 = int( first_color ) ) )
+
     def add_to_viz( self, viz, seeds = True, seed_color = "#000000", support_only = None, threshold = 0.0,
                     nb_periodicity_rings = 1, opacity_periodicity_rings = 0.25, fit_periodicity_rings = False, domain = None,
                     domain_color = "#000000", opacity_beyond_balls = 0.2, ball_resolution = 96, virtual_seeds = False, virtual_color = "#888888",
@@ -1450,6 +1463,8 @@ class PowerDiagram( Aggregate, Displayable ):
         outline = self.domain_outline() if domain else None
         balls = self.sink_weight.is_defined and d in ( 2, 3 ) and shown is not None
         first_color = viz.reserve_colors( 0 )          # ( the cells reserve their colors from there: the balls take the same )
+        if getattr( viz, "_writer", None ) is not None:   # ( a store: the seeds kept, its services rebuild cells from them )
+            self._sources_to( viz, first_color )
         ball_opacity = kwargs.get( "opacity", 1.0 )
         if balls:
             kwargs = dict( kwargs )

@@ -16,6 +16,9 @@ dependencies = [
 [project.scripts]
 sviz = "sdot.viz.sviz:main"      # the viewer of scene stores ( xyz.sviz, see sdot/viz/store.py )
 
+[project.entry-points."errand.services"]
+sdot = "sdot.viz.services"       # errand finds `errand-services.json` there, without importing sdot ( errand ADR 0027 )
+
 # releasing: `python -m loom.release` ( make version | bump_version | kernels | wheels | wheels_all | check_wheels | publish ) ( see loom's `loom/release` )
 [tool.loom.release]
 frameworks = ["jax", "numpy", "torch", "cupy"]     # those installed on each build machine

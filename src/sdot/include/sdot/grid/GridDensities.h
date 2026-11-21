@@ -115,10 +115,46 @@ struct ImageCells {
 
     /// `ox, oy, h`: the corner of the grid and the side of a cell at this level, `S h^2` its `n^2 h_n^2`; `kxp`, `kyp` the
     /// PHYSICAL edges of the pixels, `vp` their densities
-    ImageCells( int nx, int ny, const double *kxp, const double *kyp, const double *vp, double ox, double oy, double h, double Sh2 ) : nx( nx ), ny( ny ), kx( nx + 1 ), ky( ny + 1 ), v( size_t( nx ) * ny ) {
+    ImageCells( int nx, int ny, const double *kxp, const double *kyp, const double *vp, double ox, double oy, double h, double Sh2, double blur = 0 ) : nx( nx ), ny( ny ), kx( nx + 1 ), ky( ny + 1 ), v( size_t( nx ) * ny ) {
         for( int i = 0; i <= nx; ++i ) kx[ i ] = ( kxp[ i ] - ox ) / h - 0.5;
         for( int j = 0; j <= ny; ++j ) ky[ j ] = ( kyp[ j ] - oy ) / h - 0.5;
         for( size_t q = 0; q < v.size(); ++q ) v[ q ] = Sh2 * vp[ q ];
+        const double wx = ( kxp[ nx ] - kxp[ 0 ] ) / nx, wy = ( kyp[ ny ] - kyp[ 0 ] ) / ny;
+        pixel = std::min( wx, wy );
+        if( blur > 0 ) blur_values( blur / wx, blur / wy );
+    }
+
+    /// THE WIDTH CONTINUATION ( `GridNewton2D.h::solve` ): the values blurred by a gaussian of `blur` ( physical ), the image
+    /// mirrored at its edges ( its mass stays inside ). `pixel`: the narrowest side of a pixel, physical
+    static constexpr bool blurrable = true;
+    double pixel = 0;
+
+    // ( a gaussian of `sx`, `sy` pixels: three box filters per axis, running sums on the mirrored lines )
+    void blur_values( double sx, double sy ) {
+        auto widths = []( double sg, int ( &r )[ 3 ] ) {
+            const double wi = std::sqrt( 12 * sg * sg / 3 + 1 );
+            int wl = int( std::floor( wi ) );
+            if( wl % 2 == 0 ) --wl;
+            const int wu = wl + 2, m = int( std::lround( ( 12 * sg * sg - 3. * wl * wl - 12. * wl - 9 ) / ( -4. * wl - 4 ) ) );
+            for( int k = 0; k < 3; ++k ) r[ k ] = ( ( k < m ? wl : wu ) - 1 ) / 2;
+        };
+        auto mirror = []( long i, long n ) { i %= 2 * n; if( i < 0 ) i += 2 * n; return i < n ? i : 2 * n - 1 - i; };
+        auto line = [&]( double *x, int n, long stride, int r, std::vector<double> &tmp, std::vector<double> &pre ) {
+            if( r <= 0 ) return;
+            tmp.resize( n );
+            pre.assign( size_t( n ) + 2 * r + 1, 0.0 );
+            for( long k = -r; k < n + r; ++k ) pre[ k + r + 1 ] = pre[ k + r ] + x[ mirror( k, n ) * stride ];
+            for( int i = 0; i < n; ++i ) tmp[ i ] = ( pre[ i + 2 * r + 1 ] - pre[ i ] ) / ( 2 * r + 1 );
+            for( int i = 0; i < n; ++i ) x[ i * stride ] = tmp[ i ];
+        };
+        int rx[ 3 ], ry[ 3 ];
+        widths( sx, rx );
+        widths( sy, ry );
+        std::vector<double> tmp, pre;
+        for( int k = 0; k < 3; ++k ) {
+            for( int j = 0; j < ny; ++j ) line( v.data() + j, nx, ny, rx[ k ], tmp, pre );
+            for( int i = 0; i < nx; ++i ) line( v.data() + size_t( i ) * ny, ny, 1, ry[ k ], tmp, pre );
+        }
     }
 
     template<int D, int B>
