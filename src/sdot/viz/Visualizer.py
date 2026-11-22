@@ -1290,6 +1290,9 @@ _HTML = r"""<!DOCTYPE html>
   .svcDet { display: none; flex-direction: column; gap: 6px; padding-left: 24px; }
   .svcCard.open .svcDet { display: flex; }
   .svcMissing { color: var(--text) !important; }
+  .svcSummary { margin: 0; line-height: 1.45; }
+  .svcMore summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
+  .svcMore[open] { display: flex; flex-direction: column; gap: 6px; }
   .svcFound { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
   pre.cmd { margin: 0; padding: 7px 9px; border-radius: 6px; background: var(--well); border: 1px solid var(--line);
             font: 11px/1.5 ui-monospace, "JetBrains Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; }
@@ -3860,7 +3863,8 @@ function svcCard(n, s) {
     await postJson(".errand/services/" + encodeURIComponent(n), { on: sel.value });
     await refreshServices(false);
   });
-  const st = svcEl("span", ok ? "muted" : "warnText", ok ? (s.state === "running" ? "running" : "ready") : svcReason(s).replace(s.on + ": ", ""));
+  const st = svcEl("span", ok ? "muted" : "warnText", ok ? (s.state === "running" ? "running" : "ready") :
+                   (s.state === "installable" ? "not set up" : s.state === "unverified" ? "to check" : s.state));
   row.append(sel, st);
   card.appendChild(row);
   // the details: what the agent found, the lines, a path, the copy
@@ -3877,18 +3881,7 @@ function svcCard(n, s) {
     }
     det.appendChild(box);
   }
-  if (s.missing && s.missing.length) {
-    det.appendChild(svcEl("h3", "warnText", "Missing on " + s.on));
-    const ul = svcEl("ul", "svcFound svcMissing");
-    for (const f of s.missing) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
-    det.appendChild(ul);
-  }
-  if (s.found && s.found.length) {
-    det.appendChild(svcEl("h3", null, "What " + s.on + "'s agent found"));
-    const ul = svcEl("ul", "svcFound");
-    for (const f of s.found) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
-    det.appendChild(ul);
-  }
+  if (s.summary && !ok) det.appendChild(svcEl("p", "svcSummary", s.summary));
   if (s.lines && s.lines.length) {
     det.appendChild(svcEl("h3", null, "To type, in this order"));
     const pre = svcEl("pre", "cmd");
@@ -3896,7 +3889,7 @@ function svcCard(n, s) {
     for (const l of s.lines) {
       const c = svcEl("span", "cmt" + (l.unknown_source ? " bad" : ""),
                       "# " + l.comment + (l.unknown_source ? " — a source outside your list" : "")
-                      + (l.described_by === "store" ? " ( as the store describes it )" : "") + "\n");
+                      + (l.described_by === "store" ? " — as this page describes it, nothing on this machine vouches for it" : "") + "\n");
       pre.append(c, document.createTextNode(l.command + "\n"));
       text += l.command + "\n";
     }
@@ -3920,6 +3913,24 @@ function svcCard(n, s) {
     });
     r.append(inp, b);
     det.appendChild(r);
+  }
+  if ((s.missing && s.missing.length) || (s.found && s.found.length)) {
+    const more = document.createElement("details"); more.className = "svcMore";
+    more.appendChild(svcEl("summary", null, "Details: what " + s.on + " has, what it lacks"));
+    const into = more;
+      if (s.missing && s.missing.length) {
+        into.appendChild(svcEl("h3", "warnText", "Missing on " + s.on));
+        const ul = svcEl("ul", "svcFound svcMissing");
+        for (const f of s.missing) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
+        into.appendChild(ul);
+      }
+      if (s.found && s.found.length) {
+        into.appendChild(svcEl("h3", null, "What " + s.on + "'s agent found"));
+        const ul = svcEl("ul", "svcFound");
+        for (const f of s.found) ul.appendChild(svcEl("li", null, f.replace(/(^|[\s(])\/(?:Users|home)\/[^/\s]+/g, "$1~")));
+        into.appendChild(ul);
+      }
+    det.appendChild(more);
   }
   if (!det.childNodes.length && !ok) det.appendChild(svcEl("div", "hint", s.text || ""));
   card.appendChild(det);
