@@ -1,14 +1,29 @@
 """The `blender` service ( sdot ADR 0001 §5 ): a store's frame as Blender sees it, and pictures over HTTP."""
 from errand import test
 
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_MADE = [ ]
+
+
+def _tmp( ) -> str:
+    """a directory of this file's, removed when it ends: a store left behind stays registered by errand as a view, and keeps
+    the services' versions it asks for from being purged ( errand ADR 0028 )"""
+    d = _tempfile.mkdtemp()
+    _MADE.append( d )
+    return d
+
+
+_atexit.register( lambda: [ _shutil.rmtree( d, ignore_errors = True ) for d in _MADE ] )
+
 BLENDER = "/Applications/Blender.app/Contents/MacOS/Blender"
 
 
 def _store( frames = 2 ):
-    import tempfile
     import numpy as np
     from sdot.viz.Visualizer import Visualizer
-    path = tempfile.mkdtemp() + "/b.sviz"
+    path = _tmp() + "/b.sviz"
     v = Visualizer( store = path, frame_axis = "it" )
     cube = np.array( [ [ 0, 0, 0 ], [ 1, 0, 0 ], [ 1, 1, 0 ], [ 0, 1, 0 ], [ 0, 0, 1 ], [ 1, 0, 1 ], [ 1, 1, 1 ], [ 0, 1, 1 ] ], float )
     F = [ [ 0, 3, 2, 1 ], [ 4, 5, 6, 7 ], [ 0, 1, 5, 4 ], [ 1, 2, 6, 5 ], [ 2, 3, 7, 6 ], [ 3, 0, 4, 7 ] ]

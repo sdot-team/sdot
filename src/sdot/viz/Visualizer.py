@@ -1291,6 +1291,11 @@ _HTML = r"""<!DOCTYPE html>
   .svcCard.open .svcDet { display: flex; }
   .svcMissing { color: var(--text) !important; }
   .svcSummary { margin: 0; line-height: 1.45; }
+  .devBadge { margin-left: 6px; padding: 0 5px; border-radius: 4px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+              color: #fff; background: #b8621b; vertical-align: 1px; }
+  .svcFrom { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center; padding-left: 24px; }
+  .svcHelp { padding-left: 24px; }
+  #renderGroup.dev { box-shadow: inset 0 0 0 2px #b8621b; }
   .svcMore summary { cursor: pointer; color: var(--muted); font-size: 11.5px; }
   .svcMore[open] { display: flex; flex-direction: column; gap: 6px; }
   .svcFound { margin: 0; padding-left: 16px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
@@ -3820,6 +3825,10 @@ function reasonHint(el, what, s) {
 let svcStates = null, svcMachines = [], svcTools = {}, svcOpen = {};
 const SVC_DOT = st => REACHABLE(st) ? (st === "running" ? "ok" : "idle") : "warn";
 const SVC_WHAT = { "blender": "pictures", "sdot.ao": "occlusion", "sdot.region": "cells of a region" };
+function agoText(s) {
+  s = Math.max(0, s);
+  return s < 90 ? Math.round(s) + " s" : s < 5400 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days";
+}
 function svcEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 function syncSvcChip(states) {
   const body = document.getElementById("svcBody"), badge = document.getElementById("svcBadge");
@@ -3843,6 +3852,7 @@ function svcCard(n, s) {
   const nm = svcEl("span", "svcName"); nm.append(svcEl("b", null, n));
   if (s.version) nm.append(svcEl("code", "muted", " #" + s.version));
   if (SVC_WHAT[n]) nm.append(svcEl("span", "muted", " · " + SVC_WHAT[n]));
+  if (s.from === "dev") { const b = svcEl("span", "devBadge", "dev"); b.title = "runs your checkout " + ((s.dev || {}).path || ""); nm.append(b); }
   const dot = svcEl("span", "sdot " + SVC_DOT(s.state));
   top.append(fold, dot, nm);
   card.appendChild(top);
@@ -3867,6 +3877,27 @@ function svcCard(n, s) {
                    (s.state === "installable" ? "not set up" : s.state === "unverified" ? "to check" : s.state));
   row.append(sel, st);
   card.appendChild(row);
+  // ADR errand 0028 §4: from this page's version, or from the checkout you work on ( a dev source of that machine )
+  if (s.dev) {
+    const from = svcEl("div", "svcFrom");
+    const rev = s.source && s.source.rev ? " · commit " + String(s.source.rev).slice(0, 7) : "";
+    const ago = s.dev.changed ? " · changed " + agoText(Date.now() / 1000 - s.dev.changed) + " ago" : "";
+    const devOk = REACHABLE(s.dev.state);
+    const seg = segmented([["version", "this page's version"], ["dev", s.dev.off ? "your checkout ( off )" : "your checkout"]], () => s.from, async v => {
+      await postJson(".errand/services/" + encodeURIComponent(n), { from: v });
+      await refreshServices(false);
+    });
+    seg.querySelectorAll("button")[0].title = "#" + s.version + rev + ": what this page was made with";
+    seg.querySelectorAll("button")[1].title = s.dev.path + (s.dev.env ? " · env " + s.dev.env : "") + ago + (devOk ? "" : " · " + (s.dev.why || s.dev.state));
+    from.append(svcEl("span", "muted", "from"), seg);
+    card.appendChild(from);
+    const help = svcEl("div", "hint svcHelp", s.from === "dev"
+      ? "Runs your checkout " + s.dev.path + ( s.dev.origin && s.dev.origin !== "declared" ? " ( " + s.dev.origin + " )" : "" ) + ", as it is now" + ago +
+        ": not checked against this page's version. An edit is seen at the next picture." + (devOk ? "" : " Not usable now: " + (s.dev.why || s.dev.state) + ".")
+      : "Runs #" + s.version + rev + ", the version this page was made with." + (devOk ? " Your checkout " + s.dev.path + " can run it instead." :
+        s.dev.off ? " Your checkout " + s.dev.path + " is turned off in errand's storage tab." : ""));
+    card.appendChild(help);
+  }
   // the details: what the agent found, the lines, a path, the copy
   const det = svcEl("div", "svcDet");
   if (s.needs_copy || (s.store && s.store.copying)) {
@@ -3881,7 +3912,7 @@ function svcCard(n, s) {
     }
     det.appendChild(box);
   }
-  if (s.summary && !ok) det.appendChild(svcEl("p", "svcSummary", s.summary));
+  if (s.summary && !ok && s.from !== "dev") det.appendChild(svcEl("p", "svcSummary", s.summary));   // ( the version's situation )
   if (s.lines && s.lines.length) {
     det.appendChild(svcEl("h3", null, "To type, in this order"));
     const pre = svcEl("pre", "cmd");
@@ -3931,6 +3962,15 @@ function svcCard(n, s) {
         into.appendChild(ul);
       }
     det.appendChild(more);
+  }
+  if (!s.dev && s.source && s.source.git) {                // ( how to run it from a checkout you work on, ADR errand 0028 )
+    const repo = String(s.source.git).replace(/^https?:\/\//, "").replace(/\.git$/, "");
+    det.appendChild(svcEl("h3", null, "Working on " + repo.split("/").pop() + "?"));
+    det.appendChild(svcEl("div", "hint", "A checkout you work on can run this service instead of this page's version: say so once, on " + s.on +
+                                         ", in ~/.config/errand/services.py ( your path, the env its Python services use ):"));
+    const pre = svcEl("pre", "cmd");
+    pre.textContent = "errand.dev_sources[ \"" + repo + "\" ] = errand.Checkout( \"~/path/to/checkout\", env = \"ENV\" )";
+    det.appendChild(pre);
   }
   if (!det.childNodes.length && !ok) det.appendChild(svcEl("div", "hint", s.text || ""));
   card.appendChild(det);
@@ -4007,8 +4047,12 @@ function applyServices(states) {
     tabAvailable("pictures", true);
     const rb = document.getElementById("renderBtn");
     rb.disabled = !SVC.blender;
-    rb.title = SVC.blender ? "a picture of this view by Blender ( r )" : "pictures by Blender — " + svcReason(bAsked);
+    const bDev = !!(bAsked && bAsked.from === "dev" && SVC.blender);
+    rb.title = SVC.blender ? "a picture of this view by Blender ( r )" + (bDev ? " · from your checkout " + ((bAsked.dev || {}).path || "") : "") :
+                             "pictures by Blender — " + svcReason(bAsked);
+    rb.textContent = bDev ? "Render · dev" : "Render";
     document.getElementById("renderGroup").classList.toggle("off", !SVC.blender);
+    document.getElementById("renderGroup").classList.toggle("dev", bDev);
     if (SVC.blender) {
       if (!keptLoaded) { keptLoaded = true; loadKept(); }
       lastViewKey = null; renderStale();               // ( a mode that renders: the view as it is now )
@@ -4136,6 +4180,10 @@ for (const b of document.querySelectorAll("#stepsSeg button")) {
 const renderSteps = () => Array.from(document.querySelectorAll("#stepsSeg button.on")).map(b => parseInt(b.dataset.n, 10)).sort((a, b) => a - b);
 function camKey() { return JSON.stringify([camEye(), cam.rot, cam.ortho, canvas.clientWidth, canvas.clientHeight]); }
 function renderKey() { return camKey() + frameIdx + "/" + sceneVersion; }
+function blenderDev() {                              // ( pictures from the checkout you work on, ADR errand 0028 )
+  const b = svcStates && svcStates.blender;
+  return b && b.from === "dev" ? { checkout: (b.dev || {}).path || "", base: (b.source || {}).rev || "" } : null;
+}
 function renderRequest(samples, scale, keep) {
   const b = camBasis(), H = canvas.clientHeight;
   return { frame: frameIdx, axes: AX, theme: document.body.classList.contains("dark") ? "dark" : "light",
@@ -4145,6 +4193,7 @@ function renderRequest(samples, scale, keep) {
            point_radius: pointRadius(), edge_radius: 0.8 * 2 * orthoHalfH() / H,
            faces: ui.faces.checked, edges: ui.edgeMode.value !== "none", points: ui.points.checked, keep: !!keep,
            ...(FLOOR ? { studio: FLOOR } : {}),
+           ...(blenderDev() ? { dev: blenderDev() } : {}),
            ...(fieldIdx >= 0 && shownRange ? { field: { name: FIELDS[fieldIdx].name, lo: shownRange[0], hi: shownRange[1],
                                                          diverging: isDiverging(FIELDS[fieldIdx]) } } : {}),
            ...(regionShown ? { region: b64Of(regionShown) } : {}) };          // ( the cells on display, not the stored ones )
@@ -4181,7 +4230,8 @@ async function renderView(keep, only) {
       renderUi.img.style.display = "block";
       document.getElementById("downloadBtn").href = renderUi.img.src;
       renderShownKey = key; lastSamples = samples;
-      renderUi.info.textContent = "Cycles · " + samples + " samples" + (NB_FRAMES > 1 ? " · " + AXES[0] + " " + fmtVal(FR_VAL[frameIdx * NB_AXES]) : "");
+      renderUi.info.textContent = "Cycles · " + samples + " samples" + (NB_FRAMES > 1 ? " · " + AXES[0] + " " + fmtVal(FR_VAL[frameIdx * NB_AXES]) : "") +
+                                  (blenderDev() ? " · dev: your checkout" : "");
       renderUi.card.style.display = "flex";
       const kept = r.headers.get("X-Kept");
       if (kept) { say("kept: " + kept); loadKept(); setTimeout(() => { if (renderShownKey === key) say(""); }, 2500); }
@@ -4232,7 +4282,9 @@ async function loadKept() {
   for (const e of list.slice().reverse()) {
     const fig = document.createElement("figure"), img = document.createElement("img"), cap = document.createElement("figcaption");
     img.src = e.file; img.alt = "kept picture"; img.loading = "lazy";
-    cap.textContent = (e.frame < NB_FRAMES && NB_FRAMES > 1 ? AXES[0] + " " + fmtVal(FR_VAL[e.frame * NB_AXES]) + " · " : "") + e.samples + " samples";
+    cap.textContent = (e.frame < NB_FRAMES && NB_FRAMES > 1 ? AXES[0] + " " + fmtVal(FR_VAL[e.frame * NB_AXES]) + " · " : "") + e.samples + " samples" +
+                      (e.dev ? " · dev" : "");
+    if (e.dev) fig.title = "rendered from a checkout with local changes, on commit " + String(e.dev.base || "?").slice(0, 7);
     fig.append(img, cap); box.appendChild(fig);
     fig.addEventListener("click", () => {
       if (e.view) { cam.target = e.view.target.slice(); cam.dist = e.view.dist; cam.rot = e.view.rot.slice(); cam.ortho = e.view.ortho; syncProj(); viewUntouched = false; }

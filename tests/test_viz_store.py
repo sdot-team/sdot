@@ -1,5 +1,21 @@
 from errand import test
 
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_MADE = [ ]
+
+
+def _tmp( ) -> str:
+    """a directory of this file's, removed when it ends: a store left behind stays registered by errand as a view, and keeps
+    the services' versions it asks for from being purged ( errand ADR 0028 )"""
+    d = _tempfile.mkdtemp()
+    _MADE.append( d )
+    return d
+
+
+_atexit.register( lambda: [ _shutil.rmtree( d, ignore_errors = True ) for d in _MADE ] )
+
 
 def _scene( v_or_store ):
     """the same calls on a page's Visualizer and on a store: shared outline, an image, points with fields and ellipses,
@@ -61,12 +77,11 @@ def _same( a, b, atol ):
 
 
 def _check( compact, atol ):
-    import tempfile
     import numpy as np
     from sdot.viz.Visualizer import Visualizer
     from sdot.viz.store import read_scene, scene_arrays
     page = _scene( Visualizer( frame_axis = "iteration", compact = compact ) )
-    path = tempfile.mkdtemp() + "/s.sviz"
+    path = _tmp() + "/s.sviz"
     _scene( Visualizer( frame_axis = "iteration", compact = compact, store = path ) ).close()
     s = read_scene( path )
     m = s.manifest
@@ -104,12 +119,11 @@ if test( "a store gives back the frames of the page ( compact: 16 bits )" ):
     _check( compact = True, atol = 2e-4 )
 
 if test( "a store keeps only the frame being built, and tells after each manifest" ):
-    import tempfile
     import numpy as np
     from sdot.viz.Visualizer import Visualizer
     from sdot.viz.store import read_scene
     told = [ ]
-    path = tempfile.mkdtemp() + "/s.sviz"
+    path = _tmp() + "/s.sviz"
     v = Visualizer( store = path, on_frame = lambda: told.append( 1 ) )
     for k in range( 50 ):
         if k:
@@ -130,10 +144,9 @@ if test( "a store keeps only the frame being built, and tells after each manifes
 
 if test( "a store holds its page: the template, every placeholder read from STORE" ):
     import re
-    import tempfile
     import numpy as np
     from sdot.viz.Visualizer import Visualizer
-    path = tempfile.mkdtemp() + "/s.sviz"
+    path = _tmp() + "/s.sviz"
     v = Visualizer( title = "a <b>", store = path )
     v.add_points( np.random.rand( 10, 2 ) )
     v.close()
@@ -156,11 +169,10 @@ if test( "a store holds its page: the template, every placeholder read from STOR
 if test( "under errand, a store says itself a directory view at each manifest, the manifest last" ):
     import json
     import os
-    import tempfile
     import numpy as np
     from errand import steps
     from sdot.viz.Visualizer import Visualizer
-    d = tempfile.mkdtemp()
+    d = _tmp()
     journal = os.path.join( d, steps.FILE )
     was = os.environ.get( steps.ENV )
     os.environ[ steps.ENV ] = journal

@@ -1,13 +1,28 @@
 """Sources in a store and the `sdot.region` service ( sdot ADR 0001 §6 )."""
 from errand import test
 
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_MADE = [ ]
+
+
+def _tmp( ) -> str:
+    """a directory of this file's, removed when it ends: a store left behind stays registered by errand as a view, and keeps
+    the services' versions it asks for from being purged ( errand ADR 0028 )"""
+    d = _tempfile.mkdtemp()
+    _MADE.append( d )
+    return d
+
+
+_atexit.register( lambda: [ _shutil.rmtree( d, ignore_errors = True ) for d in _MADE ] )
+
 
 def _store( n = 300, seed = 1, box = True ):
-    import tempfile
     import numpy as np
     import sdot
     from sdot.viz.Visualizer import Visualizer
-    path = tempfile.mkdtemp() + "/r.sviz"
+    path = _tmp() + "/r.sviz"
     x = np.random.default_rng( seed ).random( ( n, 3 ) )
     w = 0.001 * np.random.default_rng( seed + 1 ).random( n )
     v = Visualizer( store = path, frame_axis = "it" )
@@ -59,7 +74,6 @@ if test( "sdot.region: every cell found again; a cut, the boundary, a box choose
 
 if test( "sdot.region over HTTP: the store said by the relay's header; a frame without sources refused" ):
     import socket
-    import tempfile
     import threading
     import time
     import urllib.error
@@ -70,7 +84,7 @@ if test( "sdot.region over HTTP: the store said by the relay's header; a frame w
     from sdot.viz.services import region
     from sdot.viz.store import read_chunk
     path, x, w = _store( 120 )
-    plain = tempfile.mkdtemp() + "/p.sviz"
+    plain = _tmp() + "/p.sviz"
     v = Visualizer( store = plain )
     v.add_points( np.random.rand( 5, 3 ) )
     v.close()

@@ -1,11 +1,26 @@
 from errand import test
 
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_MADE = [ ]
+
+
+def _tmp( ) -> str:
+    """a directory of this file's, removed when it ends: a store left behind stays registered by errand as a view, and keeps
+    the services' versions it asks for from being purged ( errand ADR 0028 )"""
+    d = _tempfile.mkdtemp()
+    _MADE.append( d )
+    return d
+
+
+_atexit.register( lambda: [ _shutil.rmtree( d, ignore_errors = True ) for d in _MADE ] )
+
 
 def _store( nb = 6, **kw ):
-    import tempfile
     import numpy as np
     from sdot.viz.Visualizer import Visualizer
-    path = tempfile.mkdtemp() + "/s.sviz"
+    path = _tmp() + "/s.sviz"
     v = Visualizer( frame_axis = "it", store = path, **kw )
     v.add_edges( np.array( [ [ 0, 0 ], [ 1, 0 ], [ 1, 1 ] ], float ), shared = True )
     for k in range( nb ):
@@ -21,7 +36,6 @@ def _store( nb = 6, **kw ):
 if test( "export --html: the manifest and the chunks inlined, the frames chosen, the last one kept" ):
     import json
     import re
-    import tempfile
     from sdot.viz.sviz import _select, export_html
     path = _store( 10 )
     m = json.load( open( path + "/manifest.json" ) )
@@ -31,7 +45,7 @@ if test( "export --html: the manifest and the chunks inlined, the frames chosen,
     one = m[ "frames" ][ 0 ][ "size" ] * 4 / 3
     assert _select( m, max_mb = 3.5 * one / 2 ** 20 ) == [ 0, 5, 9 ]                    # ( one frame out of 5, the last kept )
     assert _select( m, max_mb = 2.5 * one / 2 ** 20 ) == [ 0, 9 ]
-    out = tempfile.mkdtemp() + "/p.html"
+    out = _tmp() + "/p.html"
     export_html( path, out, every = 3 )
     page = open( out ).read()
     files = json.loads( re.search( r"const STORE_FILES = (\{.*\});", page ).group( 1 ) )
@@ -42,12 +56,11 @@ if test( "export --html: the manifest and the chunks inlined, the frames chosen,
 
 if test( "export --vtk: the series of the store, as the Visualizer writes it" ):
     import re
-    import tempfile
     import numpy as np
     from pathlib import Path
     from sdot.viz.Visualizer import Visualizer
     from sdot.viz.sviz import export_vtk
-    out = export_vtk( _store( 4 ), tempfile.mkdtemp() + "/s" )
+    out = export_vtk( _store( 4 ), _tmp() + "/s" )
     assert out.suffix == ".pvd" and len( list( out.parent.glob( "s_*.vtu" ) ) ) == 4
     counts = lambda f: tuple( map( int, re.search( r'NumberOfPoints="(\d+)" NumberOfCells="(\d+)"', Path( f ).read_text( errors = "replace" ) ).groups() ) )
     # the same scene, as a page's Visualizer writes it
@@ -59,19 +72,18 @@ if test( "export --vtk: the series of the store, as the Visualizer writes it" ):
         v.add_points( np.random.rand( 20 + k, 2 ) )
         v.add_faces( np.random.rand( 3, 2 ), [ [ 0, 1, 2 ] ] )
         v.add_polytope( np.array( [ [ 1, 0 ], [ -1, 0 ], [ 0, 1 ], [ 0, -1 ] ], float ), np.full( 4, 0.3 ) )
-    ref = v.write_vtk( tempfile.mkdtemp() + "/s" )
+    ref = v.write_vtk( _tmp() + "/s" )
     for k in range( 4 ):
         assert counts( out.parent / f"s_{ k:04d}.vtu" ) == counts( ref.parent / f"s_{ k:04d}.vtu" ), k
 
 if test( "the server: the page and the files of a registered store, behind the token; it stops when idle" ):
-    import tempfile
     import threading
     import time
     import urllib.error
     import urllib.request
     from pathlib import Path
     import sdot.viz.sviz as sviz
-    sviz.STATE = Path( tempfile.mkdtemp() )                                           # ( not the user's )
+    sviz.STATE = Path( _tmp() )                                           # ( not the user's )
     path = _store( 3 )
     sid = sviz.register( path )
     th = threading.Thread( target = sviz.serve, kwargs = dict( idle = 1.5 ), daemon = True )
@@ -108,7 +120,6 @@ if test( "the viewer is pinned: copied when unpublished, named only when publish
     import hashlib
     import json
     import os
-    import tempfile
     import numpy as np
     from pathlib import Path
     from sdot.viz import bundle
@@ -121,7 +132,7 @@ if test( "the viewer is pinned: copied when unpublished, named only when publish
     f = Path( path, "viewer", ident[ "file" ] )
     assert f.read_bytes() == bundle.viewer_bytes(), "unpublished ( a checkout ): the store holds its viewer"
     # named only ( published, or asked ), then packed from the installed viewer
-    p2 = tempfile.mkdtemp() + "/l.sviz"
+    p2 = _tmp() + "/l.sviz"
     v = Visualizer( store = p2, viewer = "link" )
     v.add_points( np.random.rand( 4, 2 ) )
     v.close()
@@ -138,13 +149,13 @@ if test( "the viewer is pinned: copied when unpublished, named only when publish
     bundle.pack( p2, upgrade = True )
     assert bundle.pinned( p2 )[ "sha256" ] == ident[ "sha256" ]
     # published: listed, then only named
-    out = tempfile.mkdtemp()
+    out = _tmp()
     saved = bundle.PUBLISHED
     bundle.PUBLISHED = Path( out ) / "published.json"
     try:
         assert bundle.bundle( out, publish = True ).name == ident[ "file" ]
         assert ident[ "sha256" ] in bundle.published()
-        p3 = tempfile.mkdtemp() + "/p.sviz"
+        p3 = _tmp() + "/p.sviz"
         v = Visualizer( store = p3 )
         v.add_points( np.random.rand( 4, 2 ) )
         v.close()
@@ -157,10 +168,9 @@ if test( "sviz serve: the store's own bootstrap, the installed viewer on ?viewer
     import threading
     import urllib.request
     from sdot.viz import sviz
-    import tempfile
     from pathlib import Path
     from sdot.viz.bundle import TITLE, pinned
-    sviz.STATE = Path( tempfile.mkdtemp() )                                  # ( not the user's server )
+    sviz.STATE = Path( _tmp() )                                  # ( not the user's server )
     path = _store( 2 )
     vid = sviz.register( path )
     t = threading.Thread( target = sviz.serve, kwargs = dict( idle = 3 ), daemon = True )

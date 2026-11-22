@@ -11,7 +11,8 @@ path ( stdlib + numpy ).
                     theme, point_radius, edge_radius, faces, edges, points, view, region, keep } -> image/png
                     ( `region`: a chunk of `sdot.region` in base64, the cells the page shows instead of the frame's; `keep`: also
                     written as `renders/frame-<i>-<hash>.png` in the store, its path in `X-Kept`, and listed in
-                    `renders/index.json` with the frame and the page's `view`, for the page's list of kept pictures )
+                    `renders/index.json` with the frame and the page's `view`, for the page's list of kept pictures; `dev`: the picture came
+                    from a checkout, marked so there with its base commit, ADR errand 0028 §5 )
 
 The store is `X-Errand-Root` ( percent-encoded, errand's relay ), else `--root`. One request at a time ( bpy is not
 thread safe: the server is not threaded ); the scene of the last ( store, frame, theme ) is kept loaded, a request for
@@ -490,7 +491,9 @@ def serve( port: int, root: str | None = None ):
                     kept = [ ]
                 kept = [ e for e in kept if e.get( "file" ) != rel ] + [ dict(
                     file = rel, frame = int( req.get( "frame", 0 ) ), samples = int( req.get( "samples", 0 ) ),
-                    view = req.get( "view" ), theme = req.get( "theme" ), when = time.strftime( "%Y-%m-%d %H:%M:%S" ) ) ]
+                    view = req.get( "view" ), theme = req.get( "theme" ), when = time.strftime( "%Y-%m-%d %H:%M:%S" ),
+                    **( { "dev": { "base": str( ( req.get( "dev" ) or { } ).get( "base" ) or "" ), "local_changes": True } }
+                        if isinstance( req.get( "dev" ), dict ) else { } ) ) ]     # ( from a checkout: not the version, said )
                 tmp = index.with_suffix( ".tmp" )
                 tmp.write_text( json.dumps( kept, indent = 1 ) )
                 tmp.replace( index )

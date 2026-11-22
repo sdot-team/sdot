@@ -1,6 +1,22 @@
 """Baked occlusion ( sdot ADR 0001 §4 ): the kernel, pages and stores that carry it, the `sdot.ao` service."""
 from errand import test
 
+import atexit as _atexit
+import shutil as _shutil
+import tempfile as _tempfile
+_MADE = [ ]
+
+
+def _tmp( ) -> str:
+    """a directory of this file's, removed when it ends: a store left behind stays registered by errand as a view, and keeps
+    the services' versions it asks for from being purged ( errand ADR 0028 )"""
+    d = _tempfile.mkdtemp()
+    _MADE.append( d )
+    return d
+
+
+_atexit.register( lambda: [ _shutil.rmtree( d, ignore_errors = True ) for d in _MADE ] )
+
 
 def _box( lo, hi, base ):
     import numpy as np
@@ -52,7 +68,6 @@ if test( "a page with ao = True carries a code per corner, a page without carrie
 
 if test( "a store with ao = True bakes each chunk; sdot.ao gives the same codes for a store without" ):
     import json
-    import tempfile
     import threading
     import urllib.request
     from pathlib import Path
@@ -64,7 +79,7 @@ if test( "a store with ao = True bakes each chunk; sdot.ao gives the same codes 
     pos, F = _scene()
     paths = { }
     for ao in ( False, True ):
-        paths[ ao ] = tempfile.mkdtemp() + "/s.sviz"
+        paths[ ao ] = _tmp() + "/s.sviz"
         v = Visualizer( store = paths[ ao ], ao = ao, frame_axis = "it" )
         for k in range( 2 ):
             if k:
