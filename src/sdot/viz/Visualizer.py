@@ -1851,8 +1851,7 @@ function buildScene() {
   //    not a storage format, the expense stays in GPU memory.
   let nTri = hp.length / 9;
   for (const [a, b] of polys) for (let p = a; p < b; p++) nTri += Math.max(0, POLY_OFF[p + 1] - POLY_OFF[p] - 2);
-  FLOOR = floorOn && D >= 3 && !FLAT ? floorOf(polys, edgs, pnts, hp) : null;
-  if (FLOOR) nTri += 2;
+
   TRI = { pos: new Float32Array(nTri * 9), nrm: new Float32Array(nTri * 9), ao: new Float32Array(nTri * 3).fill(1),
           col: new Float32Array(nTri * 12), n: nTri };
   let t = 0;
@@ -1883,11 +1882,6 @@ function buildScene() {
   }
   for (let i = 0; i + 8 < hp.length; i += 9)
     putTri(hp.slice(i, i + 3), hp.slice(i + 3, i + 6), hp.slice(i + 6, i + 9), hpc[i / 9]);
-  if (FLOOR) {
-    const [a, b, c, d] = FLOOR.corners;
-    putTri(a, b, c, FLOOR.color);
-    putTri(a, c, d, FLOOR.color);
-  }
 
   // 4. edges: one INSTANCE per edge (two ends), widened into a quadrilateral in the
   //    shader -- gl.lineWidth is capped at 1 pixel on most drivers.
@@ -1935,32 +1929,36 @@ function buildScene() {
   sceneVersion++;                                       // ( a picture of the scene before is out of date )
 }
 var sceneVersion = 0;
-// the FLOOR ( a layer, off at first ): a square under what is shown, three times as wide, across the world axis closest
-// to the screen's vertical when it is switched on ( kept then: the floor stays where it was put ), below the lowest point
-// less a gap; a picture by Blender gets its corners, and the shadows on it
-var floorOn = false, FLOOR = null, floorUp = null, shownRange = null;
-function floorOf(polys, edgs, pnts, hp) {
-  if (!floorUp) {
-    const u = camBasis().up;
-    let k = 0;
-    for (let q = 1; q < 3; q++) if (Math.abs(u[q]) > Math.abs(u[k])) k = q;
-    floorUp = { axis: k, sign: u[k] >= 0 ? 1 : -1 };
+// the STUDIO ( the `floor` layer, off at first ): a floor as in a photograph of an object, under what the screen shows
+// -- across the screen's vertical, leant a little toward the camera -- so that it stays put while the object turns; it
+// fades into the background far away, and the faces cast their shadow on it, the light coming from above. Its level: the
+// lowest point of the scene along its normal. `FLOOR` ( set at each draw ): what a picture by Blender gets of it.
+var floorOn = false, FLOOR = null, shownRange = null, floorLevelKey = null, floorLevel = 0;
+const STUDIO_LEAN = 0.35;                               // ( the floor's normal: up - LEAN fwd, so the camera sees it from above )
+function studioFrame(bg, dark) {
+  const b = camBasis(), r = b.right, u = b.up, f = b.fwd, s = sceneSphere();
+  const n = normalize3([u[0] - STUDIO_LEAN * f[0], u[1] - STUDIO_LEAN * f[1], u[2] - STUDIO_LEAN * f[2]]);
+  const key = n.map(x => x.toFixed(4)).join(",") + "|" + sceneVersion;
+  if (key !== floorLevelKey) {                          // the lowest point along n: a sample of what is drawn
+    let lo = Infinity;
+    const scan = (arr, n3) => { if (!arr) return; const m = Math.floor(arr.length / 3), step = Math.max(1, Math.floor(m / 40000));
+      for (let i = 0; i < m; i += step) { const d = arr[3 * i] * n3[0] + arr[3 * i + 1] * n3[1] + arr[3 * i + 2] * n3[2]; if (d < lo) lo = d; } };
+    scan(TRI.pos.subarray(0, TRI.n * 9), n); scan(LIN.a.subarray(0, LIN.n * 3), n); scan(LIN.b.subarray(0, LIN.n * 3), n);
+    if (PNT.n) { const before = lo; scan(PNT.pos.subarray(0, PNT.n * 3), n); if (lo < before || before === Infinity) lo -= pointRadius(); }
+    if (lo === Infinity) lo = s.c[0] * n[0] + s.c[1] * n[1] + s.c[2] * n[2] - s.r;
+    floorLevel = lo - 0.01 * s.r;
+    floorLevelKey = key;
   }
-  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  const add = v => { for (let k = 0; k < 3; k++) { const x = PR[3 * v + k]; if (x < lo[k]) lo[k] = x; if (x > hi[k]) hi[k] = x; } };
-  for (const [a, b] of polys) for (let p = a; p < b; p++) for (let o = POLY_OFF[p]; o < POLY_OFF[p + 1]; o++) add(POLY_V[o]);
-  for (const [a, b] of edgs) for (let i = a; i < b; i++) { add(EDG_V[2 * i]); add(EDG_V[2 * i + 1]); }
-  for (const [a, b] of pnts) for (let j = a; j < b; j++) add(PNT_V[j]);
-  for (let i = 0; i + 2 < hp.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], hp[i + k]); hi[k] = Math.max(hi[k], hp[i + k]); }
-  if (!(lo[0] <= hi[0])) return null;
-  const span = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-9), dark = document.body.classList.contains("dark");
-  const k = floorUp.axis, s = floorUp.sign, i = (k + 1) % 3, j = (k + 2) % 3, h = 1.5 * span;
-  const level = s > 0 ? lo[k] - 0.02 * span : hi[k] + 0.02 * span;
-  const ci = (lo[i] + hi[i]) / 2, cj = (lo[j] + hi[j]) / 2;
-  const pt = (di, dj) => { const p = [0, 0, 0]; p[k] = level; p[i] = ci + di * h; p[j] = cj + dj * h; return p; };
-  const corners = s > 0 ? [pt(-1, -1), pt(1, -1), pt(1, 1), pt(-1, 1)] : [pt(-1, -1), pt(-1, 1), pt(1, 1), pt(1, -1)];  // ( facing up )
-  return { axis: k, level, corners, color: dark ? [0.42, 0.42, 0.45, 1] : [0.80, 0.80, 0.80, 1] };
+  // the light: from above, a little to the left and toward the viewer ( to the light, in world )
+  const l = normalize3([-0.35 * r[0] + 1.0 * n[0] - 0.3 * f[0], -0.35 * r[1] + 1.0 * n[1] - 0.3 * f[1], -0.35 * r[2] + 1.0 * n[2] - 0.3 * f[2]]);
+  const cd = s.c[0] * n[0] + s.c[1] * n[1] + s.c[2] * n[2] - floorLevel;
+  const foot = [s.c[0] - cd * n[0], s.c[1] - cd * n[1], s.c[2] - cd * n[2]];
+  const floor = dark ? [bg[0] + 0.10, bg[1] + 0.10, bg[2] + 0.11] : [bg[0] * 0.90, bg[1] * 0.90, bg[2] * 0.91];
+  return { normal: n, level: floorLevel, foot, radius: s.r, light: l, color: floor, bg: bg.slice(0, 3),
+           back: normalize3([f[0] - (f[0] * n[0] + f[1] * n[1] + f[2] * n[2]) * n[0], f[1] - (f[0] * n[0] + f[1] * n[1] + f[2] * n[2]) * n[1],
+                             f[2] - (f[0] * n[0] + f[1] * n[1] + f[2] * n[2]) * n[2]]) };
 }
+function normalize3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 
 // ============================================================================================
 // FIELDS: the points coloured by their values. The range is robust ( the 1st and 99th percentiles ), over all the
@@ -2122,7 +2120,7 @@ function initTools() {                                 // ( called once `ui` exi
     });
   LAYERS.forEach((l, k) => addLayer(l[0], () => layerOn[k + 1], on => { layerOn[k + 1] = on; buildScene(); draw(); }, null, "var(--accent)"));
   if (D >= 3 && !FLAT)                                  // a floor under the scene ( z down ), for its shadow in pictures
-    addLayer("floor", () => floorOn, on => { floorOn = on; if (on) floorUp = null; buildScene(); draw(); }, () => floorOn && FLOOR ? "xyz"[FLOOR.axis] + " = " + fmtNum(FLOOR.level) : "",
+    addLayer("floor", () => floorOn, on => { floorOn = on; sceneVersion++; draw(); }, () => floorOn ? "studio" : "",
              "linear-gradient(180deg, transparent 55%, var(--muted) 55%)");
   if (!layerRows.length) document.getElementById("layers").style.display = "none";
   // the Colour pane: one choice per field, the range
@@ -2481,6 +2479,38 @@ void main() {
   oCol = vec4(vCol.rgb * (0.45 + 0.55 * d) * mix(1.0, vAo, uBake), vCol.a * uAlpha);
 }`);
 
+// the STUDIO's floor, per pixel: the ray of the pixel met with the floor's plane; the floor fades into the background
+const STUDIO_FLOOR = `
+uniform vec3 uFoot; uniform vec3 uBg; uniform vec3 uFloor; uniform float uRad;
+vec3 floorAt(vec3 P) { float d = length(P - uFoot) / uRad; return mix(uBg, uFloor, exp(-d * d / 7.0)); }`;
+const pStudio = prog(`#version 300 es
+out vec2 vP;
+void main() { vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0); vP = p; gl_Position = vec4(p, 0.999, 1.0); }`,
+`#version 300 es
+precision highp float;
+in vec2 vP; out vec4 oCol;
+uniform vec3 uEye; uniform vec3 uR; uniform vec3 uU; uniform vec3 uF; uniform vec3 uN;
+uniform float uTanY; uniform float uAsp; uniform float uOrtho; uniform float uHalfH; uniform float uLevel;` + STUDIO_FLOOR + `
+void main() {
+  vec3 o = uEye, dir;
+  if (uOrtho > 0.5) { o = uEye + vP.x * uHalfH * uAsp * uR + vP.y * uHalfH * uU; dir = uF; }
+  else dir = normalize(uF + vP.x * uTanY * uAsp * uR + vP.y * uTanY * uU);
+  float dn = dot(dir, uN), h = dot(o, uN) - uLevel;
+  if (dn > -1e-6 || h <= 0.0) { oCol = vec4(uBg, 1.0); return; }
+  oCol = vec4(floorAt(o - h / dn * dir), 1.0);
+}`);
+// its SHADOW: the faces flattened on the floor along the light; drawn with a MIN blend, so that where they overlap the
+// floor is darkened once
+const pShadow = prog(`#version 300 es
+in vec3 aPos;
+uniform mat4 uMVP; uniform vec3 uN; uniform float uLevel; uniform vec3 uL;
+out vec3 vW;
+void main() { float h = dot(aPos, uN) - uLevel; vec3 p = aPos - uL * (max(h, 0.0) / max(dot(uL, uN), 0.05)); vW = p; gl_Position = uMVP * vec4(p, 1.0); }`,
+`#version 300 es
+precision highp float;
+in vec3 vW; out vec4 oCol; uniform float uShade;` + STUDIO_FLOOR + `
+void main() { oCol = vec4(floorAt(vW) * uShade, 1.0); }`);
+
 const pLine = prog(`#version 300 es
 in vec2 aCorner; in vec3 aA; in vec3 aB; in vec4 aCol;
 uniform mat4 uMVP; uniform vec2 uHalfVP; uniform float uW;
@@ -2662,6 +2692,7 @@ gl.bindBuffer(gl.ARRAY_BUFFER, buf.linCorner);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW);
 
 const vaoFace = gl.createVertexArray(), vaoLine = gl.createVertexArray(), vaoPoint = gl.createVertexArray();
+const vaoStudio = gl.createVertexArray(), vaoShadow = gl.createVertexArray();
 
 function attr(p, name, b, size, divisor) {
   const loc = gl.getAttribLocation(p, name);
@@ -2680,6 +2711,8 @@ attr(pLine, "aA", buf.linA, 3, 1); attr(pLine, "aB", buf.linB, 3, 1); attr(pLine
 gl.bindVertexArray(vaoPoint);
 attr(pPoint, "aPos", buf.pntPos, 3, 1); attr(pPoint, "aCol", buf.pntCol, 4, 1); attr(pPoint, "aRad", buf.pntRad, 1, 1);
 attr(pPoint, "aMat", buf.pntMat, 4, 1);
+gl.bindVertexArray(vaoShadow);
+attr(pShadow, "aPos", buf.triPos, 3);
 gl.bindVertexArray(null);
 
 function up(b, data) { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); }
@@ -2736,6 +2769,38 @@ function draw() {
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // (0) the STUDIO: the floor under what the screen shows, then the shadow of the faces on it; no depth ( below all )
+  FLOOR = floorOn && D >= 3 && !FLAT ? studioFrame(bg, dark) : null;
+  if (FLOOR) {
+    const b = camBasis(), st = FLOOR, set = (p, k, v) => gl.uniform3fv(gl.getUniformLocation(p, k), v);
+    gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+    gl.useProgram(pStudio); gl.bindVertexArray(vaoStudio);
+    set(pStudio, "uEye", eye); set(pStudio, "uR", b.right); set(pStudio, "uU", b.up); set(pStudio, "uF", b.fwd); set(pStudio, "uN", st.normal);
+    set(pStudio, "uFoot", st.foot); set(pStudio, "uBg", st.bg); set(pStudio, "uFloor", st.color);
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uRad"), st.radius);
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uTanY"), Math.tan(FOV / 2));
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uAsp"), asp);
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uOrtho"), cam.ortho ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uHalfH"), orthoHalfH());
+    gl.uniform1f(gl.getUniformLocation(pStudio, "uLevel"), st.level);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (TRI.n > 0 && showFaces) {
+      gl.enable(gl.BLEND); gl.blendEquation(gl.MIN); gl.blendFunc(gl.ONE, gl.ONE);
+      gl.useProgram(pShadow); gl.bindVertexArray(vaoShadow);
+      gl.uniformMatrix4fv(gl.getUniformLocation(pShadow, "uMVP"), false, MVP);
+      set(pShadow, "uN", st.normal); set(pShadow, "uL", st.light);
+      set(pShadow, "uFoot", st.foot); set(pShadow, "uBg", st.bg); set(pShadow, "uFloor", st.color);
+      gl.uniform1f(gl.getUniformLocation(pShadow, "uRad"), st.radius);
+      gl.uniform1f(gl.getUniformLocation(pShadow, "uLevel"), st.level);
+      gl.uniform1f(gl.getUniformLocation(pShadow, "uShade"), dark ? 0.55 : 0.72);
+      gl.drawArrays(gl.TRIANGLES, 0, TRI.n * 3);
+      gl.blendEquation(gl.FUNC_ADD);
+    }
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.DEPTH_TEST); gl.depthMask(true);
+  }
 
   // (0) the images, under everything: no depth
   if (IMAGES.some(m => layerOn[m.layer])) {
@@ -4068,7 +4133,7 @@ function renderRequest(samples, scale, keep) {
            width: Math.max(16, Math.round(canvas.clientWidth * scale)), height: Math.max(16, Math.round(H * scale)), samples,
            point_radius: pointRadius(), edge_radius: 0.8 * 2 * orthoHalfH() / H,
            faces: ui.faces.checked, edges: ui.edgeMode.value !== "none", points: ui.points.checked, keep: !!keep,
-           ...(FLOOR ? { floor: FLOOR } : {}),
+           ...(FLOOR ? { studio: FLOOR } : {}),
            ...(fieldIdx >= 0 && shownRange ? { field: { name: FIELDS[fieldIdx].name, lo: shownRange[0], hi: shownRange[1],
                                                          diverging: isDiverging(FIELDS[fieldIdx]) } } : {}),
            ...(regionShown ? { region: b64Of(regionShown) } : {}) };          // ( the cells on display, not the stored ones )

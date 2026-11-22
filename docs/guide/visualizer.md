@@ -16,7 +16,7 @@ The scene takes the whole window; everything else floats over it, translucent.
 - **The colour scale** of a field, at the bottom left. It moves by its grip. A click opens the Colour panel.
 - **The curves**: one see-through window per chart, below the axes, moved by their title and resized by their corner. A click in a chart goes to that frame, and hovering shows the values there. The whole curve is drawn, with the current frame marked.
 - **The toolbar**, at the top right: Render (when a server offers pictures), the navigation switch, then one icon per panel. A click opens the panel, a second click closes it. Open panels stack on the right, and each one folds or closes on its own. The page remembers which panels were open.
-  - **Layers**: faces, points, your own layers, and in 3D a **floor** (off at first): a square under the scene, across the axis closest to the screen's vertical when it is switched on. Pictures by Blender get it too, with the shadows on it. Each row has its settings behind the chevron on the left (opacity, edges, radius, the field that colours the points) and its eye on the right.
+  - **Layers**: faces, points, your own layers, and in 3D a **floor** (off at first): a studio, as in a photograph of an object. The floor lies under the object as the screen shows it, so it stays put while the object turns; it fades into the background, and the faces cast their shadow on it, the light coming from above. A picture by Blender gets the same studio: the floor bent up into a wall behind, and its shadows.
   - **Curves**: one row per chart, with its scale (linear, log) and its eye.
   - **Colour**: what colours the points, and the range (this frame, all frames, typed).
   - **Display**: the theme (light, dark, auto), the light (flat, relief, custom), the view (projection, reset, axes and slices beyond 3D), the occlusion.
@@ -30,7 +30,7 @@ The scene takes the whole window; everything else floats over it, translucent.
 - **the baked occlusion** of a frame;
 - **the cells of a region** (a cut across the view, the boundary), rebuilt from the seeds that a power diagram keeps in its store.
 
-Blender draws what the page shows: the cells of a region, each edge in its colour, the points coloured by the field shown (same map, same range), the floor.
+Blender draws what the page shows: the cells of a region, each edge in its colour, the points coloured by the field shown (same map, same range), the studio. Its light comes from above and from the viewer's side, with little ambient light, so the shadows inside the object show.
 
 The Services panel shows, for each service, the machine it runs on (here, the machine the run wrote the store on, every machine errand knows), its state there, what is missing there (first), and what that machine's agent found. When the service is not ready there, it also shows the lines to type, each with a comment saying what it does. A field lets the agent look for a tool installed somewhere unusual. When that machine has no copy of the store, a button copies it into errand's cache there. ↻ asks again. The page itself installs and runs nothing; Render, Bake and the cells are enabled only when their machine says `ready` or `running`.
 

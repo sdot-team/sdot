@@ -214,7 +214,7 @@ class Scene:
         wn = world.node_tree.nodes                                    # ( the camera sees the theme's colour, the light is dimmer )
         bgn = wn.get( "Background" )
         bgn.inputs[ "Color" ].default_value = ( 1.0, 1.0, 1.0, 1.0 )   # ( a neutral sky, whatever the theme )
-        bgn.inputs[ "Strength" ].default_value = 0.45
+        bgn.inputs[ "Strength" ].default_value = 0.22       # ( little ambient light: the cavities stay dark )
         seen, mix, path = wn.new( "ShaderNodeBackground" ), wn.new( "ShaderNodeMixShader" ), wn.new( "ShaderNodeLightPath" )
         seen.inputs[ "Color" ].default_value = ( *d[ "bg" ].tolist(), 1.0 )
         seen.inputs[ "Strength" ].default_value = 1.0
@@ -224,8 +224,8 @@ class Scene:
         wl.new( seen.outputs[ 0 ], mix.inputs[ 2 ] )
         wl.new( mix.outputs[ 0 ], wn.get( "World Output" ).inputs[ "Surface" ] )
         sun = bpy.data.objects.new( "sun", bpy.data.lights.new( "sun", "SUN" ) )
-        sun.data.energy = 1.8
-        sun.data.angle = 0.2
+        sun.data.energy = 2.6
+        sun.data.angle = 0.12
         sc.collection.objects.link( sun )
         self.sun = sun
         cam = bpy.data.objects.new( "camera", bpy.data.cameras.new( "camera" ) )
@@ -292,25 +292,42 @@ class Scene:
         g.links.new( inst.outputs[ "Instances" ], go.inputs[ 0 ] )
         ob.modifiers.new( "spheres", "NODES" ).node_group = g
 
-    def set_floor( self, floor ):
-        """the page's floor ( `{ corners: 4 x [ x, y, z ], color }`, sRGB, in the axes shown ): a square that catches the shadows, or none"""
+    def set_studio( self, st ):
+        """the page's STUDIO ( `{ normal, level, back, foot, radius, light, color, bg }`, in the axes shown, colours sRGB ):
+        a floor under the object as the screen shows it, bent up into a wall behind it ( a photographer's sweep ), whose
+        shadows give the depth; the sun comes from `light`. None: no studio"""
         import bpy
-        ob = bpy.data.objects.get( "floor" )
+        ob = bpy.data.objects.get( "studio" )
         if ob is not None:
             me = ob.data
             bpy.data.objects.remove( ob, do_unlink = True )
             bpy.data.meshes.remove( me )
-        if not floor:
+        self.studio = st
+        if not st:
             return
-        corners = [ [ float( x ) for x in c ][ :3 ] for c in floor.get( "corners" ) or [ ] ]
-        if len( corners ) != 4:
-            return
-        me = bpy.data.meshes.new( "floor" )
-        me.from_pydata( corners, [ ], [ ( 0, 1, 2, 3 ) ] )
-        ob = bpy.data.objects.new( "floor", me )
-        col = _linear( np.asarray( floor.get( "color", [ 0.86, 0.86, 0.86 ] ), float )[ :3 ] )
-        mat = bpy.data.materials.get( "floor" ) or self._material( "floor", color = col )
-        mat.node_tree.nodes.get( "Principled BSDF" ).inputs[ "Base Color" ].default_value = ( *col.tolist(), 1.0 )
+        n, back = np.asarray( st[ "normal" ], float ), np.asarray( st[ "back" ], float )
+        side = np.cross( n, back )
+        foot, R = np.asarray( st[ "foot" ], float ), float( st[ "radius" ] )
+        # ( the profile in ( back, up ): the floor from in front of the camera's side to behind the object, a quarter
+        #   circle, then the wall )
+        bend, prof = 2.5 * R, [ ]
+        for x in np.linspace( -12 * R, 2.5 * R, 24 ):
+            prof.append( ( x, 0.0 ) )
+        for a in np.linspace( 0, np.pi / 2, 16 )[ 1: ]:
+            prof.append( ( 2.5 * R + bend * np.sin( a ), bend * ( 1 - np.cos( a ) ) ) )
+        for y in np.linspace( bend, 14 * R, 8 )[ 1: ]:
+            prof.append( ( 2.5 * R + bend, y ) )
+        ws = np.linspace( -14 * R, 14 * R, 2 )
+        verts = [ ( foot + x * back + y * n + w * side ).tolist() for ( x, y ) in prof for w in ws ]
+        faces = [ ( 2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2 ) for i in range( len( prof ) - 1 ) ]
+        me = bpy.data.meshes.new( "studio" )
+        me.from_pydata( verts, [ ], faces )
+        for poly in me.polygons:
+            poly.use_smooth = True
+        ob = bpy.data.objects.new( "studio", me )
+        col = _linear( np.asarray( st.get( "color", [ 0.8, 0.8, 0.8 ] ), float )[ :3 ] )
+        mat = self._material( "studio", color = col )
+        mat.node_tree.nodes.get( "Principled BSDF" ).inputs[ "Roughness" ].default_value = 0.9
         me.materials.append( mat )
         bpy.context.scene.collection.objects.link( ob )
 
@@ -336,7 +353,9 @@ class Scene:
             c.type = "PERSP"
             c.angle_y = float( cam[ "fov" ] )
         c.clip_start, c.clip_end = 1e-4 * self.span, 1e3 * self.span
-        light = 0.25 * r + 0.45 * u - 1.0 * f                          # ( from the upper left of the view, as the viewer )
+        st = getattr( self, "studio", None )
+        # ( from above, a little to the left and from the viewer's side: the shadows inside the object show; the studio's own )
+        light = np.asarray( st[ "light" ], float ) if st else -0.4 * r + 0.8 * u - 0.55 * f
         z = light / np.linalg.norm( light )                            # ( a sun shines along its -Z: its Z points to it )
         x = np.cross( u, z )
         x /= np.linalg.norm( x )
@@ -405,7 +424,7 @@ def render( store, req: dict ) -> bytes:
         SCENE.load( d )
         SCENE.key = key
         SCENE.data = d
-    SCENE.set_floor( req.get( "floor" ) if isinstance( req.get( "floor" ), dict ) else None )
+    SCENE.set_studio( req.get( "studio" ) if isinstance( req.get( "studio" ), dict ) else None )
     cam = req.get( "camera" ) or default_camera( SCENE.data )
     return SCENE.frame( cam, req.get( "width", 800 ), req.get( "height", 600 ), req.get( "samples", 64 ),
                         req.get( "point_radius" ), req.get( "edge_radius" ),
